@@ -1,0 +1,79 @@
+name: Build and Release Plugin
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_tag_suffix:
+        description: 'Image tag suffix (default: github.run_number)'
+        required: false
+        type: string
+
+permissions:
+  id-token: write # required to use OIDC authentication
+  contents: read # required to checkout the code from the repo
+
+# Configuration values are loaded from GitHub Actions Variables
+# To configure, go to: Repository Settings > Secrets and variables > Actions > Variables
+# Required variables:
+#   - AWS_ACCOUNT_ID: AWS account ID for ECR
+#   - AWS_REGION: AWS region (e.g., us-west-2)
+#   - AWS_IAM_ROLE: IAM role name for ECR push
+#   - ECR_REPOSITORY: ECR repository name
+#   - IMAGE_TAG_PREFIX: Prefix for image tags (e.g., assist)
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '22.20.0'
+          cache: 'npm'
+
+      - name: Setup Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: '1.23'
+          cache: true
+
+      - name: Install Mage
+        run: go install github.com/magefile/mage@latest
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Build plugin
+        run: npm run build:prod
+
+      - name: Set executable permissions on module.js
+        run: |
+          # Set 0755 permissions only on module.js
+          chmod 0755 dist/module.js
+          echo "Set executable permissions (0755) on module.js"
+          ls -la dist/module.js
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ vars.AWS_ACCOUNT_ID }}:role/${{ vars.AWS_IAM_ROLE }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Login to ECR
+        uses: docker/login-action@v2
+        with:
+          registry: ${{ vars.AWS_ACCOUNT_ID }}.dkr.ecr.${{ vars.AWS_REGION }}.amazonaws.com
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          tags: ${{ vars.AWS_ACCOUNT_ID }}.dkr.ecr.${{ vars.AWS_REGION }}.amazonaws.com/${{ vars.ECR_REPOSITORY }}:${{ vars.IMAGE_TAG_PREFIX }}-${{ inputs.image_tag_suffix || github.run_number }}

@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: GitHub Discussions
+    url: https://github.com/Consensys/ask-o11y-plugin/discussions
+    about: Ask questions and discuss ideas with the community
+  - name: Documentation
+    url: https://github.com/Consensys/ask-o11y-plugin/blob/main/README.md
+    about: Read the documentation for usage guides and troubleshooting
+  - name: Contributing Guide
+    url: https://github.com/Consensys/ask-o11y-plugin/blob/main/CONTRIBUTING.md
+    about: Learn how to contribute to Ask O11y

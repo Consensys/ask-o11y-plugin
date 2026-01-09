@@ -1,0 +1,144 @@
+name: Feature Request
+description: Suggest a new feature or enhancement for Ask O11y
+title: "[Feature]: "
+labels: ["enhancement", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for suggesting a new feature! Please provide as much detail as possible to help us understand your request.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem Statement
+      description: Describe the problem or limitation you're experiencing
+      placeholder: |
+        I'm always frustrated when...
+        Currently, it's difficult to...
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed Solution
+      description: Describe the solution you'd like to see
+      placeholder: |
+        I would like to...
+        The feature should...
+    validations:
+      required: true
+
+  - type: textarea
+    id: use-case
+    attributes:
+      label: Use Case
+      description: How would this feature benefit you and other users?
+      placeholder: |
+        This would help me...
+        Other users could benefit by...
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives Considered
+      description: Have you considered any alternative solutions or workarounds?
+      placeholder: |
+        I've tried...
+        Another approach could be...
+
+  - type: dropdown
+    id: category
+    attributes:
+      label: Feature Category
+      description: Which area does this feature relate to?
+      options:
+        - Chat Interface
+        - Visualizations
+        - MCP Integration
+        - Session Management
+        - Configuration
+        - RBAC/Security
+        - Query Execution
+        - Dashboard Management
+        - Performance
+        - Documentation
+        - Other
+    validations:
+      required: true
+
+  - type: dropdown
+    id: priority
+    attributes:
+      label: Priority
+      description: How important is this feature to you?
+      options:
+        - Critical - Blocking my work
+        - High - Would significantly improve my workflow
+        - Medium - Nice to have
+        - Low - Minor improvement
+    validations:
+      required: true
+
+  - type: textarea
+    id: examples
+    attributes:
+      label: Examples or Mockups
+      description: Provide examples, mockups, or references from other tools
+      placeholder: |
+        Similar to how [tool] does...
+        See this example: [URL]
+        Attach mockups or screenshots here
+
+  - type: textarea
+    id: implementation
+    attributes:
+      label: Implementation Ideas
+      description: Do you have any ideas on how this could be implemented?
+      placeholder: |
+        This could be implemented by...
+        Technical approach could involve...
+
+  - type: textarea
+    id: breaking-changes
+    attributes:
+      label: Breaking Changes
+      description: Would this feature require breaking changes to existing functionality?
+      placeholder: |
+        Yes/No, because...
+
+  - type: textarea
+    id: additional
+    attributes:
+      label: Additional Context
+      description: Add any other context, links, or information about the feature request
+      placeholder: Any other relevant information
+
+  - type: checkboxes
+    id: contribution
+    attributes:
+      label: Contribution
+      description: Are you interested in contributing this feature?
+      options:
+        - label: I would like to work on this feature and submit a PR
+          required: false
+        - label: I can help with testing this feature
+          required: false
+        - label: I can help with documentation for this feature
+          required: false
+
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Pre-submission Checklist
+      description: Please confirm the following
+      options:
+        - label: I have searched existing issues and discussions to ensure this is not a duplicate
+          required: true
+        - label: I have provided a clear use case for this feature
+          required: true
+        - label: I have considered how this feature might affect existing functionality
+          required: false

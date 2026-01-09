@@ -1,0 +1,153 @@
+name: Bug Report
+description: Report a bug or issue with Ask O11y
+title: "[Bug]: "
+labels: ["bug", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a bug! Please fill out the information below to help us diagnose and fix the issue.
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Bug Description
+      description: A clear and concise description of what the bug is.
+      placeholder: Tell us what went wrong
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to Reproduce
+      description: Detailed steps to reproduce the behavior
+      placeholder: |
+        1. Navigate to...
+        2. Click on...
+        3. Enter...
+        4. See error...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected Behavior
+      description: What did you expect to happen?
+      placeholder: Describe the expected behavior
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual Behavior
+      description: What actually happened?
+      placeholder: Describe what actually happened
+    validations:
+      required: true
+
+  - type: input
+    id: grafana-version
+    attributes:
+      label: Grafana Version
+      description: What version of Grafana are you running?
+      placeholder: e.g., 12.1.1
+    validations:
+      required: true
+
+  - type: input
+    id: plugin-version
+    attributes:
+      label: Plugin Version
+      description: What version of Ask O11y plugin are you using?
+      placeholder: e.g., 1.0.0
+    validations:
+      required: true
+
+  - type: dropdown
+    id: user-role
+    attributes:
+      label: User Role
+      description: What role does your user have in Grafana?
+      options:
+        - Admin
+        - Editor
+        - Viewer
+        - Not sure
+    validations:
+      required: true
+
+  - type: input
+    id: browser
+    attributes:
+      label: Browser
+      description: What browser are you using?
+      placeholder: e.g., Chrome 120.0, Firefox 119.0, Safari 17.1
+    validations:
+      required: true
+
+  - type: input
+    id: os
+    attributes:
+      label: Operating System
+      description: What OS are you running?
+      placeholder: e.g., macOS 14.2, Windows 11, Ubuntu 22.04
+    validations:
+      required: true
+
+  - type: textarea
+    id: console-errors
+    attributes:
+      label: Browser Console Errors
+      description: Any errors shown in the browser console (F12)?
+      placeholder: |
+        Paste console errors here
+      render: shell
+
+  - type: textarea
+    id: grafana-logs
+    attributes:
+      label: Grafana Server Logs
+      description: Any relevant errors from Grafana server logs?
+      placeholder: |
+        Paste server logs here
+      render: shell
+
+  - type: textarea
+    id: configuration
+    attributes:
+      label: Configuration
+      description: Any relevant configuration details (MCP servers, datasources, etc.)
+      placeholder: |
+        - MCP Server: http://mcp-grafana:8001
+        - Datasources: Prometheus, Loki
+        - Custom system prompt: No
+
+  - type: textarea
+    id: screenshots
+    attributes:
+      label: Screenshots
+      description: If applicable, add screenshots to help explain the problem
+      placeholder: Drag and drop screenshots here
+
+  - type: textarea
+    id: additional
+    attributes:
+      label: Additional Context
+      description: Add any other context about the problem here
+      placeholder: Any other relevant information
+
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Pre-submission Checklist
+      description: Please confirm the following
+      options:
+        - label: I have searched existing issues to ensure this is not a duplicate
+          required: true
+        - label: I have provided all required information above
+          required: true
+        - label: I have included browser console errors (if applicable)
+          required: false

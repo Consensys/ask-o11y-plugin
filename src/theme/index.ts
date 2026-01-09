@@ -1,0 +1,1 @@
+export { GrafanaThemeProvider } from './GrafanaThemeProvider';

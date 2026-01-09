@@ -1,0 +1,104 @@
+{
+  "$schema": "https://raw.githubusercontent.com/grafana/grafana/main/docs/sources/developers/plugins/plugin.schema.json",
+  "type": "app",
+  "name": "Ask O11y",
+  "id": "consensys-asko11y-app",
+  "info": {
+    "keywords": [
+      "app",
+      "assistant",
+      "ai",
+      "llm",
+      "mcp",
+      "chat",
+      "observability",
+      "monitoring",
+      "query",
+      "dashboard",
+      "analytics",
+      "troubleshooting",
+      "rbac"
+    ],
+    "description": "AI-powered observability assistant with MCP integration. Query databases, analyze metrics, manage dashboards, and troubleshoot issues through natural language with 56+ integrated tools.",
+    "author": {
+      "name": "Consensys",
+      "url": "https://consensys.io"
+    },
+    "links": [
+      {
+        "name": "GitHub Repository",
+        "url": "https://github.com/Consensys/ask-o11y-plugin"
+      },
+      {
+        "name": "Documentation",
+        "url": "https://github.com/Consensys/ask-o11y-plugin#readme"
+      },
+      {
+        "name": "Report Issues",
+        "url": "https://github.com/Consensys/ask-o11y-plugin/issues"
+      },
+      {
+        "name": "License",
+        "url": "https://github.com/Consensys/ask-o11y-plugin/blob/main/LICENSE"
+      }
+    ],
+    "logos": {
+      "small": "img/ask_o11y_logo.png",
+      "large": "img/ask_o11y_logo.png"
+    },
+    "screenshots": [
+  { "name": "Home Page", "path": "img/screenshots/home-page.png" },
+  { "name": "Main Chat Interface", "path": "img/screenshots/chat-interface.png" },
+  { "name": "Configuration", "path": "img/screenshots/mcp-configuration.png" },
+  { "name": "Session History", "path": "img/screenshots/session-history.png" }
+    ],
+    "version": "%VERSION%",
+    "updated": "%TODAY%"
+  },
+  "includes": [
+    {
+      "type": "page",
+      "name": "Ask O11y",
+      "path": "/a/%PLUGIN_ID%",
+      "addToNav": true,
+      "defaultNav": true,
+      "icon": "ai"
+    },
+    {
+      "type": "page",
+      "icon": "cog",
+      "name": "Configuration",
+      "path": "/plugins/%PLUGIN_ID%",
+      "role": "Admin",
+      "addToNav": true
+    }
+  ],
+  "backend": true,
+  "executable": "gpx_consensys-asko11y-app",
+  "dependencies": {
+    "grafanaDependency": ">=12.1.1",
+    "plugins": [
+      {
+        "type": "app",
+        "id": "grafana-llm-app",
+        "name": "LLM"
+      }
+    ]
+  },
+  "iam": {
+    "permissions": [
+      {
+        "action": "datasources:read",
+        "scope": "datasources:*"
+      },
+      {
+        "action": "datasources:query",
+        "scope": "datasources:*"
+      },
+      {
+        "action": "datasources:explore",
+        "scope": "datasources:*"
+      }
+    ]
+  }
+}
