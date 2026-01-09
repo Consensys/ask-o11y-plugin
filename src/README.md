@@ -348,9 +348,9 @@ Customize how the AI assistant behaves:
 
 Want to contribute or customize the plugin? See the development documentation:
 
-- **[CLAUDE.md](https://github.com/Consensys/ask-o11y-plugin/blob/main/CLAUDE.md)**: Complete developer guide with build commands and architecture
-- **[agent.md](https://github.com/Consensys/ask-o11y-plugin/blob/main/agent.md)**: Detailed agent architecture and technical implementation
-- **[REFACTORING.md](https://github.com/Consensys/ask-o11y-plugin/blob/main/REFACTORING.md)**: Clean architecture patterns and migration guide
+- **[CONTRIBUTING.md](https://github.com/Consensys/ask-o11y-plugin/blob/main/CONTRIBUTING.md)**: Complete guide for contributing to the project
+- **[AGENTS.md](https://github.com/Consensys/ask-o11y-plugin/blob/main/AGENTS.md)**: Detailed agent architecture and technical implementation
+- **[CHANGELOG.md](https://github.com/Consensys/ask-o11y-plugin/blob/main/CHANGELOG.md)**: Version history and release notes
 
 **Quick Dev Setup:**
 
