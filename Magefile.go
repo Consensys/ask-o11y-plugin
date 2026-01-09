@@ -35,7 +35,7 @@ func Build() error {
 	ldflags := fmt.Sprintf("-w -s -X main.version=%s", version)
 
 	// Build the backend
-	return sh.RunWith(
+	err := sh.RunWith(
 		map[string]string{
 			"CGO_ENABLED": "0",
 			"GOOS":        goos,
@@ -46,6 +46,20 @@ func Build() error {
 		"-ldflags", ldflags,
 		"./pkg",
 	)
+	if err != nil {
+		return err
+	}
+
+	// Copy Go manifest files for plugin validator
+	fmt.Println("Copying Go manifest files...")
+	if err := copyFile("go.mod", filepath.Join("dist", "go.mod")); err != nil {
+		return fmt.Errorf("failed to copy go.mod: %w", err)
+	}
+	if err := copyFile("go.sum", filepath.Join("dist", "go.sum")); err != nil {
+		return fmt.Errorf("failed to copy go.sum: %w", err)
+	}
+
+	return nil
 }
 
 // BuildAll builds for all supported platforms
@@ -89,6 +103,15 @@ func BuildAll() error {
 		if err != nil {
 			return fmt.Errorf("failed to build for %s/%s: %w", p.os, p.arch, err)
 		}
+	}
+
+	// Copy Go manifest files for plugin validator
+	fmt.Println("Copying Go manifest files...")
+	if err := copyFile("go.mod", filepath.Join("dist", "go.mod")); err != nil {
+		return fmt.Errorf("failed to copy go.mod: %w", err)
+	}
+	if err := copyFile("go.sum", filepath.Join("dist", "go.sum")); err != nil {
+		return fmt.Errorf("failed to copy go.sum: %w", err)
 	}
 
 	return nil
@@ -154,4 +177,19 @@ func getEnv(key, defaultValue string) string {
 		return value
 	}
 	return defaultValue
+}
+
+// copyFile copies a file from src to dst
+func copyFile(src, dst string) error {
+	input, err := os.ReadFile(src)
+	if err != nil {
+		return err
+	}
+
+	err = os.WriteFile(dst, input, 0644)
+	if err != nil {
+		return err
+	}
+
+	return nil
 }

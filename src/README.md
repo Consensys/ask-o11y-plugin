@@ -218,7 +218,6 @@ For detailed information about using and developing Ask O11y:
 
 - **[User Guide](https://github.com/Consensys/ask-o11y-plugin/blob/main/README.md)** - Complete installation and usage guide
 - **[Contributing Guide](https://github.com/Consensys/ask-o11y-plugin/blob/main/CONTRIBUTING.md)** - Development setup, code standards, and PR process
-- **[Developer Documentation](https://github.com/Consensys/ask-o11y-plugin/blob/main/CLAUDE.md)** - Build commands, architecture, and technical details
 - **[Architecture Guide](https://github.com/Consensys/ask-o11y-plugin/blob/main/AGENTS.md)** - Detailed agent architecture and implementation
 - **[Changelog](https://github.com/Consensys/ask-o11y-plugin/blob/main/CHANGELOG.md)** - Version history and release notes
 
@@ -475,7 +474,7 @@ When reporting issues, please include:
 
 ### Get Help
 
-- 📖 **Documentation**: Check this README and [CLAUDE.md](https://github.com/Consensys/ask-o11y-plugin/blob/main/CLAUDE.md) for detailed guides
+- 📖 **Documentation**: Check this README and [README.md](https://github.com/Consensys/ask-o11y-plugin/blob/main/README.md) for detailed guides
 - 🐛 **Bug Reports**: [GitHub Issues](https://github.com/Consensys/ask-o11y-plugin/issues)
 - 💬 **Community**: [GitHub Discussions](https://github.com/Consensys/ask-o11y-plugin/discussions)
 - 📧 **Security Issues**: Use GitHub Security Advisory feature (private disclosure)
@@ -494,8 +493,6 @@ Please read our [Contributing Guide](https://github.com/Consensys/ask-o11y-plugi
 - Code standards and testing guidelines
 - Pull request process
 - Commit message conventions
-
-For development setup, see [CLAUDE.md](https://github.com/Consensys/ask-o11y-plugin/blob/main/CLAUDE.md).
 
 **Code Standards:**
 
