@@ -119,6 +119,17 @@ func Clean() error {
 		}
 	}
 
+	// Remove Go module files from dist
+	goModFiles := []string{
+		filepath.Join("dist", "go.mod"),
+		filepath.Join("dist", "go.sum"),
+	}
+	for _, file := range goModFiles {
+		if err := os.Remove(file); err != nil && !os.IsNotExist(err) {
+			return err
+		}
+	}
+
 	return nil
 }
 
@@ -165,11 +176,14 @@ func getEnv(key, defaultValue string) string {
 	return defaultValue
 }
 
+// File permissions for copied files
+const defaultFileMode = 0644
+
 // copyFile copies a file from src to dst
 func copyFile(src, dst string) error {
 	input, err := os.ReadFile(src)
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(dst, input, 0644)
+	return os.WriteFile(dst, input, defaultFileMode)
 }
