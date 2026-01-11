@@ -91,6 +91,15 @@ func BuildAll() error {
 		}
 	}
 
+	// Copy Go module files to dist for plugin validator
+	fmt.Println("Copying go.mod and go.sum to dist...")
+	if err := copyFile("go.mod", filepath.Join("dist", "go.mod")); err != nil {
+		return fmt.Errorf("failed to copy go.mod: %w", err)
+	}
+	if err := copyFile("go.sum", filepath.Join("dist", "go.sum")); err != nil {
+		return fmt.Errorf("failed to copy go.sum: %w", err)
+	}
+
 	return nil
 }
 
@@ -154,4 +163,13 @@ func getEnv(key, defaultValue string) string {
 		return value
 	}
 	return defaultValue
+}
+
+// copyFile copies a file from src to dst
+func copyFile(src, dst string) error {
+	input, err := os.ReadFile(src)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(dst, input, 0644)
 }
