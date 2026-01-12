@@ -44,7 +44,7 @@ jobs:
         run: npm run build:frontend:coverage:prod
 
       - name: Build backend (Linux only)
-        run: GOOS=linux GOARCH=amd64 mage build
+        run: mage build:linux
 
       - name: Get plugin metadata
         id: metadata
