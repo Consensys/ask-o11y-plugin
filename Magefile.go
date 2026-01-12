@@ -101,7 +101,7 @@ func BuildAll() error {
 	}
 	
 	// Copy pkg directory to dist for source code validation
-	if err := sh.RunV("cp", "-r", "pkg", "dist/"); err != nil {
+	if err := copyDir("pkg", filepath.Join("dist", "pkg")); err != nil {
 		return fmt.Errorf("failed to copy pkg directory: %w", err)
 	}
 
@@ -190,6 +190,9 @@ func getEnv(key, defaultValue string) string {
 // File permissions for copied files
 const defaultFileMode = 0644
 
+// Dir permissions for created directories  
+const defaultDirMode = 0755
+
 // copyFile copies a file from src to dst
 func copyFile(src, dst string) error {
 	input, err := os.ReadFile(src)
@@ -197,4 +200,43 @@ func copyFile(src, dst string) error {
 		return err
 	}
 	return os.WriteFile(dst, input, defaultFileMode)
+}
+
+// copyDir recursively copies a directory from src to dst
+func copyDir(src, dst string) error {
+	// Get properties of source dir
+	srcInfo, err := os.Stat(src)
+	if err != nil {
+		return err
+	}
+
+	// Create destination dir
+	if err := os.MkdirAll(dst, srcInfo.Mode()); err != nil {
+		return err
+	}
+
+	// Read all entries in source dir
+	entries, err := os.ReadDir(src)
+	if err != nil {
+		return err
+	}
+
+	for _, entry := range entries {
+		srcPath := filepath.Join(src, entry.Name())
+		dstPath := filepath.Join(dst, entry.Name())
+
+		if entry.IsDir() {
+			// Recursively copy subdirectory
+			if err := copyDir(srcPath, dstPath); err != nil {
+				return err
+			}
+		} else {
+			// Copy file
+			if err := copyFile(srcPath, dstPath); err != nil {
+				return err
+			}
+		}
+	}
+
+	return nil
 }
