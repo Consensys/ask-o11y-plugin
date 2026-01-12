@@ -99,13 +99,16 @@ func BuildAll() error {
 	if err := copyFile("go.sum", filepath.Join("dist", "go.sum")); err != nil {
 		return fmt.Errorf("failed to copy go.sum: %w", err)
 	}
-	// Copy pkg directory to dist for source code validation
-	if _, err := os.Stat("pkg"); err == nil {
+	// Copy pkg directory to dist for source code validation (if it exists)
+	if _, err := os.Stat("pkg"); err != nil {
+		if !os.IsNotExist(err) {
+			return fmt.Errorf("failed to check pkg directory: %w", err)
+		}
+		// pkg doesn't exist, skip copying (not an error)
+	} else {
 		if err := copyDir("pkg", filepath.Join("dist", "pkg")); err != nil {
 			return fmt.Errorf("failed to copy pkg directory: %w", err)
 		}
-	} else if !os.IsNotExist(err) {
-		return fmt.Errorf("failed to check pkg directory: %w", err)
 	}
 
 	return nil
@@ -192,6 +195,9 @@ func getEnv(key, defaultValue string) string {
 // File permissions for copied files
 const defaultFileMode = 0644
 
+// Directory permissions for created directories
+const defaultDirMode = 0755
+
 // copyFile copies a file from src to dst
 func copyFile(src, dst string) error {
 	input, err := os.ReadFile(src)
@@ -214,7 +220,7 @@ func copyDir(src, dst string) error {
 	}
 
 	// Create destination dir with standard permissions
-	if err := os.MkdirAll(dst, 0755); err != nil {
+	if err := os.MkdirAll(dst, defaultDirMode); err != nil {
 		return err
 	}
 
