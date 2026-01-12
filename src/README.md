@@ -218,8 +218,7 @@ For detailed information about using and developing Ask O11y:
 
 - **[User Guide](https://github.com/Consensys/ask-o11y-plugin/blob/main/README.md)** - Complete installation and usage guide
 - **[Contributing Guide](https://github.com/Consensys/ask-o11y-plugin/blob/main/CONTRIBUTING.md)** - Development setup, code standards, and PR process
-- **[Developer Documentation](https://github.com/Consensys/ask-o11y-plugin/blob/main/CLAUDE.md)** - Build commands, architecture, and technical details
-- **[Architecture Guide](https://github.com/Consensys/ask-o11y-plugin/blob/main/AGENTS.md)** - Detailed agent architecture and implementation
+- **[Developer Documentation](https://github.com/Consensys/ask-o11y-plugin/blob/main/AGENTS.md)** - Build commands, architecture, and technical details
 - **[Changelog](https://github.com/Consensys/ask-o11y-plugin/blob/main/CHANGELOG.md)** - Version history and release notes
 
 For additional help:
@@ -348,9 +347,8 @@ Customize how the AI assistant behaves:
 
 Want to contribute or customize the plugin? See the development documentation:
 
-- **[CLAUDE.md](https://github.com/Consensys/ask-o11y-plugin/blob/main/CLAUDE.md)**: Complete developer guide with build commands and architecture
-- **[agent.md](https://github.com/Consensys/ask-o11y-plugin/blob/main/agent.md)**: Detailed agent architecture and technical implementation
-- **[REFACTORING.md](https://github.com/Consensys/ask-o11y-plugin/blob/main/REFACTORING.md)**: Clean architecture patterns and migration guide
+- **[AGENTS.md](https://github.com/Consensys/ask-o11y-plugin/blob/main/AGENTS.md)**: Complete developer guide with build commands, architecture, and technical implementation
+- **[CONTRIBUTING.md](https://github.com/Consensys/ask-o11y-plugin/blob/main/CONTRIBUTING.md)**: Development setup, code standards, and pull request process
 
 **Quick Dev Setup:**
 
@@ -475,7 +473,7 @@ When reporting issues, please include:
 
 ### Get Help
 
-- 📖 **Documentation**: Check this README and [CLAUDE.md](https://github.com/Consensys/ask-o11y-plugin/blob/main/CLAUDE.md) for detailed guides
+- 📖 **Documentation**: Check this README and [AGENTS.md](https://github.com/Consensys/ask-o11y-plugin/blob/main/AGENTS.md) for detailed guides
 - 🐛 **Bug Reports**: [GitHub Issues](https://github.com/Consensys/ask-o11y-plugin/issues)
 - 💬 **Community**: [GitHub Discussions](https://github.com/Consensys/ask-o11y-plugin/discussions)
 - 📧 **Security Issues**: Use GitHub Security Advisory feature (private disclosure)
@@ -495,7 +493,7 @@ Please read our [Contributing Guide](https://github.com/Consensys/ask-o11y-plugi
 - Pull request process
 - Commit message conventions
 
-For development setup, see [CLAUDE.md](https://github.com/Consensys/ask-o11y-plugin/blob/main/CLAUDE.md).
+For development setup, see [AGENTS.md](https://github.com/Consensys/ask-o11y-plugin/blob/main/AGENTS.md).
 
 **Code Standards:**
 

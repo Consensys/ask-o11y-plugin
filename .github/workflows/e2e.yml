@@ -31,7 +31,7 @@ jobs:
       - name: Setup Go environment
         uses: actions/setup-go@v5
         with:
-          go-version: '1.22'
+          go-version: '1.24'
           cache: true
 
       - name: Install Mage
@@ -44,7 +44,7 @@ jobs:
         run: npm run build:frontend:coverage:prod
 
       - name: Build backend (Linux only)
-        run: GOOS=linux GOARCH=amd64 mage build
+        run: mage build:linux
 
       - name: Get plugin metadata
         id: metadata

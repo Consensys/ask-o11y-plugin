@@ -1,4 +1,4 @@
-name: Build and Release Plugin
+name: Build and Release Plugin to docker image
 
 on:
   workflow_dispatch:
@@ -40,7 +40,7 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v4
         with:
-          go-version: '1.23'
+          go-version: '1.24'
           cache: true
 
       - name: Install Mage
