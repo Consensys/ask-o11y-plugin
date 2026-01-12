@@ -99,7 +99,6 @@ func BuildAll() error {
 	if err := copyFile("go.sum", filepath.Join("dist", "go.sum")); err != nil {
 		return fmt.Errorf("failed to copy go.sum: %w", err)
 	}
-	
 	// Copy pkg directory to dist for source code validation
 	if err := copyDir("pkg", filepath.Join("dist", "pkg")); err != nil {
 		return fmt.Errorf("failed to copy pkg directory: %w", err)
@@ -134,7 +133,6 @@ func Clean() error {
 			return err
 		}
 	}
-	
 	// Remove pkg directory from dist
 	pkgDir := filepath.Join("dist", "pkg")
 	if err := os.RemoveAll(pkgDir); err != nil && !os.IsNotExist(err) {
