@@ -3,13 +3,10 @@ name: CI
 on:
   push:
     branches:
-      - master
       - main
-  pull_request:
-    branches:
-      - master
-      - main
-
+  push:
+    tags:
+      - 'v*' # Run workflow on version tags, e.g. v1.0.0.
 jobs:
   build:
     name: Build, lint and unit tests
@@ -114,3 +111,27 @@ jobs:
           name: ${{ steps.metadata.outputs.plugin-id }}-${{ steps.metadata.outputs.plugin-version }}
           path: ${{ steps.metadata.outputs.plugin-id }}
           retention-days: 5
+
+      - name: Generate SHA1 checksum
+        run: |
+          ${ARCHIVE} > ${ARCHIVE}.sha1
+        env:
+          ARCHIVE: ${{ steps.metadata.outputs.archive }}
+
+      - name: Create GitHub Release
+        if: github.ref_type == 'tag'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            ${ARCHIVE}
+            ${ARCHIVE}.sha1
+          generate_release_notes: true
+          name: "Ask O11y ${{ github.ref_name }} Released!"
+          body: |
+            Ask O11y ${{ github.ref_name }} Released!
+            Installation Instructions: https://github.com/Consensys/ask-o11y-plugin?tab=readme-ov-file#installation
+             
+            Full Changelog: https://github.com/Consensys/ask-o11y-plugin/blob/main/CHANGELOG.md
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ARCHIVE: ${{ steps.metadata.outputs.archive }}
