@@ -93,7 +93,8 @@ func BuildAll() error {
 
 	// Copy Go module files to dist for plugin validator
 	// Note: Only go.mod and go.sum are needed in dist. The validator uses
-	// -sourceCodeUri to access the actual source code at the repo root.
+	// -sourceCodeUri file://./ to access the actual source code at the repo root.
+	// Including the pkg/ directory in dist would confuse the validator.
 	fmt.Println("Copying go.mod and go.sum to dist...")
 	if err := copyFile("go.mod", filepath.Join("dist", "go.mod")); err != nil {
 		return fmt.Errorf("failed to copy go.mod: %w", err)
@@ -194,6 +195,7 @@ func copyFile(src, dst string) error {
 }
 
 // copyDir recursively copies a directory from src to dst
+// Note: Currently unused but kept for potential future use
 func copyDir(src, dst string) error {
 	// Get properties of source dir
 	srcInfo, err := os.Stat(src)
