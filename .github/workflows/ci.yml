@@ -113,7 +113,7 @@ jobs:
 
       - name: Generate SHA1 checksum
         run: |
-          ${ARCHIVE} > ${ARCHIVE}.sha1
+          sha1sum ${ARCHIVE} > ${ARCHIVE}.sha1
         env:
           ARCHIVE: ${{ steps.metadata.outputs.archive }}
 
