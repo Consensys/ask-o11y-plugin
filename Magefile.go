@@ -100,8 +100,12 @@ func BuildAll() error {
 		return fmt.Errorf("failed to copy go.sum: %w", err)
 	}
 	// Copy pkg directory to dist for source code validation
-	if err := copyDir("pkg", filepath.Join("dist", "pkg")); err != nil {
-		return fmt.Errorf("failed to copy pkg directory: %w", err)
+	if _, err := os.Stat("pkg"); err == nil {
+		if err := copyDir("pkg", filepath.Join("dist", "pkg")); err != nil {
+			return fmt.Errorf("failed to copy pkg directory: %w", err)
+		}
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("failed to check pkg directory: %w", err)
 	}
 
 	return nil
@@ -205,8 +209,12 @@ func copyDir(src, dst string) error {
 		return err
 	}
 
-	// Create destination dir
-	if err := os.MkdirAll(dst, srcInfo.Mode()); err != nil {
+	if !srcInfo.IsDir() {
+		return fmt.Errorf("source is not a directory: %s", src)
+	}
+
+	// Create destination dir with standard permissions
+	if err := os.MkdirAll(dst, 0755); err != nil {
 		return err
 	}
 
