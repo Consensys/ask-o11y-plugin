@@ -91,24 +91,15 @@ func BuildAll() error {
 		}
 	}
 
-	// Copy Go module files and source to dist for plugin validator
-	fmt.Println("Copying go.mod, go.sum, and pkg/ to dist...")
+	// Copy Go module files to dist for plugin validator
+	// Note: Only go.mod and go.sum are needed in dist. The validator uses
+	// -sourceCodeUri to access the actual source code at the repo root.
+	fmt.Println("Copying go.mod and go.sum to dist...")
 	if err := copyFile("go.mod", filepath.Join("dist", "go.mod")); err != nil {
 		return fmt.Errorf("failed to copy go.mod: %w", err)
 	}
 	if err := copyFile("go.sum", filepath.Join("dist", "go.sum")); err != nil {
 		return fmt.Errorf("failed to copy go.sum: %w", err)
-	}
-	// Copy pkg directory to dist for source code validation (if it exists)
-	if _, err := os.Stat("pkg"); err != nil {
-		if !os.IsNotExist(err) {
-			return fmt.Errorf("failed to check pkg directory: %w", err)
-		}
-		// pkg doesn't exist, skip copying (not an error)
-	} else {
-		if err := copyDir("pkg", filepath.Join("dist", "pkg")); err != nil {
-			return fmt.Errorf("failed to copy pkg directory: %w", err)
-		}
 	}
 
 	return nil
@@ -139,11 +130,6 @@ func Clean() error {
 		if err := os.Remove(file); err != nil && !os.IsNotExist(err) {
 			return err
 		}
-	}
-	// Remove pkg directory from dist
-	pkgDir := filepath.Join("dist", "pkg")
-	if err := os.RemoveAll(pkgDir); err != nil && !os.IsNotExist(err) {
-		return err
 	}
 
 	return nil
