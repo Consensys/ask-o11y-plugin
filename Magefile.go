@@ -190,9 +190,6 @@ func getEnv(key, defaultValue string) string {
 // File permissions for copied files
 const defaultFileMode = 0644
 
-// Dir permissions for created directories  
-const defaultDirMode = 0755
-
 // copyFile copies a file from src to dst
 func copyFile(src, dst string) error {
 	input, err := os.ReadFile(src)
