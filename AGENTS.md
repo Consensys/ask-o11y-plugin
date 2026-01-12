@@ -419,10 +419,9 @@ npm run build:frontend
 
 ## Additional Documentation
 
-For deeper technical details, see:
+For more information, see:
 
 - `README.md` - Quick start and overview
 - `src/README.md` - Feature documentation
-- `REFACTORING.md` - Architecture migration guide
-- `IMPLEMENTATION_NOTES.md` - Technical deep dives
-- `MEMORY_AND_RELIABILITY.md` - Performance patterns
+- `CONTRIBUTING.md` - Development setup and contribution guidelines
+- `CHANGELOG.md` - Version history and release notes
