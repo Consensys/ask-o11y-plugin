@@ -17,7 +17,7 @@ jobs:
       plugin-version: ${{ steps.metadata.outputs.plugin-version }}
       has-backend: ${{ steps.check-for-backend.outputs.has-backend }}
     env:
-      GRAFANA_ACCESS_POLICY_TOKEN: ${{ secrets.GRAFANA_ACCESS_POLICY_TOKEN }}
+      GRAFANA_ACCESS_POLICY_TOKEN:  "" # ${{ secrets.GRAFANA_ACCESS_POLICY_TOKEN }}
     steps:
       - uses: actions/checkout@v4
         with:
