@@ -231,6 +231,14 @@ function ChatComponent({ pluginSettings }: ChatProps) {
         backgroundColor: theme.isDark ? '#111217' : theme.colors.background.canvas,
       }}
     >
+      {/* Side panel for Grafana page preview */}
+      <SidePanel
+        isOpen={showSidePanel}
+        onClose={() => setIsSidePanelOpen(false)}
+        pageRefs={visiblePageRefs}
+        onRemoveTab={handleRemoveTab}
+      />
+
       {/* Main chat area */}
       <div className="flex-1 flex flex-col min-h-0 min-w-0">
         {hasMessages ? (
@@ -369,14 +377,6 @@ function ChatComponent({ pluginSettings }: ChatProps) {
           </div>
         )}
       </div>
-
-      {/* Side panel for Grafana page preview */}
-      <SidePanel
-        isOpen={showSidePanel}
-        onClose={() => setIsSidePanelOpen(false)}
-        pageRefs={visiblePageRefs}
-        onRemoveTab={handleRemoveTab}
-      />
 
       {/* Session sidebar */}
       <SessionSidebar

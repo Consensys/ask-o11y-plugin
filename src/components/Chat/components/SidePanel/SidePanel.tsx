@@ -50,7 +50,7 @@ export const SidePanel: React.FC<SidePanelProps> = ({ isOpen, onClose, pageRefs,
 
   return (
     <div
-      className="flex flex-col h-screen sticky top-0 border-l transition-all duration-300 ease-in-out"
+      className="flex flex-col h-screen sticky top-0 border-r transition-all duration-300 ease-in-out"
       style={{
         width: '800px',
         minWidth: '400px',
