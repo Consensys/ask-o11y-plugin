@@ -65,6 +65,22 @@ function normalizeUrl(url: string): string {
   return url.replace(/[.,;:!?`]+$/, '').trim();
 }
 
+/**
+ * Extract a deduplication key from a URL (path portion starting from /d/ or /explore)
+ * This ensures relative and absolute URLs pointing to the same resource are treated as duplicates
+ */
+function getDedupeKey(url: string): string {
+  const dashboardMatch = url.match(/\/d\/[^\s]*/);
+  if (dashboardMatch) {
+    return dashboardMatch[0];
+  }
+  const exploreMatch = url.match(/\/explore[^\s]*/);
+  if (exploreMatch) {
+    return exploreMatch[0];
+  }
+  return url;
+}
+
 interface ParsedLink {
   url: string;
   title?: string;
@@ -96,9 +112,10 @@ export function parseGrafanaLinks(content: string): GrafanaPageRef[] {
     const title = match[1];
     const rawUrl = normalizeUrl(match[2]);
     const type = getPageType(rawUrl);
+    const dedupeKey = getDedupeKey(rawUrl);
 
-    if (type && !seenUrls.has(rawUrl)) {
-      seenUrls.add(rawUrl);
+    if (type && !seenUrls.has(dedupeKey)) {
+      seenUrls.add(dedupeKey);
       links.push({
         url: rawUrl,
         title,
@@ -112,8 +129,9 @@ export function parseGrafanaLinks(content: string): GrafanaPageRef[] {
   const dashboardMatches = Array.from(content.matchAll(DASHBOARD_PATTERN));
   for (const match of dashboardMatches) {
     const rawUrl = normalizeUrl(match[0]);
-    if (!seenUrls.has(rawUrl)) {
-      seenUrls.add(rawUrl);
+    const dedupeKey = getDedupeKey(rawUrl);
+    if (!seenUrls.has(dedupeKey)) {
+      seenUrls.add(dedupeKey);
       links.push({
         url: rawUrl,
         type: 'dashboard',
@@ -126,8 +144,9 @@ export function parseGrafanaLinks(content: string): GrafanaPageRef[] {
   const exploreMatches = Array.from(content.matchAll(EXPLORE_PATTERN));
   for (const match of exploreMatches) {
     const rawUrl = normalizeUrl(match[0]);
-    if (!seenUrls.has(rawUrl)) {
-      seenUrls.add(rawUrl);
+    const dedupeKey = getDedupeKey(rawUrl);
+    if (!seenUrls.has(dedupeKey)) {
+      seenUrls.add(dedupeKey);
       links.push({
         url: rawUrl,
         type: 'explore',
