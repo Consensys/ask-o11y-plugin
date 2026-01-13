@@ -120,7 +120,7 @@ test.describe('Chat Error Recovery', () => {
       await page.waitForTimeout(2000);
 
       // The message should be visible in the chat log
-      await expect(page.locator('[role="log"]').getByText('Test recovery')).toBeVisible();
+      await expect(page.locator('[role="log"]').getByText('Test recovery', { exact: true })).toBeVisible();
 
       // The input should eventually be usable again
       await expect(chatInput).toBeVisible();

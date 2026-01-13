@@ -146,6 +146,9 @@ export function hasGrafanaLinks(content: string): boolean {
     return false;
   }
 
-  // Use test() for performance - it stops at first match
+  // Reset lastIndex since these are global regexes
+  DASHBOARD_PATTERN.lastIndex = 0;
+  EXPLORE_PATTERN.lastIndex = 0;
+
   return DASHBOARD_PATTERN.test(content) || EXPLORE_PATTERN.test(content);
 }
