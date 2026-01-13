@@ -1,11 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { useTheme2 } from '@grafana/ui';
 import { GrafanaPageRef } from '../../types';
+import { TabCloseButton } from './TabCloseButton';
 
 export interface SidePanelProps {
   isOpen: boolean;
   onClose: () => void;
   pageRefs: Array<GrafanaPageRef & { messageIndex: number }>;
+  onRemoveTab?: (index: number) => void;
 }
 
 function getTabLabel(ref: GrafanaPageRef, index: number): string {
@@ -26,7 +28,7 @@ function toRelativeUrl(url: string): string {
   return url;
 }
 
-export const SidePanel: React.FC<SidePanelProps> = ({ isOpen, onClose, pageRefs }) => {
+export const SidePanel: React.FC<SidePanelProps> = ({ isOpen, onClose, pageRefs, onRemoveTab }) => {
   const theme = useTheme2();
   const [activeIndex, setActiveIndex] = useState(0);
 
@@ -160,10 +162,9 @@ export const SidePanel: React.FC<SidePanelProps> = ({ isOpen, onClose, pageRefs 
           role="tablist"
         >
           {pageRefs.map((ref, idx) => (
-            <button
+            <div
               key={`${ref.url}-${idx}`}
-              onClick={() => setActiveIndex(idx)}
-              className="flex-1 min-w-0 px-3 py-1.5 text-xs rounded-md truncate transition-colors"
+              className="flex items-center gap-1 flex-1 min-w-0 rounded-md transition-colors"
               style={{
                 backgroundColor:
                   idx === activeIndex
@@ -171,14 +172,27 @@ export const SidePanel: React.FC<SidePanelProps> = ({ isOpen, onClose, pageRefs 
                     : theme.isDark
                     ? 'rgba(255,255,255,0.05)'
                     : 'rgba(0,0,0,0.05)',
-                color: idx === activeIndex ? theme.colors.primary.contrastText : theme.colors.text.secondary,
               }}
               role="tab"
               aria-selected={idx === activeIndex}
-              title={ref.url}
             >
-              {getTabLabel(ref, idx)}
-            </button>
+              <button
+                onClick={() => setActiveIndex(idx)}
+                className="flex-1 min-w-0 px-3 py-1.5 text-xs truncate text-left"
+                style={{
+                  color: idx === activeIndex ? theme.colors.primary.contrastText : theme.colors.text.secondary,
+                }}
+                title={ref.url}
+              >
+                {getTabLabel(ref, idx)}
+              </button>
+              {onRemoveTab && (
+                <TabCloseButton
+                  onClick={() => onRemoveTab(idx)}
+                  color={idx === activeIndex ? theme.colors.primary.contrastText : theme.colors.text.secondary}
+                />
+              )}
+            </div>
           ))}
         </div>
       )}
