@@ -268,7 +268,14 @@ export const useChat = (pluginSettings: AppPluginSettings) => {
   }, []);
 
   const detectedPageRefs = useMemo((): Array<GrafanaPageRef & { messageIndex: number }> => {
-    return chatHistory.flatMap((msg, idx) => (msg.pageRefs || []).map((ref) => ({ ...ref, messageIndex: idx })));
+    // Find the most recent message with pageRefs
+    for (let i = chatHistory.length - 1; i >= 0; i--) {
+      const msg = chatHistory[i];
+      if (msg.pageRefs && msg.pageRefs.length > 0) {
+        return msg.pageRefs.map((ref) => ({ ...ref, messageIndex: i }));
+      }
+    }
+    return [];
   }, [chatHistory]);
 
   return {
