@@ -32,61 +32,21 @@ export const SidePanel: React.FC<SidePanelProps> = ({ isOpen, onClose, pageRefs,
   const theme = useTheme2();
   const [activeIndex, setActiveIndex] = useState(0);
 
-  useEffect(() => {
-    if (activeIndex >= pageRefs.length) {
-      setActiveIndex(Math.max(0, pageRefs.length - 1));
-    }
-  }, [pageRefs.length, activeIndex]);
+  const safeActiveIndex = Math.min(activeIndex, Math.max(0, pageRefs.length - 1));
 
-  // #region agent log
-  fetch('http://127.0.0.1:7242/ingest/2f5f5108-d124-4028-84fe-e1fd12dd1ddc', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      location: 'SidePanel.tsx:31',
-      message: 'SidePanel render',
-      data: {
-        isOpen,
-        pageRefsCount: pageRefs.length,
-        pageRefs: pageRefs.map((r) => ({ type: r.type, url: r.url, uid: r.uid, title: r.title })),
-      },
-      timestamp: Date.now(),
-      sessionId: 'debug-session',
-      hypothesisId: 'H1,H5',
-    }),
-  }).catch(() => {});
-  // #endregion
+  useEffect(() => {
+    if (activeIndex !== safeActiveIndex) {
+      setActiveIndex(safeActiveIndex);
+    }
+  }, [activeIndex, safeActiveIndex]);
 
   if (!isOpen || pageRefs.length === 0) {
     return null;
   }
 
-  const activeRef = pageRefs[activeIndex];
+  const activeRef = pageRefs[safeActiveIndex];
   const showTabs = pageRefs.length > 1;
   const iframeSrc = toRelativeUrl(activeRef.url);
-
-  // #region agent log
-  fetch('http://127.0.0.1:7242/ingest/2f5f5108-d124-4028-84fe-e1fd12dd1ddc', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      location: 'SidePanel.tsx:40',
-      message: 'activeRef selected',
-      data: {
-        activeIndex,
-        activeRefUrl: activeRef.url,
-        iframeSrc,
-        activeRefType: activeRef.type,
-        activeRefUid: activeRef.uid,
-        urlType: typeof activeRef.url,
-        urlLength: activeRef.url?.length,
-      },
-      timestamp: Date.now(),
-      sessionId: 'debug-session',
-      hypothesisId: 'H1,H2,H4,H6',
-    }),
-  }).catch(() => {});
-  // #endregion
 
   return (
     <div
@@ -167,20 +127,20 @@ export const SidePanel: React.FC<SidePanelProps> = ({ isOpen, onClose, pageRefs,
               className="flex items-center gap-1 flex-1 min-w-0 rounded-md transition-colors"
               style={{
                 backgroundColor:
-                  idx === activeIndex
+                  idx === safeActiveIndex
                     ? theme.colors.primary.main
                     : theme.isDark
                     ? 'rgba(255,255,255,0.05)'
                     : 'rgba(0,0,0,0.05)',
               }}
               role="tab"
-              aria-selected={idx === activeIndex}
+              aria-selected={idx === safeActiveIndex}
             >
               <button
                 onClick={() => setActiveIndex(idx)}
                 className="flex-1 min-w-0 px-3 py-1.5 text-xs truncate text-left"
                 style={{
-                  color: idx === activeIndex ? theme.colors.primary.contrastText : theme.colors.text.secondary,
+                  color: idx === safeActiveIndex ? theme.colors.primary.contrastText : theme.colors.text.secondary,
                 }}
                 title={ref.url}
               >
@@ -189,7 +149,7 @@ export const SidePanel: React.FC<SidePanelProps> = ({ isOpen, onClose, pageRefs,
               {onRemoveTab && (
                 <TabCloseButton
                   onClick={() => onRemoveTab(idx)}
-                  color={idx === activeIndex ? theme.colors.primary.contrastText : theme.colors.text.secondary}
+                  color={idx === safeActiveIndex ? theme.colors.primary.contrastText : theme.colors.text.secondary}
                 />
               )}
             </div>
@@ -204,36 +164,6 @@ export const SidePanel: React.FC<SidePanelProps> = ({ isOpen, onClose, pageRefs,
           title={activeRef.title || `Grafana ${activeRef.type}`}
           className="w-full h-full border-0"
           style={{ backgroundColor: theme.colors.background.canvas }}
-          // #region agent log
-          onLoad={() =>
-            fetch('http://127.0.0.1:7242/ingest/2f5f5108-d124-4028-84fe-e1fd12dd1ddc', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                location: 'SidePanel.tsx:iframe',
-                message: 'iframe onLoad fired',
-                data: { iframeSrc },
-                timestamp: Date.now(),
-                sessionId: 'debug-session',
-                hypothesisId: 'H3,H6',
-              }),
-            }).catch(() => {})
-          }
-          onError={(e) =>
-            fetch('http://127.0.0.1:7242/ingest/2f5f5108-d124-4028-84fe-e1fd12dd1ddc', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                location: 'SidePanel.tsx:iframe',
-                message: 'iframe onError fired',
-                data: { iframeSrc, error: String(e) },
-                timestamp: Date.now(),
-                sessionId: 'debug-session',
-                hypothesisId: 'H3,H6',
-              }),
-            }).catch(() => {})
-          }
-          // #endregion
         />
       </div>
     </div>

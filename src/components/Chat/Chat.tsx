@@ -146,80 +146,21 @@ function ChatComponent({ pluginSettings }: ChatProps) {
   const prevPageRefsCountRef = useRef(0);
   const announce = useAnnounce();
 
-  // Filter out removed tabs from detectedPageRefs
   const visiblePageRefs = detectedPageRefs.filter((ref) => !removedTabUrls.has(ref.url));
 
-  // #region agent log
-  fetch('http://127.0.0.1:7244/ingest/db2b8c3b-e74b-4a86-8af7-7682e8cd5ea9', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      location: 'Chat.tsx:150',
-      message: 'visiblePageRefs computed',
-      data: {
-        detectedCount: detectedPageRefs.length,
-        visibleCount: visiblePageRefs.length,
-        removedCount: removedTabUrls.size,
-        removedUrls: Array.from(removedTabUrls),
-        detectedUrls: detectedPageRefs.map((r) => r.url),
-      },
-      timestamp: Date.now(),
-      sessionId: 'debug-session',
-      hypothesisId: 'H2,H4',
-    }),
-  }).catch(() => {});
-  // #endregion
-
-  // Handle removing a tab
   const handleRemoveTab = useCallback((index: number) => {
     const tabToRemove = visiblePageRefs[index];
-    // #region agent log
-    fetch('http://127.0.0.1:7244/ingest/db2b8c3b-e74b-4a86-8af7-7682e8cd5ea9', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        location: 'Chat.tsx:handleRemoveTab',
-        message: 'Tab removal requested',
-        data: { index, tabUrl: tabToRemove?.url, visibleCount: visiblePageRefs.length },
-        timestamp: Date.now(),
-        sessionId: 'debug-session',
-        hypothesisId: 'H2',
-      }),
-    }).catch(() => {});
-    // #endregion
     if (tabToRemove) {
       setRemovedTabUrls((prev) => new Set(prev).add(tabToRemove.url));
     }
   }, [visiblePageRefs]);
 
-  // Auto-open side panel when new page refs are detected and reset removed tabs
   useEffect(() => {
     const currentCount = detectedPageRefs.length;
     const prevCount = prevPageRefsCountRef.current;
 
-    // #region agent log
-    fetch('http://127.0.0.1:7244/ingest/db2b8c3b-e74b-4a86-8af7-7682e8cd5ea9', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        location: 'Chat.tsx:useEffect-autoOpen',
-        message: 'Auto-open effect triggered',
-        data: {
-          currentCount,
-          prevCount,
-          willReset: currentCount > prevCount && currentCount > 0,
-          detectedUrls: detectedPageRefs.map((r) => r.url),
-        },
-        timestamp: Date.now(),
-        sessionId: 'debug-session',
-        hypothesisId: 'H1,H5',
-      }),
-    }).catch(() => {});
-    // #endregion
-
     if (currentCount > prevCount && currentCount > 0) {
       setIsSidePanelOpen(true);
-      // Reset removed tabs when new refs are detected
       setRemovedTabUrls(new Set());
     }
 

@@ -268,47 +268,12 @@ export const useChat = (pluginSettings: AppPluginSettings) => {
   }, []);
 
   const detectedPageRefs = useMemo((): Array<GrafanaPageRef & { messageIndex: number }> => {
-    // Find the most recent message with pageRefs
     for (let i = chatHistory.length - 1; i >= 0; i--) {
       const msg = chatHistory[i];
       if (msg.pageRefs && msg.pageRefs.length > 0) {
-        const result = msg.pageRefs.map((ref) => ({ ...ref, messageIndex: i }));
-        // #region agent log
-        fetch('http://127.0.0.1:7244/ingest/db2b8c3b-e74b-4a86-8af7-7682e8cd5ea9', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            location: 'useChat.ts:detectedPageRefs',
-            message: 'Found pageRefs in message',
-            data: {
-              messageIndex: i,
-              chatHistoryLength: chatHistory.length,
-              pageRefsCount: result.length,
-              urls: result.map((r) => r.url),
-            },
-            timestamp: Date.now(),
-            sessionId: 'debug-session',
-            hypothesisId: 'H3',
-          }),
-        }).catch(() => {});
-        // #endregion
-        return result;
+        return msg.pageRefs.map((ref) => ({ ...ref, messageIndex: i }));
       }
     }
-    // #region agent log
-    fetch('http://127.0.0.1:7244/ingest/db2b8c3b-e74b-4a86-8af7-7682e8cd5ea9', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        location: 'useChat.ts:detectedPageRefs',
-        message: 'No pageRefs found in any message',
-        data: { chatHistoryLength: chatHistory.length },
-        timestamp: Date.now(),
-        sessionId: 'debug-session',
-        hypothesisId: 'H3',
-      }),
-    }).catch(() => {});
-    // #endregion
     return [];
   }, [chatHistory]);
 
