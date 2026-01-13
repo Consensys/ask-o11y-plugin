@@ -88,7 +88,7 @@ export const SidePanel: React.FC<SidePanelProps> = ({ isOpen, onClose, pageRefs 
 
   return (
     <div
-      className="flex flex-col h-full border-l transition-all duration-300 ease-in-out"
+      className="flex flex-col h-screen sticky top-0 border-l transition-all duration-300 ease-in-out"
       style={{
         width: '800px',
         minWidth: '400px',
@@ -169,8 +169,8 @@ export const SidePanel: React.FC<SidePanelProps> = ({ isOpen, onClose, pageRefs 
                   idx === activeIndex
                     ? theme.colors.primary.main
                     : theme.isDark
-                      ? 'rgba(255,255,255,0.05)'
-                      : 'rgba(0,0,0,0.05)',
+                    ? 'rgba(255,255,255,0.05)'
+                    : 'rgba(0,0,0,0.05)',
                 color: idx === activeIndex ? theme.colors.primary.contrastText : theme.colors.text.secondary,
               }}
               role="tab"
