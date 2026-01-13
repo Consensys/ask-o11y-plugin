@@ -10,6 +10,7 @@ import {
 } from '../../../constants';
 import { TokenizerService, truncateToTokenLimit } from '../../../services/tokenizer';
 import { llmRequestQueue } from '../../../services/queue';
+import { parseGrafanaLinks } from '../utils/grafanaLinkParser';
 import type { AppPluginSettings } from '../../../types/plugin';
 
 // Simulate streaming by updating content incrementally
@@ -337,6 +338,15 @@ export const useStreamManager = (
             abortController.signal
           );
           console.log('[Content] Finished displaying content');
+
+          const pageRefs = parseGrafanaLinks(message.content);
+          if (pageRefs.length > 0) {
+            setChatHistory((prev) =>
+              prev.map((msg, idx) =>
+                idx === prev.length - 1 && msg.role === 'assistant' ? { ...msg, pageRefs } : msg
+              )
+            );
+          }
         }
 
         // Handle tool calls

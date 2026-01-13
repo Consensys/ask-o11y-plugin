@@ -6,8 +6,16 @@ export interface RenderedToolCall {
   response?: any;
 }
 
+export interface GrafanaPageRef {
+  type: 'dashboard' | 'explore';
+  url: string;
+  uid?: string;
+  title?: string;
+}
+
 export interface ChatMessage {
   role: 'user' | 'assistant';
   content: string;
   toolCalls?: RenderedToolCall[];
+  pageRefs?: GrafanaPageRef[];
 }

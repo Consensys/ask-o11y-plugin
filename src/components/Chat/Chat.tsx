@@ -1,4 +1,4 @@
-import React, { useRef, useState, useCallback } from 'react';
+import React, { useRef, useState, useCallback, useEffect } from 'react';
 import { useTheme2 } from '@grafana/ui';
 
 import { useChat } from './hooks/useChat';
@@ -12,6 +12,7 @@ import {
   QuickSuggestions,
   SessionSidebar,
   SummarizationIndicator,
+  SidePanel,
 } from './components';
 import { ChatInputRef } from './components/ChatInput/ChatInput';
 import { ChatErrorBoundary } from '../ErrorBoundary';
@@ -135,11 +136,26 @@ function ChatComponent({ pluginSettings }: ChatProps) {
 
     sessionManager,
     bottomSpacerRef,
+    detectedPageRefs,
   } = useChat(pluginSettings);
 
   const chatInputRef = useRef<ChatInputRef>(null);
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
+  const [isSidePanelOpen, setIsSidePanelOpen] = useState(false);
+  const prevPageRefsCountRef = useRef(0);
   const announce = useAnnounce();
+
+  // Auto-open side panel when new page refs are detected
+  useEffect(() => {
+    const currentCount = detectedPageRefs.length;
+    const prevCount = prevPageRefsCountRef.current;
+
+    if (currentCount > prevCount && currentCount > 0) {
+      setIsSidePanelOpen(true);
+    }
+
+    prevPageRefsCountRef.current = currentCount;
+  }, [detectedPageRefs]);
 
   // Keyboard navigation callbacks
   const focusChatInput = useCallback(() => {
@@ -194,20 +210,24 @@ function ChatComponent({ pluginSettings }: ChatProps) {
   const currentSessionTitle = currentSession?.title;
 
   const hasMessages = chatHistory.length > 0;
+  const showSidePanel = isSidePanelOpen && detectedPageRefs.length > 0;
 
   return (
     <div
-      className="w-full min-h-full flex flex-col"
+      className="w-full min-h-full flex"
       role="main"
       aria-label="Chat interface"
       style={{
         backgroundColor: theme.isDark ? '#111217' : theme.colors.background.canvas,
       }}
     >
-      {/* Main content area */}
-      <div className="flex-1 flex flex-col min-h-0">
+      {/* Main chat area */}
+      <div className="flex-1 flex flex-col min-h-0 min-w-0">
         {hasMessages ? (
-          <div className="flex-1 flex flex-col min-h-0 max-w-4xl mx-auto w-full px-4">
+          <div
+            className={`flex-1 flex flex-col min-h-0 w-full px-4 ${
+              showSidePanel ? 'max-w-none' : 'max-w-4xl mx-auto'
+            }`}>
             {/* Header - only show when there are messages */}
             <ChatHeader isGenerating={isGenerating} currentSessionTitle={currentSessionTitle} />
 
@@ -339,6 +359,13 @@ function ChatComponent({ pluginSettings }: ChatProps) {
           </div>
         )}
       </div>
+
+      {/* Side panel for Grafana page preview */}
+      <SidePanel
+        isOpen={showSidePanel}
+        onClose={() => setIsSidePanelOpen(false)}
+        pageRefs={detectedPageRefs}
+      />
 
       {/* Session sidebar */}
       <SessionSidebar

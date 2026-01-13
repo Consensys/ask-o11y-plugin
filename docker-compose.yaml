@@ -7,6 +7,7 @@ services:
       GF_INSTALL_PLUGINS: 'grafana-llm-app'
       GF_AUTH_BASIC_ENABLED: true
       GF_AUTH_ANONYMOUS_ENABLED: false
+      GF_SECURITY_ALLOW_EMBEDDING: true
       LLM_API_KEY: ${LLM_API_KEY:-}
 
   mcp-grafana:
@@ -31,17 +32,17 @@ services:
     volumes:
       - ./provisioning/alertmanager/alertmanager.yml:/etc/alertmanager/config.yml
 
-  mcp-alertmanager:
-    image: ghcr.io/ntk148v/alertmanager-mcp-server:sha-e9e2a1ea094b360ce299ac6ec828f70019584332
-    ports:
-      - 127.0.0.1:9090:8000/tcp
-    environment:
-      ALERTMANAGER_URL: http://alertmanager:8080/alertmanager
-      MCP_PORT: 8000
-      MCP_TRANSPORT: http
-    depends_on:
-      - grafana
-      - alertmanager
+  # mcp-alertmanager:
+  #   image: ghcr.io/ntk148v/alertmanager-mcp-server:sha-e9e2a1ea094b360ce299ac6ec828f70019584332
+  #   ports:
+  #     - 127.0.0.1:9090:8000/tcp
+  #   environment:
+  #     ALERTMANAGER_URL: http://alertmanager:8080/alertmanager
+  #     MCP_PORT: 8000
+  #     MCP_TRANSPORT: http
+  #   depends_on:
+  #     - grafana
+  #     - alertmanager
 
   mcpo:
     image: ghcr.io/open-webui/mcpo
