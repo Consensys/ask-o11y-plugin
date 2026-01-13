@@ -556,6 +556,6 @@ Built with [Grafana](https://grafana.com/), [Model Context Protocol](https://mod
 
 ---
 
-**Made with ❤️ by the Consensys Observability Team**
+**Made with ❤️ by the Consensys Platform Engineering Team**
 
 Got questions or feedback? We'd love to hear from you! Open an issue, join our community, or contribute to make Ask O11y even better.
