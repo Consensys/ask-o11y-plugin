@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useTheme2 } from '@grafana/ui';
+import { config } from '@grafana/runtime';
+import { EmbeddingDisabledPanel } from './EmbeddingDisabledPanel';
 import { GrafanaPageRef } from '../../types';
 import { TabCloseButton } from './TabCloseButton';
 
@@ -31,6 +33,8 @@ function toRelativeUrl(url: string): string {
 export const SidePanel: React.FC<SidePanelProps> = ({ isOpen, onClose, pageRefs, onRemoveTab }) => {
   const theme = useTheme2();
   const [activeIndex, setActiveIndex] = useState(0);
+  const allowEmbedding =
+    (config as any)?.bootData?.settings?.security?.allowEmbedding ?? (config as any)?.security?.allowEmbedding ?? false;
 
   const safeActiveIndex = Math.min(activeIndex, Math.max(0, pageRefs.length - 1));
 
@@ -47,6 +51,10 @@ export const SidePanel: React.FC<SidePanelProps> = ({ isOpen, onClose, pageRefs,
   const activeRef = pageRefs[safeActiveIndex];
   const showTabs = pageRefs.length > 1;
   const iframeSrc = toRelativeUrl(activeRef.url);
+
+  if (!allowEmbedding) {
+    return <EmbeddingDisabledPanel onClose={onClose} />;
+  }
 
   return (
     <div
