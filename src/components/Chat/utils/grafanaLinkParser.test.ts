@@ -273,6 +273,32 @@ describe('grafanaLinkParser', () => {
         expect(result).toEqual([]);
       });
 
+      it('should not match /explorer as an explore link', () => {
+        const content = 'Check the /explorer page for file browsing';
+        const result = parseGrafanaLinks(content);
+
+        expect(result).toEqual([]);
+      });
+
+      it('should not match /explore-beta as an explore link', () => {
+        const content = 'Try /explore-beta for new features';
+        const result = parseGrafanaLinks(content);
+
+        expect(result).toEqual([]);
+      });
+
+      it('should not match /explorers or /explored as explore links', () => {
+        expect(parseGrafanaLinks('The /explorers went out')).toEqual([]);
+        expect(parseGrafanaLinks('We /explored the issue')).toEqual([]);
+      });
+
+      it('should not match markdown links with /explorer', () => {
+        const content = 'Check [File Explorer](/explorer/files)';
+        const result = parseGrafanaLinks(content);
+
+        expect(result).toEqual([]);
+      });
+
       it('should handle very long query parameters', () => {
         const longQuery = 'a'.repeat(500);
         const content = `/d/abc123?query=${longQuery}`;
@@ -311,6 +337,13 @@ describe('grafanaLinkParser', () => {
     it('should return false for null/undefined', () => {
       expect(hasGrafanaLinks(null as unknown as string)).toBe(false);
       expect(hasGrafanaLinks(undefined as unknown as string)).toBe(false);
+    });
+
+    it('should return false for /explorer and similar paths', () => {
+      expect(hasGrafanaLinks('/explorer')).toBe(false);
+      expect(hasGrafanaLinks('/explore-beta')).toBe(false);
+      expect(hasGrafanaLinks('/explorers')).toBe(false);
+      expect(hasGrafanaLinks('/explored')).toBe(false);
     });
   });
 });

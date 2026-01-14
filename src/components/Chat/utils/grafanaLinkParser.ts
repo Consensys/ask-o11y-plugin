@@ -16,6 +16,7 @@ const DASHBOARD_PATTERN = /(?:https?:\/\/[^\s/]+)?\/d\/([a-zA-Z0-9_-]+)(?:\/[^\s
 /**
  * Regex pattern to match explore URLs: /explore with optional query params
  * Supports both relative paths and full URLs (http/https)
+ * Uses lookahead to ensure /explore is a complete path segment (not /explorer, /explore-beta, etc.)
  *
  * Examples:
  * - /explore
@@ -24,18 +25,19 @@ const DASHBOARD_PATTERN = /(?:https?:\/\/[^\s/]+)?\/d\/([a-zA-Z0-9_-]+)(?:\/[^\s
  * - /explore?panes={"abc":{"datasource":"..."}}
  * - https://grafana.example.com/explore?orgId=1
  */
-const EXPLORE_PATTERN = /(?:https?:\/\/[^\s/]+)?\/explore(?:\?[^\s)"\]`]*)?/g;
+const EXPLORE_PATTERN = /(?:https?:\/\/[^\s/]+)?\/explore(?=\?|[)\]`"\s.,;:!?]|$)(?:\?[^\s)"\]`]*)?/g;
 
 /**
  * Regex pattern to match markdown links with Grafana dashboard or explore URLs
  * Captures: [link text](url)
+ * For explore links, requires /explore to be a complete path segment (not /explorer, etc.)
  *
  * Examples:
  * - [My Dashboard](/d/abc123)
  * - [Explore Metrics](/explore?orgId=1)
  * - [Dashboard](https://grafana.com/d/abc123)
  */
-const MARKDOWN_LINK_PATTERN = /\[([^\]]+)\]\(((?:https?:\/\/[^\s/]+)?\/(?:d\/[^)]+|explore[^)]*))\)/g;
+const MARKDOWN_LINK_PATTERN = /\[([^\]]+)\]\(((?:https?:\/\/[^\s/]+)?\/(?:d\/[^)]+|explore(?:\?[^)]*)?))\)/g;
 
 /**
  * Extract the dashboard UID from a dashboard URL
@@ -46,13 +48,19 @@ function extractDashboardUid(url: string): string | undefined {
 }
 
 /**
+ * Pattern to check if URL contains /explore as a complete path segment
+ * Matches /explore followed by end-of-string, query params (?), or path separator (/)
+ */
+const EXPLORE_PATH_CHECK = /\/explore(?:\?|\/|$)/;
+
+/**
  * Determine if a URL is a dashboard or explore link
  */
 function getPageType(url: string): 'dashboard' | 'explore' | null {
   if (url.includes('/d/')) {
     return 'dashboard';
   }
-  if (url.includes('/explore')) {
+  if (EXPLORE_PATH_CHECK.test(url)) {
     return 'explore';
   }
   return null;
@@ -68,13 +76,15 @@ function normalizeUrl(url: string): string {
 /**
  * Extract a deduplication key from a URL (path portion starting from /d/ or /explore)
  * This ensures relative and absolute URLs pointing to the same resource are treated as duplicates
+ * For /explore, ensures it's a complete path segment (not /explorer, /explore-beta, etc.)
  */
 function getDedupeKey(url: string): string {
   const dashboardMatch = url.match(/\/d\/[^\s]*/);
   if (dashboardMatch) {
     return dashboardMatch[0];
   }
-  const exploreMatch = url.match(/\/explore[^\s]*/);
+  // Match /explore only when followed by ?, /, or end of string (complete path segment)
+  const exploreMatch = url.match(/\/explore(?:\?[^\s]*|\/[^\s]*)?$/);
   if (exploreMatch) {
     return exploreMatch[0];
   }

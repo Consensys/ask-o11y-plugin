@@ -270,8 +270,11 @@ export const useChat = (pluginSettings: AppPluginSettings) => {
   const detectedPageRefs = useMemo((): Array<GrafanaPageRef & { messageIndex: number }> => {
     for (let i = chatHistory.length - 1; i >= 0; i--) {
       const msg = chatHistory[i];
-      if (msg.pageRefs && msg.pageRefs.length > 0) {
-        return msg.pageRefs.map((ref) => ({ ...ref, messageIndex: i }));
+      if (msg.role === 'assistant') {
+        if (msg.pageRefs && msg.pageRefs.length > 0) {
+          return msg.pageRefs.map((ref) => ({ ...ref, messageIndex: i }));
+        }
+        return [];
       }
     }
     return [];

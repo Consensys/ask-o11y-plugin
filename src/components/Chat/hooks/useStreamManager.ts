@@ -339,8 +339,6 @@ export const useStreamManager = (
           );
           console.log('[Content] Finished displaying content');
 
-          // Always update pageRefs, even if empty, to clear stale links from previous responses
-          // (e.g., after tool execution when follow-up content has no Grafana links)
           const pageRefs = parseGrafanaLinks(message.content);
           setChatHistory((prev) =>
             prev.map((msg, idx) => (idx === prev.length - 1 && msg.role === 'assistant' ? { ...msg, pageRefs } : msg))

@@ -143,28 +143,33 @@ function ChatComponent({ pluginSettings }: ChatProps) {
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   const [isSidePanelOpen, setIsSidePanelOpen] = useState(false);
   const [removedTabUrls, setRemovedTabUrls] = useState<Set<string>>(new Set());
-  const prevPageRefsCountRef = useRef(0);
+  const prevSourceMessageIndexRef = useRef<number | null>(null);
   const announce = useAnnounce();
 
   const visiblePageRefs = detectedPageRefs.filter((ref) => !removedTabUrls.has(ref.url));
 
-  const handleRemoveTab = useCallback((index: number) => {
-    const tabToRemove = visiblePageRefs[index];
-    if (tabToRemove) {
-      setRemovedTabUrls((prev) => new Set(prev).add(tabToRemove.url));
-    }
-  }, [visiblePageRefs]);
+  const handleRemoveTab = useCallback(
+    (index: number) => {
+      const tabToRemove = visiblePageRefs[index];
+      if (tabToRemove) {
+        setRemovedTabUrls((prev) => new Set(prev).add(tabToRemove.url));
+      }
+    },
+    [visiblePageRefs]
+  );
 
   useEffect(() => {
-    const currentCount = detectedPageRefs.length;
-    const prevCount = prevPageRefsCountRef.current;
+    // Get the message index that the current page refs come from
+    const currentSourceIndex = detectedPageRefs.length > 0 ? detectedPageRefs[0].messageIndex : null;
+    const prevSourceIndex = prevSourceMessageIndexRef.current;
 
-    if (currentCount > prevCount && currentCount > 0) {
+    // When page refs come from a different message (new or different), reset state
+    if (currentSourceIndex !== null && currentSourceIndex !== prevSourceIndex) {
       setIsSidePanelOpen(true);
       setRemovedTabUrls(new Set());
     }
 
-    prevPageRefsCountRef.current = currentCount;
+    prevSourceMessageIndexRef.current = currentSourceIndex;
   }, [detectedPageRefs]);
 
   // Keyboard navigation callbacks
@@ -243,9 +248,8 @@ function ChatComponent({ pluginSettings }: ChatProps) {
       <div className="flex-1 flex flex-col min-h-0 min-w-0">
         {hasMessages ? (
           <div
-            className={`flex-1 flex flex-col min-h-0 w-full px-4 ${
-              showSidePanel ? 'max-w-none' : 'max-w-4xl mx-auto'
-            }`}>
+            className={`flex-1 flex flex-col min-h-0 w-full px-4 ${showSidePanel ? 'max-w-none' : 'max-w-4xl mx-auto'}`}
+          >
             {/* Header - only show when there are messages */}
             <ChatHeader isGenerating={isGenerating} currentSessionTitle={currentSessionTitle} />
 
@@ -270,11 +274,7 @@ function ChatComponent({ pluginSettings }: ChatProps) {
             >
               <div className="px-4">
                 <ChatHistory chatHistory={chatHistory} isGenerating={isGenerating} />
-                <div
-                  ref={bottomSpacerRef}
-                  className="h-16"
-                  style={{ scrollMarginBottom: '100px' }}
-                />
+                <div ref={bottomSpacerRef} className="h-16" style={{ scrollMarginBottom: '100px' }} />
               </div>
             </div>
 
