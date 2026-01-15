@@ -37,7 +37,7 @@ export function SessionSidebar({ sessionManager, currentSessionId, isOpen, onClo
     setLoadingAction(`loading-${sessionId}`);
     try {
       await new Promise((resolve) => setTimeout(resolve, 300)); // Small delay for UX
-      sessionManager.loadSession(sessionId);
+      await sessionManager.loadSession(sessionId);
       onClose();
     } finally {
       setLoadingAction(null);
@@ -53,7 +53,7 @@ export function SessionSidebar({ sessionManager, currentSessionId, isOpen, onClo
     setLoadingAction(`deleting-${sessionId}`);
     try {
       await new Promise((resolve) => setTimeout(resolve, 300)); // Small delay for UX
-      sessionManager.deleteSession(sessionId);
+      await sessionManager.deleteSession(sessionId);
       setShowDeleteConfirm(null);
     } finally {
       setLoadingAction(null);
@@ -65,7 +65,7 @@ export function SessionSidebar({ sessionManager, currentSessionId, isOpen, onClo
     setLoadingAction(`exporting-${sessionId}`);
     try {
       await new Promise((resolve) => setTimeout(resolve, 300)); // Small delay for UX
-      sessionManager.exportSession(sessionId);
+      await sessionManager.exportSession(sessionId);
     } finally {
       setLoadingAction(null);
     }
@@ -79,7 +79,7 @@ export function SessionSidebar({ sessionManager, currentSessionId, isOpen, onClo
       reader.onload = async (event) => {
         const jsonData = event.target?.result as string;
         await new Promise((resolve) => setTimeout(resolve, 500)); // Simulate processing
-        const success = sessionManager.importSession(jsonData);
+        const success = await sessionManager.importSession(jsonData);
         if (success) {
           setShowImport(false);
         } else {
@@ -125,6 +125,8 @@ export function SessionSidebar({ sessionManager, currentSessionId, isOpen, onClo
                 try {
                   await sessionManager.createNewSession();
                   onClose();
+                } catch (error) {
+                  console.error('[SessionSidebar] Failed to create new session:', error);
                 } finally {
                   setCreatingSession(false);
                 }
@@ -196,9 +198,13 @@ export function SessionSidebar({ sessionManager, currentSessionId, isOpen, onClo
         <div className="p-3 border-t border-gray-200 dark:border-gray-700">
           {sessionManager.sessions.length > 0 && (
             <button
-              onClick={() => {
+              onClick={async () => {
                 if (confirm('Are you sure you want to delete all conversations? This cannot be undone.')) {
-                  sessionManager.deleteAllSessions();
+                  try {
+                    await sessionManager.deleteAllSessions();
+                  } catch (error) {
+                    console.error('[SessionSidebar] Failed to delete all sessions:', error);
+                  }
                 }
               }}
               className="w-full px-3 py-2 text-sm text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 rounded"

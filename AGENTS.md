@@ -199,7 +199,7 @@ pkg/
 
 ### Session Management Modifications
 
-**Storage Layer** (`src/core/repositories/LocalStorageSessionRepository.ts`):
+**Storage Layer** (`src/core/repositories/GrafanaUserStorageRepository.ts`):
 
 - All keys MUST include orgId: `grafana-o11y-chat-org-{orgId}-*`
 - Respect 5MB quota per org
@@ -364,7 +364,7 @@ docker compose exec grafana curl http://mcp-grafana:8000/mcp
 - `pkg/plugin/plugin.go:192-233` - RBAC filtering (`filterToolsByRole()`, `canAccessTool()`)
 - `pkg/mcp/client.go:49-75` - Multi-tenant header injection
 - `src/core/services/SessionService.ts` - Session business logic
-- `src/core/repositories/LocalStorageSessionRepository.ts` - Session persistence
+- `src/core/repositories/GrafanaUserStorageRepository.ts` - Session persistence (uses Grafana user storage with localStorage fallback)
 - `src/services/backendMCPClient.ts` - MCP proxy client
 
 ### Configuration
