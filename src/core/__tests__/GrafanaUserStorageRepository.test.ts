@@ -1,5 +1,4 @@
 import { GrafanaUserStorageRepository } from '../repositories/GrafanaUserStorageRepository';
-import { ChatSession } from '../models/ChatSession';
 import type { UserStorage } from '@grafana/data';
 
 describe('GrafanaUserStorageRepository', () => {

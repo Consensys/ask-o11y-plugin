@@ -8,9 +8,6 @@ import type { AppPluginSettings } from './types/plugin';
 // Import Tailwind CSS
 import './index.css';
 
-// Import debug utility (available as window.debugStorage() in browser console)
-import './utils/debugStorage';
-
 const LazyApp = lazy(() => import('./components/App/App'));
 const LazyAppConfig = lazy(() => import('./components/AppConfig/AppConfig'));
 const LazyMCPStatus = lazy(() => import('./components/MCPStatus').then((module) => ({ default: module.MCPStatus })));
