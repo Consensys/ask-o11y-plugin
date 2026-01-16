@@ -201,16 +201,18 @@ pkg/
 
 **Storage Layer** (`src/core/repositories/GrafanaUserStorageRepository.ts`):
 
+- Uses Grafana's UserStorage API (per-user storage, not per-org)
 - All keys MUST include orgId: `grafana-o11y-chat-org-{orgId}-*`
-- Respect 5MB quota per org
+- Sessions are private to each user (not visible to other users, even in the same org)
+- Respect 5MB quota per user (not per org)
 - Automatic cleanup triggers at quota limit (removes 10 oldest)
-- Max 50 sessions per org
+- Max 50 sessions per user per organization
 
 **Business Logic** (`src/core/services/SessionService.ts`):
 
 - Always validate org context
 - Implement 10s debounce for auto-save
-- Maintain org isolation (no cross-org data access)
+- Maintain org isolation within user's storage (sessions organized by org, but private to each user)
 
 ### Backend Development Workflow
 
@@ -364,7 +366,7 @@ docker compose exec grafana curl http://mcp-grafana:8000/mcp
 - `pkg/plugin/plugin.go:192-233` - RBAC filtering (`filterToolsByRole()`, `canAccessTool()`)
 - `pkg/mcp/client.go:49-75` - Multi-tenant header injection
 - `src/core/services/SessionService.ts` - Session business logic
-- `src/core/repositories/GrafanaUserStorageRepository.ts` - Session persistence (uses Grafana user storage with localStorage fallback)
+- `src/core/repositories/GrafanaUserStorageRepository.ts` - Session persistence (uses Grafana UserStorage API - per-user storage with localStorage fallback, organized by organization)
 - `src/services/backendMCPClient.ts` - MCP proxy client
 
 ### Configuration
