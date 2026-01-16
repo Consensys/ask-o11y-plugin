@@ -35,8 +35,8 @@ test.describe('Session Sidebar Extended', () => {
       // Wait for message to appear
       await expect(page.getByText('Test message for session')).toBeVisible();
 
-      // Wait for response
-      await page.waitForTimeout(2000);
+      // Wait for debounce (10s) + save/refresh (2s)
+      await page.waitForTimeout(12000);
 
       // Open the sidebar
       const historyButtonInHeader = page.getByRole('button', { name: /History/i });
@@ -48,8 +48,9 @@ test.describe('Session Sidebar Extended', () => {
 
     await test.step('Verify date formatting in sidebar', async () => {
       // Get the first session item
+      // Wait for session item to appear (with timeout accounting for debounce)
       const firstSessionItem = page.locator('.p-3.rounded.group').first();
-      await expect(firstSessionItem).toBeVisible();
+      await expect(firstSessionItem).toBeVisible({ timeout: 15000 });
 
       // There should be date text like "Today", "Yesterday", or a date - only within the first session item
       await expect(
@@ -194,13 +195,17 @@ test.describe('Session Interactions After Chat', () => {
       await page.getByLabel('Send message (Enter)').click();
       await expect(page.getByText('Second session message')).toBeVisible();
 
+      // Wait for debounce (10s) + save/refresh (2s) before checking sidebar
+      await page.waitForTimeout(12000);
+
       // Open sidebar
       const historyButton = page.getByRole('button', { name: /History/i });
       await historyButton.click();
       await expect(page.getByRole('heading', { name: 'Chat History' })).toBeVisible();
 
-      // We should now have at least 2 sessions
+      // Wait for session items to appear
       const sessionItems = page.locator('.p-3.rounded.group');
+      await expect(sessionItems.first()).toBeVisible({ timeout: 15000 });
       const sessionCount = await sessionItems.count();
       expect(sessionCount).toBeGreaterThanOrEqual(1);
 

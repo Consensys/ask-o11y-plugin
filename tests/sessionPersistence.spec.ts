@@ -30,7 +30,7 @@ test.describe('Session Persistence Tests', () => {
 
     await test.step('Verify session count increments', async () => {
       // Wait for processing
-      await page.waitForTimeout(10000);
+      await page.waitForTimeout(12000); // Wait for debounce (10s) + save/refresh (2s)
 
       // Open sidebar and check session count
       await page.getByRole('button', { name: /History/i }).click();
@@ -76,7 +76,7 @@ test.describe('Session Persistence Tests', () => {
     await expect(page.locator('[role="log"]').getByText('Session to delete')).toBeVisible();
 
     // Wait for processing
-    await page.waitForTimeout(10000);
+    await page.waitForTimeout(12000); // Wait for debounce (10s) + save/refresh (2s)
 
     // Open sidebar
     await page.getByRole('button', { name: /History/i }).click();
@@ -110,7 +110,7 @@ test.describe('Session Persistence Tests', () => {
       await expect(page.locator('[role="log"]').getByText('What is Grafana used for?')).toBeVisible();
 
       // Wait for processing
-      await page.waitForTimeout(10000);
+      await page.waitForTimeout(12000); // Wait for debounce (10s) + save/refresh (2s)
     });
 
     await test.step('Verify title and metadata in sidebar', async () => {
@@ -119,8 +119,9 @@ test.describe('Session Persistence Tests', () => {
       await expect(page.getByRole('heading', { name: 'Chat History' })).toBeVisible();
 
       // Get the first session item
+      // Wait for session item to appear (with timeout accounting for debounce)
       const firstSessionItem = page.locator('.p-3.rounded.group').first();
-      await expect(firstSessionItem).toBeVisible();
+      await expect(firstSessionItem).toBeVisible({ timeout: 15000 });
 
       // The session should have a title related to the message
       // (or at least contain some text)
@@ -161,7 +162,7 @@ test.describe('Session Export/Import', () => {
     await expect(page.locator('[role="log"]').getByText('Export test message')).toBeVisible();
 
     // Wait for processing
-    await page.waitForTimeout(10000);
+    await page.waitForTimeout(12000); // Wait for debounce (10s) + save/refresh (2s)
 
     // Open sidebar
     await page.getByRole('button', { name: /History/i }).click();
