@@ -1,4 +1,5 @@
 import { AppConfigPage, AppPage, test as base } from '@grafana/plugin-e2e';
+import type { Page } from '@playwright/test';
 import pluginJson from '../src/plugin.json';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -61,3 +62,107 @@ export const test = base.extend<AppTestFixture>({
 });
 
 export { expect } from '@grafana/plugin-e2e';
+
+/**
+ * Helper function to clear any persisted chat session to ensure the welcome message is visible.
+ * This should be called before tests that expect the welcome heading to be visible.
+ */
+export async function clearPersistedSession(page: Page) {
+  // Wait for page to load - check if there's an existing chat session
+  const chatInput = page.getByLabel('Chat input');
+  await chatInput.waitFor({ state: 'visible', timeout: 5000 }).catch(() => {});
+
+  // Wait a bit for the page to fully render
+  await page.waitForTimeout(500);
+
+  // If there's a "New Chat" button visible, there's an existing session - clear it first
+  const newChatButton = page.getByRole('button', { name: /New Chat/i });
+  const hasExistingSession = await newChatButton.isVisible().catch(() => false);
+  
+  if (hasExistingSession) {
+    // Clear existing session to show welcome message
+    await newChatButton.click();
+    const confirmButton = page.getByRole('button', { name: 'Yes' });
+    if (await confirmButton.isVisible().catch(() => false)) {
+      await confirmButton.click();
+      // Wait for the confirmation dialog to close
+      await page.waitForTimeout(500);
+    }
+  }
+  
+  // Always wait for the welcome message to be visible (whether we cleared a session or not)
+  await page.getByRole('heading', { name: 'Ask O11y Assistant' }).waitFor({ state: 'visible', timeout: 10000 });
+}
+
+/**
+ * Helper function to delete all persisted chat sessions.
+ * This should be called before tests that need a clean slate with no existing sessions.
+ */
+export async function deleteAllPersistedSessions(page: Page) {
+  // Wait for page to load
+  const chatInput = page.getByLabel('Chat input');
+  await chatInput.waitFor({ state: 'visible', timeout: 5000 }).catch(() => {});
+
+  // Try to open the sidebar - check if we're on welcome screen or in a chat
+  const welcomeHeading = page.getByRole('heading', { name: 'Ask O11y Assistant' });
+  const isWelcomeVisible = await welcomeHeading.isVisible().catch(() => false);
+
+  if (isWelcomeVisible) {
+    // On welcome screen - use the "View chat history" button
+    const historyButton = page.getByText(/View chat history/);
+    if (await historyButton.isVisible().catch(() => false)) {
+      await historyButton.click();
+    }
+  } else {
+    // In a chat - use the History button in header
+    const historyButtonInHeader = page.getByRole('button', { name: /History/i });
+    if (await historyButtonInHeader.isVisible().catch(() => false)) {
+      await historyButtonInHeader.click();
+    }
+  }
+
+  // Wait for sidebar to open
+  await page.getByRole('heading', { name: 'Chat History' }).waitFor({ state: 'visible', timeout: 5000 }).catch(() => {});
+
+  // Find all session items
+  const sessionItems = page.locator('.p-3.rounded.group');
+  const sessionCount = await sessionItems.count();
+
+  // Delete each session
+  for (let i = sessionCount - 1; i >= 0; i--) {
+    const sessionItem = sessionItems.nth(i);
+    if (await sessionItem.isVisible().catch(() => false)) {
+      // Hover to reveal delete button
+      await sessionItem.hover();
+      await page.waitForTimeout(200);
+
+      // Look for delete button
+      const deleteButton = sessionItem
+        .getByRole('button', { name: /delete/i })
+        .or(sessionItem.locator('[aria-label*="delete"]'))
+        .or(sessionItem.locator('[aria-label*="Delete"]'))
+        .or(sessionItem.locator('button').last());
+
+      if (await deleteButton.isVisible().catch(() => false)) {
+        await deleteButton.click();
+        // Wait a bit for the deletion to process
+        await page.waitForTimeout(300);
+      }
+    }
+  }
+
+  // Close the sidebar
+  const backdrop = page.locator('.bg-black\\/50');
+  if (await backdrop.isVisible().catch(() => false)) {
+    await backdrop.click({ force: true });
+  } else {
+    // Try the close button in sidebar header
+    const closeButton = page.locator('.relative.w-80 button[title="Close"]');
+    if (await closeButton.isVisible().catch(() => false)) {
+      await closeButton.click();
+    }
+  }
+
+  // Wait for sidebar to close
+  await page.waitForTimeout(500);
+}

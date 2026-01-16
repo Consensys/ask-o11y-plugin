@@ -1,63 +1,30 @@
-import { test, expect } from './fixtures';
+import { test, expect, clearPersistedSession } from './fixtures';
 import { ROUTES } from '../src/constants';
 
 test.describe('navigating app', () => {
   test('home page should render successfully', async ({ gotoPage, page }) => {
     await gotoPage(`/${ROUTES.Home}`);
 
-    // The page should render either the welcome message (LLM enabled) or the LLM not enabled message
+    // Clear any persisted session to ensure welcome message is visible
+    await clearPersistedSession(page);
+
+    // The page should render the welcome message
     const welcomeHeading = page.getByRole('heading', { name: 'Ask O11y Assistant' });
-    const llmNotEnabledMessage = page.getByText('LLM plugin not enabled');
+    await expect(welcomeHeading).toBeVisible();
 
-    // Wait for either element to be visible
-    await expect(welcomeHeading.or(llmNotEnabledMessage)).toBeVisible();
-
-    // If LLM is enabled (heading visible), also check for conversation starters
-    const isWelcomeVisible = await welcomeHeading.isVisible();
-    if (isWelcomeVisible) {
-      await expect(page.getByText('Show me a graph of CPU usage')).toBeVisible();
-    }
-  });
-
-  test('should show LLM not enabled message when LLM plugin is disabled', async ({ gotoPage, page }) => {
-    await gotoPage(`/${ROUTES.Home}`);
-
-    // Wait for page to load - check for either state
-    const welcomeHeading = page.getByRole('heading', { name: 'Ask O11y Assistant' });
-    const llmNotEnabledMessage = page.getByText('LLM plugin not enabled');
-
-    // Wait for either to appear
-    await expect(welcomeHeading.or(llmNotEnabledMessage)).toBeVisible();
-
-    // Check which state we're in by checking if welcome heading is visible
-    const isWelcomeVisible = await welcomeHeading.isVisible();
-
-    if (isWelcomeVisible) {
-      // IMPORTANT: Skip when LLM is enabled - this test specifically validates the disabled state
-      test.skip();
-      return;
-    }
-
-    // Validate the LLM not enabled state
-    await expect(llmNotEnabledMessage).toBeVisible();
-    await expect(page.getByText('Please enable the LLM plugin to use the chat interface')).toBeVisible();
+    // Check for conversation starters
+    await expect(page.getByText('Show me a graph of CPU usage')).toBeVisible();
   });
 
   test('all suggestion buttons should be visible', async ({ gotoPage, page }) => {
     await gotoPage(`/${ROUTES.Home}`);
 
-    // Wait for page to load - check for either state
-    const welcomeHeading = page.getByRole('heading', { name: 'Ask O11y Assistant' });
-    const llmNotEnabledMessage = page.getByText('LLM plugin not enabled');
-    await expect(welcomeHeading.or(llmNotEnabledMessage)).toBeVisible();
+    // Clear any persisted session to ensure welcome message is visible
+    await clearPersistedSession(page);
 
-    // Check which state we're in
-    const isWelcomeVisible = await welcomeHeading.isVisible();
-    if (!isWelcomeVisible) {
-      // IMPORTANT: Skip when LLM plugin is not enabled - requires external LLM dependency
-      test.skip();
-      return;
-    }
+    // Wait for page to load
+    const welcomeHeading = page.getByRole('heading', { name: 'Ask O11y Assistant' });
+    await expect(welcomeHeading).toBeVisible();
 
     // Verify all 4 suggestion buttons are visible
     await expect(page.getByText('Show me a graph of CPU usage')).toBeVisible();
@@ -72,18 +39,12 @@ test.describe('navigating app', () => {
   test('clicking a suggestion should populate the chat input', async ({ gotoPage, page }) => {
     await gotoPage(`/${ROUTES.Home}`);
 
-    // Wait for page to load - check for either state
-    const welcomeHeading = page.getByRole('heading', { name: 'Ask O11y Assistant' });
-    const llmNotEnabledMessage = page.getByText('LLM plugin not enabled');
-    await expect(welcomeHeading.or(llmNotEnabledMessage)).toBeVisible();
+    // Clear any persisted session to ensure welcome message is visible
+    await clearPersistedSession(page);
 
-    // Check which state we're in
-    const isWelcomeVisible = await welcomeHeading.isVisible();
-    if (!isWelcomeVisible) {
-      // IMPORTANT: Skip when LLM plugin is not enabled - requires external LLM dependency
-      test.skip();
-      return;
-    }
+    // Wait for page to load
+    const welcomeHeading = page.getByRole('heading', { name: 'Ask O11y Assistant' });
+    await expect(welcomeHeading).toBeVisible();
 
     // Find the chat input by its aria-label
     const chatInput = page.getByLabel('Chat input');
@@ -101,18 +62,12 @@ test.describe('navigating app', () => {
   test('submitting a message should display it in chat history', async ({ gotoPage, page }) => {
     await gotoPage(`/${ROUTES.Home}`);
 
-    // Wait for page to load - check for either state
-    const welcomeHeading = page.getByRole('heading', { name: 'Ask O11y Assistant' });
-    const llmNotEnabledMessage = page.getByText('LLM plugin not enabled');
-    await expect(welcomeHeading.or(llmNotEnabledMessage)).toBeVisible();
+    // Clear any persisted session to ensure welcome message is visible
+    await clearPersistedSession(page);
 
-    // Check which state we're in
-    const isWelcomeVisible = await welcomeHeading.isVisible();
-    if (!isWelcomeVisible) {
-      // IMPORTANT: Skip when LLM plugin is not enabled - requires external LLM dependency
-      test.skip();
-      return;
-    }
+    // Wait for page to load
+    const welcomeHeading = page.getByRole('heading', { name: 'Ask O11y Assistant' });
+    await expect(welcomeHeading).toBeVisible();
 
     // Find the chat input
     const chatInput = page.getByLabel('Chat input');
