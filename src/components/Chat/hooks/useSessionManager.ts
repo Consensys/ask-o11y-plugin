@@ -250,12 +250,23 @@ export const useSessionManager = (
       // Set new timer for debounced save
       autoSaveTimerRef.current = setTimeout(async () => {
         try {
-          if (currentSessionId) {
-            await sessionService.updateSession(orgId, currentSessionId, messages, currentSummary);
-            console.log(`[SessionManager] Auto-saved session: ${currentSessionId}`);
+          // Capture currentSessionId at the time the callback executes
+          const sessionIdAtStart = currentSessionId;
+          
+          if (sessionIdAtStart) {
+            await sessionService.updateSession(orgId, sessionIdAtStart, messages, currentSummary);
+            console.log(`[SessionManager] Auto-saved session: ${sessionIdAtStart}`);
           } else if (messages.length > 0) {
             const newSession = await sessionService.createSession(orgId, messages);
-            setCurrentSessionId(newSession.id);
+            // Only update if currentSessionId is still null (no session was loaded in the meantime)
+            setCurrentSessionId((prevId) => {
+              if (prevId === null) {
+                return newSession.id;
+              }
+              // Session was loaded while creating, don't overwrite it
+              console.log(`[SessionManager] Session ${prevId} was loaded during creation, keeping it instead of ${newSession.id}`);
+              return prevId;
+            });
             console.log(`[SessionManager] Created and saved new session: ${newSession.id}`);
           }
           await refreshSessions();
