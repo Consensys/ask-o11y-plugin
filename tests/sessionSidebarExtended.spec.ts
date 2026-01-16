@@ -1,22 +1,22 @@
-import { test, expect } from './fixtures';
+import { test, expect, clearPersistedSession, deleteAllPersistedSessions } from './fixtures';
 import { ROUTES } from '../src/constants';
 
 test.describe('Session Sidebar Extended', () => {
   test.beforeEach(async ({ gotoPage, page }) => {
     await gotoPage(`/${ROUTES.Home}`);
 
+    // Clear any persisted session to ensure welcome message is visible
+    await clearPersistedSession(page);
+
     // Wait for page to load
     const welcomeHeading = page.getByRole('heading', { name: 'Ask O11y Assistant' });
-    const llmNotEnabledMessage = page.getByText('LLM plugin not enabled');
-    await expect(welcomeHeading.or(llmNotEnabledMessage)).toBeVisible();
-
-    const isWelcomeVisible = await welcomeHeading.isVisible();
-    if (!isWelcomeVisible) {
-      test.skip();
-    }
+    await expect(welcomeHeading).toBeVisible();
   });
 
   test('should display session information with formatting', async ({ page }) => {
+    // Delete all existing sessions to ensure a clean state
+    await deleteAllPersistedSessions(page);
+
     await test.step('Verify sessions count in view history button', async () => {
       const historyButton = page.getByText(/View chat history/);
       await expect(historyButton).toBeVisible();
@@ -35,8 +35,8 @@ test.describe('Session Sidebar Extended', () => {
       // Wait for message to appear
       await expect(page.getByText('Test message for session')).toBeVisible();
 
-      // Wait for response
-      await page.waitForTimeout(2000);
+      // Wait for debounce (10s) + save/refresh (2s)
+      await page.waitForTimeout(12000);
 
       // Open the sidebar
       const historyButtonInHeader = page.getByRole('button', { name: /History/i });
@@ -47,15 +47,24 @@ test.describe('Session Sidebar Extended', () => {
     });
 
     await test.step('Verify date formatting in sidebar', async () => {
-      // There should be date text like "Today", "Yesterday", or a date
+      // Get the first session item
+      // Wait for session item to appear (with timeout accounting for debounce)
+      const firstSessionItem = page.locator('.p-3.rounded.group').first();
+      await expect(firstSessionItem).toBeVisible({ timeout: 15000 });
+
+      // There should be date text like "Today", "Yesterday", or a date - only within the first session item
       await expect(
-        page.getByText('Today').or(page.getByText('Yesterday')).or(page.getByText(/\d+ days ago/))
+        firstSessionItem.getByText('Today').or(firstSessionItem.getByText('Yesterday')).or(firstSessionItem.getByText(/\d+ days ago/))
       ).toBeVisible();
     });
 
     await test.step('Verify message count for session', async () => {
-      // Should show message count
-      await expect(page.getByText(/\d+ messages/)).toBeVisible();
+      // Get the first session item
+      const firstSessionItem = page.locator('.p-3.rounded.group').first();
+      await expect(firstSessionItem).toBeVisible();
+
+      // Should show message count - only within the first session item
+      await expect(firstSessionItem.getByText(/\d+ messages/)).toBeVisible();
     });
 
     await test.step('Verify active session indicator', async () => {
@@ -137,14 +146,12 @@ test.describe('Session Interactions After Chat', () => {
   test.beforeEach(async ({ gotoPage, page }) => {
     await gotoPage(`/${ROUTES.Home}`);
 
-    const welcomeHeading = page.getByRole('heading', { name: 'Ask O11y Assistant' });
-    const llmNotEnabledMessage = page.getByText('LLM plugin not enabled');
-    await expect(welcomeHeading.or(llmNotEnabledMessage)).toBeVisible();
+    // Clear any persisted session to ensure welcome message is visible
+    await clearPersistedSession(page);
 
-    const isWelcomeVisible = await welcomeHeading.isVisible();
-    if (!isWelcomeVisible) {
-      test.skip();
-    }
+    // Wait for page to load
+    const welcomeHeading = page.getByRole('heading', { name: 'Ask O11y Assistant' });
+    await expect(welcomeHeading).toBeVisible();
 
     // Send initial message
     const chatInput = page.getByLabel('Chat input');
@@ -188,13 +195,17 @@ test.describe('Session Interactions After Chat', () => {
       await page.getByLabel('Send message (Enter)').click();
       await expect(page.getByText('Second session message')).toBeVisible();
 
+      // Wait for debounce (10s) + save/refresh (2s) before checking sidebar
+      await page.waitForTimeout(12000);
+
       // Open sidebar
       const historyButton = page.getByRole('button', { name: /History/i });
       await historyButton.click();
       await expect(page.getByRole('heading', { name: 'Chat History' })).toBeVisible();
 
-      // We should now have at least 2 sessions
+      // Wait for session items to appear
       const sessionItems = page.locator('.p-3.rounded.group');
+      await expect(sessionItems.first()).toBeVisible({ timeout: 15000 });
       const sessionCount = await sessionItems.count();
       expect(sessionCount).toBeGreaterThanOrEqual(1);
 

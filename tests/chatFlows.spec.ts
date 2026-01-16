@@ -1,18 +1,15 @@
-import { test, expect } from './fixtures';
+import { test, expect, clearPersistedSession } from './fixtures';
 import { ROUTES } from '../src/constants';
 
 test.describe('Chat Flow Tests', () => {
   test.beforeEach(async ({ gotoPage, page }) => {
     await gotoPage(`/${ROUTES.Home}`);
 
-    const welcomeHeading = page.getByRole('heading', { name: 'Ask O11y Assistant' });
-    const llmNotEnabledMessage = page.getByText('LLM plugin not enabled');
-    await expect(welcomeHeading.or(llmNotEnabledMessage)).toBeVisible();
+    // Clear any persisted session to ensure welcome message is visible
+    await clearPersistedSession(page);
 
-    const isWelcomeVisible = await welcomeHeading.isVisible();
-    if (!isWelcomeVisible) {
-      test.skip();
-    }
+    const welcomeHeading = page.getByRole('heading', { name: 'Ask O11y Assistant' });
+    await expect(welcomeHeading).toBeVisible();
   });
 
   test('should display and manage messages with proper roles', async ({ page }) => {
@@ -109,14 +106,11 @@ test.describe('Chat Streaming Tests', () => {
   test.beforeEach(async ({ gotoPage, page }) => {
     await gotoPage(`/${ROUTES.Home}`);
 
-    const welcomeHeading = page.getByRole('heading', { name: 'Ask O11y Assistant' });
-    const llmNotEnabledMessage = page.getByText('LLM plugin not enabled');
-    await expect(welcomeHeading.or(llmNotEnabledMessage)).toBeVisible();
+    // Clear any persisted session to ensure welcome message is visible
+    await clearPersistedSession(page);
 
-    const isWelcomeVisible = await welcomeHeading.isVisible();
-    if (!isWelcomeVisible) {
-      test.skip();
-    }
+    const welcomeHeading = page.getByRole('heading', { name: 'Ask O11y Assistant' });
+    await expect(welcomeHeading).toBeVisible();
   });
 
   test('should manage send button state during streaming', async ({ page }) => {
@@ -152,14 +146,11 @@ test.describe('Chat UI States', () => {
   test.beforeEach(async ({ gotoPage, page }) => {
     await gotoPage(`/${ROUTES.Home}`);
 
-    const welcomeHeading = page.getByRole('heading', { name: 'Ask O11y Assistant' });
-    const llmNotEnabledMessage = page.getByText('LLM plugin not enabled');
-    await expect(welcomeHeading.or(llmNotEnabledMessage)).toBeVisible();
+    // Clear any persisted session to ensure welcome message is visible
+    await clearPersistedSession(page);
 
-    const isWelcomeVisible = await welcomeHeading.isVisible();
-    if (!isWelcomeVisible) {
-      test.skip();
-    }
+    const welcomeHeading = page.getByRole('heading', { name: 'Ask O11y Assistant' });
+    await expect(welcomeHeading).toBeVisible();
   });
 
   test('should transition between welcome and chat UI states', async ({ page }) => {

@@ -1,28 +1,29 @@
 import { SessionService } from './SessionService';
-import { LocalStorageSessionRepository } from '../repositories/LocalStorageSessionRepository';
+import { GrafanaUserStorageRepository } from '../repositories/GrafanaUserStorageRepository';
+import type { UserStorage } from '@grafana/data';
 
 /**
  * Service Factory - Simple dependency injection container
  * Creates and manages service instances with their dependencies
  */
 export class ServiceFactory {
-  private static sessionService: SessionService | null = null;
-
   /**
-   * Get or create SessionService instance (Singleton)
+   * Create a new SessionService instance with the provided storage
+   * Note: We create a new instance each time since storage can change
+   * (e.g., when user signs in/out, the storage object reference changes)
+   * @param storage - UserStorage object from usePluginUserStorage() hook
+   *                  This automatically falls back to localStorage when user is not signed in
    */
-  static getSessionService(): SessionService {
-    if (!this.sessionService) {
-      const repository = new LocalStorageSessionRepository();
-      this.sessionService = new SessionService(repository);
-    }
-    return this.sessionService;
+  static getSessionService(storage: UserStorage): SessionService {
+    const repository = new GrafanaUserStorageRepository(storage);
+    return new SessionService(repository);
   }
 
   /**
    * Reset all services (useful for testing)
+   * Note: This is a no-op now since we don't use singletons
    */
   static reset(): void {
-    this.sessionService = null;
+    // No-op: services are created fresh each time
   }
 }

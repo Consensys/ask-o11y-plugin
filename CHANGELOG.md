@@ -28,7 +28,7 @@ Initial release of Ask O11y - AI-powered observability assistant for Grafana.
 
 #### Security & Access Control
 - **Role-Based Access Control (RBAC)**: Admin/Editor full access (56 tools), Viewer read-only (45 tools)
-- **Multi-tenant Organization Isolation**: Secure data isolation per organization
+- **Multi-tenant Organization Isolation**: Secure data isolation per user, with sessions organized by organization
 - **Grafana Permission Integration**: Respects existing Grafana datasource permissions
 - **Secure Credential Storage**: Integration with Grafana's secure storage mechanisms
 
