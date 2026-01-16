@@ -273,7 +273,7 @@ export const useSessionManager = (
         } catch (error) {
           console.error('[SessionManager] Auto-save failed:', error);
         }
-      }, 2000);
+      }, 10000);
     },
     [sessionService, orgId, currentSessionId, currentSummary, refreshSessions]
   );
