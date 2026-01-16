@@ -2,7 +2,7 @@
   "name": "Ask O11y",
   "version": "0.1.1",
   "scripts": {
-    "build": "webpack -c ./.config/webpack/webpack.config.ts --env production",
+    "build": "npm run build:frontend && npm run build:backend",
     "build:prod": "npm run build:frontend:prod && npm run build:backend:all",
     "build:frontend": "webpack -c ./webpack.config.ts --env development",
     "build:frontend:prod": "webpack -c ./webpack.config.ts --env production",
@@ -10,7 +10,7 @@
     "build:frontend:coverage:prod": "COVERAGE=true webpack -c ./webpack.config.ts --env production --env coverage",
     "build:backend": "go run github.com/magefile/mage@latest build:backend",
     "build:backend:all": "go run github.com/magefile/mage@latest buildAll",
-    "dev": "webpack -w -c ./.config/webpack/webpack.config.ts --env development",
+    "dev": "npm run dev:frontend",
     "dev:frontend": "webpack -w -c ./webpack.config.ts --env development",
     "dev:backend": "go run github.com/magefile/mage@latest watch",
     "test": "jest --watch --onlyChanged",

@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react';
 import { useTheme2 } from '@grafana/ui';
-import { EmbeddingDisabledPanel } from './EmbeddingDisabledPanel';
 import { GrafanaPageRef } from '../../types';
 import { TabCloseButton } from './TabCloseButton';
 import { useEmbeddingAllowed } from '../../hooks/useEmbeddingAllowed';
@@ -43,12 +42,8 @@ export const SidePanel: React.FC<SidePanelProps> = ({ isOpen, onClose, pageRefs,
     }
   }, [activeIndex, safeActiveIndex]);
 
-  if (!isOpen || pageRefs.length === 0 || allowEmbedding === null) {
+  if (!isOpen || pageRefs.length === 0 || allowEmbedding === null || !allowEmbedding) {
     return null;
-  }
-
-  if (!allowEmbedding) {
-    return <EmbeddingDisabledPanel onClose={onClose} />;
   }
 
   const activeRef = pageRefs[safeActiveIndex];

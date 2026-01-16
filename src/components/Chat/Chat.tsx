@@ -4,6 +4,7 @@ import { useTheme2 } from '@grafana/ui';
 import { useChat } from './hooks/useChat';
 import { useGrafanaTheme } from './hooks/useGrafanaTheme';
 import { useKeyboardNavigation, useAnnounce } from './hooks/useKeyboardNavigation';
+import { useEmbeddingAllowed } from './hooks/useEmbeddingAllowed';
 import {
   ChatHeader,
   ChatHistory,
@@ -121,6 +122,7 @@ function ChatComponent({ pluginSettings }: ChatProps) {
   // Sync Grafana theme to CSS custom properties
   useGrafanaTheme();
   const theme = useTheme2();
+  const allowEmbedding = useEmbeddingAllowed();
 
   const {
     chatHistory,
@@ -225,7 +227,7 @@ function ChatComponent({ pluginSettings }: ChatProps) {
   const currentSessionTitle = currentSession?.title;
 
   const hasMessages = chatHistory.length > 0;
-  const showSidePanel = isSidePanelOpen && visiblePageRefs.length > 0;
+  const showSidePanel = isSidePanelOpen && visiblePageRefs.length > 0 && allowEmbedding === true;
 
   return (
     <div
