@@ -1,4 +1,4 @@
-import { test, expect, clearPersistedSession } from './fixtures';
+import { test, expect, clearPersistedSession, deleteAllPersistedSessions } from './fixtures';
 import { ROUTES } from '../src/constants';
 
 test.describe('Session Sidebar Extended', () => {
@@ -14,6 +14,9 @@ test.describe('Session Sidebar Extended', () => {
   });
 
   test('should display session information with formatting', async ({ page }) => {
+    // Delete all existing sessions to ensure a clean state
+    await deleteAllPersistedSessions(page);
+
     await test.step('Verify sessions count in view history button', async () => {
       const historyButton = page.getByText(/View chat history/);
       await expect(historyButton).toBeVisible();
@@ -44,15 +47,23 @@ test.describe('Session Sidebar Extended', () => {
     });
 
     await test.step('Verify date formatting in sidebar', async () => {
-      // There should be date text like "Today", "Yesterday", or a date
+      // Get the first session item
+      const firstSessionItem = page.locator('.p-3.rounded.group').first();
+      await expect(firstSessionItem).toBeVisible();
+
+      // There should be date text like "Today", "Yesterday", or a date - only within the first session item
       await expect(
-        page.getByText('Today').or(page.getByText('Yesterday')).or(page.getByText(/\d+ days ago/))
+        firstSessionItem.getByText('Today').or(firstSessionItem.getByText('Yesterday')).or(firstSessionItem.getByText(/\d+ days ago/))
       ).toBeVisible();
     });
 
     await test.step('Verify message count for session', async () => {
-      // Should show message count
-      await expect(page.getByText(/\d+ messages/)).toBeVisible();
+      // Get the first session item
+      const firstSessionItem = page.locator('.p-3.rounded.group').first();
+      await expect(firstSessionItem).toBeVisible();
+
+      // Should show message count - only within the first session item
+      await expect(firstSessionItem.getByText(/\d+ messages/)).toBeVisible();
     });
 
     await test.step('Verify active session indicator', async () => {

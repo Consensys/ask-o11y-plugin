@@ -1,4 +1,4 @@
-import { test, expect, clearPersistedSession } from './fixtures';
+import { test, expect, clearPersistedSession, deleteAllPersistedSessions } from './fixtures';
 import { ROUTES } from '../src/constants';
 
 test.describe('Session Persistence Tests', () => {
@@ -98,6 +98,9 @@ test.describe('Session Persistence Tests', () => {
   });
 
   test('should display session metadata correctly', async ({ page }) => {
+    // Delete all existing sessions to ensure a clean state
+    await deleteAllPersistedSessions(page);
+
     const chatInput = page.getByLabel('Chat input');
 
     await test.step('Create session with specific message', async () => {
@@ -115,21 +118,25 @@ test.describe('Session Persistence Tests', () => {
       await page.getByRole('button', { name: /History/i }).click();
       await expect(page.getByRole('heading', { name: 'Chat History' })).toBeVisible();
 
+      // Get the first session item
+      const firstSessionItem = page.locator('.p-3.rounded.group').first();
+      await expect(firstSessionItem).toBeVisible();
+
       // The session should have a title related to the message
       // (or at least contain some text)
-      const sessionTitle = page.locator('.p-3.rounded.group .font-medium').first();
+      const sessionTitle = firstSessionItem.locator('.font-medium').first();
       if (await sessionTitle.isVisible()) {
         const title = await sessionTitle.textContent();
         expect(title).not.toBe('');
       }
 
-      // Should show date (Today, Yesterday, or date)
+      // Should show date (Today, Yesterday, or date) - only within the first session item
       await expect(
-        page.getByText('Today').or(page.getByText('Yesterday')).or(page.getByText(/\d+ days ago/))
+        firstSessionItem.getByText('Today').or(firstSessionItem.getByText('Yesterday')).or(firstSessionItem.getByText(/\d+ days ago/))
       ).toBeVisible();
 
-      // Should show message count
-      await expect(page.getByText(/\d+ messages?/)).toBeVisible();
+      // Should show message count - only within the first session item
+      await expect(firstSessionItem.getByText(/\d+ messages?/)).toBeVisible();
     });
   });
 });
