@@ -80,6 +80,19 @@ Get automatic visualizations with every query—no manual dashboard building req
 - Copy queries (PromQL/LogQL/TraceQL) to clipboard for reuse
 - Automatic light/dark theme support
 
+### 📎 Side Panel Preview
+
+When the assistant generates links to Grafana dashboards or Explore pages, they can be displayed inline in a side panel for seamless navigation.
+
+**Requirements:**
+To enable this feature, Grafana must allow embedding. Set the following environment variable:
+
+```bash
+GF_SECURITY_ALLOW_EMBEDDING=true
+```
+
+See [Grafana documentation on allow_embedding](https://grafana.com/docs/grafana/latest/setup-grafana/configure-grafana/#allow_embedding) for more details.
+
 ### 🔧 Model Context Protocol (MCP) Integration
 
 **Extensible Tool Architecture:**
