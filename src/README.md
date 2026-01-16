@@ -63,7 +63,7 @@ You can switch between visualization types on-the-fly using the built-in visuali
 
 ### 💾 **Smart Session Management**
 
-- **Auto-Save**: All conversations automatically saved every 2 seconds (never lose your work)
+- **Auto-Save**: All conversations automatically saved every 10 seconds (never lose your work)
 - **Organization Scoping**: Sessions automatically isolated per Grafana organization
 - **Session History**: Browse, resume, and manage previous conversations
 - **Import/Export**: Backup sessions as JSON or share with team members
@@ -86,7 +86,7 @@ You can switch between visualization types on-the-fly using the built-in visuali
 ### **Built for Performance**
 
 - ⚡ **Streaming Responses**: See answers appear in real-time as they're generated
-- 🔄 **Auto-Save**: 2-second debounced saves prevent data loss
+- 🔄 **Auto-Save**: 10-second debounced saves prevent data loss
 - 📦 **Efficient Storage**: Smart caching and automatic cleanup
 - 🎨 **Smooth UI**: Optimized React components with proper memoization
 - 🔌 **Lazy Loading**: Fast initial load times
@@ -279,7 +279,7 @@ The assistant automatically:
 
 **Your conversations are automatically saved and organized:**
 
-- ✅ **Auto-Save**: Every message saved automatically (2-second debounce)
+- ✅ **Auto-Save**: Every message saved automatically (10-second debounce)
 - 🏢 **Org Scoped**: Sessions isolated per Grafana organization
 - 📚 **History**: Browse and resume any previous conversation
 - 📤 **Export/Import**: Backup sessions as JSON files

@@ -209,7 +209,7 @@ pkg/
 **Business Logic** (`src/core/services/SessionService.ts`):
 
 - Always validate org context
-- Implement 2s debounce for auto-save
+- Implement 10s debounce for auto-save
 - Maintain org isolation (no cross-org data access)
 
 ### Backend Development Workflow
