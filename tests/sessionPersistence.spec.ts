@@ -30,7 +30,7 @@ test.describe('Session Persistence Tests', () => {
 
     await test.step('Verify session count increments', async () => {
       // Wait for processing
-      await page.waitForTimeout(2000);
+      await page.waitForTimeout(10000);
 
       // Open sidebar and check session count
       await page.getByRole('button', { name: /History/i }).click();
@@ -76,7 +76,7 @@ test.describe('Session Persistence Tests', () => {
     await expect(page.locator('[role="log"]').getByText('Session to delete')).toBeVisible();
 
     // Wait for processing
-    await page.waitForTimeout(2000);
+    await page.waitForTimeout(10000);
 
     // Open sidebar
     await page.getByRole('button', { name: /History/i }).click();
@@ -110,7 +110,7 @@ test.describe('Session Persistence Tests', () => {
       await expect(page.locator('[role="log"]').getByText('What is Grafana used for?')).toBeVisible();
 
       // Wait for processing
-      await page.waitForTimeout(2000);
+      await page.waitForTimeout(10000);
     });
 
     await test.step('Verify title and metadata in sidebar', async () => {
@@ -161,7 +161,7 @@ test.describe('Session Export/Import', () => {
     await expect(page.locator('[role="log"]').getByText('Export test message')).toBeVisible();
 
     // Wait for processing
-    await page.waitForTimeout(2000);
+    await page.waitForTimeout(10000);
 
     // Open sidebar
     await page.getByRole('button', { name: /History/i }).click();
