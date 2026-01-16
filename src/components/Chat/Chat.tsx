@@ -146,6 +146,7 @@ function ChatComponent({ pluginSettings }: ChatProps) {
   const [isSidePanelOpen, setIsSidePanelOpen] = useState(false);
   const [removedTabUrls, setRemovedTabUrls] = useState<Set<string>>(new Set());
   const prevSourceMessageIndexRef = useRef<number | null>(null);
+  const prevSessionIdRef = useRef<string | null>(null);
   const announce = useAnnounce();
 
   const visiblePageRefs = detectedPageRefs.filter((ref) => !removedTabUrls.has(ref.url));
@@ -164,15 +165,28 @@ function ChatComponent({ pluginSettings }: ChatProps) {
     // Get the message index that the current page refs come from
     const currentSourceIndex = detectedPageRefs.length > 0 ? detectedPageRefs[0].messageIndex : null;
     const prevSourceIndex = prevSourceMessageIndexRef.current;
+    const currentSessionId = sessionManager.currentSessionId;
+    const prevSessionId = prevSessionIdRef.current;
 
-    // When page refs come from a different message (new or different), reset state
-    if (currentSourceIndex !== null && currentSourceIndex !== prevSourceIndex) {
+    // Reset state when session changes OR when page refs come from a different message
+    const sessionChanged = currentSessionId !== prevSessionId;
+    const messageIndexChanged = currentSourceIndex !== null && currentSourceIndex !== prevSourceIndex;
+
+    if (sessionChanged) {
+      // Always reset removed tabs when switching sessions to prevent cross-session state bleed
+      setRemovedTabUrls(new Set());
+      if (currentSourceIndex !== null) {
+        setIsSidePanelOpen(true);
+      }
+    } else if (messageIndexChanged) {
+      // New page refs from a different message in the same session
       setIsSidePanelOpen(true);
       setRemovedTabUrls(new Set());
     }
 
     prevSourceMessageIndexRef.current = currentSourceIndex;
-  }, [detectedPageRefs]);
+    prevSessionIdRef.current = currentSessionId;
+  }, [detectedPageRefs, sessionManager.currentSessionId]);
 
   // Keyboard navigation callbacks
   const focusChatInput = useCallback(() => {
