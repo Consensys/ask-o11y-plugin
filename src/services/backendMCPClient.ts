@@ -3,6 +3,7 @@
  * Communicates with the backend MCP proxy instead of directly connecting to external servers
  */
 
+import { firstValueFrom } from 'rxjs';
 import { getBackendSrv, config } from '@grafana/runtime';
 import type { Tool, CallToolResult } from '@modelcontextprotocol/sdk/types';
 
@@ -31,12 +32,12 @@ export class BackendMCPClient {
     }
 
     try {
-      const response = await getBackendSrv()
-        .fetch<{ tools: Tool[] }>({
+      const response = await firstValueFrom(
+        getBackendSrv().fetch<{ tools: Tool[] }>({
           url: `${this.baseUrl}/api/mcp/tools`,
           method: 'GET',
         })
-        .toPromise();
+      );
 
       this.cachedTools = response?.data.tools || [];
       console.log('[BackendMCPClient] Listed tools from backend:', this.cachedTools.length);
@@ -66,8 +67,8 @@ export class BackendMCPClient {
       // This must be passed in the body, not headers, as Grafana's proxy doesn't forward custom headers
       const orgName = config.bootData?.user?.orgName || '';
 
-      const response = await getBackendSrv()
-        .fetch<CallToolResult>({
+      const response = await firstValueFrom(
+        getBackendSrv().fetch<CallToolResult>({
           url: `${this.baseUrl}/api/mcp/call-tool`,
           method: 'POST',
           data: {
@@ -78,7 +79,7 @@ export class BackendMCPClient {
           },
           showErrorAlert: false,
         })
-        .toPromise();
+      );
 
       if (!response) {
         throw new Error('No response from backend');
@@ -123,8 +124,8 @@ export class BackendMCPClient {
    */
   async getHealth(): Promise<{ status: string; mcpServers: number; message: string }> {
     try {
-      const response = await getBackendSrv()
-        .fetch<{
+      const response = await firstValueFrom(
+        getBackendSrv().fetch<{
           status: string;
           mcpServers: number;
           message: string;
@@ -132,7 +133,7 @@ export class BackendMCPClient {
           url: `${this.baseUrl}/health`,
           method: 'GET',
         })
-        .toPromise();
+      );
 
       if (!response) {
         throw new Error('No response from backend');

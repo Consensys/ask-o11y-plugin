@@ -10,13 +10,12 @@ import {
   Button,
   Card,
   Checkbox,
+  Combobox,
   Icon,
   Input,
   LoadingPlaceholder,
-  Select,
+  Stack,
   useTheme2,
-  VerticalGroup,
-  HorizontalGroup,
 } from '@grafana/ui';
 import { SelectableValue } from '@grafana/data';
 import { PluginPage, config } from '@grafana/runtime';
@@ -193,7 +192,7 @@ export function MCPToolsPage() {
   return (
     <PluginPage>
       <div className="p-4">
-        <VerticalGroup spacing="lg">
+        <Stack direction="column" gap={2}>
           {/* Header */}
           <div>
             <h2 className="text-2xl font-bold mb-2">MCP Tools Management</h2>
@@ -252,8 +251,8 @@ export function MCPToolsPage() {
           <Card>
             <Card.Heading>Filters and Actions</Card.Heading>
             <Card.Description>
-              <VerticalGroup spacing="md">
-                <HorizontalGroup spacing="md" justify="space-between">
+              <Stack direction="column" gap={1}>
+                <Stack direction="row" gap={1} justifyContent="space-between">
                   <Input
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.currentTarget.value)}
@@ -261,7 +260,7 @@ export function MCPToolsPage() {
                     prefix={<Icon name="search" />}
                     width={40}
                   />
-                  <Select
+                  <Combobox
                     value={categoryFilter}
                     options={[
                       { value: 'all', label: 'All Tools', description: `${tools.length} tools` },
@@ -276,11 +275,11 @@ export function MCPToolsPage() {
                         description: `${toolsByCategory.other.length} tools`,
                       },
                     ]}
-                    onChange={setCategoryFilter}
+                    onChange={(option) => setCategoryFilter(option)}
                     width={30}
                   />
-                </HorizontalGroup>
-                <HorizontalGroup spacing="sm">
+                </Stack>
+                <Stack direction="row" gap={0.5}>
                   <Button size="sm" variant="secondary" onClick={() => toggleAll(true)} icon="check">
                     Enable All
                   </Button>
@@ -290,8 +289,8 @@ export function MCPToolsPage() {
                   <Button size="sm" variant="secondary" onClick={loadToolsAndSettings} icon="sync">
                     Refresh
                   </Button>
-                </HorizontalGroup>
-              </VerticalGroup>
+                </Stack>
+              </Stack>
             </Card.Description>
           </Card>
 
@@ -354,7 +353,7 @@ export function MCPToolsPage() {
               )}
             </Card.Description>
           </Card>
-        </VerticalGroup>
+        </Stack>
       </div>
     </PluginPage>
   );
