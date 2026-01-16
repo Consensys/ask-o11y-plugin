@@ -1,4 +1,5 @@
 import { AppConfigPage, AppPage, test as base } from '@grafana/plugin-e2e';
+import type { Page } from '@playwright/test';
 import pluginJson from '../src/plugin.json';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -61,3 +62,34 @@ export const test = base.extend<AppTestFixture>({
 });
 
 export { expect } from '@grafana/plugin-e2e';
+
+/**
+ * Helper function to clear any persisted chat session to ensure the welcome message is visible.
+ * This should be called before tests that expect the welcome heading to be visible.
+ */
+export async function clearPersistedSession(page: Page) {
+  // Wait for page to load - check if there's an existing chat session
+  const chatInput = page.getByLabel('Chat input');
+  await chatInput.waitFor({ state: 'visible', timeout: 5000 }).catch(() => {});
+
+  // Wait a bit for the page to fully render
+  await page.waitForTimeout(500);
+
+  // If there's a "New Chat" button visible, there's an existing session - clear it first
+  const newChatButton = page.getByRole('button', { name: /New Chat/i });
+  const hasExistingSession = await newChatButton.isVisible().catch(() => false);
+  
+  if (hasExistingSession) {
+    // Clear existing session to show welcome message
+    await newChatButton.click();
+    const confirmButton = page.getByRole('button', { name: 'Yes' });
+    if (await confirmButton.isVisible().catch(() => false)) {
+      await confirmButton.click();
+      // Wait for the confirmation dialog to close
+      await page.waitForTimeout(500);
+    }
+  }
+  
+  // Always wait for the welcome message to be visible (whether we cleared a session or not)
+  await page.getByRole('heading', { name: 'Ask O11y Assistant' }).waitFor({ state: 'visible', timeout: 10000 });
+}
