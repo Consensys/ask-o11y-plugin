@@ -12,6 +12,28 @@ jest.mock('../../services/backendMCPClient', () => ({
   },
 }));
 
+// Mock Grafana runtime hooks
+jest.mock('@grafana/runtime', () => ({
+  usePluginUserStorage: jest.fn(() => ({
+    getItem: jest.fn().mockResolvedValue(null),
+    setItem: jest.fn().mockResolvedValue(undefined),
+  })),
+  getDataSourceSrv: jest.fn(() => ({
+    get: jest.fn().mockResolvedValue({}),
+  })),
+  getBackendSrv: jest.fn(() => ({
+    fetch: jest.fn().mockResolvedValue({ data: {} }),
+  })),
+  config: {
+    publicDashboardAccessToken: '',
+    bootData: {
+      user: {
+        orgName: 'TestOrg',
+      },
+    },
+  },
+}));
+
 describe('Components/App', () => {
   let props: AppRootProps;
 

@@ -1,18 +1,15 @@
-import { test, expect } from './fixtures';
+import { test, expect, clearPersistedSession, deleteAllPersistedSessions } from './fixtures';
 import { ROUTES } from '../src/constants';
 
 test.describe('Session Persistence Tests', () => {
   test.beforeEach(async ({ gotoPage, page }) => {
     await gotoPage(`/${ROUTES.Home}`);
 
-    const welcomeHeading = page.getByRole('heading', { name: 'Ask O11y Assistant' });
-    const llmNotEnabledMessage = page.getByText('LLM plugin not enabled');
-    await expect(welcomeHeading.or(llmNotEnabledMessage)).toBeVisible();
+    // Clear any persisted session to ensure welcome message is visible
+    await clearPersistedSession(page);
 
-    const isWelcomeVisible = await welcomeHeading.isVisible();
-    if (!isWelcomeVisible) {
-      test.skip();
-    }
+    const welcomeHeading = page.getByRole('heading', { name: 'Ask O11y Assistant' });
+    await expect(welcomeHeading).toBeVisible();
   });
 
   test('should persist and load sessions correctly', async ({ page }) => {
@@ -33,7 +30,7 @@ test.describe('Session Persistence Tests', () => {
 
     await test.step('Verify session count increments', async () => {
       // Wait for processing
-      await page.waitForTimeout(2000);
+      await page.waitForTimeout(12000); // Wait for debounce (10s) + save/refresh (2s)
 
       // Open sidebar and check session count
       await page.getByRole('button', { name: /History/i }).click();
@@ -79,7 +76,7 @@ test.describe('Session Persistence Tests', () => {
     await expect(page.locator('[role="log"]').getByText('Session to delete')).toBeVisible();
 
     // Wait for processing
-    await page.waitForTimeout(2000);
+    await page.waitForTimeout(12000); // Wait for debounce (10s) + save/refresh (2s)
 
     // Open sidebar
     await page.getByRole('button', { name: /History/i }).click();
@@ -101,6 +98,9 @@ test.describe('Session Persistence Tests', () => {
   });
 
   test('should display session metadata correctly', async ({ page }) => {
+    // Delete all existing sessions to ensure a clean state
+    await deleteAllPersistedSessions(page);
+
     const chatInput = page.getByLabel('Chat input');
 
     await test.step('Create session with specific message', async () => {
@@ -110,7 +110,7 @@ test.describe('Session Persistence Tests', () => {
       await expect(page.locator('[role="log"]').getByText('What is Grafana used for?')).toBeVisible();
 
       // Wait for processing
-      await page.waitForTimeout(2000);
+      await page.waitForTimeout(12000); // Wait for debounce (10s) + save/refresh (2s)
     });
 
     await test.step('Verify title and metadata in sidebar', async () => {
@@ -118,21 +118,26 @@ test.describe('Session Persistence Tests', () => {
       await page.getByRole('button', { name: /History/i }).click();
       await expect(page.getByRole('heading', { name: 'Chat History' })).toBeVisible();
 
+      // Get the first session item
+      // Wait for session item to appear (with timeout accounting for debounce)
+      const firstSessionItem = page.locator('.p-3.rounded.group').first();
+      await expect(firstSessionItem).toBeVisible({ timeout: 15000 });
+
       // The session should have a title related to the message
       // (or at least contain some text)
-      const sessionTitle = page.locator('.p-3.rounded.group .font-medium').first();
+      const sessionTitle = firstSessionItem.locator('.font-medium').first();
       if (await sessionTitle.isVisible()) {
         const title = await sessionTitle.textContent();
         expect(title).not.toBe('');
       }
 
-      // Should show date (Today, Yesterday, or date)
+      // Should show date (Today, Yesterday, or date) - only within the first session item
       await expect(
-        page.getByText('Today').or(page.getByText('Yesterday')).or(page.getByText(/\d+ days ago/))
+        firstSessionItem.getByText('Today').or(firstSessionItem.getByText('Yesterday')).or(firstSessionItem.getByText(/\d+ days ago/))
       ).toBeVisible();
 
-      // Should show message count
-      await expect(page.getByText(/\d+ messages?/)).toBeVisible();
+      // Should show message count - only within the first session item
+      await expect(firstSessionItem.getByText(/\d+ messages?/)).toBeVisible();
     });
   });
 });
@@ -141,14 +146,11 @@ test.describe('Session Export/Import', () => {
   test.beforeEach(async ({ gotoPage, page }) => {
     await gotoPage(`/${ROUTES.Home}`);
 
-    const welcomeHeading = page.getByRole('heading', { name: 'Ask O11y Assistant' });
-    const llmNotEnabledMessage = page.getByText('LLM plugin not enabled');
-    await expect(welcomeHeading.or(llmNotEnabledMessage)).toBeVisible();
+    // Clear any persisted session to ensure welcome message is visible
+    await clearPersistedSession(page);
 
-    const isWelcomeVisible = await welcomeHeading.isVisible();
-    if (!isWelcomeVisible) {
-      test.skip();
-    }
+    const welcomeHeading = page.getByRole('heading', { name: 'Ask O11y Assistant' });
+    await expect(welcomeHeading).toBeVisible();
   });
 
   test('should have export button in session item', async ({ page }) => {
@@ -160,7 +162,7 @@ test.describe('Session Export/Import', () => {
     await expect(page.locator('[role="log"]').getByText('Export test message')).toBeVisible();
 
     // Wait for processing
-    await page.waitForTimeout(2000);
+    await page.waitForTimeout(12000); // Wait for debounce (10s) + save/refresh (2s)
 
     // Open sidebar
     await page.getByRole('button', { name: /History/i }).click();
