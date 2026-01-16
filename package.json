@@ -2,7 +2,7 @@
   "name": "Ask O11y",
   "version": "0.1.1",
   "scripts": {
-    "build": "npm run build:frontend && npm run build:backend",
+    "build": "webpack -c ./.config/webpack/webpack.config.ts --env production",
     "build:prod": "npm run build:frontend:prod && npm run build:backend:all",
     "build:frontend": "webpack -c ./webpack.config.ts --env development",
     "build:frontend:prod": "webpack -c ./webpack.config.ts --env production",
