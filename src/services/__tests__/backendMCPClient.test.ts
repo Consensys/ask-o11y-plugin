@@ -1,3 +1,4 @@
+import { of, throwError } from 'rxjs';
 import { BackendMCPClient, backendMCPClient } from '../backendMCPClient';
 
 // Create a mock fetch function that we can control
@@ -21,44 +22,33 @@ jest.mock('@grafana/runtime', () => ({
 const setupSuccessMocks = () => {
   mockFetch.mockImplementation(({ url, method }) => {
     if (url.includes('/api/mcp/tools') && method === 'GET') {
-      return {
-        toPromise: () =>
-          Promise.resolve({
-            data: {
-              tools: [
-                { name: 'prometheus_query', description: 'Query Prometheus', inputSchema: {} },
-                { name: 'loki_query', description: 'Query Loki', inputSchema: {} },
-              ],
-            },
-          }),
-      };
+      return of({
+        data: {
+          tools: [
+            { name: 'prometheus_query', description: 'Query Prometheus', inputSchema: {} },
+            { name: 'loki_query', description: 'Query Loki', inputSchema: {} },
+          ],
+        },
+      });
     }
     if (url.includes('/api/mcp/call-tool') && method === 'POST') {
-      return {
-        toPromise: () =>
-          Promise.resolve({
-            data: {
-              content: [{ type: 'text', text: 'Tool result' }],
-              isError: false,
-            },
-          }),
-      };
+      return of({
+        data: {
+          content: [{ type: 'text', text: 'Tool result' }],
+          isError: false,
+        },
+      });
     }
     if (url.includes('/health') && method === 'GET') {
-      return {
-        toPromise: () =>
-          Promise.resolve({
-            data: {
-              status: 'ok',
-              mcpServers: 2,
-              message: 'All servers healthy',
-            },
-          }),
-      };
+      return of({
+        data: {
+          status: 'ok',
+          mcpServers: 2,
+          message: 'All servers healthy',
+        },
+      });
     }
-    return {
-      toPromise: () => Promise.reject(new Error('Unknown endpoint')),
-    };
+    return throwError(() => new Error('Unknown endpoint'));
   });
 };
 
@@ -89,9 +79,7 @@ describe('BackendMCPClient', () => {
     });
 
     it('should return empty array on error', async () => {
-      mockFetch.mockImplementation(() => ({
-        toPromise: () => Promise.reject(new Error('Network error')),
-      }));
+      mockFetch.mockImplementation(() => throwError(() => new Error('Network error')));
 
       const tools = await client.listTools();
 
@@ -112,9 +100,7 @@ describe('BackendMCPClient', () => {
     });
 
     it('should return error result when no response', async () => {
-      mockFetch.mockImplementation(() => ({
-        toPromise: () => Promise.resolve(undefined),
-      }));
+      mockFetch.mockImplementation(() => of(undefined));
 
       const result = await client.callTool({
         name: 'test_tool',
@@ -128,9 +114,7 @@ describe('BackendMCPClient', () => {
     });
 
     it('should return error result on exception', async () => {
-      mockFetch.mockImplementation(() => ({
-        toPromise: () => Promise.reject(new Error('API error')),
-      }));
+      mockFetch.mockImplementation(() => throwError(() => new Error('API error')));
 
       const result = await client.callTool({
         name: 'test_tool',
@@ -196,9 +180,7 @@ describe('BackendMCPClient', () => {
     });
 
     it('should return error status when no response', async () => {
-      mockFetch.mockImplementation(() => ({
-        toPromise: () => Promise.resolve(undefined),
-      }));
+      mockFetch.mockImplementation(() => of(undefined));
 
       const health = await client.getHealth();
 
@@ -208,9 +190,7 @@ describe('BackendMCPClient', () => {
     });
 
     it('should return error status on exception', async () => {
-      mockFetch.mockImplementation(() => ({
-        toPromise: () => Promise.reject(new Error('Connection refused')),
-      }));
+      mockFetch.mockImplementation(() => throwError(() => new Error('Connection refused')));
 
       const health = await client.getHealth();
 
