@@ -15,6 +15,8 @@ export function useEmbeddingAllowed(): boolean | null {
       return;
     }
 
+    let mounted = true;
+
     if (!fetchPromise) {
       fetchPromise = fetch(window.location.origin + '/api/health', { method: 'HEAD' })
         .then((response) => {
@@ -28,7 +30,15 @@ export function useEmbeddingAllowed(): boolean | null {
         });
     }
 
-    fetchPromise.then(setAllowed);
+    fetchPromise.then((result) => {
+      if (mounted) {
+        setAllowed(result);
+      }
+    });
+
+    return () => {
+      mounted = false;
+    };
   }, []);
 
   return allowed;
