@@ -11,3 +11,4 @@ export { SummarizationIndicator } from './SummarizationIndicator/SummarizationIn
 export { GraphRenderer } from './GraphRenderer/GraphRenderer';
 export { LogsRenderer } from './LogsRenderer/LogsRenderer';
 export { TracesRenderer } from './TracesRenderer/TracesRenderer';
+export { SidePanel } from './SidePanel/SidePanel';

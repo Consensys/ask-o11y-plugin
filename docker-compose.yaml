@@ -7,6 +7,7 @@ services:
       GF_INSTALL_PLUGINS: 'grafana-llm-app'
       GF_AUTH_BASIC_ENABLED: true
       GF_AUTH_ANONYMOUS_ENABLED: false
+      GF_SECURITY_ALLOW_EMBEDDING: true
       LLM_API_KEY: ${LLM_API_KEY:-}
 
   mcp-grafana:
