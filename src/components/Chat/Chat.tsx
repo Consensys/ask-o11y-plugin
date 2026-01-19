@@ -1,9 +1,10 @@
-import React, { useRef, useState, useCallback } from 'react';
+import React, { useRef, useState, useCallback, useEffect } from 'react';
 import { useTheme2 } from '@grafana/ui';
 
 import { useChat } from './hooks/useChat';
 import { useGrafanaTheme } from './hooks/useGrafanaTheme';
 import { useKeyboardNavigation, useAnnounce } from './hooks/useKeyboardNavigation';
+import { useEmbeddingAllowed } from './hooks/useEmbeddingAllowed';
 import {
   ChatHeader,
   ChatHistory,
@@ -12,6 +13,7 @@ import {
   QuickSuggestions,
   SessionSidebar,
   SummarizationIndicator,
+  SidePanel,
 } from './components';
 import { ChatInputRef } from './components/ChatInput/ChatInput';
 import { ChatErrorBoundary } from '../ErrorBoundary';
@@ -120,6 +122,7 @@ function ChatComponent({ pluginSettings }: ChatProps) {
   // Sync Grafana theme to CSS custom properties
   useGrafanaTheme();
   const theme = useTheme2();
+  const allowEmbedding = useEmbeddingAllowed();
 
   const {
     chatHistory,
@@ -135,11 +138,55 @@ function ChatComponent({ pluginSettings }: ChatProps) {
 
     sessionManager,
     bottomSpacerRef,
+    detectedPageRefs,
   } = useChat(pluginSettings);
 
   const chatInputRef = useRef<ChatInputRef>(null);
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
+  const [isSidePanelOpen, setIsSidePanelOpen] = useState(false);
+  const [removedTabUrls, setRemovedTabUrls] = useState<Set<string>>(new Set());
+  const prevSourceMessageIndexRef = useRef<number | null>(null);
+  const prevSessionIdRef = useRef<string | null>(null);
   const announce = useAnnounce();
+
+  const visiblePageRefs = detectedPageRefs.filter((ref) => !removedTabUrls.has(ref.url));
+
+  const handleRemoveTab = useCallback(
+    (index: number) => {
+      const tabToRemove = visiblePageRefs[index];
+      if (tabToRemove) {
+        setRemovedTabUrls((prev) => new Set(prev).add(tabToRemove.url));
+      }
+    },
+    [visiblePageRefs]
+  );
+
+  useEffect(() => {
+    // Get the message index that the current page refs come from
+    const currentSourceIndex = detectedPageRefs.length > 0 ? detectedPageRefs[0].messageIndex : null;
+    const prevSourceIndex = prevSourceMessageIndexRef.current;
+    const currentSessionId = sessionManager.currentSessionId;
+    const prevSessionId = prevSessionIdRef.current;
+
+    // Reset state when session changes OR when page refs come from a different message
+    const sessionChanged = currentSessionId !== prevSessionId;
+    const messageIndexChanged = currentSourceIndex !== null && currentSourceIndex !== prevSourceIndex;
+
+    if (sessionChanged) {
+      // Always reset removed tabs when switching sessions to prevent cross-session state bleed
+      setRemovedTabUrls(new Set());
+      if (currentSourceIndex !== null) {
+        setIsSidePanelOpen(true);
+      }
+    } else if (messageIndexChanged) {
+      // New page refs from a different message in the same session
+      setIsSidePanelOpen(true);
+      setRemovedTabUrls(new Set());
+    }
+
+    prevSourceMessageIndexRef.current = currentSourceIndex;
+    prevSessionIdRef.current = currentSessionId;
+  }, [detectedPageRefs, sessionManager.currentSessionId]);
 
   // Keyboard navigation callbacks
   const focusChatInput = useCallback(() => {
@@ -194,20 +241,31 @@ function ChatComponent({ pluginSettings }: ChatProps) {
   const currentSessionTitle = currentSession?.title;
 
   const hasMessages = chatHistory.length > 0;
+  const showSidePanel = isSidePanelOpen && visiblePageRefs.length > 0 && allowEmbedding === true;
 
   return (
     <div
-      className="w-full min-h-full flex flex-col"
+      className="w-full min-h-full flex"
       role="main"
       aria-label="Chat interface"
       style={{
         backgroundColor: theme.isDark ? '#111217' : theme.colors.background.canvas,
       }}
     >
-      {/* Main content area */}
-      <div className="flex-1 flex flex-col min-h-0">
+      {/* Side panel for Grafana page preview */}
+      <SidePanel
+        isOpen={showSidePanel}
+        onClose={() => setIsSidePanelOpen(false)}
+        pageRefs={visiblePageRefs}
+        onRemoveTab={handleRemoveTab}
+      />
+
+      {/* Main chat area */}
+      <div className="flex-1 flex flex-col min-h-0 min-w-0">
         {hasMessages ? (
-          <div className="flex-1 flex flex-col min-h-0 max-w-4xl mx-auto w-full px-4">
+          <div
+            className={`flex-1 flex flex-col min-h-0 w-full px-4 ${showSidePanel ? 'max-w-none' : 'max-w-4xl mx-auto'}`}
+          >
             {/* Header - only show when there are messages */}
             <ChatHeader isGenerating={isGenerating} currentSessionTitle={currentSessionTitle} />
 
@@ -232,11 +290,7 @@ function ChatComponent({ pluginSettings }: ChatProps) {
             >
               <div className="px-4">
                 <ChatHistory chatHistory={chatHistory} isGenerating={isGenerating} />
-                <div
-                  ref={bottomSpacerRef}
-                  className="h-16"
-                  style={{ scrollMarginBottom: '100px' }}
-                />
+                <div ref={bottomSpacerRef} className="h-16" style={{ scrollMarginBottom: '100px' }} />
               </div>
             </div>
 
