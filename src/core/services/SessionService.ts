@@ -13,22 +13,22 @@ export class SessionService {
   /**
    * Get all sessions for an organization
    */
-  getAllSessions(orgId: string): SessionMetadata[] {
+  async getAllSessions(orgId: string): Promise<SessionMetadata[]> {
     return this.repository.findAll(orgId);
   }
 
   /**
    * Get a session by ID
    */
-  getSession(orgId: string, sessionId: string): ChatSession | null {
+  async getSession(orgId: string, sessionId: string): Promise<ChatSession | null> {
     return this.repository.findById(orgId, sessionId);
   }
 
   /**
    * Get current active session
    */
-  getCurrentSession(orgId: string): ChatSession | null {
-    const currentId = this.repository.getCurrentSessionId(orgId);
+  async getCurrentSession(orgId: string): Promise<ChatSession | null> {
+    const currentId = await this.repository.getCurrentSessionId(orgId);
     if (!currentId) {
       return null;
     }
@@ -38,67 +38,67 @@ export class SessionService {
   /**
    * Create a new session
    */
-  createSession(orgId: string, messages: ChatMessage[], title?: string): ChatSession {
+  async createSession(orgId: string, messages: ChatMessage[], title?: string): Promise<ChatSession> {
     const session = ChatSession.create(messages, title);
-    this.repository.save(orgId, session);
-    this.repository.setCurrentSessionId(orgId, session.id);
+    await this.repository.save(orgId, session);
+    await this.repository.setCurrentSessionId(orgId, session.id);
     return session;
   }
 
   /**
    * Update an existing session
    */
-  updateSession(orgId: string, sessionId: string, messages: ChatMessage[], summary?: string): void {
-    const session = this.repository.findById(orgId, sessionId);
+  async updateSession(orgId: string, sessionId: string, messages: ChatMessage[], summary?: string): Promise<void> {
+    const session = await this.repository.findById(orgId, sessionId);
 
     if (!session) {
       // Session not found, create new one
       console.warn(`[SessionService] Session ${sessionId} not found, creating new session`);
-      this.createSession(orgId, messages);
+      await this.createSession(orgId, messages);
       return;
     }
 
     session.updateMessages(messages, summary);
-    this.repository.save(orgId, session);
+    await this.repository.save(orgId, session);
   }
 
   /**
    * Delete a session
    */
-  deleteSession(orgId: string, sessionId: string): void {
-    this.repository.delete(orgId, sessionId);
+  async deleteSession(orgId: string, sessionId: string): Promise<void> {
+    await this.repository.delete(orgId, sessionId);
   }
 
   /**
    * Delete all sessions for an organization
    */
-  deleteAllSessions(orgId: string): void {
-    this.repository.deleteAll(orgId);
+  async deleteAllSessions(orgId: string): Promise<void> {
+    await this.repository.deleteAll(orgId);
   }
 
   /**
    * Set active session
    */
-  setActiveSession(orgId: string, sessionId: string): void {
-    const session = this.repository.findById(orgId, sessionId);
+  async setActiveSession(orgId: string, sessionId: string): Promise<void> {
+    const session = await this.repository.findById(orgId, sessionId);
     if (!session) {
       throw StorageError.notFound('Session', sessionId);
     }
-    this.repository.setCurrentSessionId(orgId, sessionId);
+    await this.repository.setCurrentSessionId(orgId, sessionId);
   }
 
   /**
    * Clear active session
    */
-  clearActiveSession(orgId: string): void {
-    this.repository.clearCurrentSessionId(orgId);
+  async clearActiveSession(orgId: string): Promise<void> {
+    await this.repository.clearCurrentSessionId(orgId);
   }
 
   /**
    * Export session as JSON
    */
-  exportSession(orgId: string, sessionId: string): string | null {
-    const session = this.repository.findById(orgId, sessionId);
+  async exportSession(orgId: string, sessionId: string): Promise<string | null> {
+    const session = await this.repository.findById(orgId, sessionId);
     if (!session) {
       return null;
     }
@@ -108,7 +108,7 @@ export class SessionService {
   /**
    * Import session from JSON
    */
-  importSession(orgId: string, jsonData: string): ChatSession {
+  async importSession(orgId: string, jsonData: string): Promise<ChatSession> {
     try {
       const data = JSON.parse(jsonData);
 
@@ -124,7 +124,7 @@ export class SessionService {
       }));
 
       const session = ChatSession.create(messages, data.title);
-      this.repository.save(orgId, session);
+      await this.repository.save(orgId, session);
 
       return session;
     } catch (error) {
@@ -135,22 +135,22 @@ export class SessionService {
   /**
    * Get storage statistics
    */
-  getStorageStats(orgId: string) {
+  async getStorageStats(orgId: string) {
     return this.repository.getStorageStats(orgId);
   }
 
   /**
    * Auto-save session (debounced externally)
    */
-  autoSave(orgId: string, sessionId: string | null, messages: ChatMessage[]): void {
+  async autoSave(orgId: string, sessionId: string | null, messages: ChatMessage[]): Promise<void> {
     if (messages.length === 0) {
       return;
     }
 
     if (sessionId) {
-      this.updateSession(orgId, sessionId, messages);
+      await this.updateSession(orgId, sessionId, messages);
     } else {
-      this.createSession(orgId, messages);
+      await this.createSession(orgId, messages);
     }
   }
 }

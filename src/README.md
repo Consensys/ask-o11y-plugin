@@ -63,8 +63,8 @@ You can switch between visualization types on-the-fly using the built-in visuali
 
 ### 💾 **Smart Session Management**
 
-- **Auto-Save**: All conversations automatically saved every 2 seconds (never lose your work)
-- **Organization Scoping**: Sessions automatically isolated per Grafana organization
+- **Auto-Save**: All conversations automatically saved every 10 seconds (never lose your work)
+- **Organization Scoping**: Sessions organized by Grafana organization within each user's storage (private to each user, not shared between users)
 - **Session History**: Browse, resume, and manage previous conversations
 - **Import/Export**: Backup sessions as JSON or share with team members
 - **Storage Management**: Automatic cleanup when quota is reached (oldest sessions removed first)
@@ -86,7 +86,7 @@ You can switch between visualization types on-the-fly using the built-in visuali
 ### **Built for Performance**
 
 - ⚡ **Streaming Responses**: See answers appear in real-time as they're generated
-- 🔄 **Auto-Save**: 2-second debounced saves prevent data loss
+- 🔄 **Auto-Save**: 10-second debounced saves prevent data loss
 - 📦 **Efficient Storage**: Smart caching and automatic cleanup
 - 🎨 **Smooth UI**: Optimized React components with proper memoization
 - 🔌 **Lazy Loading**: Fast initial load times
@@ -279,12 +279,13 @@ The assistant automatically:
 
 **Your conversations are automatically saved and organized:**
 
-- ✅ **Auto-Save**: Every message saved automatically (2-second debounce)
-- 🏢 **Org Scoped**: Sessions isolated per Grafana organization
+- ✅ **Auto-Save**: Every message saved automatically (10-second debounce)
+- 🏢 **Org Scoped**: Sessions organized by Grafana organization within each user's storage
+- 👤 **Per-User Storage**: Sessions are private to each user and stored using Grafana's UserStorage API (not visible to other users, even in the same organization)
 - 📚 **History**: Browse and resume any previous conversation
 - 📤 **Export/Import**: Backup sessions as JSON files
 - 🧹 **Auto-Cleanup**: When storage is full, oldest sessions are removed
-- 🔒 **Private**: Each organization has its own isolated storage (5MB limit)
+- 🔒 **Storage Limits**: Each user has their own isolated storage (5MB limit per user, max 50 sessions per user per organization)
 
 **Managing Sessions:**
 
@@ -408,7 +409,7 @@ go test ./pkg/...        # Backend tests
 **Automatic Fix:**
 
 - The system automatically removes the 10 oldest sessions when storage is full
-- Max 50 sessions per organization
+- Max 50 sessions per user per organization
 
 **Manual Fix:**
 

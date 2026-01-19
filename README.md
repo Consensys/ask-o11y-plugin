@@ -104,8 +104,9 @@ Get automatic visualizations with every query—no manual dashboard building req
 - Granular control over who can modify dashboards, datasources, and alerts
 
 **Multi-Tenant Organization Isolation:**
-- Chat sessions automatically scoped per Grafana organization
-- Complete data isolation between organizations
+- Chat sessions stored per-user using Grafana's UserStorage API
+- Sessions organized by Grafana organization within each user's storage
+- Complete data isolation between users (sessions are private to each user)
 - Seamless context switching when changing organizations
 - Organization-specific MCP server configurations
 
@@ -120,7 +121,7 @@ Get automatic visualizations with every query—no manual dashboard building req
 **Never Lose Your Work:**
 - **Auto-Save**: All conversations saved every 2 seconds
 - **Session History**: Browse, resume, and manage previous conversations
-- **Organization Scoping**: Sessions isolated per Grafana organization
+- **Organization Scoping**: Sessions organized by Grafana organization within each user's storage (sessions are private to each user)
 - **Import/Export**: Backup sessions as JSON or share with team members
 - **Automatic Cleanup**: Oldest sessions removed when storage quota reached
 - **Session Metadata**: Auto-generated titles, timestamps, message counts

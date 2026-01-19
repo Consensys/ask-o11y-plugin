@@ -3,6 +3,7 @@
  * Fetches server health status and tools from the backend
  */
 
+import { firstValueFrom } from 'rxjs';
 import { getBackendSrv } from '@grafana/runtime';
 
 export interface MCPServerStatus {
@@ -53,12 +54,12 @@ export class MCPServerStatusService {
    */
   async fetchServerStatuses(): Promise<MCPServersResponse> {
     try {
-      const response = await getBackendSrv()
-        .fetch<MCPServersResponse>({
+      const response = await firstValueFrom(
+        getBackendSrv().fetch<MCPServersResponse>({
           url: `${this.baseUrl}/api/mcp/servers`,
           method: 'GET',
         })
-        .toPromise();
+      );
 
       if (!response || !response.data) {
         throw new Error('No response from backend');

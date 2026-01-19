@@ -1,39 +1,39 @@
+import { of, throwError } from 'rxjs';
 import { MCPServerStatusService, mcpServerStatusService } from '../mcpServerStatus';
 
 // Mock @grafana/runtime
 jest.mock('@grafana/runtime', () => ({
   getBackendSrv: () => ({
-    fetch: jest.fn().mockReturnValue({
-      toPromise: () =>
-        Promise.resolve({
-          data: {
-            servers: [
-              {
-                serverId: 'server-1',
-                name: 'Test Server',
-                url: 'http://localhost:8080',
-                type: 'sse',
-                status: 'healthy',
-                lastCheck: '2024-01-01T00:00:00Z',
-                responseTime: 50,
-                successRate: 100,
-                errorCount: 0,
-                consecutiveFailures: 0,
-                tools: [{ name: 'test_tool', description: 'A test tool', inputSchema: {} }],
-                toolCount: 1,
-              },
-            ],
-            systemHealth: {
-              overallStatus: 'healthy',
-              healthy: 1,
-              degraded: 0,
-              unhealthy: 0,
-              disconnected: 0,
-              total: 1,
+    fetch: jest.fn().mockReturnValue(
+      of({
+        data: {
+          servers: [
+            {
+              serverId: 'server-1',
+              name: 'Test Server',
+              url: 'http://localhost:8080',
+              type: 'sse',
+              status: 'healthy',
+              lastCheck: '2024-01-01T00:00:00Z',
+              responseTime: 50,
+              successRate: 100,
+              errorCount: 0,
+              consecutiveFailures: 0,
+              tools: [{ name: 'test_tool', description: 'A test tool', inputSchema: {} }],
+              toolCount: 1,
             },
+          ],
+          systemHealth: {
+            overallStatus: 'healthy',
+            healthy: 1,
+            degraded: 0,
+            unhealthy: 0,
+            disconnected: 0,
+            total: 1,
           },
-        }),
-    }),
+        },
+      })
+    ),
   }),
 }));
 
@@ -90,9 +90,7 @@ describe('MCPServerStatusService error handling', () => {
     jest.resetModules();
     jest.doMock('@grafana/runtime', () => ({
       getBackendSrv: () => ({
-        fetch: jest.fn().mockReturnValue({
-          toPromise: () => Promise.reject(new Error('Network error')),
-        }),
+        fetch: jest.fn().mockReturnValue(throwError(() => new Error('Network error'))),
       }),
     }));
 
@@ -111,9 +109,7 @@ describe('MCPServerStatusService error handling', () => {
     jest.resetModules();
     jest.doMock('@grafana/runtime', () => ({
       getBackendSrv: () => ({
-        fetch: jest.fn().mockReturnValue({
-          toPromise: () => Promise.resolve(null),
-        }),
+        fetch: jest.fn().mockReturnValue(of(null)),
       }),
     }));
 

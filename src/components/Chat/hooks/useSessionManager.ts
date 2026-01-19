@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { usePluginUserStorage } from '@grafana/runtime';
 import { ChatMessage } from '../types';
 import { SessionMetadata } from '../../../core';
 import { ServiceFactory } from '../../../core/services/ServiceFactory';
@@ -11,12 +12,12 @@ export interface UseSessionManagerReturn {
   currentSummary: string | undefined;
 
   // Session operations
-  createNewSession: () => void;
-  loadSession: (sessionId: string) => void;
-  deleteSession: (sessionId: string) => void;
-  deleteAllSessions: () => void;
-  exportSession: (sessionId: string) => void;
-  importSession: (jsonData: string) => boolean;
+  createNewSession: () => Promise<void>;
+  loadSession: (sessionId: string) => Promise<void>;
+  deleteSession: (sessionId: string) => Promise<void>;
+  deleteAllSessions: () => Promise<void>;
+  exportSession: (sessionId: string) => Promise<void>;
+  importSession: (jsonData: string) => Promise<boolean>;
 
   // Auto-save
   autoSaveMessages: (messages: ChatMessage[]) => void;
@@ -38,15 +39,18 @@ export const useSessionManager = (
   chatHistory: ChatMessage[],
   setChatHistory: React.Dispatch<React.SetStateAction<ChatMessage[]>>
 ): UseSessionManagerReturn => {
-  // Get session service instance (memoized)
-  const sessionService = useMemo(() => ServiceFactory.getSessionService(), []);
+  // Get Grafana user storage (automatically falls back to localStorage when user is not signed in)
+  const storage = usePluginUserStorage();
+
+  // Get session service instance (memoized with storage dependency)
+  const sessionService = useMemo(() => ServiceFactory.getSessionService(storage), [storage]);
 
   // State
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
   const [sessions, setSessions] = useState<SessionMetadata[]>([]);
   const [currentSummary, setCurrentSummary] = useState<string | undefined>(undefined);
   const [isSummarizing, setIsSummarizing] = useState(false);
-  const [storageStats, setStorageStats] = useState(() => sessionService.getStorageStats(orgId));
+  const [storageStats, setStorageStats] = useState({ used: 0, total: 0, sessionCount: 0 });
 
   // Auto-save debounce timer
   const autoSaveTimerRef = useRef<NodeJS.Timeout | null>(null);
@@ -54,56 +58,88 @@ export const useSessionManager = (
   /**
    * Refresh the sessions list
    */
-  const refreshSessions = useCallback(() => {
-    const loadedSessions = sessionService.getAllSessions(orgId);
-    setSessions(loadedSessions);
-    setStorageStats(sessionService.getStorageStats(orgId));
-  }, [sessionService, orgId]);
-
-  /**
-   * Load the current session on mount
-   */
-  const loadCurrentSession = useCallback(() => {
-    const session = sessionService.getCurrentSession(orgId);
-    if (session) {
-      setCurrentSessionId(session.id);
-      setChatHistory(session.messages);
-      setCurrentSummary(session.summary);
-      console.log(`[SessionManager] Loaded session: ${session.title} (${session.messages.length} messages)`);
+  const refreshSessions = useCallback(async () => {
+    try {
+      const loadedSessions = await sessionService.getAllSessions(orgId);
+      setSessions(loadedSessions);
+      const stats = await sessionService.getStorageStats(orgId);
+      setStorageStats(stats);
+    } catch (error) {
+      console.error('[SessionManager] Failed to refresh sessions:', error);
     }
-  }, [sessionService, orgId, setChatHistory]);
+  }, [sessionService, orgId]);
 
   /**
    * Load sessions index on mount
    */
   useEffect(() => {
-    refreshSessions();
-    loadCurrentSession();
-  }, [refreshSessions, loadCurrentSession]);
+    console.log('[SessionManager] Initializing with orgId:', orgId);
+    console.log('[SessionManager] Using Grafana user storage (falls back to localStorage if not signed in)');
+    
+    let cancelled = false;
+    
+    const initialize = async () => {
+      try {
+        const loadedSessions = await sessionService.getAllSessions(orgId);
+        if (!cancelled) {
+          setSessions(loadedSessions);
+        }
+        
+        const stats = await sessionService.getStorageStats(orgId);
+        if (!cancelled) {
+          setStorageStats(stats);
+        }
+        
+        const session = await sessionService.getCurrentSession(orgId);
+        if (!cancelled && session) {
+          setCurrentSessionId(session.id);
+          setChatHistory(session.messages);
+          setCurrentSummary(session.summary);
+          console.log(`[SessionManager] Loaded session: ${session.title} (${session.messages.length} messages)`);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          console.error('[SessionManager] Failed to initialize:', error);
+        }
+      }
+    };
+    
+    initialize();
+    
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [orgId]); // Only depend on orgId to avoid infinite loops
+
 
   /**
    * Create a new session
    */
-  const createNewSession = useCallback(() => {
+  const createNewSession = useCallback(async () => {
     setChatHistory([]);
     setCurrentSessionId(null);
     setCurrentSummary(undefined);
-    sessionService.clearActiveSession(orgId);
-    console.log('[SessionManager] Created new session');
+    try {
+      await sessionService.clearActiveSession(orgId);
+      console.log('[SessionManager] Created new session');
+    } catch (error) {
+      console.error('[SessionManager] Failed to clear active session:', error);
+    }
   }, [sessionService, orgId, setChatHistory]);
 
   /**
    * Load an existing session
    */
   const loadSession = useCallback(
-    (sessionId: string) => {
+    async (sessionId: string) => {
       try {
-        const session = sessionService.getSession(orgId, sessionId);
+        const session = await sessionService.getSession(orgId, sessionId);
         if (session) {
           setCurrentSessionId(session.id);
           setChatHistory(session.messages);
           setCurrentSummary(session.summary);
-          sessionService.setActiveSession(orgId, session.id);
+          await sessionService.setActiveSession(orgId, session.id);
           console.log(`[SessionManager] Loaded session: ${session.title} (${session.messages.length} messages)`);
         } else {
           console.error(`[SessionManager] Session ${sessionId} not found`);
@@ -119,14 +155,14 @@ export const useSessionManager = (
    * Delete a session
    */
   const deleteSession = useCallback(
-    (sessionId: string) => {
+    async (sessionId: string) => {
       try {
-        sessionService.deleteSession(orgId, sessionId);
-        refreshSessions();
+        await sessionService.deleteSession(orgId, sessionId);
+        await refreshSessions();
 
         // If deleting current session, clear it
         if (sessionId === currentSessionId) {
-          createNewSession();
+          await createNewSession();
         }
 
         console.log(`[SessionManager] Deleted session: ${sessionId}`);
@@ -140,11 +176,11 @@ export const useSessionManager = (
   /**
    * Delete all sessions
    */
-  const deleteAllSessions = useCallback(() => {
+  const deleteAllSessions = useCallback(async () => {
     try {
-      sessionService.deleteAllSessions(orgId);
-      refreshSessions();
-      createNewSession();
+      await sessionService.deleteAllSessions(orgId);
+      await refreshSessions();
+      await createNewSession();
       console.log('[SessionManager] Deleted all sessions');
     } catch (error) {
       console.error('[SessionManager] Error deleting all sessions:', error);
@@ -155,9 +191,9 @@ export const useSessionManager = (
    * Export a session as JSON
    */
   const exportSession = useCallback(
-    (sessionId: string) => {
+    async (sessionId: string) => {
       try {
-        const jsonData = sessionService.exportSession(orgId, sessionId);
+        const jsonData = await sessionService.exportSession(orgId, sessionId);
         if (jsonData) {
           // Download as file
           const blob = new Blob([jsonData], { type: 'application/json' });
@@ -182,11 +218,11 @@ export const useSessionManager = (
    * Import a session from JSON
    */
   const importSession = useCallback(
-    (jsonData: string): boolean => {
+    async (jsonData: string): Promise<boolean> => {
       try {
-        const session = sessionService.importSession(orgId, jsonData);
-        refreshSessions();
-        loadSession(session.id);
+        const session = await sessionService.importSession(orgId, jsonData);
+        await refreshSessions();
+        await loadSession(session.id);
         console.log(`[SessionManager] Imported session: ${session.title}`);
         return true;
       } catch (error) {
@@ -212,21 +248,32 @@ export const useSessionManager = (
       }
 
       // Set new timer for debounced save
-      autoSaveTimerRef.current = setTimeout(() => {
+      autoSaveTimerRef.current = setTimeout(async () => {
         try {
-          if (currentSessionId) {
-            sessionService.updateSession(orgId, currentSessionId, messages, currentSummary);
-            console.log(`[SessionManager] Auto-saved session: ${currentSessionId}`);
+          // Capture currentSessionId at the time the callback executes
+          const sessionIdAtStart = currentSessionId;
+          
+          if (sessionIdAtStart) {
+            await sessionService.updateSession(orgId, sessionIdAtStart, messages, currentSummary);
+            console.log(`[SessionManager] Auto-saved session: ${sessionIdAtStart}`);
           } else if (messages.length > 0) {
-            const newSession = sessionService.createSession(orgId, messages);
-            setCurrentSessionId(newSession.id);
+            const newSession = await sessionService.createSession(orgId, messages);
+            // Only update if currentSessionId is still null (no session was loaded in the meantime)
+            setCurrentSessionId((prevId) => {
+              if (prevId === null) {
+                return newSession.id;
+              }
+              // Session was loaded while creating, don't overwrite it
+              console.log(`[SessionManager] Session ${prevId} was loaded during creation, keeping it instead of ${newSession.id}`);
+              return prevId;
+            });
             console.log(`[SessionManager] Created and saved new session: ${newSession.id}`);
           }
-          refreshSessions();
+          await refreshSessions();
         } catch (error) {
           console.error('[SessionManager] Auto-save failed:', error);
         }
-      }, 2000);
+      }, 10000);
     },
     [sessionService, orgId, currentSessionId, currentSummary, refreshSessions]
   );
@@ -252,7 +299,7 @@ export const useSessionManager = (
 
           // Update session with summary
           if (currentSessionId) {
-            sessionService.updateSession(orgId, currentSessionId, messages, summary);
+            await sessionService.updateSession(orgId, currentSessionId, messages, summary);
             console.log('[SessionManager] Summarization complete and saved');
           }
         }
