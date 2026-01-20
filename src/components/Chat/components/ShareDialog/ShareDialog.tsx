@@ -1,0 +1,222 @@
+import React, { useState, useEffect } from 'react';
+// Note: Select is deprecated but used for compatibility. Consider migrating to Combobox in future.
+ 
+import { Modal, Button, Select, Input, ClipboardButton } from '@grafana/ui';
+import { sessionShareService, CreateShareResponse } from '../../../../services/sessionShare';
+import { ChatSession } from '../../../../core/models/ChatSession';
+
+interface ShareDialogProps {
+  sessionId: string;
+  session: ChatSession;
+  onClose: () => void;
+  existingShares?: CreateShareResponse[];
+}
+
+export function ShareDialog({ sessionId, session, onClose, existingShares = [] }: ShareDialogProps) {
+  const [expiresInDays, setExpiresInDays] = useState<number | undefined>(undefined);
+  const [customDays, setCustomDays] = useState<string>('');
+  const [isCreating, setIsCreating] = useState(false);
+  const [createdShare, setCreatedShare] = useState<CreateShareResponse | null>(null);
+  const [shares, setShares] = useState<CreateShareResponse[]>(existingShares);
+  const [revokingShareId, setRevokingShareId] = useState<string | null>(null);
+
+  useEffect(() => {
+    // Load existing shares if not provided
+    if (existingShares.length === 0) {
+      loadShares();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessionId, existingShares.length]);
+
+  const loadShares = async () => {
+    try {
+      const loadedShares = await sessionShareService.getSessionShares(sessionId);
+      setShares(loadedShares);
+    } catch (error) {
+      console.error('[ShareDialog] Failed to load shares:', error);
+    }
+  };
+
+  const handleCreateShare = async () => {
+    setIsCreating(true);
+    try {
+      let expiresDays: number | undefined = expiresInDays;
+      
+      // Handle custom days
+      if (expiresInDays === -1 && customDays) {
+        const days = parseInt(customDays, 10);
+        if (isNaN(days) || days <= 0) {
+          alert('Please enter a valid number of days');
+          setIsCreating(false);
+          return;
+        }
+        expiresDays = days;
+      }
+
+      const share = await sessionShareService.createShare(sessionId, session, expiresDays);
+      setCreatedShare(share);
+      await loadShares(); // Refresh shares list
+    } catch (error) {
+      console.error('[ShareDialog] Failed to create share:', error);
+      alert('Failed to create share. Please try again.');
+    } finally {
+      setIsCreating(false);
+    }
+  };
+
+  const handleRevokeShare = async (shareId: string) => {
+    setRevokingShareId(shareId);
+    try {
+      await sessionShareService.revokeShare(shareId);
+      setShares(shares.filter((s) => s.shareId !== shareId));
+      if (createdShare?.shareId === shareId) {
+        setCreatedShare(null);
+      }
+    } catch (error) {
+      console.error('[ShareDialog] Failed to revoke share:', error);
+      alert('Failed to revoke share. Please try again.');
+    } finally {
+      setRevokingShareId(null);
+    }
+  };
+
+  const formatExpiryDate = (expiresAt: string | null): string => {
+    if (!expiresAt) {
+      return 'Never';
+    }
+    try {
+      const date = new Date(expiresAt);
+      return date.toLocaleDateString();
+    } catch {
+      return 'Invalid date';
+    }
+  };
+
+  const expiryOptions = [
+    { label: 'Never', value: undefined },
+    { label: '7 days', value: 7 },
+    { label: '30 days', value: 30 },
+    { label: '90 days', value: 90 },
+    { label: 'Custom', value: -1 },
+  ];
+
+
+  return (
+    <Modal title="Share Session" isOpen={true} onDismiss={onClose}>
+      <div className="min-w-[400px]">
+        {createdShare ? (
+          <div className="space-y-3">
+            <p className="text-sm text-primary">Share link created successfully!</p>
+            <div>
+              <label className="block text-xs font-medium mb-1 text-primary">Share URL:</label>
+              <div className="flex gap-1.5">
+                <Input
+                  value={sessionShareService.buildShareUrl(createdShare.shareId)}
+                  readOnly
+                  className="flex-1"
+                />
+                <ClipboardButton
+                  icon="copy"
+                  getText={() => sessionShareService.buildShareUrl(createdShare.shareId)}
+                >
+                  Copy
+                </ClipboardButton>
+              </div>
+            </div>
+            <div className="text-xs text-secondary">
+              <strong>Expires:</strong> {formatExpiryDate(createdShare.expiresAt)}
+            </div>
+            <div className="flex gap-1.5 justify-end pt-2">
+              <Button variant="secondary" size="sm" onClick={() => setCreatedShare(null)}>
+                Create Another Share
+              </Button>
+              <Button variant="primary" size="sm" onClick={onClose}>
+                Close
+              </Button>
+            </div>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            <div>
+              <label className="block text-xs font-medium mb-1 text-primary">
+                Expiration:
+              </label>
+              <Select
+                options={expiryOptions.map((opt) => ({ label: opt.label, value: opt.value ?? null }))}
+                value={expiresInDays ?? null}
+                onChange={(option) => {
+                  if (option) {
+                    setExpiresInDays(option.value === null ? undefined : (option.value as number));
+                    if (option.value !== -1) {
+                      setCustomDays('');
+                    }
+                  }
+                }}
+                placeholder="Select expiration"
+              />
+              {expiresInDays === -1 && (
+                <div className="mt-1.5">
+                  <Input
+                    type="number"
+                    placeholder="Enter number of days"
+                    value={customDays}
+                    onChange={(e) => setCustomDays(e.currentTarget.value)}
+                    min={1}
+                  />
+                </div>
+              )}
+            </div>
+
+            <div className="p-2 bg-secondary rounded text-xs text-secondary">
+              <p className="m-0">
+                Shared sessions can be viewed in read-only mode. Recipients can import the session to their account.
+              </p>
+            </div>
+
+            {shares.length > 0 && (
+              <div>
+                <label className="block text-xs font-medium mb-1 text-primary">
+                  Existing Shares:
+                </label>
+                <div className="flex flex-col gap-1.5">
+                  {shares.map((share) => (
+                    <div
+                      key={share.shareId}
+                      className="flex justify-between items-center p-1.5 bg-secondary rounded border border-weak"
+                    >
+                      <div className="flex-1 min-w-0">
+                        <div className="text-xs text-secondary overflow-hidden text-ellipsis">
+                          {share.shareUrl}
+                        </div>
+                        <div className="text-xs text-disabled mt-0.5">
+                          Expires: {formatExpiryDate(share.expiresAt)}
+                        </div>
+                      </div>
+                      <Button
+                        variant="destructive"
+                        size="sm"
+                        onClick={() => handleRevokeShare(share.shareId)}
+                        disabled={revokingShareId === share.shareId}
+                      >
+                        {revokingShareId === share.shareId ? 'Revoking...' : 'Revoke'}
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <div className="flex gap-1.5 justify-end pt-2">
+              <Button variant="secondary" size="sm" onClick={onClose}>
+                Cancel
+              </Button>
+              <Button variant="primary" size="sm" onClick={handleCreateShare} disabled={isCreating}>
+                {isCreating ? 'Creating...' : 'Create Share'}
+              </Button>
+            </div>
+          </div>
+        )}
+      </div>
+    </Modal>
+  );
+}

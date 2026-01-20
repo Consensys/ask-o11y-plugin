@@ -17,11 +17,13 @@ import {
 } from './components';
 import { ChatInputRef } from './components/ChatInput/ChatInput';
 import { ChatErrorBoundary } from '../ErrorBoundary';
-import { SessionMetadata } from '../../core';
+import { SessionMetadata, ChatSession } from '../../core';
 import type { AppPluginSettings } from '../../types/plugin';
 
 interface ChatProps {
   pluginSettings: AppPluginSettings;
+  readOnly?: boolean;
+  initialSession?: ChatSession;
 }
 
 interface NewChatButtonProps {
@@ -118,7 +120,7 @@ const NewChatButton: React.FC<NewChatButtonProps> = ({ onConfirm, disabled, them
   );
 };
 
-function ChatComponent({ pluginSettings }: ChatProps) {
+function ChatComponent({ pluginSettings, readOnly = false, initialSession }: ChatProps) {
   // Sync Grafana theme to CSS custom properties
   useGrafanaTheme();
   const theme = useTheme2();
@@ -139,7 +141,7 @@ function ChatComponent({ pluginSettings }: ChatProps) {
     sessionManager,
     bottomSpacerRef,
     detectedPageRefs,
-  } = useChat(pluginSettings);
+  } = useChat(pluginSettings, readOnly ? initialSession : undefined);
 
   const chatInputRef = useRef<ChatInputRef>(null);
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
@@ -295,49 +297,51 @@ function ChatComponent({ pluginSettings }: ChatProps) {
             </div>
 
             {/* Chat input at bottom */}
-            <div
-              className="flex-shrink-0 py-4 sticky bottom-0 z-10"
-              role="region"
-              aria-label="Message input"
-              style={{
-                backgroundColor: theme.isDark ? '#111217' : theme.colors.background.canvas,
-              }}
-            >
-              <ChatInput
-                ref={chatInputRef}
-                currentInput={currentInput}
-                isGenerating={isGenerating}
-                toolsLoading={toolsLoading}
-                setCurrentInput={setCurrentInput}
-                sendMessage={sendMessage}
-                handleKeyPress={handleKeyPress}
-                leftSlot={<NewChatButton onConfirm={clearChat} disabled={isGenerating} theme={theme} />}
-                rightSlot={
-                  <button
-                    onClick={openHistory}
-                    className="flex items-center gap-2 px-2 py-1 text-xs font-medium rounded-md hover:bg-white/10 transition-colors"
-                    aria-label="Chat history"
-                    title="View chat history"
-                    style={{ color: theme.colors.text.secondary }}
-                  >
-                    <svg
-                      width="14"
-                      height="14"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="2"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
+            {!readOnly && (
+              <div
+                className="flex-shrink-0 py-4 sticky bottom-0 z-10"
+                role="region"
+                aria-label="Message input"
+                style={{
+                  backgroundColor: theme.isDark ? '#111217' : theme.colors.background.canvas,
+                }}
+              >
+                <ChatInput
+                  ref={chatInputRef}
+                  currentInput={currentInput}
+                  isGenerating={isGenerating}
+                  toolsLoading={toolsLoading}
+                  setCurrentInput={setCurrentInput}
+                  sendMessage={sendMessage}
+                  handleKeyPress={handleKeyPress}
+                  leftSlot={<NewChatButton onConfirm={clearChat} disabled={isGenerating} theme={theme} />}
+                  rightSlot={
+                    <button
+                      onClick={openHistory}
+                      className="flex items-center gap-2 px-2 py-1 text-xs font-medium rounded-md hover:bg-white/10 transition-colors"
+                      aria-label="Chat history"
+                      title="View chat history"
+                      style={{ color: theme.colors.text.secondary }}
                     >
-                      <circle cx="12" cy="12" r="10" />
-                      <polyline points="12 6 12 12 16 14" />
-                    </svg>
-                    <span>View chat history ({sessionManager.sessions.length})</span>
-                  </button>
-                }
-              />
-            </div>
+                      <svg
+                        width="14"
+                        height="14"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      >
+                        <circle cx="12" cy="12" r="10" />
+                        <polyline points="12 6 12 12 16 14" />
+                      </svg>
+                      <span>View chat history ({sessionManager.sessions.length})</span>
+                    </button>
+                  }
+                />
+              </div>
+            )}
           </div>
         ) : (
           /* Welcome state - centered layout, full width background */

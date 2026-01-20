@@ -9,6 +9,7 @@ import { SYSTEM_PROMPT } from '../constants';
 import { ConversationMemoryService } from '../../../services/memory';
 import { ReliabilityService } from '../../../services/reliability';
 import { ValidationService } from '../../../services/validation';
+import { ChatSession } from '../../../core/models/ChatSession';
 import type { AppPluginSettings } from '../../../types/plugin';
 
 /**
@@ -35,7 +36,7 @@ const buildEffectiveSystemPrompt = (
   }
 };
 
-export const useChat = (pluginSettings: AppPluginSettings) => {
+export const useChat = (pluginSettings: AppPluginSettings, initialSession?: ChatSession) => {
   console.log('[useChat] Hook initialized');
 
   // Get organization ID from Grafana config
@@ -50,7 +51,9 @@ export const useChat = (pluginSettings: AppPluginSettings) => {
     [systemPromptMode, customSystemPrompt]
   );
 
-  const [chatHistory, setChatHistory] = useState<ChatMessage[]>([]);
+  const [chatHistory, setChatHistory] = useState<ChatMessage[]>(
+    initialSession ? initialSession.messages : []
+  );
   const [currentInput, setCurrentInput] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
   const chatContainerRef = useRef<HTMLDivElement>(null);
