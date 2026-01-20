@@ -60,7 +60,7 @@ describe('useSessionManager - Read-only mode', () => {
   });
 
   it('should skip auto-save when readOnly is true', async () => {
-    const { result } = renderHook(() =>
+    renderHook(() =>
       useSessionManager('test-org', mockMessages, mockSetChatHistory, true)
     );
 
@@ -87,7 +87,7 @@ describe('useSessionManager - Read-only mode', () => {
     // Mock shouldSummarize to return true (would normally trigger summarization)
     (ConversationMemoryService.shouldSummarize as jest.Mock).mockReturnValue(true);
 
-    const { result } = renderHook(() =>
+    renderHook(() =>
       useSessionManager('test-org', mockMessages, mockSetChatHistory, true)
     );
 
@@ -109,7 +109,7 @@ describe('useSessionManager - Read-only mode', () => {
   });
 
   it('should NOT skip auto-save when readOnly is false', async () => {
-    const { result } = renderHook(() =>
+    renderHook(() =>
       useSessionManager('test-org', mockMessages, mockSetChatHistory, false)
     );
 
@@ -131,7 +131,7 @@ describe('useSessionManager - Read-only mode', () => {
   });
 
   it('should NOT skip auto-save when readOnly is undefined', async () => {
-    const { result } = renderHook(() =>
+    renderHook(() =>
       useSessionManager('test-org', mockMessages, mockSetChatHistory, undefined)
     );
 
@@ -153,7 +153,7 @@ describe('useSessionManager - Read-only mode', () => {
   });
 
   it('should skip loading current session when chatHistory has messages and readOnly is true', async () => {
-    const { result } = renderHook(() =>
+    renderHook(() =>
       useSessionManager('test-org', mockMessages, mockSetChatHistory, true)
     );
 
@@ -167,7 +167,7 @@ describe('useSessionManager - Read-only mode', () => {
   });
 
   it('should load current session when chatHistory is empty even if readOnly is true', async () => {
-    const { result } = renderHook(() =>
+    renderHook(() =>
       useSessionManager('test-org', [], mockSetChatHistory, true)
     );
 
