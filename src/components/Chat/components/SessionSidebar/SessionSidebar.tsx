@@ -1,7 +1,12 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { UseSessionManagerReturn } from '../../hooks/useSessionManager';
 import { SessionMetadata } from '../../../../core';
 import { LoadingOverlay, LoadingButton, InlineLoading } from '../../../LoadingOverlay';
+import { ShareDialog } from '../ShareDialog/ShareDialog';
+import { sessionShareService, CreateShareResponse } from '../../../../services/sessionShare';
+import { ServiceFactory } from '../../../../core/services/ServiceFactory';
+import { usePluginUserStorage, config } from '@grafana/runtime';
+import { Icon, useTheme2 } from '@grafana/ui';
 
 interface SessionSidebarProps {
   sessionManager: UseSessionManagerReturn;
@@ -11,11 +16,53 @@ interface SessionSidebarProps {
 }
 
 export function SessionSidebar({ sessionManager, currentSessionId, isOpen, onClose }: SessionSidebarProps) {
+  const theme = useTheme2();
   const [showDeleteConfirm, setShowDeleteConfirm] = useState<string | null>(null);
   const [showImport, setShowImport] = useState(false);
   const [loadingAction, setLoadingAction] = useState<string | null>(null);
   const [importLoading, setImportLoading] = useState(false);
   const [creatingSession, setCreatingSession] = useState(false);
+  const [shareDialogSessionId, setShareDialogSessionId] = useState<string | null>(null);
+  const [sessionShares, setSessionShares] = useState<Map<string, CreateShareResponse[]>>(new Map());
+  const previousSessionIdsRef = useRef<string>('');
+  const isLoadingRef = useRef<boolean>(false);
+
+  // Create a stable string representation of session IDs for comparison
+  const sessionIdsString = sessionManager.sessions.map((s) => s.id).sort().join(',');
+
+  // Load shares when sidebar opens or when session IDs change
+  useEffect(() => {
+    if (!isOpen) {
+      return;
+    }
+
+    // Only reload if session IDs actually changed and we're not already loading
+    if (sessionIdsString === previousSessionIdsRef.current || isLoadingRef.current) {
+      return;
+    }
+
+    previousSessionIdsRef.current = sessionIdsString;
+    isLoadingRef.current = true;
+
+    const loadAllShares = async () => {
+      try {
+        const sharesMap = new Map<string, CreateShareResponse[]>();
+        for (const session of sessionManager.sessions) {
+          try {
+            const shares = await sessionShareService.getSessionShares(session.id);
+            sharesMap.set(session.id, shares);
+          } catch (error) {
+            console.error(`[SessionSidebar] Failed to load shares for session ${session.id}:`, error);
+          }
+        }
+        setSessionShares(sharesMap);
+      } finally {
+        isLoadingRef.current = false;
+      }
+    };
+    loadAllShares();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen, sessionIdsString]); // sessionIdsString is a stable string value, won't cause infinite loops
 
   const formatDate = (date: Date) => {
     const now = new Date();
@@ -103,22 +150,38 @@ export function SessionSidebar({ sessionManager, currentSessionId, isOpen, onClo
 
   return (
     <div className="fixed inset-0 z-50 flex">
-      {/* Backdrop */}
-      <div className="absolute inset-0 bg-black/50" onClick={onClose} />
+      {/* Backdrop - theme-aware overlay */}
+      <div 
+        className="absolute inset-0" 
+        onClick={onClose}
+        style={{ 
+          backgroundColor: theme.colors.background.canvas,
+          opacity: theme.isDark ? 0.9 : 0.8
+        }}
+      />
 
       {/* Sidebar */}
-      <div className="relative w-80 bg-white dark:bg-gray-900 shadow-xl flex flex-col">
+      <div 
+        className="relative w-80 shadow-xl flex flex-col border-r border-weak"
+        style={{ 
+          backgroundColor: theme.colors.background.primary
+        }}
+      >
         {/* Header */}
-        <div className="p-4 border-b border-gray-200 dark:border-gray-700">
-          <div className="flex items-center justify-between mb-2">
-            <h2 className="text-lg font-semibold">Chat History</h2>
-            <button onClick={onClose} className="p-1 hover:bg-gray-100 dark:hover:bg-gray-800 rounded" title="Close">
-              ✕
+        <div className="p-2 border-b border-weak">
+          <div className="flex items-center justify-between mb-1">
+            <h2 className="text-base font-semibold text-primary">Chat History</h2>
+            <button 
+              onClick={onClose} 
+              className="p-0.5 hover:bg-secondary rounded text-secondary hover:text-primary transition-colors" 
+              title="Close"
+            >
+              <Icon name="times" size="sm" />
             </button>
           </div>
 
           {/* Actions */}
-          <div className="flex gap-2 mt-3">
+          <div className="flex gap-1.5 mt-2">
             <LoadingButton
               onClick={async () => {
                 setCreatingSession(true);
@@ -141,23 +204,23 @@ export function SessionSidebar({ sessionManager, currentSessionId, isOpen, onClo
             </LoadingButton>
             <button
               onClick={() => setShowImport(true)}
-              className="px-3 py-1.5 text-sm bg-gray-200 dark:bg-gray-700 rounded hover:bg-gray-300 dark:hover:bg-gray-600"
+              className="px-2 py-1 text-xs bg-secondary hover:bg-surface rounded text-secondary hover:text-primary transition-colors"
               title="Import session"
               disabled={importLoading}
             >
-              Import
+              <Icon name="upload" size="sm" />
             </button>
           </div>
 
           {/* Storage indicator */}
-          <div className="mt-3 text-xs text-gray-600 dark:text-gray-400">
+          <div className="mt-2 text-xs text-secondary">
             <div className="flex justify-between mb-1">
               <span>{sessionManager.sessions.length} sessions</span>
               <span>{storagePercent}% storage used</span>
             </div>
-            <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-1.5">
+            <div className="w-full bg-surface rounded-full h-1">
               <div
-                className={`h-1.5 rounded-full ${storagePercent > 80 ? 'bg-red-500' : 'bg-blue-500'}`}
+                className={`h-1 rounded-full ${storagePercent > 80 ? 'bg-error' : 'bg-primary'}`}
                 style={{ width: `${storagePercent}%` }}
               />
             </div>
@@ -165,14 +228,14 @@ export function SessionSidebar({ sessionManager, currentSessionId, isOpen, onClo
         </div>
 
         {/* Session list */}
-        <div className="flex-1 overflow-y-auto p-2">
+        <div className="flex-1 overflow-y-auto p-1.5">
           {sessionManager.sessions.length === 0 ? (
-            <div className="text-center text-gray-500 dark:text-gray-400 mt-8">
-              <p>No saved conversations yet</p>
-              <p className="text-sm mt-2">Start a new chat to begin</p>
+            <div className="text-center text-secondary mt-8">
+              <p className="text-sm">No saved conversations yet</p>
+              <p className="text-xs mt-1">Start a new chat to begin</p>
             </div>
           ) : (
-            <div className="space-y-1">
+            <div className="space-y-0.5">
               {sessionManager.sessions.map((session: SessionMetadata) => (
                 <SessionItem
                   key={session.id}
@@ -182,11 +245,13 @@ export function SessionSidebar({ sessionManager, currentSessionId, isOpen, onClo
                   isLoading={loadingAction === `loading-${session.id}`}
                   isDeleting={loadingAction === `deleting-${session.id}`}
                   isExporting={loadingAction === `exporting-${session.id}`}
+                  hasShares={(sessionShares.get(session.id)?.length ?? 0) > 0}
                   onLoad={() => handleLoadSession(session.id)}
                   onDelete={(e) => handleDeleteClick(session.id, e)}
                   onConfirmDelete={() => confirmDelete(session.id)}
                   onCancelDelete={() => setShowDeleteConfirm(null)}
                   onExport={(e) => handleExport(session.id, e)}
+                  onShare={() => setShareDialogSessionId(session.id)}
                   formatDate={formatDate}
                 />
               ))}
@@ -195,7 +260,7 @@ export function SessionSidebar({ sessionManager, currentSessionId, isOpen, onClo
         </div>
 
         {/* Footer actions */}
-        <div className="p-3 border-t border-gray-200 dark:border-gray-700">
+        <div className="p-2 border-t border-weak">
           {sessionManager.sessions.length > 0 && (
             <button
               onClick={async () => {
@@ -207,7 +272,7 @@ export function SessionSidebar({ sessionManager, currentSessionId, isOpen, onClo
                   }
                 }
               }}
-              className="w-full px-3 py-2 text-sm text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 rounded"
+              className="w-full px-2 py-1 text-xs text-error hover:bg-error/10 rounded transition-colors"
             >
               Clear All History
             </button>
@@ -216,21 +281,21 @@ export function SessionSidebar({ sessionManager, currentSessionId, isOpen, onClo
 
         {/* Import modal */}
         {showImport && (
-          <div className="absolute inset-0 bg-white/95 dark:bg-gray-900/95 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-background flex items-center justify-center p-3 border border-weak">
             <LoadingOverlay isLoading={importLoading} message="Importing session...">
               <div className="w-full max-w-sm">
-                <h3 className="text-lg font-semibold mb-4">Import Session</h3>
+                <h3 className="text-sm font-semibold mb-2 text-primary">Import Session</h3>
                 <input
                   type="file"
                   accept=".json"
                   onChange={handleImport}
                   disabled={importLoading}
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded disabled:opacity-50"
+                  className="w-full px-2 py-1 text-xs border border-weak rounded bg-background text-primary disabled:opacity-50"
                 />
                 <button
                   onClick={() => setShowImport(false)}
                   disabled={importLoading}
-                  className="mt-3 w-full px-3 py-2 text-sm bg-gray-200 dark:bg-gray-700 rounded hover:bg-gray-300 dark:hover:bg-gray-600 disabled:opacity-50"
+                  className="mt-2 w-full px-2 py-1 text-xs bg-secondary hover:bg-surface rounded text-secondary hover:text-primary disabled:opacity-50 transition-colors"
                 >
                   Cancel
                 </button>
@@ -238,9 +303,71 @@ export function SessionSidebar({ sessionManager, currentSessionId, isOpen, onClo
             </LoadingOverlay>
           </div>
         )}
+
+        {/* Share dialog */}
+        {shareDialogSessionId && (
+          <ShareDialogWrapper
+            sessionId={shareDialogSessionId}
+            onClose={async () => {
+              setShareDialogSessionId(null);
+              // Refresh shares for the session that was shared
+              try {
+                const shares = await sessionShareService.getSessionShares(shareDialogSessionId);
+                setSessionShares((prev) => {
+                  const next = new Map(prev);
+                  next.set(shareDialogSessionId, shares);
+                  return next;
+                });
+              } catch (error) {
+                console.error('[SessionSidebar] Failed to refresh shares:', error);
+              }
+            }}
+            existingShares={sessionShares.get(shareDialogSessionId) || []}
+          />
+        )}
       </div>
     </div>
   );
+}
+
+// Wrapper component to load session data for ShareDialog
+function ShareDialogWrapper({
+  sessionId,
+  onClose,
+  existingShares,
+}: {
+  sessionId: string;
+  onClose: () => void;
+  existingShares: CreateShareResponse[];
+}) {
+  const storage = usePluginUserStorage();
+  const orgId = String(config.bootData.user.orgId || '1');
+  const [session, setSession] = React.useState<any>(null);
+  const [loading, setLoading] = React.useState(true);
+
+  useEffect(() => {
+    const loadSession = async () => {
+      try {
+        const sessionService = ServiceFactory.getSessionService(storage);
+        const loadedSession = await sessionService.getSession(orgId, sessionId);
+        if (loadedSession) {
+          setSession(loadedSession);
+        }
+      } catch (error) {
+        console.error('[ShareDialogWrapper] Failed to load session:', error);
+      } finally {
+        setLoading(false);
+      }
+    };
+    loadSession();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessionId, orgId]); // storage is stable, don't include it to avoid unnecessary re-runs
+
+  if (loading || !session) {
+    return null;
+  }
+
+  return <ShareDialog sessionId={sessionId} session={session} onClose={onClose} existingShares={existingShares} />;
 }
 
 interface SessionItemProps {
@@ -250,11 +377,13 @@ interface SessionItemProps {
   isLoading?: boolean;
   isDeleting?: boolean;
   isExporting?: boolean;
+  hasShares?: boolean;
   onLoad: () => void;
   onDelete: (e: React.MouseEvent) => void;
   onConfirmDelete: () => void;
   onCancelDelete: () => void;
   onExport: (e: React.MouseEvent) => void;
+  onShare: () => void;
   formatDate: (date: Date) => string;
 }
 
@@ -265,18 +394,20 @@ function SessionItem({
   isLoading = false,
   isDeleting = false,
   isExporting = false,
+  hasShares = false,
   onLoad,
   onDelete,
   onConfirmDelete,
   onCancelDelete,
   onExport,
+  onShare,
   formatDate,
 }: SessionItemProps) {
   if (showDeleteConfirm) {
     return (
-      <div className="p-3 bg-red-50 dark:bg-red-900/20 rounded border border-red-200 dark:border-red-800">
-        <p className="text-sm text-red-900 dark:text-red-200 mb-2">Delete this conversation?</p>
-        <div className="flex gap-2">
+      <div className="p-2 bg-surface rounded border border-error">
+        <p className="text-xs text-error mb-1.5">Delete this conversation?</p>
+        <div className="flex gap-1.5">
           <LoadingButton
             onClick={onConfirmDelete}
             isLoading={isDeleting}
@@ -290,7 +421,7 @@ function SessionItem({
           <button
             onClick={onCancelDelete}
             disabled={isDeleting}
-            className="flex-1 px-2 py-1 text-sm bg-gray-200 dark:bg-gray-700 rounded hover:bg-gray-300 dark:hover:bg-gray-600 disabled:opacity-50"
+            className="flex-1 px-1.5 py-0.5 text-xs bg-secondary hover:bg-surface rounded text-secondary hover:text-primary disabled:opacity-50 transition-colors"
           >
             Cancel
           </button>
@@ -302,44 +433,55 @@ function SessionItem({
   return (
     <div
       onClick={isLoading ? undefined : onLoad}
-      className={`p-3 rounded group transition-colors relative ${
+      className={`p-1.5 rounded group transition-colors relative ${
         isActive
-          ? 'bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800'
-          : 'hover:bg-gray-100 dark:hover:bg-gray-800'
-      } ${isLoading ? 'cursor-wait opacity-75' : 'cursor-pointer'}`}
+          ? 'bg-surface border border-primary'
+          : 'hover:bg-secondary border border-weak'
+      } ${isLoading ? 'cursor-wait' : 'cursor-pointer'}`}
     >
       {isLoading && (
-        <div className="absolute inset-0 flex items-center justify-center bg-white/50 dark:bg-gray-900/50 rounded">
+        <div className="absolute inset-0 flex items-center justify-center bg-background rounded border border-weak">
           <InlineLoading message="Loading..." size="sm" />
         </div>
       )}
 
-      <div className="flex items-start justify-between gap-2">
+      <div className="flex items-start justify-between gap-1.5">
         <div className="flex-1 min-w-0">
-          <h3 className="font-medium text-sm truncate">{session.title}</h3>
-          <div className="flex items-center gap-2 mt-1 text-xs text-gray-600 dark:text-gray-400">
+          <h3 className="font-medium text-xs truncate text-primary">{session.title}</h3>
+          <div className="flex items-center gap-1.5 mt-0.5 text-xs text-secondary">
             <span>{formatDate(session.updatedAt)}</span>
             <span>•</span>
             <span>{session.messageCount} messages</span>
           </div>
         </div>
 
-        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+        <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onShare();
+            }}
+            disabled={isLoading || isExporting}
+            className="p-0.5 hover:bg-surface rounded text-secondary hover:text-primary disabled:opacity-50 transition-colors"
+            title={hasShares ? 'View shares' : 'Share'}
+          >
+            <Icon name="share-alt" size="sm" />
+          </button>
           <button
             onClick={onExport}
             disabled={isExporting}
-            className="p-1 hover:bg-gray-200 dark:hover:bg-gray-700 rounded disabled:opacity-50"
+            className="p-0.5 hover:bg-surface rounded text-secondary hover:text-primary disabled:opacity-50 transition-colors"
             title="Export"
           >
-            {isExporting ? <InlineLoading size="sm" /> : '↓'}
+            {isExporting ? <InlineLoading size="sm" /> : <Icon name="arrow-down" size="sm" />}
           </button>
           <button
             onClick={onDelete}
             disabled={isLoading || isExporting}
-            className="p-1 hover:bg-red-100 dark:hover:bg-red-900/20 text-red-600 dark:text-red-400 rounded disabled:opacity-50"
+            className="p-0.5 hover:bg-surface rounded text-error hover:text-error disabled:opacity-50 transition-colors"
             title="Delete"
           >
-            🗑
+            <Icon name="trash-alt" size="sm" />
           </button>
         </div>
       </div>

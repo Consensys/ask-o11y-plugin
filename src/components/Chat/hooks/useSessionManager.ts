@@ -71,6 +71,7 @@ export const useSessionManager = (
 
   /**
    * Load sessions index on mount
+   * Skip loading current session if chatHistory already has messages (read-only mode with initialSession)
    */
   useEffect(() => {
     console.log('[SessionManager] Initializing with orgId:', orgId);
@@ -90,12 +91,18 @@ export const useSessionManager = (
           setStorageStats(stats);
         }
         
-        const session = await sessionService.getCurrentSession(orgId);
-        if (!cancelled && session) {
-          setCurrentSessionId(session.id);
-          setChatHistory(session.messages);
-          setCurrentSummary(session.summary);
-          console.log(`[SessionManager] Loaded session: ${session.title} (${session.messages.length} messages)`);
+        // Only load current session from storage if chatHistory is empty
+        // If chatHistory has messages, we're in read-only mode with an initialSession
+        if (chatHistory.length === 0) {
+          const session = await sessionService.getCurrentSession(orgId);
+          if (!cancelled && session) {
+            setCurrentSessionId(session.id);
+            setChatHistory(session.messages);
+            setCurrentSummary(session.summary);
+            console.log(`[SessionManager] Loaded session: ${session.title} (${session.messages.length} messages)`);
+          }
+        } else {
+          console.log('[SessionManager] Skipping session load - chatHistory already has messages (read-only mode)');
         }
       } catch (error) {
         if (!cancelled) {
