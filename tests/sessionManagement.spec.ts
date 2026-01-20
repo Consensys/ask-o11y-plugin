@@ -75,8 +75,8 @@ test.describe('Session Management', () => {
     // Storage indicator should be visible (shows "X% storage used")
     await expect(page.getByText(/storage used/)).toBeVisible();
 
-    // Close sidebar using the backdrop
-    await page.locator('.bg-black\\/50').click({ force: true });
+    // Close sidebar using the close button
+    await page.locator('button[title="Close"]').click();
   });
 
   test('should show empty state when no sessions exist', async ({ page }) => {
@@ -89,13 +89,13 @@ test.describe('Session Management', () => {
 
     // Check for either empty state or session list
     const emptyStateMessage = page.getByText('No saved conversations yet');
-    const sessionsList = page.locator('[class*="space-y-1"]');
+    const sessionsList = page.locator('[class*="space-y-0.5"]');
 
     // At least one of these should be visible
     await expect(emptyStateMessage.or(sessionsList)).toBeVisible();
 
-    // Close sidebar using the backdrop
-    await page.locator('.bg-black\\/50').click({ force: true });
+    // Close sidebar using the close button
+    await page.locator('button[title="Close"]').click();
   });
 
   test('should close sidebar by clicking backdrop', async ({ page }) => {
@@ -106,10 +106,10 @@ test.describe('Session Management', () => {
     // Wait for sidebar to open
     await expect(page.getByRole('heading', { name: 'Chat History' })).toBeVisible();
 
-    // Click the backdrop (the black overlay area)
-    // The backdrop is the first child div with bg-black/50 class
-    const backdrop = page.locator('.bg-black\\/50');
-    await backdrop.click({ force: true });
+    // Click the backdrop (the overlay div that covers the screen)
+    // The backdrop is the first absolute inset-0 div in the sidebar container
+    const backdrop = page.locator('.fixed.inset-0 > div.absolute.inset-0').first();
+    await backdrop.click();
 
     // The sidebar should be closed
     await expect(page.getByRole('heading', { name: 'Chat History' })).not.toBeVisible();
@@ -141,6 +141,9 @@ test.describe('Session Management', () => {
     // Wait for the user message to appear in chat
     await expect(page.getByText('Hello, test for history')).toBeVisible();
 
+    // Wait for chat input to become enabled again (wait for isGenerating to be false)
+    await expect(chatInput).toBeEnabled({ timeout: 30000 });
+
     // Click the History button in the header
     const historyButtonInHeader = page.getByRole('button', { name: /History/i });
     await historyButtonInHeader.click();
@@ -148,8 +151,8 @@ test.describe('Session Management', () => {
     // The sidebar should now be visible
     await expect(page.getByRole('heading', { name: 'Chat History' })).toBeVisible();
 
-    // Close the sidebar using the backdrop
-    await page.locator('.bg-black\\/50').click({ force: true });
+    // Close the sidebar using the close button
+    await page.locator('button[title="Close"]').click();
     await expect(page.getByRole('heading', { name: 'Chat History' })).not.toBeVisible();
   });
 
@@ -205,8 +208,8 @@ test.describe('Session Management', () => {
     await expect(page.getByRole('heading', { name: 'Import Session' })).not.toBeVisible();
     await expect(page.getByRole('heading', { name: 'Chat History' })).toBeVisible();
 
-    // Close the sidebar using the backdrop
-    await page.locator('.bg-black\\/50').click({ force: true });
+    // Close the sidebar using the close button
+    await page.locator('button[title="Close"]').click();
   });
 });
 

@@ -139,8 +139,8 @@ test.describe('Chat Interactions', () => {
     const chatMessages = page.locator('[role="log"]');
     await expect(chatMessages.getByText('First test message')).toBeVisible();
 
-    // Wait a bit for the response
-    await page.waitForTimeout(1000);
+    // Wait for chat input to become enabled again (wait for isGenerating to be false)
+    await expect(chatInput).toBeEnabled({ timeout: 30000 });
 
     // Send second message
     await chatInput.fill('Second test message');
