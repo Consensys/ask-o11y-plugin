@@ -58,3 +58,6 @@ ci/
 # Grafana plugin
 consensys-asko11y-app/
 consensys-asko11y-app.zip
+
+# Cursor plan file
+.cursor/plans/
