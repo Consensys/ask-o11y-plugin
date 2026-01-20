@@ -1,0 +1,1 @@
+"use strict";(self.webpackChunkconsensys_asko11y_app=self.webpackChunkconsensys_asko11y_app||[]).push([[9760],{59760(s,e,c){c.d(e,{createArchitectureServices:()=>a.S});var a=c(85878);c(12827)}}]);

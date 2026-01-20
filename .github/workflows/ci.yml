@@ -60,3 +60,33 @@ jobs:
         with:
           version: latest
           args: test
+
+      - name: Get plugin metadata
+        id: metadata
+        run: |
+          sudo apt-get update && sudo apt-get install -y jq
+          
+          export GRAFANA_PLUGIN_ID=$(cat dist/plugin.json | jq -r .id)
+          export GRAFANA_PLUGIN_VERSION=$(cat dist/plugin.json | jq -r .info.version)
+          export GRAFANA_PLUGIN_TYPE=$(cat dist/plugin.json | jq -r .type)
+          export GRAFANA_PLUGIN_ARTIFACT=${GRAFANA_PLUGIN_ID}-${GRAFANA_PLUGIN_VERSION}.zip
+          
+          echo "plugin-id=${GRAFANA_PLUGIN_ID}" >> $GITHUB_OUTPUT
+          echo "plugin-version=${GRAFANA_PLUGIN_VERSION}" >> $GITHUB_OUTPUT
+          echo "plugin-type=${GRAFANA_PLUGIN_TYPE}" >> $GITHUB_OUTPUT
+          echo "archive=${GRAFANA_PLUGIN_ARTIFACT}" >> $GITHUB_OUTPUT
+
+      - name: Package plugin
+        id: package-plugin
+        run: |
+          mv dist $PLUGIN_ID
+          zip $PLUGIN_ARCHIVE $PLUGIN_ID -r
+        env:
+          PLUGIN_ID: ${{ steps.metadata.outputs.plugin-id }}
+          PLUGIN_ARCHIVE: ${{ steps.metadata.outputs.archive }}
+
+      - name: Validate plugin
+        run: |
+          npx -y @grafana/plugin-validator@latest -sourceCodeUri file://./ $PLUGIN_ARCHIVE
+        env:
+          PLUGIN_ARCHIVE: ${{ steps.metadata.outputs.archive }}
