@@ -37,7 +37,8 @@ export interface UseSessionManagerReturn {
 export const useSessionManager = (
   orgId: string,
   chatHistory: ChatMessage[],
-  setChatHistory: React.Dispatch<React.SetStateAction<ChatMessage[]>>
+  setChatHistory: React.Dispatch<React.SetStateAction<ChatMessage[]>>,
+  readOnly?: boolean
 ): UseSessionManagerReturn => {
   // Get Grafana user storage (automatically falls back to localStorage when user is not signed in)
   const storage = usePluginUserStorage();
@@ -321,8 +322,14 @@ export const useSessionManager = (
 
   /**
    * Auto-save whenever chat history changes
+   * Skip auto-save in read-only mode (e.g., when viewing shared sessions)
    */
   useEffect(() => {
+    if (readOnly) {
+      console.log('[SessionManager] Skipping auto-save - read-only mode');
+      return;
+    }
+
     if (chatHistory.length > 0) {
       autoSaveMessages(chatHistory);
 
@@ -331,7 +338,7 @@ export const useSessionManager = (
         triggerSummarization(chatHistory);
       }
     }
-  }, [chatHistory, autoSaveMessages, triggerSummarization]);
+  }, [chatHistory, autoSaveMessages, triggerSummarization, readOnly]);
 
   /**
    * Cleanup on unmount

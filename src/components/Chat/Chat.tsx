@@ -141,7 +141,7 @@ function ChatComponent({ pluginSettings, readOnly = false, initialSession }: Cha
     sessionManager,
     bottomSpacerRef,
     detectedPageRefs,
-  } = useChat(pluginSettings, readOnly ? initialSession : undefined);
+  } = useChat(pluginSettings, readOnly ? initialSession : undefined, readOnly);
 
   const chatInputRef = useRef<ChatInputRef>(null);
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
