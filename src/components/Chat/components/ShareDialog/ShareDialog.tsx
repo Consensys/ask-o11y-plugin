@@ -14,7 +14,6 @@ interface ShareDialogProps {
 
 export function ShareDialog({ sessionId, session, onClose, existingShares = [] }: ShareDialogProps) {
   const [expiresInDays, setExpiresInDays] = useState<number | undefined>(undefined);
-  const [customDays, setCustomDays] = useState<string>('');
   const [isCreating, setIsCreating] = useState(false);
   const [createdShare, setCreatedShare] = useState<CreateShareResponse | null>(null);
   const [shares, setShares] = useState<CreateShareResponse[]>(existingShares);
@@ -40,20 +39,7 @@ export function ShareDialog({ sessionId, session, onClose, existingShares = [] }
   const handleCreateShare = async () => {
     setIsCreating(true);
     try {
-      let expiresDays: number | undefined = expiresInDays;
-      
-      // Handle custom days
-      if (expiresInDays === -1 && customDays) {
-        const days = parseInt(customDays, 10);
-        if (isNaN(days) || days <= 0) {
-          alert('Please enter a valid number of days');
-          setIsCreating(false);
-          return;
-        }
-        expiresDays = days;
-      }
-
-      const share = await sessionShareService.createShare(sessionId, session, expiresDays);
+      const share = await sessionShareService.createShare(sessionId, session, expiresInDays);
       setCreatedShare(share);
       await loadShares(); // Refresh shares list
     } catch (error) {
@@ -97,9 +83,7 @@ export function ShareDialog({ sessionId, session, onClose, existingShares = [] }
     { label: '7 days', value: 7 },
     { label: '30 days', value: 30 },
     { label: '90 days', value: 90 },
-    { label: 'Custom', value: -1 },
   ];
-
 
   return (
     <Modal title="Share Session" isOpen={true} onDismiss={onClose}>
@@ -147,24 +131,10 @@ export function ShareDialog({ sessionId, session, onClose, existingShares = [] }
                 onChange={(option) => {
                   if (option) {
                     setExpiresInDays(option.value === null ? undefined : (option.value as number));
-                    if (option.value !== -1) {
-                      setCustomDays('');
-                    }
                   }
                 }}
                 placeholder="Select expiration"
               />
-              {expiresInDays === -1 && (
-                <div className="mt-1.5">
-                  <Input
-                    type="number"
-                    placeholder="Enter number of days"
-                    value={customDays}
-                    onChange={(e) => setCustomDays(e.currentTarget.value)}
-                    min={1}
-                  />
-                </div>
-              )}
             </div>
 
             <div className="p-2 bg-secondary rounded text-xs text-secondary">

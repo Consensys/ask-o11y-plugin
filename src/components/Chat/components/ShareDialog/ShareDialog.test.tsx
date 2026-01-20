@@ -53,7 +53,7 @@ jest.mock('@grafana/ui', () => ({
       onChange={onChange}
       placeholder={placeholder}
       min={min}
-      data-testid="custom-days-input"
+      data-testid="share-url-input"
     />
   ),
   ClipboardButton: ({ children, getText }: any) => (
@@ -147,7 +147,7 @@ describe('ShareDialog', () => {
     });
   });
 
-  it('should handle custom expiry days', async () => {
+  it('should create a share with no expiration', async () => {
     const mockShare = {
       shareId: 'new-share-id',
       shareUrl: '/a/consensys-asko11y-app/shared/new-share-id',
@@ -158,25 +158,12 @@ describe('ShareDialog', () => {
 
     render(<ShareDialog sessionId="session-123" session={mockSession} onClose={jest.fn()} />);
 
-    // Select custom option
-    const select = screen.getByTestId('expiry-select');
-    fireEvent.change(select, { target: { value: '-1' } });
-
-    // Wait for custom input to appear
-    await waitFor(() => {
-      expect(screen.getByTestId('custom-days-input')).toBeInTheDocument();
-    });
-
-    // Enter custom days
-    const customInput = screen.getByTestId('custom-days-input');
-    fireEvent.change(customInput, { target: { value: '15' } });
-
-    // Click create share button
+    // Don't select any expiry option (defaults to undefined)
     const createButton = screen.getByText('Create Share');
     fireEvent.click(createButton);
 
     await waitFor(() => {
-      expect(sessionShareService.createShare).toHaveBeenCalledWith('session-123', mockSession, 15);
+      expect(sessionShareService.createShare).toHaveBeenCalledWith('session-123', mockSession, undefined);
     });
   });
 
