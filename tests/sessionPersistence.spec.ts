@@ -29,21 +29,29 @@ test.describe('Session Persistence Tests', () => {
     });
 
     await test.step('Verify session count increments', async () => {
-      // Wait for processing
-      await page.waitForTimeout(12000); // Wait for debounce (10s) + save/refresh (2s)
+      // Wait for chat input to become enabled (indicates message processing is done)
+      const chatInput = page.getByLabel('Chat input');
+      await expect(chatInput).toBeEnabled({ timeout: 30000 });
+
+      // Wait for auto-save debounce (10s) + a bit more for refresh
+      await page.waitForTimeout(12000);
 
       // Open sidebar and check session count
       await page.getByRole('button', { name: /History/i }).click();
       await expect(page.getByRole('heading', { name: 'Chat History' })).toBeVisible();
 
       // Should have at least 1 session
-      await expect(page.getByText(/\d+ sessions/)).toBeVisible();
+      await expect(page.getByText(/\d+ sessions/)).toBeVisible({ timeout: 5000 });
 
-      // Close sidebar
-      await page.locator('.bg-black\\/50').click({ force: true });
+      // Close sidebar using the close button
+      await page.locator('button[title="Close"]').click();
     });
 
     await test.step('Load existing session from sidebar', async () => {
+      // Wait for chat input to become enabled
+      const chatInput = page.getByLabel('Chat input');
+      await expect(chatInput).toBeEnabled({ timeout: 30000 });
+
       // Create a new session
       await page.getByRole('button', { name: /New Chat/i }).click();
 
@@ -56,14 +64,15 @@ test.describe('Session Persistence Tests', () => {
       await page.getByText(/View chat history/).click();
       await expect(page.getByRole('heading', { name: 'Chat History' })).toBeVisible();
 
-      // Click on the existing session
-      const sessionItem = page.locator('.p-3.rounded.group').first();
-      if (await sessionItem.isVisible()) {
-        await sessionItem.click();
+      // Wait for session items to appear
+      const sessionItem = page.locator('.p-1\\.5.rounded.group').first();
+      await expect(sessionItem).toBeVisible({ timeout: 5000 });
 
-        // The old message should be visible again
-        await expect(page.locator('[role="log"]').getByText('Message to persist')).toBeVisible();
-      }
+      // Click on the existing session
+      await sessionItem.click();
+
+      // The old message should be visible again
+      await expect(page.locator('[role="log"]').getByText('Message to persist')).toBeVisible({ timeout: 5000 });
     });
   });
 
@@ -75,15 +84,18 @@ test.describe('Session Persistence Tests', () => {
     await page.getByLabel('Send message (Enter)').click();
     await expect(page.locator('[role="log"]').getByText('Session to delete')).toBeVisible();
 
-    // Wait for processing
-    await page.waitForTimeout(12000); // Wait for debounce (10s) + save/refresh (2s)
+    // Wait for chat input to become enabled (indicates message processing is done)
+    await expect(chatInput).toBeEnabled({ timeout: 30000 });
+
+    // Wait for auto-save debounce (10s) + a bit more for refresh
+    await page.waitForTimeout(12000);
 
     // Open sidebar
     await page.getByRole('button', { name: /History/i }).click();
     await expect(page.getByRole('heading', { name: 'Chat History' })).toBeVisible();
 
     // Find delete button in session item
-    const sessionItem = page.locator('.p-3.rounded.group').first();
+    const sessionItem = page.locator('.p-1\\.5.rounded.group').first();
     if (await sessionItem.isVisible()) {
       // Hover to reveal delete button
       await sessionItem.hover();
@@ -109,8 +121,11 @@ test.describe('Session Persistence Tests', () => {
       await page.getByLabel('Send message (Enter)').click();
       await expect(page.locator('[role="log"]').getByText('What is Grafana used for?')).toBeVisible();
 
-      // Wait for processing
-      await page.waitForTimeout(12000); // Wait for debounce (10s) + save/refresh (2s)
+      // Wait for chat input to become enabled (indicates message processing is done)
+      await expect(chatInput).toBeEnabled({ timeout: 30000 });
+
+      // Wait for auto-save debounce (10s) + a bit more for refresh
+      await page.waitForTimeout(12000);
     });
 
     await test.step('Verify title and metadata in sidebar', async () => {
@@ -120,7 +135,7 @@ test.describe('Session Persistence Tests', () => {
 
       // Get the first session item
       // Wait for session item to appear (with timeout accounting for debounce)
-      const firstSessionItem = page.locator('.p-3.rounded.group').first();
+      const firstSessionItem = page.locator('.p-1\\.5.rounded.group').first();
       await expect(firstSessionItem).toBeVisible({ timeout: 15000 });
 
       // The session should have a title related to the message
@@ -161,15 +176,18 @@ test.describe('Session Export/Import', () => {
     await page.getByLabel('Send message (Enter)').click();
     await expect(page.locator('[role="log"]').getByText('Export test message')).toBeVisible();
 
-    // Wait for processing
-    await page.waitForTimeout(12000); // Wait for debounce (10s) + save/refresh (2s)
+    // Wait for chat input to become enabled (indicates message processing is done)
+    await expect(chatInput).toBeEnabled({ timeout: 30000 });
+
+    // Wait for auto-save debounce (10s) + a bit more for refresh
+    await page.waitForTimeout(12000);
 
     // Open sidebar
     await page.getByRole('button', { name: /History/i }).click();
     await expect(page.getByRole('heading', { name: 'Chat History' })).toBeVisible();
 
     // Hover over session item to reveal actions
-    const sessionItem = page.locator('.p-3.rounded.group').first();
+    const sessionItem = page.locator('.p-1\\.5.rounded.group').first();
     if (await sessionItem.isVisible()) {
       await sessionItem.hover();
 

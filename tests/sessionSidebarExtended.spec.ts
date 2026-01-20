@@ -35,7 +35,10 @@ test.describe('Session Sidebar Extended', () => {
       // Wait for message to appear
       await expect(page.getByText('Test message for session')).toBeVisible();
 
-      // Wait for debounce (10s) + save/refresh (2s)
+      // Wait for chat input to become enabled (indicates message processing is done)
+      await expect(chatInput).toBeEnabled({ timeout: 30000 });
+
+      // Wait for auto-save debounce (10s) + a bit more for refresh
       await page.waitForTimeout(12000);
 
       // Open the sidebar
@@ -49,7 +52,7 @@ test.describe('Session Sidebar Extended', () => {
     await test.step('Verify date formatting in sidebar', async () => {
       // Get the first session item
       // Wait for session item to appear (with timeout accounting for debounce)
-      const firstSessionItem = page.locator('.p-3.rounded.group').first();
+      const firstSessionItem = page.locator('.p-1\\.5.rounded.group').first();
       await expect(firstSessionItem).toBeVisible({ timeout: 15000 });
 
       // There should be date text like "Today", "Yesterday", or a date - only within the first session item
@@ -60,7 +63,7 @@ test.describe('Session Sidebar Extended', () => {
 
     await test.step('Verify message count for session', async () => {
       // Get the first session item
-      const firstSessionItem = page.locator('.p-3.rounded.group').first();
+      const firstSessionItem = page.locator('.p-1\\.5.rounded.group').first();
       await expect(firstSessionItem).toBeVisible();
 
       // Should show message count - only within the first session item
@@ -70,13 +73,13 @@ test.describe('Session Sidebar Extended', () => {
     await test.step('Verify active session indicator', async () => {
       // The current session should have some visual indication (blue styling)
       // Check for a session item that might have active styling
-      const sessionItems = page.locator('.p-3.rounded.group');
+      const sessionItems = page.locator('.p-1\\.5.rounded.group');
       await expect(sessionItems.first()).toBeVisible();
     });
 
     await test.step('Close sidebar', async () => {
-      // Close sidebar
-      await page.locator('.bg-black\\/50').click({ force: true });
+      // Close sidebar using the close button
+      await page.locator('button[title="Close"]').click();
     });
   });
 
@@ -137,8 +140,8 @@ test.describe('Session Sidebar Extended', () => {
     const focusedElement = page.locator(':focus');
     await expect(focusedElement).toBeVisible();
 
-    // Close sidebar
-    await page.locator('.bg-black\\/50').click({ force: true });
+    // Close sidebar using the close button
+    await page.locator('button[title="Close"]').click();
   });
 });
 
@@ -195,7 +198,10 @@ test.describe('Session Interactions After Chat', () => {
       await page.getByLabel('Send message (Enter)').click();
       await expect(page.getByText('Second session message')).toBeVisible();
 
-      // Wait for debounce (10s) + save/refresh (2s) before checking sidebar
+      // Wait for chat input to become enabled (indicates message processing is done)
+      await expect(chatInput).toBeEnabled({ timeout: 30000 });
+
+      // Wait for auto-save debounce (10s) + a bit more for refresh
       await page.waitForTimeout(12000);
 
       // Open sidebar
@@ -204,13 +210,13 @@ test.describe('Session Interactions After Chat', () => {
       await expect(page.getByRole('heading', { name: 'Chat History' })).toBeVisible();
 
       // Wait for session items to appear
-      const sessionItems = page.locator('.p-3.rounded.group');
+      const sessionItems = page.locator('.p-1\\.5.rounded.group');
       await expect(sessionItems.first()).toBeVisible({ timeout: 15000 });
       const sessionCount = await sessionItems.count();
       expect(sessionCount).toBeGreaterThanOrEqual(1);
 
-      // Close sidebar
-      await page.locator('.bg-black\\/50').click({ force: true });
+      // Close sidebar using the close button
+      await page.locator('button[title="Close"]').click();
     });
   });
 });
