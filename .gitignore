@@ -53,3 +53,8 @@ ci/
 .env.local
 .env.development
 .env.production
+
+
+# Grafana plugin
+consensys-asko11y-app/
+consensys-asko11y-app.zip
