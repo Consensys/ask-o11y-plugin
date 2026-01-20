@@ -36,8 +36,8 @@ const buildEffectiveSystemPrompt = (
   }
 };
 
-export const useChat = (pluginSettings: AppPluginSettings, initialSession?: ChatSession) => {
-  console.log('[useChat] Hook initialized');
+export const useChat = (pluginSettings: AppPluginSettings, initialSession?: ChatSession, readOnly?: boolean) => {
+  console.log('[useChat] Hook initialized', { readOnly, hasInitialSession: !!initialSession });
 
   // Get organization ID from Grafana config
   const orgId = String(config.bootData.user.orgId || '1');
@@ -86,7 +86,7 @@ export const useChat = (pluginSettings: AppPluginSettings, initialSession?: Chat
   );
 
   // Session management with persistence
-  const sessionManager = useSessionManager(orgId, chatHistory, setChatHistory);
+  const sessionManager = useSessionManager(orgId, chatHistory, setChatHistory, readOnly);
 
   // Auto-scroll when chat history changes (only if auto-scroll is enabled)
   useEffect(() => {
