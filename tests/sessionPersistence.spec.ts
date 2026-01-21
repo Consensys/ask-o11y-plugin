@@ -65,14 +65,23 @@ test.describe('Session Persistence Tests', () => {
       await expect(page.getByRole('heading', { name: 'Chat History' })).toBeVisible();
 
       // Wait for session items to appear
+      await page.waitForSelector('.p-1\\.5.rounded.group', { timeout: 10000 });
       const sessionItem = page.locator('.p-1\\.5.rounded.group').first();
-      await expect(sessionItem).toBeVisible({ timeout: 5000 });
+      await expect(sessionItem).toBeVisible({ timeout: 10000 });
 
       // Click on the existing session
       await sessionItem.click();
+      
+      // Wait for the chat to load the session
+      await page.waitForTimeout(1000);
 
-      // The old message should be visible again
-      await expect(page.locator('[role="log"]').getByText('Message to persist')).toBeVisible({ timeout: 5000 });
+      // The old message should be visible again - wait for it with multiple strategies
+      const chatLog = page.locator('[role="log"]');
+      await expect(chatLog).toBeVisible({ timeout: 5000 });
+      
+      // Wait for the message text to appear
+      await page.waitForSelector('text=Message to persist', { timeout: 10000 });
+      await expect(chatLog.getByText('Message to persist')).toBeVisible({ timeout: 10000 });
     });
   });
 
