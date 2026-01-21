@@ -23,7 +23,16 @@ type ShareMetadata struct {
 	SessionData []byte    `json:"sessionData"` // JSON snapshot of session
 }
 
-// ShareStore manages share metadata storage
+// ShareStoreInterface defines the interface for share storage implementations
+type ShareStoreInterface interface {
+	CreateShare(sessionID string, sessionData []byte, orgID, userID int64, expiresInDays *int) (*ShareMetadata, error)
+	GetShare(shareID string) (*ShareMetadata, error)
+	DeleteShare(shareID string) error
+	GetSharesBySession(sessionID string) []*ShareMetadata
+	CleanupExpired()
+}
+
+// ShareStore manages share metadata storage (in-memory implementation)
 type ShareStore struct {
 	mu        sync.RWMutex
 	shares    map[string]*ShareMetadata // keyed by shareId

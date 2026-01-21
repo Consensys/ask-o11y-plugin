@@ -8,6 +8,8 @@ import (
 	"hash/fnv"
 	"io"
 	"net/http"
+	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -15,6 +17,7 @@ import (
 	"github.com/grafana/grafana-plugin-sdk-go/backend/instancemgmt"
 	"github.com/grafana/grafana-plugin-sdk-go/backend/log"
 	"github.com/grafana/grafana-plugin-sdk-go/backend/resource/httpadapter"
+	"github.com/redis/go-redis/v9"
 )
 
 // Make sure Plugin implements required interfaces
@@ -23,6 +26,62 @@ var (
 	_ instancemgmt.InstanceDisposer = (*Plugin)(nil)
 	_ backend.CheckHealthHandler    = (*Plugin)(nil)
 )
+
+// RedisConfig holds Redis connection configuration
+type RedisConfig struct {
+	Addr     string
+	Password string
+	DB       int
+}
+
+// getRedisAddr returns the Redis address from environment variables
+func getRedisAddr() string {
+	if addr := os.Getenv("REDIS_ADDR"); addr != "" {
+		return addr
+	}
+	return "localhost:6379"
+}
+
+// createRedisClient creates a Redis client from environment variables
+func createRedisClient(logger log.Logger) (*redis.Client, error) {
+	// Try GF_PLUGIN_ASKO11Y_REDIS first (full connection string)
+	redisURL := os.Getenv("GF_PLUGIN_ASKO11Y_REDIS")
+	if redisURL != "" {
+		opt, err := redis.ParseURL(redisURL)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse GF_PLUGIN_ASKO11Y_REDIS: %w", err)
+		}
+		logger.Info("Using Redis connection from GF_PLUGIN_ASKO11Y_REDIS")
+		return redis.NewClient(opt), nil
+	}
+
+	// Fall back to individual environment variables
+	addr := getRedisAddr()
+	password := os.Getenv("REDIS_PASSWORD")
+	
+	db := 0
+	if dbStr := os.Getenv("REDIS_DB"); dbStr != "" {
+		var err error
+		db, err = strconv.Atoi(dbStr)
+		if err != nil {
+			logger.Warn("Invalid REDIS_DB value, using default 0", "value", dbStr, "error", err)
+			db = 0
+		}
+	}
+
+	opt := &redis.Options{
+		Addr:     addr,
+		Password: password,
+		DB:       db,
+	}
+
+	logger.Info("Using Redis connection from individual environment variables",
+		"addr", addr,
+		"db", db,
+		"hasPassword", password != "")
+
+	return redis.NewClient(opt), nil
+}
 
 // PluginSettings represents the plugin configuration
 type PluginSettings struct {
@@ -34,7 +93,9 @@ type Plugin struct {
 	backend.CallResourceHandler
 	logger     log.Logger
 	mcpProxy   *mcp.Proxy
-	shareStore *ShareStore
+	shareStore ShareStoreInterface
+	redisClient *redis.Client // Store Redis client for health checks and cleanup
+	usingRedis bool           // Track if we're using Redis or in-memory
 }
 
 // NewPlugin creates a new backend plugin instance
@@ -57,28 +118,58 @@ func NewPlugin(ctx context.Context, settings backend.AppInstanceSettings) (insta
 	// Start health monitoring with 30 second intervals
 	mcpProxy.StartHealthMonitoring(30 * time.Second)
 
-	// Create share store
-	shareStore := NewShareStore(logger)
+	// Try to create Redis-backed share store, fallback to in-memory
+	var shareStore ShareStoreInterface
+	var redisClient *redis.Client
+	usingRedis := false
 
-	p := &Plugin{
-		logger:     logger,
-		mcpProxy:   mcpProxy,
-		shareStore: shareStore,
+	redisClient, err := createRedisClient(logger)
+	if err == nil {
+		// Test connection
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := redisClient.Ping(ctx).Err(); err == nil {
+			shareStore = NewRedisShareStore(redisClient, logger)
+			usingRedis = true
+			logger.Info("Using Redis for session sharing", "redisAddr", getRedisAddr())
+		} else {
+			logger.Warn("Redis connection test failed, falling back to in-memory storage", "error", err)
+			redisClient.Close()
+			redisClient = nil
+		}
+	} else {
+		logger.Warn("Failed to create Redis client, falling back to in-memory storage", "error", err)
 	}
 
-	// Start cleanup goroutine for expired shares
-	go func() {
-		ticker := time.NewTicker(1 * time.Hour) // Run every hour
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ticker.C:
-				shareStore.CleanupExpired()
-			case <-ctx.Done():
-				return
+	// Fallback to in-memory store if Redis is not available
+	if !usingRedis {
+		shareStore = NewShareStore(logger)
+		logger.Info("Using in-memory storage for session sharing (not suitable for multi-replica deployments)")
+	}
+
+	p := &Plugin{
+		logger:      logger,
+		mcpProxy:    mcpProxy,
+		shareStore:  shareStore,
+		redisClient: redisClient,
+		usingRedis:  usingRedis,
+	}
+
+	// Start cleanup goroutine for expired shares (only needed for in-memory store)
+	if !usingRedis {
+		go func() {
+			ticker := time.NewTicker(1 * time.Hour) // Run every hour
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ticker.C:
+					shareStore.CleanupExpired()
+				case <-ctx.Done():
+					return
+				}
 			}
-		}
-	}()
+		}()
+	}
 
 	// Setup resource handler using httpadapter
 	mux := http.NewServeMux()
@@ -95,6 +186,11 @@ func NewPlugin(ctx context.Context, settings backend.AppInstanceSettings) (insta
 // Dispose cleans up plugin resources
 func (p *Plugin) Dispose() {
 	p.mcpProxy.StopHealthMonitoring()
+	if p.redisClient != nil {
+		if err := p.redisClient.Close(); err != nil {
+			p.logger.Warn("Failed to close Redis client", "error", err)
+		}
+	}
 	p.logger.Info("Plugin disposed")
 }
 
@@ -103,10 +199,27 @@ func (p *Plugin) CheckHealth(ctx context.Context, req *backend.CheckHealthReques
 	p.logger.Info("CheckHealth called")
 
 	serverCount := p.mcpProxy.GetServerCount()
+	status := backend.HealthStatusOk
 	message := fmt.Sprintf("Plugin is healthy (MCP servers: %d)", serverCount)
 
+	// Check Redis connection if using Redis
+	if p.usingRedis && p.redisClient != nil {
+		healthCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+		defer cancel()
+		if err := p.redisClient.Ping(healthCtx).Err(); err != nil {
+			// Plugin is still functional, but Redis is down - use warning message
+			message = fmt.Sprintf("Plugin is healthy but Redis connection failed (MCP servers: %d). Session sharing may not work across replicas.", serverCount)
+			p.logger.Warn("Redis health check failed", "error", err)
+		} else {
+			message = fmt.Sprintf("Plugin is healthy (MCP servers: %d, Redis: connected)", serverCount)
+		}
+	} else if !p.usingRedis {
+		// Plugin is functional but using in-memory storage - include warning in message
+		message = fmt.Sprintf("Plugin is healthy but using in-memory storage (MCP servers: %d). Session sharing will not work across multiple Grafana replicas. Configure Redis for production.", serverCount)
+	}
+
 	return &backend.CheckHealthResult{
-		Status:  backend.HealthStatusOk,
+		Status:  status,
 		Message: message,
 	}, nil
 }

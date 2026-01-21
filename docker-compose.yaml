@@ -1,4 +1,17 @@
 services:
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "127.0.0.1:6379:6379"
+    command: redis-server --appendonly yes
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
   grafana:
     extends:
       file: .config/docker-compose-base.yaml
@@ -9,6 +22,10 @@ services:
       GF_AUTH_ANONYMOUS_ENABLED: false
       GF_SECURITY_ALLOW_EMBEDDING: true
       LLM_API_KEY: ${LLM_API_KEY:-}
+      GF_PLUGIN_ASKO11Y_REDIS: ${GF_PLUGIN_ASKO11Y_REDIS:-redis://redis:6379/0}
+    depends_on:
+      redis:
+        condition: service_healthy
 
   mcp-grafana:
     image: grafana/mcp-grafana
@@ -54,4 +71,7 @@ services:
       --config /mcpo/config.json
     depends_on:
       - mcp-grafana
+
+volumes:
+  redis-data:
 
