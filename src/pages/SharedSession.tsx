@@ -29,6 +29,20 @@ export function SharedSession() {
     const loadSharedSession = async () => {
       try {
         const session = await sessionShareService.getSharedSession(shareId);
+        console.log('[SharedSession] Loaded shared session', { 
+          id: session.id, 
+          title: session.title,
+          messageCount: session.messages?.length || 0 
+        });
+        
+        // Validate that we have messages
+        if (!session.messages || session.messages.length === 0) {
+          console.error('[SharedSession] Shared session has no messages');
+          setError('This shared session has no messages.');
+          setLoading(false);
+          return;
+        }
+        
         setSharedSession(session);
       } catch (err: any) {
         console.error('[SharedSession] Failed to load shared session:', err);
@@ -113,18 +127,59 @@ export function SharedSession() {
   }
 
   // Convert shared session to ChatSession for display
-  const messages: ChatMessage[] = sharedSession.messages.map((msg: any) => ({
-    ...msg,
-    timestamp: new Date(msg.timestamp || Date.now()),
-  }));
+  // Ensure messages are properly formatted
+  const messages: ChatMessage[] = (sharedSession.messages || []).map((msg: any) => {
+    // Handle both string and Date timestamps
+    let timestamp: Date;
+    if (msg.timestamp) {
+      timestamp = typeof msg.timestamp === 'string' ? new Date(msg.timestamp) : new Date(msg.timestamp);
+    } else {
+      timestamp = new Date();
+    }
+    
+    return {
+      ...msg,
+      timestamp,
+    };
+  });
+
+  console.log('[SharedSession] Rendering with messages', {
+    messageCount: messages.length,
+    sessionId: sharedSession.id,
+    firstMessage: messages[0]?.content?.substring(0, 50)
+  });
+
+  // Validate we have messages before creating session
+  if (messages.length === 0) {
+    return (
+      <div className="min-h-full w-full flex items-center justify-center p-4">
+        <div className="max-w-md w-full">
+          <Alert title="Error" severity="error">
+            This shared session has no messages.
+          </Alert>
+          <div className="mt-4">
+            <Button variant="primary" onClick={() => navigate('/')}>
+              Go to Home
+            </Button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   const session = ChatSession.fromStorage({
     id: sharedSession.id,
-    title: sharedSession.title,
+    title: sharedSession.title || 'Shared Session',
     messages: messages,
     createdAt: sharedSession.createdAt,
     updatedAt: sharedSession.updatedAt,
     messageCount: messages.length,
+  });
+
+  console.log('[SharedSession] Created session object', {
+    sessionId: session.id,
+    messageCount: session.messages.length,
+    hasInitialSession: true
   });
 
   // Empty plugin settings for read-only mode

@@ -64,10 +64,21 @@ export const useSessionManager = (
   
   // Capture initial chatHistory length to check if we should load current session
   // This avoids including chatHistory in the dependency array which causes re-runs
-  // Update the ref when orgId changes to capture the new initial state
+  // IMPORTANT: Capture the initial length immediately when the hook is called
+  // This ensures read-only mode with initialSession is detected correctly
   const initialChatHistoryLengthRef = useRef<number>(chatHistory.length);
+  
+  // Update the ref when orgId changes to capture the new initial state
+  // But preserve the initial value if chatHistory already had messages (read-only mode)
   useEffect(() => {
-    initialChatHistoryLengthRef.current = chatHistory.length;
+    // Only update if we haven't captured an initial value with messages yet
+    // This prevents overwriting the initial state when orgId changes in read-only mode
+    if (initialChatHistoryLengthRef.current === 0 && chatHistory.length > 0) {
+      initialChatHistoryLengthRef.current = chatHistory.length;
+    } else if (chatHistory.length === 0) {
+      // Reset if chatHistory becomes empty (new session)
+      initialChatHistoryLengthRef.current = 0;
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [orgId]); // Only update when orgId changes, not on every chatHistory change
 
