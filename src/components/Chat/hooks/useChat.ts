@@ -37,7 +37,11 @@ const buildEffectiveSystemPrompt = (
 };
 
 export const useChat = (pluginSettings: AppPluginSettings, initialSession?: ChatSession, readOnly?: boolean) => {
-  console.log('[useChat] Hook initialized', { readOnly, hasInitialSession: !!initialSession });
+  console.log('[useChat] Hook initialized', { 
+    readOnly, 
+    hasInitialSession: !!initialSession,
+    initialMessageCount: initialSession?.messages?.length || 0
+  });
 
   // Get organization ID from Grafana config
   const orgId = String(config.bootData.user.orgId || '1');
@@ -51,9 +55,32 @@ export const useChat = (pluginSettings: AppPluginSettings, initialSession?: Chat
     [systemPromptMode, customSystemPrompt]
   );
 
-  const [chatHistory, setChatHistory] = useState<ChatMessage[]>(
-    initialSession ? initialSession.messages : []
-  );
+  // Initialize chat history with initial session messages if provided
+  // Ensure messages array exists and is not empty
+  const initialMessages = initialSession?.messages || [];
+  const [chatHistory, setChatHistory] = useState<ChatMessage[]>(initialMessages);
+  
+  // Update chatHistory when initialSession changes (e.g., when SharedSession loads)
+  // Use a ref to track if we've already initialized to avoid unnecessary updates
+  const hasInitializedRef = useRef(false);
+  useEffect(() => {
+    // Only update if we have an initialSession with messages and haven't initialized yet
+    // or if the message count changed (session was updated)
+    if (initialSession?.messages && initialSession.messages.length > 0) {
+      const shouldUpdate = !hasInitializedRef.current || 
+                          chatHistory.length !== initialSession.messages.length;
+      
+      if (shouldUpdate) {
+        console.log('[useChat] Updating chatHistory from initialSession', { 
+          messageCount: initialSession.messages.length,
+          firstMessage: initialSession.messages[0]?.content?.substring(0, 50),
+          currentHistoryLength: chatHistory.length
+        });
+        setChatHistory(initialSession.messages);
+        hasInitializedRef.current = true;
+      }
+    }
+  }, [initialSession?.messages?.length, initialSession?.id]); // Only depend on length and id, not the whole object
   const [currentInput, setCurrentInput] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
   const chatContainerRef = useRef<HTMLDivElement>(null);

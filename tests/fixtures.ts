@@ -216,9 +216,10 @@ export async function deleteAllPersistedSessions(page: Page) {
 export async function resetRateLimits() {
   try {
     // First, get all rate limit keys
+    // Use --no-warnings to suppress warnings when no keys are found
     const keysOutput = execSync(
-      'docker compose exec -T redis redis-cli --scan --pattern "ratelimit:*"',
-      { encoding: 'utf-8', stdio: 'pipe', timeout: 5000 }
+      'docker compose exec -T redis redis-cli --scan --pattern "ratelimit:*" 2>/dev/null || true',
+      { encoding: 'utf-8', stdio: 'pipe', timeout: 5000, shell: '/bin/bash' }
     ).trim();
 
     // If there are keys, delete them
@@ -226,9 +227,11 @@ export async function resetRateLimits() {
       const keyList = keysOutput.split('\n').filter(k => k.trim());
       if (keyList.length > 0) {
         // Delete all rate limit keys at once
+        // Escape keys to handle special characters
+        const escapedKeys = keyList.map(k => `"${k}"`).join(' ');
         execSync(
-          `docker compose exec -T redis redis-cli DEL ${keyList.join(' ')}`,
-          { encoding: 'utf-8', stdio: 'pipe', timeout: 5000 }
+          `docker compose exec -T redis redis-cli DEL ${escapedKeys} 2>/dev/null || true`,
+          { encoding: 'utf-8', stdio: 'pipe', timeout: 5000, shell: '/bin/bash' }
         );
       }
     }

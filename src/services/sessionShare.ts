@@ -77,7 +77,7 @@ export class SessionShareService {
   async getSharedSession(shareId: string): Promise<SharedSession> {
     try {
       const response = await firstValueFrom(
-        getBackendSrv().fetch<SharedSession>({
+        getBackendSrv().fetch<any>({
           url: `${this.baseUrl}/api/sessions/shared/${shareId}`,
           method: 'GET',
           showErrorAlert: false,
@@ -88,9 +88,38 @@ export class SessionShareService {
         throw new Error('No response from backend');
       }
 
-      return response.data;
-    } catch (error) {
+      const data = response.data;
+      
+      // Ensure messages array exists and is properly formatted
+      if (!data.messages || !Array.isArray(data.messages)) {
+        console.error('[SessionShareService] Invalid session data format:', data);
+        throw new Error('Invalid session data: messages array is missing or invalid');
+      }
+
+      // Convert to SharedSession format, ensuring all required fields are present
+      const sharedSession: SharedSession = {
+        id: data.id || '',
+        title: data.title || 'Shared Session',
+        messages: data.messages || [],
+        createdAt: data.createdAt || new Date().toISOString(),
+        updatedAt: data.updatedAt || new Date().toISOString(),
+        isShared: true,
+        sharedBy: data.sharedBy,
+      };
+
+      console.log('[SessionShareService] Parsed shared session', {
+        id: sharedSession.id,
+        title: sharedSession.title,
+        messageCount: sharedSession.messages.length,
+      });
+
+      return sharedSession;
+    } catch (error: any) {
       console.error('[SessionShareService] Failed to get shared session:', error);
+      // Preserve status code if available
+      if (error?.status) {
+        error.status = error.status;
+      }
       throw error;
     }
   }

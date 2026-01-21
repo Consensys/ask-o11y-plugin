@@ -164,19 +164,35 @@ test.describe('Session Sharing', () => {
     });
 
     await test.step('Navigate to shared session URL', async () => {
-      // Navigate to the shared session
-      await page.goto(shareUrl);
+      // Ensure shareUrl is a full URL
+      let fullUrl = shareUrl;
+      if (!shareUrl.startsWith('http')) {
+        // If it's a relative URL, make it absolute
+        const baseUrl = page.url().split('/a/')[0];
+        fullUrl = baseUrl + shareUrl;
+      }
       
-      // Wait for shared session to load
+      // Navigate to the shared session
+      await page.goto(fullUrl);
+      
+      // Wait for shared session to load - check for loading state first
+      await expect(page.getByText('Loading shared session...').or(page.getByText('Viewing Shared Session'))).toBeVisible({ timeout: 10000 });
+      
+      // Wait for the actual shared session header (not just loading)
       await expect(page.getByText('Viewing Shared Session')).toBeVisible({ timeout: 10000 });
-      await expect(page.getByText('This is a shared session. You can view it or import it to your account.')).toBeVisible();
+      await expect(page.getByText('This is a shared session. You can view it or import it to your account.')).toBeVisible({ timeout: 5000 });
     });
 
     await test.step('Verify read-only mode', async () => {
-      // Wait for the shared session to fully load (ShareDialogWrapper loads the session)
-      await page.waitForTimeout(2000);
+      // Wait for the chat messages container to be visible
+      const chatLog = page.locator('[role="log"]');
+      await expect(chatLog).toBeVisible({ timeout: 10000 });
+      
+      // Wait a bit more for messages to render
+      await page.waitForTimeout(1000);
+      
       // Verify the message is visible
-      await expect(page.locator('[role="log"]').getByText('Message to be shared')).toBeVisible({ timeout: 15000 });
+      await expect(chatLog.getByText('Message to be shared')).toBeVisible({ timeout: 15000 });
 
       // Verify chat input is NOT visible (read-only mode)
       const chatInput = page.getByLabel('Chat input');
@@ -229,9 +245,24 @@ test.describe('Session Sharing', () => {
     });
 
     await test.step('Import the shared session', async () => {
+      // Ensure shareUrl is a full URL
+      let fullUrl = shareUrl;
+      if (!shareUrl.startsWith('http')) {
+        const baseUrl = page.url().split('/a/')[0];
+        fullUrl = baseUrl + shareUrl;
+      }
+      
       // Navigate to shared session
-      await page.goto(shareUrl);
+      await page.goto(fullUrl);
+      
+      // Wait for loading state first, then the actual content
+      await expect(page.getByText('Loading shared session...').or(page.getByText('Viewing Shared Session'))).toBeVisible({ timeout: 10000 });
       await expect(page.getByText('Viewing Shared Session')).toBeVisible({ timeout: 10000 });
+      
+      // Wait for messages to load
+      const chatLog = page.locator('[role="log"]');
+      await expect(chatLog).toBeVisible({ timeout: 10000 });
+      await page.waitForTimeout(1000);
 
       // Click import button
       const importButton = page.getByRole('button', { name: /Import as New Session/i });
