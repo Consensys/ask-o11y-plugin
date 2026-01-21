@@ -30,7 +30,6 @@ describe('useSessionManager - Read-only mode', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
-    jest.useFakeTimers();
 
     mockSetChatHistory = jest.fn();
 
@@ -43,8 +42,6 @@ describe('useSessionManager - Read-only mode', () => {
       updateSession: jest.fn().mockResolvedValue(undefined),
       deleteSession: jest.fn().mockResolvedValue(undefined),
       deleteAllSessions: jest.fn().mockResolvedValue(undefined),
-      exportSession: jest.fn().mockResolvedValue(null),
-      importSession: jest.fn().mockResolvedValue({ id: 'imported-1', title: 'Imported' }),
       setActiveSession: jest.fn().mockResolvedValue(undefined),
       clearActiveSession: jest.fn().mockResolvedValue(undefined),
       getStorageStats: jest.fn().mockResolvedValue({ used: 1024, total: 5242880, sessionCount: 0 }),
@@ -55,12 +52,8 @@ describe('useSessionManager - Read-only mode', () => {
     (ConversationMemoryService.summarizeMessages as jest.Mock) = jest.fn().mockResolvedValue('Test summary');
   });
 
-  afterEach(() => {
-    jest.useRealTimers();
-  });
-
-  it('should skip auto-save when readOnly is true', async () => {
-    renderHook(() =>
+  it('should skip save when readOnly is true', async () => {
+    const { result } = renderHook(() =>
       useSessionManager('test-org', mockMessages, mockSetChatHistory, true)
     );
 
@@ -69,18 +62,15 @@ describe('useSessionManager - Read-only mode', () => {
       expect(mockSessionService.getAllSessions).toHaveBeenCalled();
     });
 
-    // Fast-forward past the 10 second debounce timer
-    act(() => {
-      jest.advanceTimersByTime(11000);
+    // Try to save immediately
+    await act(async () => {
+      await result.current.saveImmediately(mockMessages);
     });
 
-    // Wait a bit for any async operations
-    await waitFor(() => {
-      // Verify that createSession was NOT called (no auto-save)
-      expect(mockSessionService.createSession).not.toHaveBeenCalled();
-      // Verify that updateSession was NOT called (no auto-save)
-      expect(mockSessionService.updateSession).not.toHaveBeenCalled();
-    });
+    // Verify that createSession was NOT called (no save in read-only mode)
+    expect(mockSessionService.createSession).not.toHaveBeenCalled();
+    // Verify that updateSession was NOT called (no save in read-only mode)
+    expect(mockSessionService.updateSession).not.toHaveBeenCalled();
   });
 
   it('should skip summarization when readOnly is true', async () => {
@@ -96,20 +86,12 @@ describe('useSessionManager - Read-only mode', () => {
       expect(mockSessionService.getAllSessions).toHaveBeenCalled();
     });
 
-    // Fast-forward past the 10 second debounce timer
-    act(() => {
-      jest.advanceTimersByTime(11000);
-    });
-
-    // Wait a bit for any async operations
-    await waitFor(() => {
-      // Verify that summarization was NOT triggered
-      expect(ConversationMemoryService.summarizeMessages).not.toHaveBeenCalled();
-    });
+    // Verify that summarization was NOT triggered (read-only mode skips summarization)
+    expect(ConversationMemoryService.summarizeMessages).not.toHaveBeenCalled();
   });
 
-  it('should NOT skip auto-save when readOnly is false', async () => {
-    renderHook(() =>
+  it('should NOT skip save when readOnly is false', async () => {
+    const { result } = renderHook(() =>
       useSessionManager('test-org', mockMessages, mockSetChatHistory, false)
     );
 
@@ -118,20 +100,17 @@ describe('useSessionManager - Read-only mode', () => {
       expect(mockSessionService.getAllSessions).toHaveBeenCalled();
     });
 
-    // Fast-forward past the 10 second debounce timer
-    act(() => {
-      jest.advanceTimersByTime(11000);
+    // Save immediately
+    await act(async () => {
+      await result.current.saveImmediately(mockMessages);
     });
 
-    // Wait for auto-save to complete
-    await waitFor(() => {
-      // Verify that createSession WAS called (auto-save creates new session when currentSessionId is null)
-      expect(mockSessionService.createSession).toHaveBeenCalledWith('test-org', mockMessages);
-    });
+    // Verify that createSession WAS called (save creates new session when currentSessionId is null)
+    expect(mockSessionService.createSession).toHaveBeenCalledWith('test-org', mockMessages);
   });
 
-  it('should NOT skip auto-save when readOnly is undefined', async () => {
-    renderHook(() =>
+  it('should NOT skip save when readOnly is undefined', async () => {
+    const { result } = renderHook(() =>
       useSessionManager('test-org', mockMessages, mockSetChatHistory, undefined)
     );
 
@@ -140,16 +119,13 @@ describe('useSessionManager - Read-only mode', () => {
       expect(mockSessionService.getAllSessions).toHaveBeenCalled();
     });
 
-    // Fast-forward past the 10 second debounce timer
-    act(() => {
-      jest.advanceTimersByTime(11000);
+    // Save immediately
+    await act(async () => {
+      await result.current.saveImmediately(mockMessages);
     });
 
-    // Wait for auto-save to complete
-    await waitFor(() => {
-      // Verify that createSession WAS called (readOnly undefined is falsy, so auto-save should run)
-      expect(mockSessionService.createSession).toHaveBeenCalledWith('test-org', mockMessages);
-    });
+    // Verify that createSession WAS called (readOnly undefined is falsy, so save should run)
+    expect(mockSessionService.createSession).toHaveBeenCalledWith('test-org', mockMessages);
   });
 
   it('should skip loading current session when chatHistory has messages and readOnly is true', async () => {

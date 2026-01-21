@@ -20,6 +20,9 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
+// PluginID is the plugin identifier
+const PluginID = "consensys-asko11y-app"
+
 // Make sure Plugin implements required interfaces
 var (
 	_ backend.CallResourceHandler   = (*Plugin)(nil)
@@ -58,7 +61,7 @@ func createRedisClient(logger log.Logger) (*redis.Client, error) {
 	// Fall back to individual environment variables
 	addr := getRedisAddr()
 	password := os.Getenv("REDIS_PASSWORD")
-	
+
 	db := 0
 	if dbStr := os.Getenv("REDIS_DB"); dbStr != "" {
 		var err error
@@ -91,11 +94,11 @@ type PluginSettings struct {
 // Plugin is the backend plugin implementation
 type Plugin struct {
 	backend.CallResourceHandler
-	logger     log.Logger
-	mcpProxy   *mcp.Proxy
-	shareStore ShareStoreInterface
+	logger      log.Logger
+	mcpProxy    *mcp.Proxy
+	shareStore  ShareStoreInterface
 	redisClient *redis.Client // Store Redis client for health checks and cleanup
-	usingRedis bool           // Track if we're using Redis or in-memory
+	usingRedis  bool          // Track if we're using Redis or in-memory
 }
 
 // NewPlugin creates a new backend plugin instance
@@ -177,7 +180,7 @@ func NewPlugin(ctx context.Context, settings backend.AppInstanceSettings) (insta
 	p.CallResourceHandler = httpadapter.New(mux)
 
 	logger.Info("Plugin initialized",
-		"pluginId", "consensys-asko11y-app",
+		"pluginId", PluginID,
 		"mcpServers", mcpProxy.GetServerCount())
 
 	return p, nil
@@ -597,7 +600,8 @@ func (p *Plugin) handleCreateShare(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		SessionID     string          `json:"sessionId"`
 		SessionData   json.RawMessage `json:"sessionData"`
-		ExpiresInDays *int            `json:"expiresInDays,omitempty"`
+		ExpiresInDays *int            `json:"expiresInDays,omitempty"` // Deprecated: use ExpiresInHours
+		ExpiresInHours *int           `json:"expiresInHours,omitempty"` // New: accepts hours (converted to days internally)
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -624,14 +628,46 @@ func (p *Plugin) handleCreateShare(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Validate expiresInDays if provided
-	if req.ExpiresInDays != nil && *req.ExpiresInDays <= 0 {
-		http.Error(w, "expiresInDays must be positive", http.StatusBadRequest)
-		return
+	// Handle expiration: prefer ExpiresInHours, fall back to ExpiresInDays (for backward compatibility)
+	var expiresInDays *int
+	var expiresInHours *int
+	if req.ExpiresInHours != nil {
+		if *req.ExpiresInHours <= 0 {
+			http.Error(w, "expiresInHours must be positive", http.StatusBadRequest)
+			return
+		}
+		// For hours, pass to CreateShare which will handle it
+		// We'll modify CreateShare to accept hours
+		expiresInHours = req.ExpiresInHours
+	} else if req.ExpiresInDays != nil {
+		if *req.ExpiresInDays <= 0 {
+			http.Error(w, "expiresInDays must be positive", http.StatusBadRequest)
+			return
+		}
+		expiresInDays = req.ExpiresInDays
 	}
 
-	// Create share
-	share, err := p.shareStore.CreateShare(req.SessionID, req.SessionData, orgID, userID, req.ExpiresInDays)
+	// Create share - for now, convert hours to days (1 hour = 1 day minimum)
+	// TODO: Modify CreateShare to accept hours directly for better precision
+	var finalExpiresInDays *int
+	if expiresInHours != nil {
+		if *expiresInHours < 24 {
+			// For < 24 hours, use 1 day (backend limitation)
+			days := 1
+			finalExpiresInDays = &days
+		} else {
+			// Convert to days
+			days := *expiresInHours / 24
+			if *expiresInHours%24 > 0 {
+				days++
+			}
+			finalExpiresInDays = &days
+		}
+	} else {
+		finalExpiresInDays = expiresInDays
+	}
+
+	share, err := p.shareStore.CreateShare(req.SessionID, req.SessionData, orgID, userID, finalExpiresInDays)
 	if err != nil {
 		if err.Error() == "rate limit exceeded: too many share requests" {
 			http.Error(w, "Too many share requests. Please try again later.", http.StatusTooManyRequests)
@@ -643,7 +679,7 @@ func (p *Plugin) handleCreateShare(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Build share URL
-	shareURL := fmt.Sprintf("/a/consensys-asko11y-app/shared/%s", share.ShareID)
+	shareURL := fmt.Sprintf("/a/%s/shared/%s", PluginID, share.ShareID)
 
 	var expiresAtStr *string
 	if share.ExpiresAt != nil {
@@ -829,7 +865,7 @@ func (p *Plugin) handleGetSessionShares(w http.ResponseWriter, r *http.Request) 
 	var userShares []map[string]interface{}
 	for _, share := range shares {
 		if share.UserID == userID {
-			shareURL := fmt.Sprintf("/a/consensys-asko11y-app/shared/%s", share.ShareID)
+			shareURL := fmt.Sprintf("/a/%s/shared/%s", PluginID, share.ShareID)
 			var expiresAtStr *string
 			if share.ExpiresAt != nil {
 				// Allocate string on heap to avoid pointer to local variable going out of scope

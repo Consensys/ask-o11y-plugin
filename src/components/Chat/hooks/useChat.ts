@@ -163,6 +163,10 @@ export const useChat = (pluginSettings: AppPluginSettings, initialSession?: Chat
     const newChatHistory = [...chatHistory, userMessage];
     console.log('[useChat] Adding user message to history');
     setChatHistory(newChatHistory);
+    // Save immediately after user input
+    if (!readOnly) {
+      sessionManager.saveImmediately(newChatHistory);
+    }
     setCurrentInput('');
     setIsGenerating(true);
     clearToolCalls();
@@ -217,11 +221,21 @@ export const useChat = (pluginSettings: AppPluginSettings, initialSession?: Chat
       // Get user-friendly error message
       const errorMessage = ReliabilityService.getUserFriendlyErrorMessage(error);
 
-      setChatHistory((prev) =>
-        prev.map((msg, idx) =>
+      // Update chat history with error message and save immediately
+      setChatHistory((prev) => {
+        const updated = prev.map((msg, idx) =>
           idx === prev.length - 1 && msg.role === 'assistant' ? { ...msg, content: errorMessage } : msg
-        )
-      );
+        );
+        
+        // Save immediately after error (use setTimeout to ensure state has updated)
+        if (!readOnly) {
+          setTimeout(() => {
+            sessionManager.saveImmediately(updated);
+          }, 0);
+        }
+        
+        return updated;
+      });
 
       // Track retry count
       setRetryCount((prev) => prev + 1);
@@ -260,6 +274,17 @@ export const useChat = (pluginSettings: AppPluginSettings, initialSession?: Chat
       updateToolCallsInChatHistory(toolCalls);
     }
   }, [toolCalls]);
+
+  // Save immediately when streaming completes (isGenerating changes from true to false)
+  const prevIsGeneratingRef = useRef(isGenerating);
+  useEffect(() => {
+    // Save when streaming completes (isGenerating goes from true to false)
+    if (prevIsGeneratingRef.current && !isGenerating && chatHistory.length > 0 && !readOnly) {
+      console.log('[useChat] Streaming completed, saving immediately');
+      sessionManager.saveImmediately(chatHistory);
+    }
+    prevIsGeneratingRef.current = isGenerating;
+  }, [isGenerating, chatHistory, sessionManager, readOnly]);
 
   // Recovery on mount
   useEffect(() => {
