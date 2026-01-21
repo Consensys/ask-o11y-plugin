@@ -49,8 +49,26 @@ const config = async (env: Env): Promise<Configuration> => {
       exclude: path.resolve(process.cwd(), 'src'),
       use: ['style-loader', 'css-loader'],
     },
-    // Add all other base rules
-    ...baseRules,
+    // Add all other base rules, but modify swc-loader for coverage builds
+    ...baseRules.map((rule) => {
+      // For coverage builds, disable source maps in swc-loader to avoid conflicts with babel-loader
+      if (isCoverage && rule.test && rule.use && typeof rule.use === 'object' && 'loader' in rule.use) {
+        const loader = rule.use as { loader: string; options?: any };
+        if (loader.loader === 'swc-loader' && loader.options) {
+          return {
+            ...rule,
+            use: {
+              ...loader,
+              options: {
+                ...loader.options,
+                sourceMaps: false,
+              },
+            },
+          };
+        }
+      }
+      return rule;
+    }),
   ];
 
   // Add Istanbul instrumentation for coverage builds
@@ -64,6 +82,10 @@ const config = async (env: Env): Promise<Configuration> => {
       use: {
         loader: 'babel-loader',
         options: {
+          // Ignore source maps from previous loader to avoid conflicts with swc-loader
+          // This prevents babel-loader from trying to process incompatible source maps
+          inputSourceMap: undefined,
+          sourceMaps: false,
           plugins: [
             [
               'istanbul',
