@@ -40,8 +40,8 @@ func TestRedisShareStore_CreateShare(t *testing.T) {
 	store := NewRedisShareStore(client, log.DefaultLogger)
 	sessionData := []byte(`{"id":"session-123","messages":[{"role":"user","content":"test"}]}`)
 
-	expiresInDays := 7
-	share, err := store.CreateShare("session-123", sessionData, 1, 100, &expiresInDays)
+	expiresInHours := 7 * 24 // 7 days in hours
+	share, err := store.CreateShare("session-123", sessionData, 1, 100, &expiresInHours)
 	if err != nil {
 		t.Fatalf("Failed to create share: %v", err)
 	}
@@ -59,7 +59,7 @@ func TestRedisShareStore_CreateShare(t *testing.T) {
 		t.Errorf("Expected UserID 100, got %d", share.UserID)
 	}
 	if share.ExpiresAt == nil {
-		t.Error("ExpiresAt should be set when expiresInDays is provided")
+		t.Error("ExpiresAt should be set when expiresInHours is provided")
 	}
 	if share.SessionData == nil {
 		t.Error("SessionData should not be nil")
@@ -162,15 +162,15 @@ func TestRedisShareStore_RateLimit(t *testing.T) {
 	store := NewRedisShareStore(client, log.DefaultLogger)
 	sessionData := []byte(`{"id":"session-123","messages":[{"role":"user","content":"test"}]}`)
 
-	// Create 10 shares (should succeed)
-	for i := 0; i < 10; i++ {
+	// Create 50 shares (should succeed)
+	for i := 0; i < 50; i++ {
 		_, err := store.CreateShare("session-123", sessionData, 1, 100, nil)
 		if err != nil {
 			t.Fatalf("Failed to create share %d: %v", i, err)
 		}
 	}
 
-	// 11th share should fail due to rate limit
+	// 51st share should fail due to rate limit
 	_, err := store.CreateShare("session-123", sessionData, 1, 100, nil)
 	if err == nil {
 		t.Error("Expected rate limit error")
@@ -187,15 +187,15 @@ func TestRedisShareStore_RateLimit_ResetsAfterHour(t *testing.T) {
 	store := NewRedisShareStore(client, log.DefaultLogger)
 	sessionData := []byte(`{"id":"session-123","messages":[{"role":"user","content":"test"}]}`)
 
-	// Create 10 shares
-	for i := 0; i < 10; i++ {
+	// Create 50 shares
+	for i := 0; i < 50; i++ {
 		_, err := store.CreateShare("session-123", sessionData, 1, 100, nil)
 		if err != nil {
 			t.Fatalf("Failed to create share %d: %v", i, err)
 		}
 	}
 
-	// 11th should fail
+	// 51st should fail
 	_, err := store.CreateShare("session-123", sessionData, 1, 100, nil)
 	if err == nil {
 		t.Error("Expected rate limit error")
@@ -220,12 +220,9 @@ func TestRedisShareStore_Expiration(t *testing.T) {
 	store := NewRedisShareStore(client, log.DefaultLogger)
 	sessionData := []byte(`{"id":"session-123","messages":[{"role":"user","content":"test"}]}`)
 
-	// Create share with very short expiration (1 second)
-	expiresInDays := -1 // This will create a share that expires in the past
-	// Actually, let's create one with a future expiration and then manually expire it
-	// Or better, create one with 1 day expiration and check TTL
-	expiresInDays = 1
-	share, err := store.CreateShare("session-123", sessionData, 1, 100, &expiresInDays)
+	// Create share with 1 day expiration (24 hours)
+	expiresInHours := 24
+	share, err := store.CreateShare("session-123", sessionData, 1, 100, &expiresInHours)
 	if err != nil {
 		t.Fatalf("Failed to create share: %v", err)
 	}
@@ -236,7 +233,7 @@ func TestRedisShareStore_Expiration(t *testing.T) {
 		t.Fatalf("Share should exist: %v", err)
 	}
 
-	// Check that TTL is set (should be approximately 1 day)
+	// Check that TTL is set (should be approximately 24 hours)
 	ctx := context.Background()
 	shareKey := "share:" + share.ShareID
 	ttl := client.TTL(ctx, shareKey).Val()
@@ -244,6 +241,6 @@ func TestRedisShareStore_Expiration(t *testing.T) {
 		t.Error("Share should have a TTL set")
 	}
 	if ttl > 25*time.Hour || ttl < 23*time.Hour {
-		t.Errorf("TTL should be approximately 1 day, got %v", ttl)
+		t.Errorf("TTL should be approximately 24 hours, got %v", ttl)
 	}
 }

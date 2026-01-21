@@ -12,8 +12,8 @@ func TestShareStore_CreateShare(t *testing.T) {
 	store := NewShareStore(log.DefaultLogger)
 	sessionData := []byte(`{"id":"session-123","messages":[{"role":"user","content":"test"}]}`)
 
-	expiresInDays := 7
-	share, err := store.CreateShare("session-123", sessionData, 1, 100, &expiresInDays)
+	expiresInHours := 7 * 24 // 7 days in hours
+	share, err := store.CreateShare("session-123", sessionData, 1, 100, &expiresInHours)
 	if err != nil {
 		t.Fatalf("Failed to create share: %v", err)
 	}
@@ -31,7 +31,7 @@ func TestShareStore_CreateShare(t *testing.T) {
 		t.Errorf("Expected UserID 100, got %d", share.UserID)
 	}
 	if share.ExpiresAt == nil {
-		t.Error("ExpiresAt should be set when expiresInDays is provided")
+		t.Error("ExpiresAt should be set when expiresInHours is provided")
 	}
 	if share.SessionData == nil {
 		t.Error("SessionData should not be nil")
@@ -87,8 +87,8 @@ func TestShareStore_GetShare_Expired(t *testing.T) {
 	store := NewShareStore(log.DefaultLogger)
 	sessionData := []byte(`{"id":"session-123","messages":[{"role":"user","content":"test"}]}`)
 
-	expiresInDays := -1 // Expired
-	share, err := store.CreateShare("session-123", sessionData, 1, 100, &expiresInDays)
+	expiresInHours := -1 // Expired (negative value)
+	share, err := store.CreateShare("session-123", sessionData, 1, 100, &expiresInHours)
 	if err != nil {
 		t.Fatalf("Failed to create share: %v", err)
 	}
@@ -155,8 +155,8 @@ func TestShareStore_CleanupExpired(t *testing.T) {
 	sessionData := []byte(`{"id":"session-123","messages":[{"role":"user","content":"test"}]}`)
 
 	// Create expired share
-	expiresInDays := -1
-	expiredShare, _ := store.CreateShare("session-123", sessionData, 1, 100, &expiresInDays)
+	expiresInHours := -1 // Negative value (expired)
+	expiredShare, _ := store.CreateShare("session-123", sessionData, 1, 100, &expiresInHours)
 	expiredTime := time.Now().Add(-1 * time.Hour)
 	expiredShare.ExpiresAt = &expiredTime
 	store.shares[expiredShare.ShareID] = expiredShare
@@ -183,15 +183,15 @@ func TestShareStore_RateLimit(t *testing.T) {
 	store := NewShareStore(log.DefaultLogger)
 	sessionData := []byte(`{"id":"session-123","messages":[{"role":"user","content":"test"}]}`)
 
-	// Create 10 shares (should succeed)
-	for i := 0; i < 10; i++ {
+	// Create 50 shares (should succeed)
+	for i := 0; i < 50; i++ {
 		_, err := store.CreateShare("session-123", sessionData, 1, 100, nil)
 		if err != nil {
 			t.Fatalf("Failed to create share %d: %v", i, err)
 		}
 	}
 
-	// 11th share should fail due to rate limit
+	// 51st share should fail due to rate limit
 	_, err := store.CreateShare("session-123", sessionData, 1, 100, nil)
 	if err == nil {
 		t.Error("Expected rate limit error")

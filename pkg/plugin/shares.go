@@ -25,7 +25,7 @@ type ShareMetadata struct {
 
 // ShareStoreInterface defines the interface for share storage implementations
 type ShareStoreInterface interface {
-	CreateShare(sessionID string, sessionData []byte, orgID, userID int64, expiresInDays *int) (*ShareMetadata, error)
+	CreateShare(sessionID string, sessionData []byte, orgID, userID int64, expiresInHours *int) (*ShareMetadata, error)
 	GetShare(shareID string) (*ShareMetadata, error)
 	DeleteShare(shareID string) error
 	GetSharesBySession(sessionID string) []*ShareMetadata
@@ -55,11 +55,11 @@ func NewShareStore(logger log.Logger) *ShareStore {
 }
 
 // CreateShare creates a new share and returns the share metadata
-func (s *ShareStore) CreateShare(sessionID string, sessionData []byte, orgID, userID int64, expiresInDays *int) (*ShareMetadata, error) {
+func (s *ShareStore) CreateShare(sessionID string, sessionData []byte, orgID, userID int64, expiresInHours *int) (*ShareMetadata, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	// Check rate limit (10 shares per hour per user)
+	// Check rate limit (50 shares per hour per user)
 	if !s.checkRateLimit(userID) {
 		return nil, fmt.Errorf("rate limit exceeded: too many share requests")
 	}
@@ -72,8 +72,8 @@ func (s *ShareStore) CreateShare(sessionID string, sessionData []byte, orgID, us
 
 	// Calculate expiration
 	var expiresAt *time.Time
-	if expiresInDays != nil && *expiresInDays > 0 {
-		exp := time.Now().Add(time.Duration(*expiresInDays) * 24 * time.Hour)
+	if expiresInHours != nil && *expiresInHours > 0 {
+		exp := time.Now().Add(time.Duration(*expiresInHours) * time.Hour)
 		expiresAt = &exp
 	}
 
@@ -165,21 +165,21 @@ func (s *ShareStore) CleanupExpired() {
 	}
 }
 
-// checkRateLimit checks if user has exceeded rate limit (10 shares per hour)
+// checkRateLimit checks if user has exceeded rate limit (50 shares per hour)
 func (s *ShareStore) checkRateLimit(userID int64) bool {
 	rl, exists := s.rateLimit[userID]
 	now := time.Now()
 
 	// Reset if more than 1 hour has passed
 	if exists && now.Sub(rl.lastReset) > time.Hour {
-		rl.limiter = rate.NewLimiter(rate.Every(time.Hour/10), 10)
+		rl.limiter = rate.NewLimiter(rate.Every(time.Hour/50), 50)
 		rl.lastReset = now
 	}
 
 	// Create new limiter if doesn't exist
 	if !exists {
 		rl = &rateLimiter{
-			limiter:   rate.NewLimiter(rate.Every(time.Hour/10), 10),
+			limiter:   rate.NewLimiter(rate.Every(time.Hour/50), 50),
 			lastReset: now,
 		}
 		s.rateLimit[userID] = rl

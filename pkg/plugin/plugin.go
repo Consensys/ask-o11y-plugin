@@ -611,8 +611,8 @@ func (p *Plugin) handleCreateShare(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		SessionID      string          `json:"sessionId"`
 		SessionData    json.RawMessage `json:"sessionData"`
-		ExpiresInDays  *int            `json:"expiresInDays,omitempty"`  // Deprecated: use ExpiresInHours
-		ExpiresInHours *int            `json:"expiresInHours,omitempty"` // New: accepts hours (converted to days internally)
+		ExpiresInDays  *int            `json:"expiresInDays,omitempty"`  // Deprecated: use ExpiresInHours (converted to hours internally)
+		ExpiresInHours *int            `json:"expiresInHours,omitempty"` // Accepts hours directly
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -640,45 +640,24 @@ func (p *Plugin) handleCreateShare(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Handle expiration: prefer ExpiresInHours, fall back to ExpiresInDays (for backward compatibility)
-	var expiresInDays *int
 	var expiresInHours *int
 	if req.ExpiresInHours != nil {
 		if *req.ExpiresInHours <= 0 {
 			http.Error(w, "expiresInHours must be positive", http.StatusBadRequest)
 			return
 		}
-		// For hours, pass to CreateShare which will handle it
-		// We'll modify CreateShare to accept hours
 		expiresInHours = req.ExpiresInHours
 	} else if req.ExpiresInDays != nil {
 		if *req.ExpiresInDays <= 0 {
 			http.Error(w, "expiresInDays must be positive", http.StatusBadRequest)
 			return
 		}
-		expiresInDays = req.ExpiresInDays
+		// Convert days to hours for backward compatibility
+		hours := *req.ExpiresInDays * 24
+		expiresInHours = &hours
 	}
 
-	// Create share - for now, convert hours to days (1 hour = 1 day minimum)
-	// TODO: Modify CreateShare to accept hours directly for better precision
-	var finalExpiresInDays *int
-	if expiresInHours != nil {
-		if *expiresInHours < 24 {
-			// For < 24 hours, use 1 day (backend limitation)
-			days := 1
-			finalExpiresInDays = &days
-		} else {
-			// Convert to days
-			days := *expiresInHours / 24
-			if *expiresInHours%24 > 0 {
-				days++
-			}
-			finalExpiresInDays = &days
-		}
-	} else {
-		finalExpiresInDays = expiresInDays
-	}
-
-	share, err := p.shareStore.CreateShare(req.SessionID, req.SessionData, orgID, userID, finalExpiresInDays)
+	share, err := p.shareStore.CreateShare(req.SessionID, req.SessionData, orgID, userID, expiresInHours)
 	if err != nil {
 		if err.Error() == "rate limit exceeded: too many share requests" {
 			http.Error(w, "Too many share requests. Please try again later.", http.StatusTooManyRequests)

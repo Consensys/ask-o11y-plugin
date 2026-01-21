@@ -153,7 +153,7 @@ See [Grafana documentation on allow_embedding](https://grafana.com/docs/grafana/
 - **Read-Only Viewing**: Recipients can view shared sessions in read-only mode
 - **Import to Account**: Import shared sessions into your own account for continued conversation
 - **Revoke Access**: Revoke share links at any time
-- **Rate Limited**: 10 shares per hour per user to prevent abuse
+- **Rate Limited**: 50 shares per hour per user to prevent abuse
 - **Organization Isolation**: Shares are scoped to the organization where they were created
 
 **How It Works:**
@@ -522,7 +522,7 @@ For detailed troubleshooting, see the [Troubleshooting Guide](src/README.md#trou
 **Solutions**:
 1. **Check Expiration**: Verify the share link hasn't expired (check expiration date)
 2. **Organization Context**: Ensure accessing from the same Grafana organization where created
-3. **Rate Limit**: Maximum 10 shares per hour per user - wait if limit reached
+3. **Rate Limit**: Maximum 50 shares per hour per user - wait if limit reached
 4. **Share Revoked**: Creator may have revoked the share link
 5. **Backend Storage**: If using in-memory storage, shares are lost on Grafana restart (use Redis for persistence)
 6. Check Grafana logs: `docker compose logs -f grafana | grep -i share`

@@ -220,7 +220,7 @@ pkg/
 
 - **Storage Options**: In-memory (default) or Redis (optional, for production)
 - **Share Store Interface**: `ShareStoreInterface` allows pluggable storage backends
-- **Rate Limiting**: 10 shares per hour per user (prevents abuse)
+- **Rate Limiting**: 50 shares per hour per user (prevents abuse)
 - **Expiration Handling**: Supports expiration in days or hours (hours converted to days internally)
 - **Organization Isolation**: Shares are scoped to the organization where created
 - **Secure IDs**: Cryptographically secure share IDs (32-byte random tokens, base64 URL-safe encoded)
@@ -398,7 +398,7 @@ docker compose exec grafana curl http://mcp-grafana:8000/mcp
 # Check share link is accessible
 # Verify share hasn't expired (check expiration date)
 # Check organization context (shares are org-scoped)
-# Verify rate limit (10 shares per hour per user)
+# Verify rate limit (50 shares per hour per user)
 # Check Redis connection if using Redis backend
 docker compose logs -f grafana | grep -i "share\|redis"
 ```
