@@ -3,6 +3,7 @@ import type { Page } from '@playwright/test';
 import pluginJson from '../src/plugin.json';
 import * as fs from 'fs';
 import * as path from 'path';
+import { execSync } from 'child_process';
 
 type AppTestFixture = {
   appConfigPage: AppConfigPage;
@@ -202,4 +203,38 @@ export async function deleteAllPersistedSessions(page: Page) {
 
   // Wait for sidebar to close
   await page.waitForTimeout(500);
+}
+
+/**
+ * Helper function to reset rate limits in Redis.
+ * This should be called before tests that create multiple shares to avoid rate limiting issues.
+ * Uses docker compose to execute redis-cli commands.
+ * 
+ * Note: This function will silently fail if Redis is not available (e.g., using in-memory storage),
+ * allowing tests to continue running.
+ */
+export async function resetRateLimits() {
+  try {
+    // First, get all rate limit keys
+    const keysOutput = execSync(
+      'docker compose exec -T redis redis-cli --scan --pattern "ratelimit:*"',
+      { encoding: 'utf-8', stdio: 'pipe', timeout: 5000 }
+    ).trim();
+
+    // If there are keys, delete them
+    if (keysOutput) {
+      const keyList = keysOutput.split('\n').filter(k => k.trim());
+      if (keyList.length > 0) {
+        // Delete all rate limit keys at once
+        execSync(
+          `docker compose exec -T redis redis-cli DEL ${keyList.join(' ')}`,
+          { encoding: 'utf-8', stdio: 'pipe', timeout: 5000 }
+        );
+      }
+    }
+  } catch (error) {
+    // If docker compose or redis is not available, silently fail
+    // This allows tests to run even if Redis is not running (using in-memory storage)
+    // The error is expected when Redis is not available, so we don't log it
+  }
 }

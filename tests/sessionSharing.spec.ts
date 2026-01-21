@@ -1,8 +1,11 @@
-import { test, expect, clearPersistedSession } from './fixtures';
+import { test, expect, clearPersistedSession, resetRateLimits } from './fixtures';
 import { ROUTES } from '../src/constants';
 
 test.describe('Session Sharing', () => {
   test.beforeEach(async ({ gotoPage, page }) => {
+    // Reset rate limits before each test to avoid rate limiting issues
+    await resetRateLimits();
+
     await gotoPage(`/${ROUTES.Home}`);
 
     // Clear any persisted session to ensure welcome message is visible

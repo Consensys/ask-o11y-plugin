@@ -27,8 +27,8 @@ func NewRedisShareStore(client *redis.Client, logger log.Logger) *RedisShareStor
 }
 
 // CreateShare creates a new share and returns the share metadata
-func (s *RedisShareStore) CreateShare(sessionID string, sessionData []byte, orgID, userID int64, expiresInDays *int) (*ShareMetadata, error) {
-	// Check rate limit (10 shares per hour per user)
+func (s *RedisShareStore) CreateShare(sessionID string, sessionData []byte, orgID, userID int64, expiresInHours *int) (*ShareMetadata, error) {
+	// Check rate limit (50 shares per hour per user)
 	if !s.checkRateLimit(userID) {
 		return nil, fmt.Errorf("rate limit exceeded: too many share requests")
 	}
@@ -42,8 +42,8 @@ func (s *RedisShareStore) CreateShare(sessionID string, sessionData []byte, orgI
 	// Calculate expiration
 	var expiresAt *time.Time
 	var ttl time.Duration
-	if expiresInDays != nil && *expiresInDays > 0 {
-		exp := time.Now().Add(time.Duration(*expiresInDays) * 24 * time.Hour)
+	if expiresInHours != nil && *expiresInHours > 0 {
+		exp := time.Now().Add(time.Duration(*expiresInHours) * time.Hour)
 		expiresAt = &exp
 		ttl = time.Until(exp)
 	} else {
@@ -208,7 +208,7 @@ func (s *RedisShareStore) CleanupExpired() {
 	// This is optional and can be done periodically if needed
 }
 
-// checkRateLimit checks if user has exceeded rate limit (10 shares per hour) using Redis
+// checkRateLimit checks if user has exceeded rate limit (50 shares per hour) using Redis
 func (s *RedisShareStore) checkRateLimit(userID int64) bool {
 	rateLimitKey := fmt.Sprintf("ratelimit:%d", userID)
 	
@@ -227,8 +227,8 @@ func (s *RedisShareStore) checkRateLimit(userID int64) bool {
 		}
 	}
 
-	// Check if limit exceeded (10 shares per hour)
-	if count > 10 {
+	// Check if limit exceeded (50 shares per hour)
+	if count > 50 {
 		return false
 	}
 

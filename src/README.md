@@ -80,7 +80,7 @@ Share your conversations with team members through secure, shareable links:
 - **Read-Only Viewing**: Shared sessions are viewable in read-only mode, preserving the original conversation
 - **Import Functionality**: Recipients can import shared sessions into their own account to continue the conversation
 - **Manage Shares**: View all active shares for a session and revoke access at any time
-- **Rate Limiting**: 10 shares per hour per user to prevent abuse
+- **Rate Limiting**: 50 shares per hour per user to prevent abuse
 - **Organization Scoped**: Shares are isolated to the organization where they were created
 - **Secure**: Cryptographically secure share IDs (32-byte random tokens)
 
@@ -467,7 +467,7 @@ go test ./pkg/...        # Backend tests
 
 1. **Check Expiration**: Verify the share link hasn't expired (check the expiration date shown when creating the share)
 2. **Organization Context**: Ensure you're accessing the share from the same Grafana organization where it was created
-3. **Rate Limit**: If you can't create new shares, you may have hit the rate limit (10 shares per hour per user). Wait and try again later
+3. **Rate Limit**: If you can't create new shares, you may have hit the rate limit (50 shares per hour per user). Wait and try again later
 4. **Share Revoked**: The share may have been revoked by the creator
 5. **Check URL**: Verify the share URL is complete and hasn't been truncated
 6. **Backend Issues**: Check Grafana logs for errors: `docker compose logs -f grafana | grep -i share`
