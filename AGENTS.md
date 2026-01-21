@@ -211,8 +211,48 @@ pkg/
 **Business Logic** (`src/core/services/SessionService.ts`):
 
 - Always validate org context
-- Implement 10s debounce for auto-save
+- Auto-save when streaming completes (immediate save, no debounce)
 - Maintain org isolation within user's storage (sessions organized by org, but private to each user)
+
+### Session Sharing
+
+**Backend Implementation** (`pkg/plugin/shares.go`, `pkg/plugin/shares_redis.go`):
+
+- **Storage Options**: In-memory (default) or Redis (optional, for production)
+- **Share Store Interface**: `ShareStoreInterface` allows pluggable storage backends
+- **Rate Limiting**: 10 shares per hour per user (prevents abuse)
+- **Expiration Handling**: Supports expiration in days or hours (hours converted to days internally)
+- **Organization Isolation**: Shares are scoped to the organization where created
+- **Secure IDs**: Cryptographically secure share IDs (32-byte random tokens, base64 URL-safe encoded)
+
+**API Endpoints** (`pkg/plugin/plugin.go`):
+
+- `POST /api/sessions/share` - Create a share link
+- `GET /api/sessions/shared/:shareId` - Get shared session (read-only, org-scoped)
+- `DELETE /api/sessions/share/:shareId` - Revoke a share link
+- `GET /api/sessions/:sessionId/shares` - List all shares for a session
+
+**Frontend Implementation** (`src/services/sessionShare.ts`, `src/components/Chat/components/ShareDialog/ShareDialog.tsx`):
+
+- `SessionShareService` - Client service for share operations
+- `ShareDialog` - UI component for creating and managing shares
+- `SharedSession` page (`src/pages/SharedSession.tsx`) - Read-only view for shared sessions
+- Expiration options: 1 hour, 1 day, 7 days, 30 days, 90 days, or never
+- Import functionality: Users can import shared sessions into their account
+
+**Redis Support** (Optional):
+
+- Configure Redis via environment variables or plugin config
+- `RedisShareStore` implements `ShareStoreInterface` for persistent storage
+- Automatic TTL handling (Redis manages expiration)
+- Session index sets for efficient lookup of all shares for a session
+- See `pkg/plugin/shares_redis.go` for implementation details
+
+**Adding Redis Support:**
+
+1. Set Redis connection details in plugin configuration or environment variables
+2. Backend automatically detects Redis availability and uses it if configured
+3. Falls back to in-memory storage if Redis is unavailable
 
 ### Backend Development Workflow
 
@@ -352,6 +392,17 @@ docker compose exec grafana curl http://mcp-grafana:8000/mcp
 # Auto-cleanup: triggers at quota limit
 ```
 
+**Session sharing issues:**
+
+```bash
+# Check share link is accessible
+# Verify share hasn't expired (check expiration date)
+# Check organization context (shares are org-scoped)
+# Verify rate limit (10 shares per hour per user)
+# Check Redis connection if using Redis backend
+docker compose logs -f grafana | grep -i "share\|redis"
+```
+
 ## Key Files Reference
 
 ### Entry Points
@@ -364,9 +415,15 @@ docker compose exec grafana curl http://mcp-grafana:8000/mcp
 
 - `pkg/plugin/plugin.go:140-191` - RBAC read-only tool list (`isReadOnlyTool()`)
 - `pkg/plugin/plugin.go:192-233` - RBAC filtering (`filterToolsByRole()`, `canAccessTool()`)
+- `pkg/plugin/plugin.go:600-850` - Session sharing API endpoints
+- `pkg/plugin/shares.go` - In-memory share store implementation
+- `pkg/plugin/shares_redis.go` - Redis-backed share store implementation
 - `pkg/mcp/client.go:49-75` - Multi-tenant header injection
 - `src/core/services/SessionService.ts` - Session business logic
 - `src/core/repositories/GrafanaUserStorageRepository.ts` - Session persistence (uses Grafana UserStorage API - per-user storage with localStorage fallback, organized by organization)
+- `src/services/sessionShare.ts` - Session sharing client service
+- `src/components/Chat/components/ShareDialog/ShareDialog.tsx` - Share dialog UI component
+- `src/pages/SharedSession.tsx` - Shared session read-only view page
 - `src/services/backendMCPClient.ts` - MCP proxy client
 
 ### Configuration

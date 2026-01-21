@@ -132,7 +132,7 @@ See [Grafana documentation on allow_embedding](https://grafana.com/docs/grafana/
 ### 💾 Smart Session Management
 
 **Never Lose Your Work:**
-- **Auto-Save**: All conversations saved every 2 seconds
+- **Auto-Save**: All conversations saved automatically when streaming completes
 - **Session History**: Browse, resume, and manage previous conversations
 - **Organization Scoping**: Sessions organized by Grafana organization within each user's storage (sessions are private to each user)
 - **Import/Export**: Backup sessions as JSON or share with team members
@@ -144,6 +144,24 @@ See [Grafana documentation on allow_embedding](https://grafana.com/docs/grafana/
 - Delete individual sessions or clear all
 - Search through conversation history
 - Export important conversations for documentation
+
+### 🔗 Session Sharing
+
+**Share Conversations with Your Team:**
+- **Shareable Links**: Create secure, shareable links for any chat session
+- **Flexible Expiration**: Set expiration times (1 hour, 1 day, 7 days, 30 days, 90 days, or never)
+- **Read-Only Viewing**: Recipients can view shared sessions in read-only mode
+- **Import to Account**: Import shared sessions into your own account for continued conversation
+- **Revoke Access**: Revoke share links at any time
+- **Rate Limited**: 10 shares per hour per user to prevent abuse
+- **Organization Isolation**: Shares are scoped to the organization where they were created
+
+**How It Works:**
+1. Click the share button on any session
+2. Choose an expiration time (or set to never expire)
+3. Copy the generated share link
+4. Share the link with team members
+5. Recipients can view the session or import it to continue the conversation
 
 ### ⚙️ Customizable Configuration
 
@@ -496,6 +514,18 @@ For detailed troubleshooting, see the [Troubleshooting Guide](src/README.md#trou
 2. Check datasource permissions in Grafana settings
 3. Ensure organization context is correct
 4. Review Grafana RBAC policies if using Enterprise
+
+### Session Sharing Issues
+
+**Issue**: Share link not working, expired, or access denied
+
+**Solutions**:
+1. **Check Expiration**: Verify the share link hasn't expired (check expiration date)
+2. **Organization Context**: Ensure accessing from the same Grafana organization where created
+3. **Rate Limit**: Maximum 10 shares per hour per user - wait if limit reached
+4. **Share Revoked**: Creator may have revoked the share link
+5. **Backend Storage**: If using in-memory storage, shares are lost on Grafana restart (use Redis for persistence)
+6. Check Grafana logs: `docker compose logs -f grafana | grep -i share`
 
 ### Build or Development Issues
 
