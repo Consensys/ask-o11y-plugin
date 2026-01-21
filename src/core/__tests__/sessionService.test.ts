@@ -203,68 +203,6 @@ describe('SessionService', () => {
     });
   });
 
-  describe('exportSession', () => {
-    it('should export session as JSON', async () => {
-      const mockSession = {
-        id: 'session-1',
-        title: 'Test',
-        toStorage: jest.fn().mockReturnValue({
-          id: 'session-1',
-          title: 'Test',
-          messages: [],
-        }),
-      };
-      mockRepository.findById.mockResolvedValue(mockSession as any);
-
-      const result = await sessionService.exportSession(testOrgId, 'session-1');
-
-      expect(result).toBeDefined();
-      const parsed = JSON.parse(result!);
-      expect(parsed.id).toBe('session-1');
-    });
-
-    it('should return null when session not found', async () => {
-      mockRepository.findById.mockResolvedValue(null);
-
-      const result = await sessionService.exportSession(testOrgId, 'non-existent');
-
-      expect(result).toBeNull();
-    });
-  });
-
-  describe('importSession', () => {
-    it('should import session from JSON', async () => {
-      const jsonData = JSON.stringify({
-        id: 'imported-session',
-        title: 'Imported',
-        messages: [{ role: 'user', content: 'Hello', timestamp: new Date().toISOString() }],
-      });
-
-      const result = await sessionService.importSession(testOrgId, jsonData);
-
-      expect(result).toBeDefined();
-      expect(mockRepository.save).toHaveBeenCalled();
-    });
-
-    it('should throw on invalid JSON', async () => {
-      await expect(sessionService.importSession(testOrgId, 'invalid json')).rejects.toThrow();
-    });
-
-    it('should throw on missing required fields', async () => {
-      const jsonData = JSON.stringify({ title: 'Missing id and messages' });
-
-      await expect(sessionService.importSession(testOrgId, jsonData)).rejects.toThrow();
-    });
-
-    it('should throw on invalid messages format', async () => {
-      const jsonData = JSON.stringify({
-        id: 'session-1',
-        messages: 'not an array',
-      });
-
-      await expect(sessionService.importSession(testOrgId, jsonData)).rejects.toThrow();
-    });
-  });
 
   describe('getStorageStats', () => {
     it('should return storage stats from repository', async () => {

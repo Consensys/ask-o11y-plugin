@@ -63,15 +63,20 @@ export function SharedSession() {
       }));
 
       // Create new session with imported data
-      // createSession already sets it as the active session, so we don't need to call setActiveSession
+      // createSession already sets it as the active session
       await sessionService.createSession(orgId, messages, sharedSession.title);
 
-      // Wait a brief moment to ensure the session is fully persisted
-      await new Promise((resolve) => setTimeout(resolve, 100));
+      // Wait a moment to ensure the session is fully persisted and indexed
+      await new Promise((resolve) => setTimeout(resolve, 300));
 
-      // Navigate to home - use relative path to go up one level from /shared/:shareId
-      // This keeps us within the plugin's router context
-      navigate('..', { replace: true });
+      // Navigate to home - the session is already set as active
+      // When Home component mounts, useSessionManager will initialize and load the current session
+      // Use window.location to ensure a fresh mount, which will trigger useSessionManager to load the current session
+      const currentPath = window.location.pathname;
+      const basePath = currentPath.includes('/shared/') 
+        ? currentPath.split('/shared/')[0] 
+        : currentPath.replace(/\/shared\/.*$/, '');
+      window.location.href = window.location.origin + (basePath || '/');
     } catch (err) {
       console.error('[SharedSession] Failed to import session:', err);
       alert('Failed to import session. Please try again.');

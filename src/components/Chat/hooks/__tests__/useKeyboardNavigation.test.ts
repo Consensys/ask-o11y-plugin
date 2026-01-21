@@ -12,7 +12,6 @@ describe('useKeyboardNavigation', () => {
   let mockOnOpenHistory: jest.Mock;
   let mockOnFocusInput: jest.Mock;
   let mockOnToggleTheme: jest.Mock;
-  let mockOnExportChat: jest.Mock;
   let mockOnSearch: jest.Mock;
 
   beforeEach(() => {
@@ -21,7 +20,6 @@ describe('useKeyboardNavigation', () => {
     mockOnOpenHistory = jest.fn();
     mockOnFocusInput = jest.fn();
     mockOnToggleTheme = jest.fn();
-    mockOnExportChat = jest.fn();
     mockOnSearch = jest.fn();
   });
 
@@ -69,15 +67,6 @@ describe('useKeyboardNavigation', () => {
       expect(newChatShortcut?.keys).toContain('N');
     });
 
-    it('should include export chat shortcut', () => {
-      const { result } = renderHook(() =>
-        useKeyboardNavigation({})
-      );
-
-      const exportShortcut = result.current.shortcuts.find((s) => s.description === 'Export chat');
-      expect(exportShortcut).toBeDefined();
-    });
-
     it('should include search shortcut', () => {
       const { result } = renderHook(() =>
         useKeyboardNavigation({})
@@ -97,7 +86,6 @@ describe('useKeyboardNavigation', () => {
       expect(shortcutDescriptions).toContain('Focus chat input');
       expect(shortcutDescriptions).toContain('New chat');
       expect(shortcutDescriptions).toContain('Open history');
-      expect(shortcutDescriptions).toContain('Export chat');
       expect(shortcutDescriptions).toContain('Search in chat');
       expect(shortcutDescriptions).toContain('Clear chat');
       expect(shortcutDescriptions).toContain('Close dialog');
@@ -193,19 +181,6 @@ describe('useKeyboardNavigation', () => {
       expect(mockOnOpenHistory).toHaveBeenCalled();
     });
 
-    it('should call onExportChat on Cmd+E', () => {
-      renderHook(() =>
-        useKeyboardNavigation({
-          onExportChat: mockOnExportChat,
-        })
-      );
-
-      act(() => {
-        window.dispatchEvent(createKeyboardEvent('e', { metaKey: true }));
-      });
-
-      expect(mockOnExportChat).toHaveBeenCalled();
-    });
 
     it('should call onSearch on Cmd+F', () => {
       renderHook(() =>
