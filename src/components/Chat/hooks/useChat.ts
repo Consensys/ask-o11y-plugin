@@ -63,12 +63,16 @@ export const useChat = (pluginSettings: AppPluginSettings, initialSession?: Chat
   // Update chatHistory when initialSession changes (e.g., when SharedSession loads)
   // Use a ref to track if we've already initialized to avoid unnecessary updates
   const hasInitializedRef = useRef(false);
+  const initialSessionIdRef = useRef<string | undefined>(initialSession?.id);
+  const initialMessageCountRef = useRef<number>(initialSession?.messages?.length || 0);
+  
   useEffect(() => {
     // Only update if we have an initialSession with messages and haven't initialized yet
-    // or if the message count changed (session was updated)
+    // or if the session ID or message count changed (session was updated)
     if (initialSession?.messages && initialSession.messages.length > 0) {
-      const shouldUpdate = !hasInitializedRef.current || 
-                          chatHistory.length !== initialSession.messages.length;
+      const sessionIdChanged = initialSessionIdRef.current !== initialSession.id;
+      const messageCountChanged = initialMessageCountRef.current !== initialSession.messages.length;
+      const shouldUpdate = !hasInitializedRef.current || sessionIdChanged || messageCountChanged;
       
       if (shouldUpdate) {
         console.log('[useChat] Updating chatHistory from initialSession', { 
@@ -78,9 +82,12 @@ export const useChat = (pluginSettings: AppPluginSettings, initialSession?: Chat
         });
         setChatHistory(initialSession.messages);
         hasInitializedRef.current = true;
+        initialSessionIdRef.current = initialSession.id;
+        initialMessageCountRef.current = initialSession.messages.length;
       }
     }
-  }, [initialSession?.messages?.length, initialSession?.id]); // Only depend on length and id, not the whole object
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialSession?.id, initialSession?.messages?.length]); // Only depend on id and length, not the whole object or chatHistory
   const [currentInput, setCurrentInput] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
   const chatContainerRef = useRef<HTMLDivElement>(null);
