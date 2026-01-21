@@ -293,12 +293,24 @@ test.describe('Session Sharing', () => {
     });
 
     await test.step('Revoke the share', async () => {
+      // After creating a share, the dialog shows success message with "Create Another Share" button
+      // Click it to go back to the form and see the existing shares list
+      const createAnotherButton = page.getByRole('button', { name: /Create Another Share/i });
+      await expect(createAnotherButton).toBeVisible({ timeout: 5000 });
+      await createAnotherButton.click();
+      
+      // Wait for the form to show and existing shares to load
+      await expect(page.getByRole('heading', { name: 'Share Session' })).toBeVisible({ timeout: 5000 });
+      await page.waitForTimeout(1000);
+      
       // Find the revoke button in the existing shares section
-      const revokeButton = page.getByRole('button', { name: /Revoke/i }).or(page.locator('button').filter({ hasText: /Revoke/i }));
-      await expect(revokeButton).toBeVisible({ timeout: 5000 });
+      // Look for the "Existing Shares" label first, then find the revoke button within that section
+      await expect(page.getByText('Existing Shares:')).toBeVisible({ timeout: 5000 });
+      const revokeButton = page.getByRole('button', { name: /Revoke/i }).first();
+      await expect(revokeButton).toBeVisible({ timeout: 10000 });
       await revokeButton.click();
 
-      // Wait for the share to be removed
+      // Wait for the share to be removed (revoke button should disappear)
       await expect(revokeButton).not.toBeVisible({ timeout: 5000 });
 
       // Close dialog
@@ -312,8 +324,10 @@ test.describe('Session Sharing', () => {
     // Navigate to a non-existent share
     await page.goto('/a/consensys-asko11y-app/shared/invalid-share-id-12345');
 
-    // Should show error message
-    await expect(page.getByText(/not found or has expired/i).or(page.getByText(/Error/i))).toBeVisible({ timeout: 10000 });
+    // Should show error message - use first() to avoid strict mode violation
+    // The error message should contain "not found or has expired"
+    const errorMessage = page.getByText(/not found or has expired/i).first();
+    await expect(errorMessage).toBeVisible({ timeout: 10000 });
 
     // Should show "Go to Home" button
     await expect(page.getByRole('button', { name: /Go to Home/i })).toBeVisible();
