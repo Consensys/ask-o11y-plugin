@@ -31,8 +31,6 @@ describe('useSessionManager utilities', () => {
       updateSession: jest.fn().mockResolvedValue(undefined),
       deleteSession: jest.fn().mockResolvedValue(undefined),
       deleteAllSessions: jest.fn().mockResolvedValue(undefined),
-      exportSession: jest.fn().mockResolvedValue(null),
-      importSession: jest.fn().mockResolvedValue({ id: 'imported-1', title: 'Imported' }),
       setActiveSession: jest.fn().mockResolvedValue(undefined),
       clearActiveSession: jest.fn().mockResolvedValue(undefined),
       getStorageStats: jest.fn().mockResolvedValue({ used: 1024, total: 5242880, sessionCount: 0 }),
@@ -164,21 +162,6 @@ describe('useSessionManager utilities', () => {
       expect(mockSessionService.deleteSession).toHaveBeenCalledWith('test-org', 'new-session-1');
     });
 
-    it('should handle import/export operations', async () => {
-      const jsonData = '{"id":"session-1","messages":[]}';
-      mockSessionService.exportSession.mockResolvedValue(jsonData);
-      mockSessionService.importSession.mockResolvedValue({ id: 'imported-1', title: 'Imported' });
-
-      const service = ServiceFactory.getSessionService(mockStorage as any);
-      
-      // Export
-      const exported = await service.exportSession('test-org', 'session-1');
-      expect(exported).toBe(jsonData);
-      
-      // Import
-      const imported = await service.importSession('test-org', jsonData);
-      expect(imported.id).toBe('imported-1');
-    });
   });
 
   describe('Active session management', () => {

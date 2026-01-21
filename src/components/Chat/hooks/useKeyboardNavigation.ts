@@ -11,7 +11,6 @@ interface KeyboardShortcuts {
   onOpenHistory?: () => void;
   onFocusInput?: () => void;
   onToggleTheme?: () => void;
-  onExportChat?: () => void;
   onSearch?: () => void;
 }
 
@@ -21,7 +20,6 @@ export function useKeyboardNavigation({
   onOpenHistory,
   onFocusInput,
   onToggleTheme,
-  onExportChat,
   onSearch,
 }: KeyboardShortcuts) {
   const handleKeyDown = useCallback(
@@ -76,13 +74,6 @@ export function useKeyboardNavigation({
         return;
       }
 
-      // Cmd/Ctrl + E: Export chat
-      if ((event.metaKey || event.ctrlKey) && event.key === 'e') {
-        event.preventDefault();
-        onExportChat?.();
-        return;
-      }
-
       // Cmd/Ctrl + F: Search in chat
       if ((event.metaKey || event.ctrlKey) && event.key === 'f') {
         event.preventDefault();
@@ -130,7 +121,7 @@ export function useKeyboardNavigation({
         }
       }
     },
-    [onNewChat, onClearChat, onOpenHistory, onFocusInput, onToggleTheme, onExportChat, onSearch]
+    [onNewChat, onClearChat, onOpenHistory, onFocusInput, onToggleTheme, onSearch]
   );
 
   useEffect(() => {
@@ -146,7 +137,6 @@ export function useKeyboardNavigation({
       { keys: ['⌘', 'K'], description: 'Focus chat input', windows: ['Ctrl', 'K'] },
       { keys: ['⌘', 'N'], description: 'New chat', windows: ['Ctrl', 'N'] },
       { keys: ['⌘', 'H'], description: 'Open history', windows: ['Ctrl', 'H'] },
-      { keys: ['⌘', 'E'], description: 'Export chat', windows: ['Ctrl', 'E'] },
       { keys: ['⌘', 'F'], description: 'Search in chat', windows: ['Ctrl', 'F'] },
       { keys: ['⌘', '⇧', 'Delete'], description: 'Clear chat', windows: ['Ctrl', 'Shift', 'Delete'] },
       { keys: ['Esc'], description: 'Close dialog', windows: ['Esc'] },

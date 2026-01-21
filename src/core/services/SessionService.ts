@@ -94,43 +94,6 @@ export class SessionService {
     await this.repository.clearCurrentSessionId(orgId);
   }
 
-  /**
-   * Export session as JSON
-   */
-  async exportSession(orgId: string, sessionId: string): Promise<string | null> {
-    const session = await this.repository.findById(orgId, sessionId);
-    if (!session) {
-      return null;
-    }
-    return JSON.stringify(session.toStorage(), null, 2);
-  }
-
-  /**
-   * Import session from JSON
-   */
-  async importSession(orgId: string, jsonData: string): Promise<ChatSession> {
-    try {
-      const data = JSON.parse(jsonData);
-
-      // Validate structure
-      if (!data.id || !data.messages || !Array.isArray(data.messages)) {
-        throw new Error('Invalid session format: missing required fields');
-      }
-
-      // Create new session with imported data
-      const messages = data.messages.map((msg: any) => ({
-        ...msg,
-        timestamp: new Date(msg.timestamp),
-      }));
-
-      const session = ChatSession.create(messages, data.title);
-      await this.repository.save(orgId, session);
-
-      return session;
-    } catch (error) {
-      throw StorageError.invalidData('Failed to import session', error as Error);
-    }
-  }
 
   /**
    * Get storage statistics
