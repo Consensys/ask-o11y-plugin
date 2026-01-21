@@ -97,8 +97,10 @@ type Plugin struct {
 	logger      log.Logger
 	mcpProxy    *mcp.Proxy
 	shareStore  ShareStoreInterface
-	redisClient *redis.Client // Store Redis client for health checks and cleanup
-	usingRedis  bool          // Track if we're using Redis or in-memory
+	redisClient *redis.Client      // Store Redis client for health checks and cleanup
+	usingRedis  bool               // Track if we're using Redis or in-memory
+	ctx         context.Context    // Plugin lifecycle context
+	cancel      context.CancelFunc // Cancel function for plugin lifecycle context
 }
 
 // NewPlugin creates a new backend plugin instance
@@ -150,12 +152,17 @@ func NewPlugin(ctx context.Context, settings backend.AppInstanceSettings) (insta
 		logger.Info("Using in-memory storage for session sharing (not suitable for multi-replica deployments)")
 	}
 
+	// Create a context that lives for the plugin's lifetime (not the initialization context)
+	pluginCtx, cancel := context.WithCancel(context.Background())
+
 	p := &Plugin{
 		logger:      logger,
 		mcpProxy:    mcpProxy,
 		shareStore:  shareStore,
 		redisClient: redisClient,
 		usingRedis:  usingRedis,
+		ctx:         pluginCtx,
+		cancel:      cancel,
 	}
 
 	// Start cleanup goroutine for expired shares (only needed for in-memory store)
@@ -167,7 +174,7 @@ func NewPlugin(ctx context.Context, settings backend.AppInstanceSettings) (insta
 				select {
 				case <-ticker.C:
 					shareStore.CleanupExpired()
-				case <-ctx.Done():
+				case <-pluginCtx.Done():
 					return
 				}
 			}
@@ -188,6 +195,10 @@ func NewPlugin(ctx context.Context, settings backend.AppInstanceSettings) (insta
 
 // Dispose cleans up plugin resources
 func (p *Plugin) Dispose() {
+	// Cancel the plugin lifecycle context to stop the cleanup goroutine
+	if p.cancel != nil {
+		p.cancel()
+	}
 	p.mcpProxy.StopHealthMonitoring()
 	if p.redisClient != nil {
 		if err := p.redisClient.Close(); err != nil {
@@ -598,10 +609,10 @@ func (p *Plugin) handleCreateShare(w http.ResponseWriter, r *http.Request) {
 	userID := getUserID(r)
 
 	var req struct {
-		SessionID     string          `json:"sessionId"`
-		SessionData   json.RawMessage `json:"sessionData"`
-		ExpiresInDays *int            `json:"expiresInDays,omitempty"` // Deprecated: use ExpiresInHours
-		ExpiresInHours *int           `json:"expiresInHours,omitempty"` // New: accepts hours (converted to days internally)
+		SessionID      string          `json:"sessionId"`
+		SessionData    json.RawMessage `json:"sessionData"`
+		ExpiresInDays  *int            `json:"expiresInDays,omitempty"`  // Deprecated: use ExpiresInHours
+		ExpiresInHours *int            `json:"expiresInHours,omitempty"` // New: accepts hours (converted to days internally)
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
