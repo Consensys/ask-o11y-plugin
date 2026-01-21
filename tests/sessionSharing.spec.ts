@@ -188,8 +188,12 @@ test.describe('Session Sharing', () => {
       const chatLog = page.locator('[role="log"]');
       await expect(chatLog).toBeVisible({ timeout: 10000 });
       
-      // Wait a bit more for messages to render
-      await page.waitForTimeout(1000);
+      // Wait for any messages to appear in the chat log (not just the container)
+      // This ensures the Chat component has fully rendered with the initialSession
+      await expect(chatLog.locator('[class*="message"]').or(chatLog.getByRole('listitem'))).first().toBeVisible({ timeout: 15000 });
+      
+      // Additional wait to ensure React has fully rendered the messages
+      await page.waitForTimeout(500);
       
       // Verify the message is visible
       await expect(chatLog.getByText('Message to be shared')).toBeVisible({ timeout: 15000 });
