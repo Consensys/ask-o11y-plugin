@@ -2,6 +2,7 @@ import { getBackendSrv } from '@grafana/runtime';
 import { firstValueFrom } from 'rxjs';
 import { ChatSession } from '../core/models/ChatSession';
 import { ChatMessage } from '../components/Chat/types';
+import pluginJson from '../plugin.json';
 
 export interface CreateShareRequest {
   sessionId: string;
@@ -31,17 +32,30 @@ export class SessionShareService {
   /**
    * Create a shareable link for a session
    */
-  async createShare(sessionId: string, sessionData: ChatSession, expiresInDays?: number): Promise<CreateShareResponse> {
+  async createShare(
+    sessionId: string,
+    sessionData: ChatSession,
+    expiresInDays?: number,
+    expiresInHours?: number
+  ): Promise<CreateShareResponse> {
     try {
+      const requestData: any = {
+        sessionId,
+        sessionData: sessionData.toStorage(),
+      };
+      
+      // Send expiresInHours if provided, otherwise expiresInDays
+      if (expiresInHours !== undefined) {
+        requestData.expiresInHours = expiresInHours;
+      } else if (expiresInDays !== undefined) {
+        requestData.expiresInDays = expiresInDays;
+      }
+      
       const response = await firstValueFrom(
         getBackendSrv().fetch<CreateShareResponse>({
           url: `${this.baseUrl}/api/sessions/share`,
           method: 'POST',
-          data: {
-            sessionId,
-            sessionData: sessionData.toStorage(),
-            expiresInDays,
-          },
+          data: requestData,
           showErrorAlert: false,
         })
       );
@@ -129,7 +143,7 @@ export class SessionShareService {
   buildShareUrl(shareId: string): string {
     // Get current origin
     const origin = window.location.origin;
-    return `${origin}/a/consensys-asko11y-app/shared/${shareId}`;
+    return `${origin}/a/${pluginJson.id}/shared/${shareId}`;
   }
 }
 

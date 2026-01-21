@@ -151,6 +151,19 @@ function ChatComponent({ pluginSettings, readOnly = false, initialSession }: Cha
   const prevSessionIdRef = useRef<string | null>(null);
   const announce = useAnnounce();
 
+  // Refresh sessions and load current session when component mounts (e.g., on page refresh)
+  useEffect(() => {
+    if (!readOnly) {
+      // Refresh sessions list first
+      sessionManager.refreshSessions().then(() => {
+        // Then load current session if chatHistory is empty (e.g., on page refresh)
+        // This ensures we have the latest sessions list before checking for current session
+        sessionManager.loadCurrentSessionIfNeeded();
+      });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // Only run on mount
+
   const visiblePageRefs = detectedPageRefs.filter((ref) => !removedTabUrls.has(ref.url));
 
   const handleRemoveTab = useCallback(
@@ -201,13 +214,6 @@ function ChatComponent({ pluginSettings, readOnly = false, initialSession }: Cha
     announce('Chat history opened');
   }, [announce]);
 
-  const exportCurrentChat = useCallback(() => {
-    if (sessionManager.currentSessionId) {
-      sessionManager.exportSession(sessionManager.currentSessionId);
-      announce('Chat exported');
-    }
-  }, [sessionManager, announce]);
-
   // Set up keyboard shortcuts
   useKeyboardNavigation({
     onNewChat: () => {
@@ -222,7 +228,6 @@ function ChatComponent({ pluginSettings, readOnly = false, initialSession }: Cha
     },
     onOpenHistory: openHistory,
     onFocusInput: focusChatInput,
-    onExportChat: exportCurrentChat,
   });
 
   const handleSuggestionClick = (message: string) => {

@@ -38,8 +38,8 @@ test.describe('Session Sidebar Extended', () => {
       // Wait for chat input to become enabled (indicates message processing is done)
       await expect(chatInput).toBeEnabled({ timeout: 30000 });
 
-      // Wait for auto-save debounce (10s) + a bit more for refresh
-      await page.waitForTimeout(12000);
+      // Session is saved immediately, just wait a bit for UI refresh
+      await page.waitForTimeout(1000);
 
       // Open the sidebar
       const historyButtonInHeader = page.getByRole('button', { name: /History/i });
@@ -51,7 +51,7 @@ test.describe('Session Sidebar Extended', () => {
 
     await test.step('Verify date formatting in sidebar', async () => {
       // Get the first session item
-      // Wait for session item to appear (with timeout accounting for debounce)
+      // Wait for session item to appear (session is saved immediately)
       const firstSessionItem = page.locator('.p-1\\.5.rounded.group').first();
       await expect(firstSessionItem).toBeVisible({ timeout: 15000 });
 
@@ -83,7 +83,7 @@ test.describe('Session Sidebar Extended', () => {
     });
   });
 
-  test('should support sidebar actions (import, new chat, storage)', async ({ page }) => {
+  test('should support sidebar actions (new chat, storage)', async ({ page }) => {
     await test.step('Open sidebar and verify storage indicator', async () => {
       // Open history sidebar
       const historyButton = page.getByText(/View chat history/);
@@ -92,25 +92,6 @@ test.describe('Session Sidebar Extended', () => {
 
       // Storage indicator should show percentage
       await expect(page.getByText(/\d+% storage used/)).toBeVisible();
-    });
-
-    await test.step('Open and close import modal', async () => {
-      // Click Import button
-      await page.getByRole('button', { name: 'Import' }).click();
-
-      // Import modal should be visible
-      await expect(page.getByRole('heading', { name: 'Import Session' })).toBeVisible();
-
-      // File input should be visible
-      const fileInput = page.locator('input[type="file"]');
-      await expect(fileInput).toBeVisible();
-
-      // Cancel button should be visible
-      await expect(page.getByRole('button', { name: 'Cancel' })).toBeVisible();
-
-      // Cancel and verify sidebar is still open
-      await page.getByRole('button', { name: 'Cancel' }).click();
-      await expect(page.getByRole('heading', { name: 'Chat History' })).toBeVisible();
     });
 
     await test.step('Create new session from sidebar', async () => {
@@ -201,8 +182,8 @@ test.describe('Session Interactions After Chat', () => {
       // Wait for chat input to become enabled (indicates message processing is done)
       await expect(chatInput).toBeEnabled({ timeout: 30000 });
 
-      // Wait for auto-save debounce (10s) + a bit more for refresh
-      await page.waitForTimeout(12000);
+      // Session is saved immediately, just wait a bit for UI refresh
+      await page.waitForTimeout(1000);
 
       // Open sidebar
       const historyButton = page.getByRole('button', { name: /History/i });

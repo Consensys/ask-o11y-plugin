@@ -66,6 +66,39 @@ describe('SessionShareService', () => {
       });
     });
 
+    it('should create a share with hours expiration', async () => {
+      const session = ChatSession.create(
+        [{ role: 'user', content: 'test message' }] as ChatMessage[],
+        'Test Session'
+      );
+
+      const mockResponse = {
+        shareId: 'test-share-id',
+        shareUrl: '/a/consensys-asko11y-app/shared/test-share-id',
+        expiresAt: '2024-12-31T23:59:59Z',
+      };
+
+      mockFetch.mockReturnValue(
+        of({
+          data: mockResponse,
+        })
+      );
+
+      const result = await sessionShareService.createShare(session.id, session, undefined, 1);
+
+      expect(result).toEqual(mockResponse);
+      expect(mockFetch).toHaveBeenCalledWith({
+        url: '/api/plugins/consensys-asko11y-app/resources/api/sessions/share',
+        method: 'POST',
+        data: {
+          sessionId: session.id,
+          sessionData: session.toStorage(),
+          expiresInHours: 1,
+        },
+        showErrorAlert: false,
+      });
+    });
+
     it('should handle errors', async () => {
       const session = ChatSession.create(
         [{ role: 'user', content: 'test message' }] as ChatMessage[],

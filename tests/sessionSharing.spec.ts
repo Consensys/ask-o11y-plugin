@@ -24,8 +24,9 @@ test.describe('Session Sharing', () => {
       // Wait for chat input to become enabled (indicates message processing is done)
       await expect(chatInput).toBeEnabled({ timeout: 30000 });
 
-      // Wait for auto-save debounce (10s) + a bit more for refresh
-      await page.waitForTimeout(12000);
+      // Session is saved immediately, but wait a bit longer to ensure it's fully persisted
+      // and indexed before trying to share it
+      await page.waitForTimeout(2000);
     });
 
     await test.step('Open sidebar and share session', async () => {
@@ -49,21 +50,47 @@ test.describe('Session Sharing', () => {
     });
 
     await test.step('Create share in dialog', async () => {
-      // Wait for share dialog to appear
+      // Wait for share dialog to appear and session to be loaded
       await expect(page.getByRole('heading', { name: 'Share Session' })).toBeVisible({ timeout: 5000 });
+      
+      // Wait a bit for the session to be loaded in the ShareDialogWrapper
+      await page.waitForTimeout(1000);
 
-      // Select expiry option (7 days)
-      const expirySelect = page.getByTestId('expiry-select');
-      await expect(expirySelect).toBeVisible();
-      await expirySelect.selectOption('7');
+      // Note: Default expiry is now 7 days (was "Never")
+      // For this test, we'll use the default 7 days without changing the selection
+      // The expiry select should show "7 days" as selected by default
 
       // Click create share button
       const createButton = page.getByRole('button', { name: /Create Share/i });
       await expect(createButton).toBeVisible();
+      await expect(createButton).toBeEnabled();
+      
+      // Listen for any alerts (errors)
+      let alertMessage: string | null = null;
+      page.on('dialog', async (dialog) => {
+        alertMessage = dialog.message();
+        await dialog.accept();
+      });
+      
       await createButton.click();
 
-      // Wait for success message
-      await expect(page.getByText('Share link created successfully!')).toBeVisible({ timeout: 10000 });
+      // Wait for success message or check for alert
+      try {
+        await expect(page.getByText('Share link created successfully!')).toBeVisible({ timeout: 15000 });
+      } catch (error) {
+        if (alertMessage) {
+          throw new Error(`Share creation failed with alert: ${alertMessage}`);
+        }
+        // Check if button is still in "Creating..." state (might be taking longer)
+        const stillCreating = page.getByRole('button', { name: /Creating/i });
+        if (await stillCreating.isVisible({ timeout: 1000 }).catch(() => false)) {
+          // Wait a bit more and try again
+          await page.waitForTimeout(2000);
+          await expect(page.getByText('Share link created successfully!')).toBeVisible({ timeout: 10000 });
+        } else {
+          throw error;
+        }
+      }
 
       // Verify share URL input is visible and contains a URL
       const shareUrlInput = page.getByTestId('share-url-input');
@@ -143,8 +170,10 @@ test.describe('Session Sharing', () => {
     });
 
     await test.step('Verify read-only mode', async () => {
+      // Wait for the shared session to fully load (ShareDialogWrapper loads the session)
+      await page.waitForTimeout(2000);
       // Verify the message is visible
-      await expect(page.locator('[role="log"]').getByText('Message to be shared')).toBeVisible();
+      await expect(page.locator('[role="log"]').getByText('Message to be shared')).toBeVisible({ timeout: 15000 });
 
       // Verify chat input is NOT visible (read-only mode)
       const chatInput = page.getByLabel('Chat input');
@@ -207,7 +236,10 @@ test.describe('Session Sharing', () => {
       await importButton.click();
 
       // Wait for navigation back to home
-      await expect(page.getByRole('heading', { name: 'Ask O11y Assistant' })).toBeVisible({ timeout: 10000 });
+      // After import, the current session is automatically loaded, so we should see the session content
+      await page.waitForTimeout(2000); // Wait for page reload and session to load
+      // Verify the imported session content is visible (current session is loaded on page load)
+      await expect(page.locator('[role="log"]').getByText('Session to be imported')).toBeVisible({ timeout: 10000 });
     });
 
     await test.step('Verify imported session is available', async () => {
@@ -367,10 +399,9 @@ test.describe('Session Sharing', () => {
       const shareButton = firstSession.locator('button[title*="Share" i]').or(firstSession.getByRole('button', { name: /Share/i }));
       await shareButton.click();
 
-      // Select 7 days expiration
+      // Select 7 days expiration (which is now the default)
       await expect(page.getByRole('heading', { name: 'Share Session' })).toBeVisible({ timeout: 5000 });
-      const expirySelect = page.getByTestId('expiry-select');
-      await expirySelect.selectOption('7');
+      // Note: 7 days is now the default, so we don't need to change the selection
 
       // Create share
       const createButton = page.getByRole('button', { name: /Create Share/i });

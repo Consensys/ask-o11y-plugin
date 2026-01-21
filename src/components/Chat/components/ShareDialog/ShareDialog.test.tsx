@@ -22,7 +22,18 @@ jest.mock('@grafana/ui', () => ({
   ),
   Select: ({ options, value, onChange, placeholder }: any) => {
     const handleChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-      const selectedValue = e.target.value === '' ? null : (e.target.value === 'null' ? null : Number(e.target.value));
+      // Handle empty string as -1 (Never) or find the matching option
+      let selectedValue: any = null;
+      if (e.target.value === '') {
+        // Empty string could be Never (-1) or placeholder
+        const neverOption = options.find((opt: any) => opt.value === -1);
+        if (neverOption) {
+          selectedValue = -1;
+        }
+      } else {
+        selectedValue = Number(e.target.value);
+      }
+      
       const option = options.find((opt: any) => {
         if (opt.value === null && selectedValue === null) {return true;}
         return opt.value === selectedValue;
@@ -31,18 +42,24 @@ jest.mock('@grafana/ui', () => ({
         onChange(option);
       }
     };
+    // Handle -1 sentinel value for "Never" - convert to empty string for display
+    const displayValue = value === -1 ? '' : (value === null || value === undefined ? '' : String(value));
     return (
       <select
-        value={value === null || value === undefined ? '' : String(value)}
+        value={displayValue}
         onChange={handleChange}
         data-testid="expiry-select"
       >
         <option value="">{placeholder}</option>
-        {options.map((opt: any) => (
-          <option key={opt.value ?? 'null'} value={opt.value === null || opt.value === undefined ? '' : String(opt.value)}>
-            {opt.label}
-          </option>
-        ))}
+        {options.map((opt: any) => {
+          // -1 (Never) displays as empty string, all other values as their string representation
+          const optValue = opt.value === -1 ? '' : (opt.value === null || opt.value === undefined ? '' : String(opt.value));
+          return (
+            <option key={opt.value ?? 'null'} value={optValue}>
+              {opt.label}
+            </option>
+          );
+        })}
       </select>
     );
   },
@@ -129,16 +146,18 @@ describe('ShareDialog', () => {
     const onClose = jest.fn();
     render(<ShareDialog sessionId="session-123" session={mockSession} onClose={onClose} />);
 
-    // Select expiry option
+    // Default is 7 days (encoded as 107), so clicking create should use that
+    // Select a different expiry option (1 day = 101)
     const select = screen.getByTestId('expiry-select');
-    fireEvent.change(select, { target: { value: '7' } });
+    fireEvent.change(select, { target: { value: '101' } });
 
     // Click create share button
     const createButton = screen.getByText('Create Share');
     fireEvent.click(createButton);
 
     await waitFor(() => {
-      expect(sessionShareService.createShare).toHaveBeenCalledWith('session-123', mockSession, 7);
+      // 1 day (101) decodes to: expiresInDays = 1, expiresInHours = undefined
+      expect(sessionShareService.createShare).toHaveBeenCalledWith('session-123', mockSession, 1, undefined);
     });
 
     // Should show success message
@@ -147,7 +166,7 @@ describe('ShareDialog', () => {
     });
   });
 
-  it('should create a share with no expiration', async () => {
+  it('should create a share with no expiration (Never)', async () => {
     const mockShare = {
       shareId: 'new-share-id',
       shareUrl: '/a/consensys-asko11y-app/shared/new-share-id',
@@ -158,12 +177,61 @@ describe('ShareDialog', () => {
 
     render(<ShareDialog sessionId="session-123" session={mockSession} onClose={jest.fn()} />);
 
-    // Don't select any expiry option (defaults to undefined)
+    // Select "Never" option (encoded as -1)
+    const select = screen.getByTestId('expiry-select');
+    fireEvent.change(select, { target: { value: '-1' } });
+
     const createButton = screen.getByText('Create Share');
     fireEvent.click(createButton);
 
     await waitFor(() => {
-      expect(sessionShareService.createShare).toHaveBeenCalledWith('session-123', mockSession, undefined);
+      // Never (-1) decodes to: expiresInDays = undefined, expiresInHours = undefined
+      expect(sessionShareService.createShare).toHaveBeenCalledWith('session-123', mockSession, undefined, undefined);
+    });
+  });
+
+  it('should default to 7 days expiration', async () => {
+    const mockShare = {
+      shareId: 'new-share-id',
+      shareUrl: '/a/consensys-asko11y-app/shared/new-share-id',
+      expiresAt: null,
+    };
+
+    (sessionShareService.createShare as jest.Mock).mockResolvedValue(mockShare);
+
+    render(<ShareDialog sessionId="session-123" session={mockSession} onClose={jest.fn()} />);
+
+    // Don't change the default (should be 7 days = 107)
+    const createButton = screen.getByText('Create Share');
+    fireEvent.click(createButton);
+
+    await waitFor(() => {
+      // Default 7 days (107) decodes to: expiresInDays = 7, expiresInHours = undefined
+      expect(sessionShareService.createShare).toHaveBeenCalledWith('session-123', mockSession, 7, undefined);
+    });
+  });
+
+  it('should create a share with 1 hour expiration', async () => {
+    const mockShare = {
+      shareId: 'new-share-id',
+      shareUrl: '/a/consensys-asko11y-app/shared/new-share-id',
+      expiresAt: null,
+    };
+
+    (sessionShareService.createShare as jest.Mock).mockResolvedValue(mockShare);
+
+    render(<ShareDialog sessionId="session-123" session={mockSession} onClose={jest.fn()} />);
+
+    // Select "1 hour" option (encoded as 1)
+    const select = screen.getByTestId('expiry-select');
+    fireEvent.change(select, { target: { value: '1' } });
+
+    const createButton = screen.getByText('Create Share');
+    fireEvent.click(createButton);
+
+    await waitFor(() => {
+      // 1 hour (1) decodes to: expiresInDays = undefined, expiresInHours = 1
+      expect(sessionShareService.createShare).toHaveBeenCalledWith('session-123', mockSession, undefined, 1);
     });
   });
 

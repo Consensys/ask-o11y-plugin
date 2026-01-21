@@ -33,8 +33,8 @@ test.describe('Session Persistence Tests', () => {
       const chatInput = page.getByLabel('Chat input');
       await expect(chatInput).toBeEnabled({ timeout: 30000 });
 
-      // Wait for auto-save debounce (10s) + a bit more for refresh
-      await page.waitForTimeout(12000);
+      // Session is saved immediately, just wait a bit for UI refresh
+      await page.waitForTimeout(1000);
 
       // Open sidebar and check session count
       await page.getByRole('button', { name: /History/i }).click();
@@ -124,8 +124,8 @@ test.describe('Session Persistence Tests', () => {
       // Wait for chat input to become enabled (indicates message processing is done)
       await expect(chatInput).toBeEnabled({ timeout: 30000 });
 
-      // Wait for auto-save debounce (10s) + a bit more for refresh
-      await page.waitForTimeout(12000);
+      // Session is saved immediately, just wait a bit for UI refresh
+      await page.waitForTimeout(1000);
     });
 
     await test.step('Verify title and metadata in sidebar', async () => {
@@ -134,9 +134,9 @@ test.describe('Session Persistence Tests', () => {
       await expect(page.getByRole('heading', { name: 'Chat History' })).toBeVisible();
 
       // Get the first session item
-      // Wait for session item to appear (with timeout accounting for debounce)
+      // Wait for session item to appear (session is saved immediately)
       const firstSessionItem = page.locator('.p-1\\.5.rounded.group').first();
-      await expect(firstSessionItem).toBeVisible({ timeout: 15000 });
+      await expect(firstSessionItem).toBeVisible({ timeout: 5000 });
 
       // The session should have a title related to the message
       // (or at least contain some text)
@@ -157,72 +157,3 @@ test.describe('Session Persistence Tests', () => {
   });
 });
 
-test.describe('Session Export/Import', () => {
-  test.beforeEach(async ({ gotoPage, page }) => {
-    await gotoPage(`/${ROUTES.Home}`);
-
-    // Clear any persisted session to ensure welcome message is visible
-    await clearPersistedSession(page);
-
-    const welcomeHeading = page.getByRole('heading', { name: 'Ask O11y Assistant' });
-    await expect(welcomeHeading).toBeVisible();
-  });
-
-  test('should have export button in session item', async ({ page }) => {
-    const chatInput = page.getByLabel('Chat input');
-
-    // Create a session
-    await chatInput.fill('Export test message');
-    await page.getByLabel('Send message (Enter)').click();
-    await expect(page.locator('[role="log"]').getByText('Export test message')).toBeVisible();
-
-    // Wait for chat input to become enabled (indicates message processing is done)
-    await expect(chatInput).toBeEnabled({ timeout: 30000 });
-
-    // Wait for auto-save debounce (10s) + a bit more for refresh
-    await page.waitForTimeout(12000);
-
-    // Open sidebar
-    await page.getByRole('button', { name: /History/i }).click();
-    await expect(page.getByRole('heading', { name: 'Chat History' })).toBeVisible();
-
-    // Hover over session item to reveal actions
-    const sessionItem = page.locator('.p-1\\.5.rounded.group').first();
-    if (await sessionItem.isVisible()) {
-      await sessionItem.hover();
-
-      // Look for export action
-      // The UI might have various ways to export
-    }
-  });
-
-  test('should show and close import modal', async ({ page }) => {
-    await test.step('Open import modal', async () => {
-      // Open sidebar via welcome screen button
-      await page.getByText(/View chat history/).click();
-      await expect(page.getByRole('heading', { name: 'Chat History' })).toBeVisible();
-
-      // Click Import button
-      await page.getByRole('button', { name: 'Import' }).click();
-
-      // Import modal should appear
-      await expect(page.getByRole('heading', { name: 'Import Session' })).toBeVisible();
-
-      // File input should be present
-      const fileInput = page.locator('input[type="file"]');
-      await expect(fileInput).toBeVisible();
-
-      // Cancel button should be present
-      await expect(page.getByRole('button', { name: 'Cancel' })).toBeVisible();
-    });
-
-    await test.step('Close import modal when cancelled', async () => {
-      // Cancel
-      await page.getByRole('button', { name: 'Cancel' }).click();
-
-      // Modal should be closed but sidebar still open
-      await expect(page.getByRole('heading', { name: 'Import Session' })).not.toBeVisible();
-      await expect(page.getByRole('heading', { name: 'Chat History' })).toBeVisible();
-    });
-  });
-});

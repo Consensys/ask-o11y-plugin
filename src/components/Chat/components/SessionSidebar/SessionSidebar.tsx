@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { UseSessionManagerReturn } from '../../hooks/useSessionManager';
 import { SessionMetadata } from '../../../../core';
-import { LoadingOverlay, LoadingButton, InlineLoading } from '../../../LoadingOverlay';
+import { LoadingButton, InlineLoading } from '../../../LoadingOverlay';
 import { ShareDialog } from '../ShareDialog/ShareDialog';
 import { sessionShareService, CreateShareResponse } from '../../../../services/sessionShare';
 import { ServiceFactory } from '../../../../core/services/ServiceFactory';
@@ -18,9 +18,7 @@ interface SessionSidebarProps {
 export function SessionSidebar({ sessionManager, currentSessionId, isOpen, onClose }: SessionSidebarProps) {
   const theme = useTheme2();
   const [showDeleteConfirm, setShowDeleteConfirm] = useState<string | null>(null);
-  const [showImport, setShowImport] = useState(false);
   const [loadingAction, setLoadingAction] = useState<string | null>(null);
-  const [importLoading, setImportLoading] = useState(false);
   const [creatingSession, setCreatingSession] = useState(false);
   const [shareDialogSessionId, setShareDialogSessionId] = useState<string | null>(null);
   const [sessionShares, setSessionShares] = useState<Map<string, CreateShareResponse[]>>(new Map());
@@ -30,13 +28,16 @@ export function SessionSidebar({ sessionManager, currentSessionId, isOpen, onClo
   // Create a stable string representation of session IDs for comparison
   const sessionIdsString = sessionManager.sessions.map((s) => s.id).sort().join(',');
 
-  // Load shares when sidebar opens or when session IDs change
+  // Refresh sessions and load shares when sidebar opens
   useEffect(() => {
     if (!isOpen) {
       return;
     }
 
-    // Only reload if session IDs actually changed and we're not already loading
+    // Refresh sessions list when sidebar opens to ensure it's up to date
+    sessionManager.refreshSessions();
+
+    // Only reload shares if session IDs actually changed and we're not already loading
     if (sessionIdsString === previousSessionIdsRef.current || isLoadingRef.current) {
       return;
     }
@@ -107,42 +108,10 @@ export function SessionSidebar({ sessionManager, currentSessionId, isOpen, onClo
     }
   };
 
-  const handleExport = async (sessionId: string, e: React.MouseEvent) => {
-    e.stopPropagation();
-    setLoadingAction(`exporting-${sessionId}`);
-    try {
-      await new Promise((resolve) => setTimeout(resolve, 300)); // Small delay for UX
-      await sessionManager.exportSession(sessionId);
-    } finally {
-      setLoadingAction(null);
-    }
-  };
 
-  const handleImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      setImportLoading(true);
-      const reader = new FileReader();
-      reader.onload = async (event) => {
-        const jsonData = event.target?.result as string;
-        await new Promise((resolve) => setTimeout(resolve, 500)); // Simulate processing
-        const success = await sessionManager.importSession(jsonData);
-        if (success) {
-          setShowImport(false);
-        } else {
-          alert('Failed to import session. Please check the file format.');
-        }
-        setImportLoading(false);
-      };
-      reader.onerror = () => {
-        setImportLoading(false);
-        alert('Failed to read file');
-      };
-      reader.readAsText(file);
-    }
-  };
-
-  const storagePercent = Math.round((sessionManager.storageStats.used / sessionManager.storageStats.total) * 100);
+  const storagePercent = sessionManager.storageStats.total > 0 
+    ? Math.round((sessionManager.storageStats.used / sessionManager.storageStats.total) * 100)
+    : 0;
 
   if (!isOpen) {
     return null;
@@ -198,18 +167,10 @@ export function SessionSidebar({ sessionManager, currentSessionId, isOpen, onClo
               loadingText="Creating..."
               variant="primary"
               size="sm"
-              className="flex-1"
+              className="w-full"
             >
               + New Chat
             </LoadingButton>
-            <button
-              onClick={() => setShowImport(true)}
-              className="px-2 py-1 text-xs bg-secondary hover:bg-surface rounded text-secondary hover:text-primary transition-colors"
-              title="Import session"
-              disabled={importLoading}
-            >
-              <Icon name="upload" size="sm" />
-            </button>
           </div>
 
           {/* Storage indicator */}
@@ -244,13 +205,11 @@ export function SessionSidebar({ sessionManager, currentSessionId, isOpen, onClo
                   showDeleteConfirm={showDeleteConfirm === session.id}
                   isLoading={loadingAction === `loading-${session.id}`}
                   isDeleting={loadingAction === `deleting-${session.id}`}
-                  isExporting={loadingAction === `exporting-${session.id}`}
                   hasShares={(sessionShares.get(session.id)?.length ?? 0) > 0}
                   onLoad={() => handleLoadSession(session.id)}
                   onDelete={(e) => handleDeleteClick(session.id, e)}
                   onConfirmDelete={() => confirmDelete(session.id)}
                   onCancelDelete={() => setShowDeleteConfirm(null)}
-                  onExport={(e) => handleExport(session.id, e)}
                   onShare={() => setShareDialogSessionId(session.id)}
                   formatDate={formatDate}
                 />
@@ -279,30 +238,6 @@ export function SessionSidebar({ sessionManager, currentSessionId, isOpen, onClo
           )}
         </div>
 
-        {/* Import modal */}
-        {showImport && (
-          <div className="absolute inset-0 bg-background flex items-center justify-center p-3 border border-weak">
-            <LoadingOverlay isLoading={importLoading} message="Importing session...">
-              <div className="w-full max-w-sm">
-                <h3 className="text-sm font-semibold mb-2 text-primary">Import Session</h3>
-                <input
-                  type="file"
-                  accept=".json"
-                  onChange={handleImport}
-                  disabled={importLoading}
-                  className="w-full px-2 py-1 text-xs border border-weak rounded bg-background text-primary disabled:opacity-50"
-                />
-                <button
-                  onClick={() => setShowImport(false)}
-                  disabled={importLoading}
-                  className="mt-2 w-full px-2 py-1 text-xs bg-secondary hover:bg-surface rounded text-secondary hover:text-primary disabled:opacity-50 transition-colors"
-                >
-                  Cancel
-                </button>
-              </div>
-            </LoadingOverlay>
-          </div>
-        )}
 
         {/* Share dialog */}
         {shareDialogSessionId && (
@@ -376,13 +311,11 @@ interface SessionItemProps {
   showDeleteConfirm: boolean;
   isLoading?: boolean;
   isDeleting?: boolean;
-  isExporting?: boolean;
   hasShares?: boolean;
   onLoad: () => void;
   onDelete: (e: React.MouseEvent) => void;
   onConfirmDelete: () => void;
   onCancelDelete: () => void;
-  onExport: (e: React.MouseEvent) => void;
   onShare: () => void;
   formatDate: (date: Date) => string;
 }
@@ -393,13 +326,11 @@ function SessionItem({
   showDeleteConfirm,
   isLoading = false,
   isDeleting = false,
-  isExporting = false,
   hasShares = false,
   onLoad,
   onDelete,
   onConfirmDelete,
   onCancelDelete,
-  onExport,
   onShare,
   formatDate,
 }: SessionItemProps) {
@@ -461,23 +392,15 @@ function SessionItem({
               e.stopPropagation();
               onShare();
             }}
-            disabled={isLoading || isExporting}
+            disabled={isLoading}
             className="p-0.5 hover:bg-surface rounded text-secondary hover:text-primary disabled:opacity-50 transition-colors"
             title={hasShares ? 'View shares' : 'Share'}
           >
             <Icon name="share-alt" size="sm" />
           </button>
           <button
-            onClick={onExport}
-            disabled={isExporting}
-            className="p-0.5 hover:bg-surface rounded text-secondary hover:text-primary disabled:opacity-50 transition-colors"
-            title="Export"
-          >
-            {isExporting ? <InlineLoading size="sm" /> : <Icon name="arrow-down" size="sm" />}
-          </button>
-          <button
             onClick={onDelete}
-            disabled={isLoading || isExporting}
+            disabled={isLoading}
             className="p-0.5 hover:bg-surface rounded text-error hover:text-error disabled:opacity-50 transition-colors"
             title="Delete"
           >
