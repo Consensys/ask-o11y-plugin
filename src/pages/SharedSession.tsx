@@ -8,6 +8,7 @@ import { usePluginUserStorage, config } from '@grafana/runtime';
 import { ChatSession } from '../core/models/ChatSession';
 import { ChatMessage } from '../components/Chat/types';
 import type { AppPluginSettings } from '../types/plugin';
+import { normalizeMessageTimestamp } from '../utils/shareUtils';
 
 export function SharedSession() {
   const { shareId } = useParams<{ shareId: string }>();
@@ -73,7 +74,7 @@ export function SharedSession() {
       // Convert shared session to ChatSession format
       const messages: ChatMessage[] = sharedSession.messages.map((msg: any) => ({
         ...msg,
-        timestamp: new Date(msg.timestamp || Date.now()),
+        timestamp: normalizeMessageTimestamp(msg),
       }));
 
       // Create new session with imported data
@@ -128,20 +129,10 @@ export function SharedSession() {
 
   // Convert shared session to ChatSession for display
   // Ensure messages are properly formatted
-  const messages: ChatMessage[] = (sharedSession.messages || []).map((msg: any) => {
-    // Handle both string and Date timestamps
-    let timestamp: Date;
-    if (msg.timestamp) {
-      timestamp = typeof msg.timestamp === 'string' ? new Date(msg.timestamp) : new Date(msg.timestamp);
-    } else {
-      timestamp = new Date();
-    }
-    
-    return {
-      ...msg,
-      timestamp,
-    };
-  });
+  const messages: ChatMessage[] = (sharedSession.messages || []).map((msg: any) => ({
+    ...msg,
+    timestamp: normalizeMessageTimestamp(msg),
+  }));
 
   console.log('[SharedSession] Rendering with messages', {
     messageCount: messages.length,

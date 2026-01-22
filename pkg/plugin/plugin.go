@@ -120,8 +120,8 @@ func NewPlugin(ctx context.Context, settings backend.AppInstanceSettings) (insta
 	mcpProxy := mcp.NewProxy(logger)
 	mcpProxy.UpdateConfig(pluginSettings.MCPServers)
 
-	// Start health monitoring with 30 second intervals
-	mcpProxy.StartHealthMonitoring(30 * time.Second)
+	// Start health monitoring
+	mcpProxy.StartHealthMonitoring(MCPHealthMonitoringInterval)
 
 	// Try to create Redis-backed share store, fallback to in-memory
 	var shareStore ShareStoreInterface
@@ -131,10 +131,12 @@ func NewPlugin(ctx context.Context, settings backend.AppInstanceSettings) (insta
 	redisClient, err := createRedisClient(logger)
 	if err == nil {
 		// Test connection
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), RedisConnectionTimeout)
 		defer cancel()
 		if err := redisClient.Ping(ctx).Err(); err == nil {
-			shareStore = NewRedisShareStore(redisClient, logger)
+			// Create Redis-backed rate limiter
+			rateLimiter := NewRedisRateLimiter(redisClient, logger)
+			shareStore = NewRedisShareStore(redisClient, logger, rateLimiter)
 			usingRedis = true
 			logger.Info("Using Redis for session sharing", "redisAddr", getRedisAddr())
 		} else {
@@ -148,7 +150,9 @@ func NewPlugin(ctx context.Context, settings backend.AppInstanceSettings) (insta
 
 	// Fallback to in-memory store if Redis is not available
 	if !usingRedis {
-		shareStore = NewShareStore(logger)
+		// Create in-memory rate limiter
+		rateLimiter := NewInMemoryRateLimiter(logger)
+		shareStore = NewShareStore(logger, rateLimiter)
 		logger.Info("Using in-memory storage for session sharing (not suitable for multi-replica deployments)")
 	}
 
@@ -168,7 +172,7 @@ func NewPlugin(ctx context.Context, settings backend.AppInstanceSettings) (insta
 	// Start cleanup goroutine for expired shares (only needed for in-memory store)
 	if !usingRedis {
 		go func() {
-			ticker := time.NewTicker(1 * time.Hour) // Run every hour
+			ticker := time.NewTicker(ShareCleanupInterval)
 			defer ticker.Stop()
 			for {
 				select {
@@ -218,7 +222,7 @@ func (p *Plugin) CheckHealth(ctx context.Context, req *backend.CheckHealthReques
 
 	// Check Redis connection if using Redis
 	if p.usingRedis && p.redisClient != nil {
-		healthCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+		healthCtx, cancel := context.WithTimeout(ctx, HealthCheckTimeout)
 		defer cancel()
 		if err := p.redisClient.Ping(healthCtx).Err(); err != nil {
 			// Plugin is still functional, but Redis is down - use warning message

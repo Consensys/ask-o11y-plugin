@@ -243,21 +243,15 @@ export function SessionSidebar({ sessionManager, currentSessionId, isOpen, onClo
         {shareDialogSessionId && (
           <ShareDialogWrapper
             sessionId={shareDialogSessionId}
-            onClose={async () => {
-              setShareDialogSessionId(null);
-              // Refresh shares for the session that was shared
-              try {
-                const shares = await sessionShareService.getSessionShares(shareDialogSessionId);
-                setSessionShares((prev) => {
-                  const next = new Map(prev);
-                  next.set(shareDialogSessionId, shares);
-                  return next;
-                });
-              } catch (error) {
-                console.error('[SessionSidebar] Failed to refresh shares:', error);
-              }
-            }}
+            onClose={() => setShareDialogSessionId(null)}
             existingShares={sessionShares.get(shareDialogSessionId) || []}
+            onSharesChanged={(shares) => {
+              setSessionShares((prev) => {
+                const next = new Map(prev);
+                next.set(shareDialogSessionId, shares);
+                return next;
+              });
+            }}
           />
         )}
       </div>
@@ -270,10 +264,12 @@ function ShareDialogWrapper({
   sessionId,
   onClose,
   existingShares,
+  onSharesChanged,
 }: {
   sessionId: string;
   onClose: () => void;
   existingShares: CreateShareResponse[];
+  onSharesChanged: (shares: CreateShareResponse[]) => void;
 }) {
   const storage = usePluginUserStorage();
   const orgId = String(config.bootData.user.orgId || '1');
@@ -302,7 +298,15 @@ function ShareDialogWrapper({
     return null;
   }
 
-  return <ShareDialog sessionId={sessionId} session={session} onClose={onClose} existingShares={existingShares} />;
+  return (
+    <ShareDialog
+      sessionId={sessionId}
+      session={session}
+      onClose={onClose}
+      existingShares={existingShares}
+      onSharesChanged={onSharesChanged}
+    />
+  );
 }
 
 interface SessionItemProps {
@@ -363,6 +367,7 @@ function SessionItem({
 
   return (
     <div
+      data-testid="session-item"
       onClick={isLoading ? undefined : onLoad}
       className={`p-1.5 rounded group transition-colors relative ${
         isActive
@@ -388,6 +393,7 @@ function SessionItem({
 
         <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
           <button
+            data-testid="session-share-button"
             onClick={(e) => {
               e.stopPropagation();
               onShare();
@@ -399,6 +405,7 @@ function SessionItem({
             <Icon name="share-alt" size="sm" />
           </button>
           <button
+            data-testid="session-delete-button"
             onClick={onDelete}
             disabled={isLoading}
             className="p-0.5 hover:bg-surface rounded text-error hover:text-error disabled:opacity-50 transition-colors"
