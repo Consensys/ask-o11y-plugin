@@ -1,20 +1,28 @@
 import React, { useState, useEffect } from 'react';
 // Note: Select is deprecated but used for compatibility. Consider migrating to Combobox in future.
- 
+
 import { Modal, Button, Select, Input, ClipboardButton } from '@grafana/ui';
 import { sessionShareService, CreateShareResponse } from '../../../../services/sessionShare';
 import { ChatSession } from '../../../../core/models/ChatSession';
+import {
+  EXPIRY_OPTIONS,
+  expiryConfigToApiParams,
+  formatExpiryDate,
+  expiryConfigToKey,
+  findExpiryOptionByKey,
+} from '../../../../utils/shareUtils';
 
 interface ShareDialogProps {
   sessionId: string;
   session: ChatSession;
   onClose: () => void;
   existingShares?: CreateShareResponse[];
+  onSharesChanged?: (shares: CreateShareResponse[]) => void;
 }
 
-export function ShareDialog({ sessionId, session, onClose, existingShares = [] }: ShareDialogProps) {
-  // Default to 7 days (encoded as 107)
-  const [expiresInDays, setExpiresInDays] = useState<number | undefined>(107);
+export function ShareDialog({ sessionId, session, onClose, existingShares = [], onSharesChanged }: ShareDialogProps) {
+  // Default to 7 days
+  const [selectedExpiryKey, setSelectedExpiryKey] = useState<string>(expiryConfigToKey({ type: 'days', value: 7 }));
   const [isCreating, setIsCreating] = useState(false);
   const [createdShare, setCreatedShare] = useState<CreateShareResponse | null>(null);
   const [shares, setShares] = useState<CreateShareResponse[]>(existingShares);
@@ -32,6 +40,7 @@ export function ShareDialog({ sessionId, session, onClose, existingShares = [] }
     try {
       const loadedShares = await sessionShareService.getSessionShares(sessionId);
       setShares(loadedShares);
+      onSharesChanged?.(loadedShares);
     } catch (error) {
       console.error('[ShareDialog] Failed to load shares:', error);
     }
@@ -40,33 +49,26 @@ export function ShareDialog({ sessionId, session, onClose, existingShares = [] }
   const handleCreateShare = async () => {
     setIsCreating(true);
     try {
-      // Decode the encoded value:
-      // -1: Never (send undefined)
-      // 1-23: Hours (send as ExpiresInHours)
-      // 100+: Days (send as ExpiresInDays, value - 100 = actual days)
-      let expiresInDaysValue: number | undefined = undefined;
-      let expiresInHoursValue: number | undefined = undefined;
-      
-      if (expiresInDays === -1) {
-        // Never - send nothing
-        expiresInDaysValue = undefined;
-        expiresInHoursValue = undefined;
-      } else if (expiresInDays !== undefined && expiresInDays < 100) {
-        // Hours (1-23)
-        expiresInHoursValue = expiresInDays;
-      } else if (expiresInDays !== undefined && expiresInDays >= 100) {
-        // Days (100+), decode: value - 100 = actual days
-        expiresInDaysValue = expiresInDays - 100;
+      const expiryOption = findExpiryOptionByKey(selectedExpiryKey);
+      if (!expiryOption) {
+        console.error('[ShareDialog] Invalid expiry option selected');
+        return;
       }
-      
+
+      const { expiresInDays, expiresInHours } = expiryConfigToApiParams(expiryOption.config);
+
       const share = await sessionShareService.createShare(
         sessionId,
         session,
-        expiresInDaysValue,
-        expiresInHoursValue
+        expiresInDays,
+        expiresInHours
       );
       setCreatedShare(share);
-      await loadShares(); // Refresh shares list
+
+      // Update shares list locally and notify parent
+      const updatedShares = [...shares, share];
+      setShares(updatedShares);
+      onSharesChanged?.(updatedShares);
     } catch (error) {
       console.error('[ShareDialog] Failed to create share:', error);
       alert('Failed to create share. Please try again.');
@@ -79,7 +81,9 @@ export function ShareDialog({ sessionId, session, onClose, existingShares = [] }
     setRevokingShareId(shareId);
     try {
       await sessionShareService.revokeShare(shareId);
-      setShares(shares.filter((s) => s.shareId !== shareId));
+      const updatedShares = shares.filter((s) => s.shareId !== shareId);
+      setShares(updatedShares);
+      onSharesChanged?.(updatedShares);
       if (createdShare?.shareId === shareId) {
         setCreatedShare(null);
       }
@@ -91,30 +95,6 @@ export function ShareDialog({ sessionId, session, onClose, existingShares = [] }
     }
   };
 
-  const formatExpiryDate = (expiresAt: string | null): string => {
-    if (!expiresAt) {
-      return 'Never';
-    }
-    try {
-      const date = new Date(expiresAt);
-      return date.toLocaleDateString();
-    } catch {
-      return 'Invalid date';
-    }
-  };
-
-  // Options use special encoding:
-  // Values 1-23: hours (sent as ExpiresInHours)
-  // Values 100+: days (sent as ExpiresInDays, value - 100 = actual days)
-  // Value -1: Never (sent as undefined)
-  const expiryOptions = [
-    { label: '1 hour', value: 1 }, // Sent as ExpiresInHours: 1
-    { label: '1 day', value: 101 }, // Sent as ExpiresInDays: 1 (101 - 100)
-    { label: '7 days', value: 107 }, // Sent as ExpiresInDays: 7 (107 - 100) - default
-    { label: '30 days', value: 130 }, // Sent as ExpiresInDays: 30 (130 - 100)
-    { label: '90 days', value: 190 }, // Sent as ExpiresInDays: 90 (190 - 100)
-    { label: 'Never', value: -1 }, // Sent as undefined
-  ];
 
   return (
     <Modal title="Share Session" isOpen={true} onDismiss={onClose}>
@@ -159,13 +139,14 @@ export function ShareDialog({ sessionId, session, onClose, existingShares = [] }
               </label>
               <Select
                 data-testid="expiry-select"
-                options={expiryOptions.map((opt) => ({ label: opt.label, value: opt.value }))}
-                value={expiresInDays !== undefined ? expiresInDays : -1}
+                options={EXPIRY_OPTIONS.map((opt) => ({
+                  label: opt.label,
+                  value: expiryConfigToKey(opt.config),
+                }))}
+                value={selectedExpiryKey}
                 onChange={(option) => {
                   if (option) {
-                    const val = option.value as number;
-                    // -1 is the sentinel value for "Never"
-                    setExpiresInDays(val === -1 ? undefined : val);
+                    setSelectedExpiryKey(option.value as string);
                   }
                 }}
                 placeholder="Select expiration"

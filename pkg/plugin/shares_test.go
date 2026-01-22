@@ -9,7 +9,7 @@ import (
 )
 
 func TestShareStore_CreateShare(t *testing.T) {
-	store := NewShareStore(log.DefaultLogger)
+	store := NewShareStore(log.DefaultLogger, NewInMemoryRateLimiter(log.DefaultLogger))
 	sessionData := []byte(`{"id":"session-123","messages":[{"role":"user","content":"test"}]}`)
 
 	expiresInHours := 7 * 24 // 7 days in hours
@@ -39,7 +39,7 @@ func TestShareStore_CreateShare(t *testing.T) {
 }
 
 func TestShareStore_CreateShare_NoExpiry(t *testing.T) {
-	store := NewShareStore(log.DefaultLogger)
+	store := NewShareStore(log.DefaultLogger, NewInMemoryRateLimiter(log.DefaultLogger))
 	sessionData := []byte(`{"id":"session-123","messages":[{"role":"user","content":"test"}]}`)
 
 	share, err := store.CreateShare("session-123", sessionData, 1, 100, nil)
@@ -53,7 +53,7 @@ func TestShareStore_CreateShare_NoExpiry(t *testing.T) {
 }
 
 func TestShareStore_GetShare(t *testing.T) {
-	store := NewShareStore(log.DefaultLogger)
+	store := NewShareStore(log.DefaultLogger, NewInMemoryRateLimiter(log.DefaultLogger))
 	sessionData := []byte(`{"id":"session-123","messages":[{"role":"user","content":"test"}]}`)
 
 	share, err := store.CreateShare("session-123", sessionData, 1, 100, nil)
@@ -72,7 +72,7 @@ func TestShareStore_GetShare(t *testing.T) {
 }
 
 func TestShareStore_GetShare_NotFound(t *testing.T) {
-	store := NewShareStore(log.DefaultLogger)
+	store := NewShareStore(log.DefaultLogger, NewInMemoryRateLimiter(log.DefaultLogger))
 
 	_, err := store.GetShare("non-existent")
 	if err == nil {
@@ -84,7 +84,7 @@ func TestShareStore_GetShare_NotFound(t *testing.T) {
 }
 
 func TestShareStore_GetShare_Expired(t *testing.T) {
-	store := NewShareStore(log.DefaultLogger)
+	store := NewShareStore(log.DefaultLogger, NewInMemoryRateLimiter(log.DefaultLogger))
 	sessionData := []byte(`{"id":"session-123","messages":[{"role":"user","content":"test"}]}`)
 
 	expiresInHours := -1 // Expired (negative value)
@@ -108,7 +108,7 @@ func TestShareStore_GetShare_Expired(t *testing.T) {
 }
 
 func TestShareStore_DeleteShare(t *testing.T) {
-	store := NewShareStore(log.DefaultLogger)
+	store := NewShareStore(log.DefaultLogger, NewInMemoryRateLimiter(log.DefaultLogger))
 	sessionData := []byte(`{"id":"session-123","messages":[{"role":"user","content":"test"}]}`)
 
 	share, err := store.CreateShare("session-123", sessionData, 1, 100, nil)
@@ -128,7 +128,7 @@ func TestShareStore_DeleteShare(t *testing.T) {
 }
 
 func TestShareStore_GetSharesBySession(t *testing.T) {
-	store := NewShareStore(log.DefaultLogger)
+	store := NewShareStore(log.DefaultLogger, NewInMemoryRateLimiter(log.DefaultLogger))
 	sessionData := []byte(`{"id":"session-123","messages":[{"role":"user","content":"test"}]}`)
 
 	// Create multiple shares for the same session
@@ -151,7 +151,7 @@ func TestShareStore_GetSharesBySession(t *testing.T) {
 }
 
 func TestShareStore_CleanupExpired(t *testing.T) {
-	store := NewShareStore(log.DefaultLogger)
+	store := NewShareStore(log.DefaultLogger, NewInMemoryRateLimiter(log.DefaultLogger))
 	sessionData := []byte(`{"id":"session-123","messages":[{"role":"user","content":"test"}]}`)
 
 	// Create expired share
@@ -180,7 +180,7 @@ func TestShareStore_CleanupExpired(t *testing.T) {
 }
 
 func TestShareStore_RateLimit(t *testing.T) {
-	store := NewShareStore(log.DefaultLogger)
+	store := NewShareStore(log.DefaultLogger, NewInMemoryRateLimiter(log.DefaultLogger))
 	sessionData := []byte(`{"id":"session-123","messages":[{"role":"user","content":"test"}]}`)
 
 	// Create 50 shares (should succeed)

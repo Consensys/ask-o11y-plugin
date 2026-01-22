@@ -38,7 +38,7 @@ test.describe('Session Sharing', () => {
       await expect(page.getByRole('heading', { name: 'Chat History' })).toBeVisible();
 
       // Wait for session items to appear
-      const sessionItems = page.locator('.p-1\\.5.rounded.group');
+      const sessionItems = page.getByTestId('session-item');
       await expect(sessionItems.first()).toBeVisible({ timeout: 15000 });
 
       // Find the share button for the first session
@@ -136,14 +136,14 @@ test.describe('Session Sharing', () => {
       await page.getByRole('button', { name: /History/i }).click();
       await expect(page.getByRole('heading', { name: 'Chat History' })).toBeVisible();
 
-      const sessionItems = page.locator('.p-1\\.5.rounded.group');
+      const sessionItems = page.getByTestId('session-item');
       await expect(sessionItems.first()).toBeVisible({ timeout: 15000 });
 
       const firstSession = sessionItems.first();
       await firstSession.hover();
-      await page.waitForTimeout(200);
 
-      const shareButton = firstSession.locator('button[title*="Share" i]').or(firstSession.getByRole('button', { name: /Share/i }));
+      const shareButton = firstSession.getByTestId('session-share-button');
+      await expect(shareButton).toBeVisible();
       await shareButton.click();
 
       // Wait for dialog to open and be fully loaded
@@ -191,27 +191,33 @@ test.describe('Session Sharing', () => {
         fullUrl = baseUrl + shareUrl;
       }
 
+      // Set up API response listener BEFORE navigation
+      const apiResponsePromise = page.waitForResponse(
+        response => response.url().includes('/api/sessions/shared/') && response.status() === 200,
+        { timeout: 30000 }
+      );
+
       // Navigate to the shared session
       await page.goto(fullUrl, { waitUntil: 'networkidle', timeout: 30000 });
 
-      // Wait for shared session to load - check for loading state first
-      await expect(page.getByText('Loading shared session...').or(page.getByText('Viewing Shared Session'))).toBeVisible({ timeout: 15000 });
+      // Wait for API to return shared session data
+      await apiResponsePromise;
 
-      // Wait for the actual shared session header (not just loading)
-      await expect(page.getByText('Viewing Shared Session')).toBeVisible({ timeout: 15000 });
-      await expect(page.getByText('This is a shared session. You can view it or import it to your account.')).toBeVisible({ timeout: 10000 });
-
-      // Give extra time for messages to fully load after navigation
-      await page.waitForTimeout(3000);
+      // Wait for the UI to reflect the loaded data
+      await expect(page.getByText('Viewing Shared Session')).toBeVisible({ timeout: 10000 });
+      await expect(page.getByText('This is a shared session. You can view it or import it to your account.')).toBeVisible({ timeout: 5000 });
     });
 
     await test.step('Verify read-only mode', async () => {
       // Wait for the chat messages container to be visible
       const chatLog = page.locator('[role="log"]');
-      await expect(chatLog).toBeVisible({ timeout: 20000 });
+      await expect(chatLog).toBeVisible({ timeout: 10000 });
 
-      // Verify the message is visible with longer timeout
-      await expect(chatLog.getByText('Message to be shared')).toBeVisible({ timeout: 20000 });
+      // Wait for at least one message to render (indicates data loaded)
+      await expect(chatLog.locator('[role="article"]').first()).toBeVisible({ timeout: 10000 });
+
+      // Verify the specific message is visible
+      await expect(chatLog.getByText('Message to be shared')).toBeVisible({ timeout: 5000 });
 
       // Verify chat input is NOT visible (read-only mode)
       const chatInput = page.getByLabel('Chat input');
@@ -240,14 +246,14 @@ test.describe('Session Sharing', () => {
       await page.getByRole('button', { name: /History/i }).click();
       await expect(page.getByRole('heading', { name: 'Chat History' })).toBeVisible();
 
-      const sessionItems = page.locator('.p-1\\.5.rounded.group');
+      const sessionItems = page.getByTestId('session-item');
       await expect(sessionItems.first()).toBeVisible({ timeout: 15000 });
 
       const firstSession = sessionItems.first();
       await firstSession.hover();
-      await page.waitForTimeout(200);
 
-      const shareButton = firstSession.locator('button[title*="Share" i]').or(firstSession.getByRole('button', { name: /Share/i }));
+      const shareButton = firstSession.getByTestId('session-share-button');
+      await expect(shareButton).toBeVisible();
       await shareButton.click();
 
       await expect(page.getByRole('heading', { name: 'Share Session' })).toBeVisible({ timeout: 5000 });
@@ -319,7 +325,7 @@ test.describe('Session Sharing', () => {
       await expect(page.getByRole('heading', { name: 'Chat History' })).toBeVisible();
 
       // Verify the imported message is visible in the session list
-      const sessionItems = page.locator('.p-1\\.5.rounded.group');
+      const sessionItems = page.getByTestId('session-item');
       await expect(sessionItems.first()).toBeVisible({ timeout: 5000 });
 
       // Click on the session to verify it loads
@@ -346,14 +352,14 @@ test.describe('Session Sharing', () => {
       await page.getByRole('button', { name: /History/i }).click();
       await expect(page.getByRole('heading', { name: 'Chat History' })).toBeVisible();
 
-      const sessionItems = page.locator('.p-1\\.5.rounded.group');
+      const sessionItems = page.getByTestId('session-item');
       await expect(sessionItems.first()).toBeVisible({ timeout: 15000 });
 
       const firstSession = sessionItems.first();
       await firstSession.hover();
-      await page.waitForTimeout(200);
 
-      const shareButton = firstSession.locator('button[title*="Share" i]').or(firstSession.getByRole('button', { name: /Share/i }));
+      const shareButton = firstSession.getByTestId('session-share-button');
+      await expect(shareButton).toBeVisible();
       await shareButton.click();
 
       // Wait for dialog to open
@@ -453,7 +459,7 @@ test.describe('Session Sharing', () => {
       await page.getByRole('button', { name: /History/i }).click();
       await expect(page.getByRole('heading', { name: 'Chat History' })).toBeVisible();
 
-      const sessionItems = page.locator('.p-1\\.5.rounded.group');
+      const sessionItems = page.getByTestId('session-item');
       await expect(sessionItems.first()).toBeVisible({ timeout: 15000 });
 
       const firstSession = sessionItems.first();
@@ -546,14 +552,14 @@ test.describe('Session Sharing', () => {
       await page.getByRole('button', { name: /History/i }).click();
       await expect(page.getByRole('heading', { name: 'Chat History' })).toBeVisible();
 
-      const sessionItems = page.locator('.p-1\\.5.rounded.group');
+      const sessionItems = page.getByTestId('session-item');
       await expect(sessionItems.first()).toBeVisible({ timeout: 15000 });
 
       const firstSession = sessionItems.first();
       await firstSession.hover();
-      await page.waitForTimeout(200);
 
-      const shareButton = firstSession.locator('button[title*="Share" i]').or(firstSession.getByRole('button', { name: /Share/i }));
+      const shareButton = firstSession.getByTestId('session-share-button');
+      await expect(shareButton).toBeVisible();
       await shareButton.click();
 
       // Select 7 days expiration (which is now the default)
