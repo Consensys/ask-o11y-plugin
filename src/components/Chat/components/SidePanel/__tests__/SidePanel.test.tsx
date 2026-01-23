@@ -327,7 +327,7 @@ describe('SidePanel Component', () => {
       const pageRefs: Array<GrafanaPageRef & { messageIndex: number }> = [
         {
           type: 'explore',
-          url: '/explore?kiosk=tv',
+          url: '/explore?kiosk',
           title: 'Explore with kiosk',
           messageIndex: 0,
         },

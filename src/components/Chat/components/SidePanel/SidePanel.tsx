@@ -41,7 +41,6 @@ function toRelativeUrl(url: string): string {
   }
 
   // Add kiosk parameter for full kiosk mode (hides both navbar and sidebar)
-  // Note: kiosk=tv only hides sidebar, kiosk hides both
   const separator = relativeUrl.includes('?') ? '&' : '?';
   return `${relativeUrl}${separator}kiosk`;
 }
