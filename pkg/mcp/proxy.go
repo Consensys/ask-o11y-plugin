@@ -16,6 +16,7 @@ type Proxy struct {
 	logger        log.Logger
 	mu            sync.RWMutex
 	healthMonitor *HealthMonitor
+	oauthManager  *OAuthFlowManager // OAuth manager (shared across clients)
 }
 
 // NewProxy creates a new MCP proxy
@@ -26,6 +27,17 @@ func NewProxy(logger log.Logger) *Proxy {
 	}
 	p.healthMonitor = NewHealthMonitor(p, logger)
 	return p
+}
+
+// SetOAuthManager sets the OAuth manager for all MCP clients
+func (p *Proxy) SetOAuthManager(manager *OAuthFlowManager) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.oauthManager = manager
+	// Update existing clients
+	for _, client := range p.clients {
+		client.SetOAuthManager(manager)
+	}
 }
 
 // StartHealthMonitoring starts the health monitoring with the given interval
@@ -67,7 +79,11 @@ func (p *Proxy) UpdateConfig(configs []ServerConfig) {
 	// Add or update clients
 	for id, config := range newConfigs {
 		if _, exists := p.clients[id]; !exists {
-			p.clients[id] = NewClient(config, p.logger)
+			client := NewClient(config, p.logger)
+			if p.oauthManager != nil {
+				client.SetOAuthManager(p.oauthManager)
+			}
+			p.clients[id] = client
 			p.logger.Info("Added MCP client", "id", id, "url", config.URL, "type", config.Type)
 		}
 	}
@@ -125,11 +141,11 @@ func (p *Proxy) ListTools() ([]Tool, error) {
 
 // CallTool routes a tool call to the appropriate MCP server
 func (p *Proxy) CallTool(toolName string, arguments map[string]interface{}) (*CallToolResult, error) {
-	return p.CallToolWithContext(toolName, arguments, "", "", "")
+	return p.CallToolWithContext(toolName, arguments, 0, "", "", "")
 }
 
-// CallToolWithContext routes a tool call to the appropriate MCP server with additional context (e.g., Org ID, Org Name, Scope Org ID)
-func (p *Proxy) CallToolWithContext(toolName string, arguments map[string]interface{}, orgID string, orgName string, scopeOrgId string) (*CallToolResult, error) {
+// CallToolWithContext routes a tool call to the appropriate MCP server with additional context (e.g., User ID, Org ID, Org Name, Scope Org ID)
+func (p *Proxy) CallToolWithContext(toolName string, arguments map[string]interface{}, userID int64, orgID string, orgName string, scopeOrgId string) (*CallToolResult, error) {
 	// Extract server ID from tool name prefix
 	parts := strings.SplitN(toolName, "_", 2)
 	if len(parts) < 2 {
@@ -154,9 +170,9 @@ func (p *Proxy) CallToolWithContext(toolName string, arguments map[string]interf
 		}, nil
 	}
 
-	p.logger.Debug("Calling tool on MCP server", "tool", toolName, "server", serverID, "orgID", orgID, "orgName", orgName, "scopeOrgId", scopeOrgId)
+	p.logger.Debug("Calling tool on MCP server", "tool", toolName, "server", serverID, "userId", userID, "orgID", orgID, "orgName", orgName, "scopeOrgId", scopeOrgId)
 
-	return client.CallToolWithContext(toolName, arguments, orgID, orgName, scopeOrgId)
+	return client.CallToolWithContext(toolName, arguments, userID, orgID, orgName, scopeOrgId)
 }
 
 // HandleMCPRequest handles an MCP JSON-RPC request

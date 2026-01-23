@@ -3,6 +3,8 @@ package plugin
 import (
 	"consensys-asko11y-app/pkg/mcp"
 	"context"
+	"crypto/rand"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"hash/fnv"
@@ -86,6 +88,33 @@ func createRedisClient(logger log.Logger) (*redis.Client, error) {
 	return redis.NewClient(opt), nil
 }
 
+// getOAuthEncryptionKey retrieves or generates the OAuth token encryption key
+// Priority: environment variable > generated (with warning)
+func getOAuthEncryptionKey(logger log.Logger) ([]byte, error) {
+	// Try to get key from environment variable
+	if keyStr := os.Getenv("MCP_OAUTH_ENCRYPTION_KEY"); keyStr != "" {
+		decoded, err := base64.StdEncoding.DecodeString(keyStr)
+		if err != nil {
+			return nil, fmt.Errorf("invalid MCP_OAUTH_ENCRYPTION_KEY: must be base64-encoded: %w", err)
+		}
+		if len(decoded) != 32 {
+			return nil, fmt.Errorf("invalid MCP_OAUTH_ENCRYPTION_KEY: must be 32 bytes (got %d bytes)", len(decoded))
+		}
+		logger.Info("Using OAuth encryption key from MCP_OAUTH_ENCRYPTION_KEY environment variable")
+		return decoded, nil
+	}
+
+	// Generate random key (WARNING: not persistent across restarts)
+	key := make([]byte, 32)
+	if _, err := rand.Read(key); err != nil {
+		return nil, fmt.Errorf("failed to generate random encryption key: %w", err)
+	}
+
+	logger.Warn("Using generated OAuth encryption key - tokens will be lost on plugin restart",
+		"recommendation", "Set MCP_OAUTH_ENCRYPTION_KEY environment variable to persist tokens")
+	return key, nil
+}
+
 // PluginSettings represents the plugin configuration
 type PluginSettings struct {
 	MCPServers []mcp.ServerConfig `json:"mcpServers"`
@@ -94,13 +123,14 @@ type PluginSettings struct {
 // Plugin is the backend plugin implementation
 type Plugin struct {
 	backend.CallResourceHandler
-	logger      log.Logger
-	mcpProxy    *mcp.Proxy
-	shareStore  ShareStoreInterface
-	redisClient *redis.Client      // Store Redis client for health checks and cleanup
-	usingRedis  bool               // Track if we're using Redis or in-memory
-	ctx         context.Context    // Plugin lifecycle context
-	cancel      context.CancelFunc // Cancel function for plugin lifecycle context
+	logger       log.Logger
+	mcpProxy     *mcp.Proxy
+	shareStore   ShareStoreInterface
+	redisClient  *redis.Client        // Store Redis client for health checks and cleanup
+	usingRedis   bool                 // Track if we're using Redis or in-memory
+	ctx          context.Context      // Plugin lifecycle context
+	cancel       context.CancelFunc   // Cancel function for plugin lifecycle context
+	oauthManager *mcp.OAuthFlowManager // OAuth flow manager for MCP servers
 }
 
 // NewPlugin creates a new backend plugin instance
@@ -156,17 +186,41 @@ func NewPlugin(ctx context.Context, settings backend.AppInstanceSettings) (insta
 		logger.Info("Using in-memory storage for session sharing (not suitable for multi-replica deployments)")
 	}
 
+	// Initialize OAuth manager if Redis is available
+	var oauthManager *mcp.OAuthFlowManager
+	if usingRedis {
+		// Get encryption key for OAuth tokens
+		encryptionKey, err := getOAuthEncryptionKey(logger)
+		if err != nil {
+			logger.Error("Failed to get OAuth encryption key, OAuth will be disabled", "error", err)
+		} else {
+			// Create OAuth token store
+			tokenStore := mcp.NewTokenStore(redisClient, encryptionKey, logger)
+
+			// Create OAuth flow manager
+			oauthManager = mcp.NewOAuthFlowManager(tokenStore, redisClient, logger)
+
+			// Set OAuth manager on the MCP proxy
+			mcpProxy.SetOAuthManager(oauthManager)
+
+			logger.Info("OAuth manager initialized for MCP servers")
+		}
+	} else {
+		logger.Warn("OAuth for MCP servers disabled (requires Redis)")
+	}
+
 	// Create a context that lives for the plugin's lifetime (not the initialization context)
 	pluginCtx, cancel := context.WithCancel(context.Background())
 
 	p := &Plugin{
-		logger:      logger,
-		mcpProxy:    mcpProxy,
-		shareStore:  shareStore,
-		redisClient: redisClient,
-		usingRedis:  usingRedis,
-		ctx:         pluginCtx,
-		cancel:      cancel,
+		logger:       logger,
+		mcpProxy:     mcpProxy,
+		shareStore:   shareStore,
+		redisClient:  redisClient,
+		usingRedis:   usingRedis,
+		ctx:          pluginCtx,
+		cancel:       cancel,
+		oauthManager: oauthManager,
 	}
 
 	// Start cleanup goroutine for expired shares (only needed for in-memory store)
@@ -254,6 +308,14 @@ func (p *Plugin) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/mcp/tools", p.handleMCPTools)
 	mux.HandleFunc("/api/mcp/call-tool", p.handleMCPCallTool)
 	mux.HandleFunc("/api/mcp/servers", p.handleMCPServers)
+
+	// OAuth endpoints for MCP servers
+	mux.HandleFunc("/api/mcp/oauth/discover", p.handleOAuthDiscover)
+	mux.HandleFunc("/api/mcp/oauth/authorize", p.handleOAuthAuthorize)
+	mux.HandleFunc("/api/mcp/oauth/callback", p.handleOAuthCallback)
+	mux.HandleFunc("/api/mcp/oauth/status", p.handleOAuthStatus)
+	mux.HandleFunc("/api/mcp/oauth/revoke", p.handleOAuthRevoke)
+	mux.HandleFunc("/api/mcp/oauth/register", p.handleOAuthRegister)
 
 	// Session sharing endpoints
 	// IMPORTANT: Register more specific routes BEFORE general ones
@@ -465,8 +527,9 @@ func (p *Plugin) handleMCPCallTool(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Get user role from headers
+	// Get user role and ID from headers
 	userRole := getUserRole(r)
+	userID := getUserID(r)
 
 	var req struct {
 		Name       string                 `json:"name"`
@@ -480,7 +543,7 @@ func (p *Plugin) handleMCPCallTool(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	p.logger.Info("MCP call tool request", "tool", req.Name, "role", userRole)
+	p.logger.Info("MCP call tool request", "tool", req.Name, "role", userRole, "userId", userID)
 
 	// Check if user has access to this tool
 	if !canAccessTool(userRole, req.Name) {
@@ -498,9 +561,9 @@ func (p *Plugin) handleMCPCallTool(w http.ResponseWriter, r *http.Request) {
 	orgName := req.OrgName
 	scopeOrgId := req.ScopeOrgId
 
-	p.logger.Debug("Tool call context", "orgID", orgID, "orgName", orgName, "scopeOrgId", scopeOrgId, "tool", req.Name)
+	p.logger.Debug("Tool call context", "userId", userID, "orgID", orgID, "orgName", orgName, "scopeOrgId", scopeOrgId, "tool", req.Name)
 
-	result, err := p.mcpProxy.CallToolWithContext(req.Name, req.Arguments, orgID, orgName, scopeOrgId)
+	result, err := p.mcpProxy.CallToolWithContext(req.Name, req.Arguments, userID, orgID, orgName, scopeOrgId)
 	if err != nil {
 		p.logger.Error("Failed to call tool", "error", err)
 		http.Error(w, fmt.Sprintf("Failed to call tool: %v", err), http.StatusInternalServerError)
@@ -876,4 +939,358 @@ func (p *Plugin) handleGetSessionShares(w http.ResponseWriter, r *http.Request) 
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(userShares)
+}
+
+// ==================== OAuth Handlers ====================
+
+// handleOAuthDiscover handles POST /api/mcp/oauth/discover
+// Discovers OAuth metadata from an MCP server URL
+func (p *Plugin) handleOAuthDiscover(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	if p.oauthManager == nil {
+		http.Error(w, "OAuth is not available (requires Redis)", http.StatusServiceUnavailable)
+		return
+	}
+
+	var req struct {
+		ServerURL string `json:"serverUrl"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, fmt.Sprintf("Invalid request: %v", err), http.StatusBadRequest)
+		return
+	}
+
+	if req.ServerURL == "" {
+		http.Error(w, "serverUrl is required", http.StatusBadRequest)
+		return
+	}
+
+	p.logger.Info("OAuth metadata discovery request", "serverUrl", req.ServerURL)
+
+	metadata, err := p.oauthManager.DiscoverMetadata(r.Context(), req.ServerURL)
+	if err != nil {
+		p.logger.Error("Failed to discover OAuth metadata", "error", err)
+		http.Error(w, fmt.Sprintf("Failed to discover OAuth metadata: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(metadata)
+}
+
+// handleOAuthRegister handles POST /api/mcp/oauth/register
+// Performs Dynamic Client Registration (RFC 7591)
+func (p *Plugin) handleOAuthRegister(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	if p.oauthManager == nil {
+		http.Error(w, "OAuth is not available (requires Redis)", http.StatusServiceUnavailable)
+		return
+	}
+
+	var req struct {
+		RegistrationEndpoint string   `json:"registrationEndpoint"`
+		ClientName           string   `json:"clientName"`
+		RedirectURI          string   `json:"redirectUri"`
+		Scopes               []string `json:"scopes"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, fmt.Sprintf("Invalid request: %v", err), http.StatusBadRequest)
+		return
+	}
+
+	if req.RegistrationEndpoint == "" {
+		http.Error(w, "registrationEndpoint is required", http.StatusBadRequest)
+		return
+	}
+
+	// Default client name if not provided
+	if req.ClientName == "" {
+		req.ClientName = "Grafana Ask O11y Plugin"
+	}
+
+	p.logger.Info("OAuth client registration request", "endpoint", req.RegistrationEndpoint)
+
+	registration, err := p.oauthManager.RegisterClient(r.Context(), req.RegistrationEndpoint, req.ClientName, req.RedirectURI, req.Scopes)
+	if err != nil {
+		p.logger.Error("Failed to register OAuth client", "error", err)
+		http.Error(w, fmt.Sprintf("Failed to register client: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(registration)
+}
+
+// handleOAuthAuthorize handles POST /api/mcp/oauth/authorize
+// Starts the OAuth authorization flow and returns the authorization URL
+func (p *Plugin) handleOAuthAuthorize(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	if p.oauthManager == nil {
+		http.Error(w, "OAuth is not available (requires Redis)", http.StatusServiceUnavailable)
+		return
+	}
+
+	var req struct {
+		ServerID string           `json:"serverId"`
+		Config   *mcp.OAuth2Config `json:"config"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, fmt.Sprintf("Invalid request: %v", err), http.StatusBadRequest)
+		return
+	}
+
+	if req.ServerID == "" {
+		http.Error(w, "serverId is required", http.StatusBadRequest)
+		return
+	}
+
+	if req.Config == nil {
+		http.Error(w, "config is required", http.StatusBadRequest)
+		return
+	}
+
+	userID := getUserID(r)
+	if userID == 0 {
+		http.Error(w, "Unable to determine user ID", http.StatusUnauthorized)
+		return
+	}
+
+	// Build callback URL (plugin-wide callback endpoint)
+	// This will be: /api/plugins/{pluginId}/resources/api/mcp/oauth/callback
+	callbackURL := fmt.Sprintf("/api/plugins/%s/resources/api/mcp/oauth/callback", PluginID)
+
+	p.logger.Info("OAuth authorization request", "serverId", req.ServerID, "userId", userID)
+
+	authURL, err := p.oauthManager.GenerateAuthorizationURL(r.Context(), userID, req.ServerID, req.Config, callbackURL)
+	if err != nil {
+		p.logger.Error("Failed to generate authorization URL", "error", err)
+		http.Error(w, fmt.Sprintf("Failed to start OAuth flow: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	response := map[string]interface{}{
+		"authUrl": authURL,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(response)
+}
+
+// handleOAuthCallback handles GET /api/mcp/oauth/callback
+// Handles the OAuth callback with authorization code
+func (p *Plugin) handleOAuthCallback(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	if p.oauthManager == nil {
+		http.Error(w, "OAuth is not available (requires Redis)", http.StatusServiceUnavailable)
+		return
+	}
+
+	// Extract code and state from query parameters
+	code := r.URL.Query().Get("code")
+	state := r.URL.Query().Get("state")
+
+	if code == "" {
+		http.Error(w, "Missing authorization code", http.StatusBadRequest)
+		return
+	}
+
+	if state == "" {
+		http.Error(w, "Missing state parameter", http.StatusBadRequest)
+		return
+	}
+
+	// Build callback URL (same as what was used in authorize)
+	callbackURL := fmt.Sprintf("/api/plugins/%s/resources/api/mcp/oauth/callback", PluginID)
+
+	// Get the server config from the pending auth state
+	// We need to pass the config to exchange the code for a token
+	// For now, we'll need to modify ExchangeCodeForToken to fetch config internally
+	// or we pass it via the state parameter (encoded)
+
+	p.logger.Info("OAuth callback received", "hasCode", code != "", "hasState", state != "")
+
+	// Note: ExchangeCodeForToken needs the OAuth config, which we should retrieve
+	// from the server configuration based on the serverID stored in pending auth
+	// For now, pass nil config - the implementation should retrieve it from pending auth
+
+	token, err := p.oauthManager.ExchangeCodeForToken(r.Context(), code, state, nil, callbackURL)
+	if err != nil {
+		p.logger.Error("Failed to exchange authorization code", "error", err)
+		// Return HTML page with error for popup
+		w.Header().Set("Content-Type", "text/html")
+		fmt.Fprintf(w, `
+<!DOCTYPE html>
+<html>
+<head>
+    <title>OAuth Authorization Failed</title>
+</head>
+<body>
+    <h1>Authorization Failed</h1>
+    <p>%s</p>
+    <script>
+        // Notify parent window of error
+        if (window.opener) {
+            window.opener.postMessage({ type: 'oauth-error', error: %q }, '*');
+            window.close();
+        }
+    </script>
+</body>
+</html>`, err.Error(), err.Error())
+		return
+	}
+
+	p.logger.Info("OAuth token exchanged successfully", "serverId", token.ServerID, "userId", token.UserID)
+
+	// Return HTML page with success message for popup
+	w.Header().Set("Content-Type", "text/html")
+	fmt.Fprint(w, `
+<!DOCTYPE html>
+<html>
+<head>
+    <title>OAuth Authorization Complete</title>
+</head>
+<body>
+    <h1>Authorization Successful!</h1>
+    <p>You can close this window and return to Grafana.</p>
+    <script>
+        // Notify parent window of success
+        if (window.opener) {
+            window.opener.postMessage({ type: 'oauth-complete' }, '*');
+            window.close();
+        }
+    </script>
+</body>
+</html>`)
+}
+
+// handleOAuthStatus handles GET /api/mcp/oauth/status
+// Returns the OAuth token status for a server
+func (p *Plugin) handleOAuthStatus(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	if p.oauthManager == nil {
+		http.Error(w, "OAuth is not available (requires Redis)", http.StatusServiceUnavailable)
+		return
+	}
+
+	serverID := r.URL.Query().Get("serverId")
+	if serverID == "" {
+		http.Error(w, "serverId query parameter is required", http.StatusBadRequest)
+		return
+	}
+
+	userID := getUserID(r)
+	if userID == 0 {
+		http.Error(w, "Unable to determine user ID", http.StatusUnauthorized)
+		return
+	}
+
+	p.logger.Debug("OAuth status request", "serverId", serverID, "userId", userID)
+
+	// Try to get valid token (will refresh if needed)
+	// Note: We need the OAuth config to refresh, so this should be retrieved from server config
+	// For now, we'll just try to load the token without refresh
+	token, err := p.oauthManager.GetValidToken(r.Context(), userID, serverID, nil)
+
+	var status string
+	var expiresAt *string
+	var lastError *string
+
+	if err != nil {
+		if err.Error() == "token not found" {
+			status = "not_configured"
+		} else {
+			status = "error"
+			errStr := err.Error()
+			lastError = &errStr
+		}
+	} else {
+		if time.Until(token.ExpiresAt) < 0 {
+			status = "expired"
+		} else {
+			status = "authorized"
+		}
+		expStr := token.ExpiresAt.Format(time.RFC3339)
+		expiresAt = &expStr
+	}
+
+	response := map[string]interface{}{
+		"tokenStatus": status,
+		"expiresAt":   expiresAt,
+		"lastError":   lastError,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(response)
+}
+
+// handleOAuthRevoke handles POST/DELETE /api/mcp/oauth/revoke
+// Revokes and deletes OAuth tokens for a server
+func (p *Plugin) handleOAuthRevoke(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost && r.Method != http.MethodDelete {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	if p.oauthManager == nil {
+		http.Error(w, "OAuth is not available (requires Redis)", http.StatusServiceUnavailable)
+		return
+	}
+
+	var req struct {
+		ServerID string `json:"serverId"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, fmt.Sprintf("Invalid request: %v", err), http.StatusBadRequest)
+		return
+	}
+
+	if req.ServerID == "" {
+		http.Error(w, "serverId is required", http.StatusBadRequest)
+		return
+	}
+
+	userID := getUserID(r)
+	if userID == 0 {
+		http.Error(w, "Unable to determine user ID", http.StatusUnauthorized)
+		return
+	}
+
+	p.logger.Info("OAuth revoke request", "serverId", req.ServerID, "userId", userID)
+
+	if err := p.oauthManager.RevokeToken(r.Context(), userID, req.ServerID); err != nil {
+		p.logger.Error("Failed to revoke OAuth token", "error", err)
+		http.Error(w, fmt.Sprintf("Failed to revoke token: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	response := map[string]interface{}{
+		"success": true,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(response)
 }

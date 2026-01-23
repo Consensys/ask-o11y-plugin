@@ -57,12 +57,39 @@ type ContentBlock struct {
 	Text string `json:"text,omitempty"`
 }
 
+// AuthType represents the authentication method for an MCP server
+type AuthType string
+
+const (
+	AuthTypeNone    AuthType = "none"
+	AuthTypeHeaders AuthType = "headers"
+	AuthTypeOAuth   AuthType = "oauth2.1"
+)
+
+// OAuth2Config represents OAuth 2.1 configuration for an MCP server
+type OAuth2Config struct {
+	ClientID               string   `json:"clientId,omitempty"`
+	ClientSecret           string   `json:"clientSecret,omitempty"`
+	DiscoveryURL           string   `json:"discoveryUrl,omitempty"`
+	AuthorizationEndpoint  string   `json:"authorizationEndpoint,omitempty"`
+	TokenEndpoint          string   `json:"tokenEndpoint,omitempty"`
+	RegistrationEndpoint   string   `json:"registrationEndpoint,omitempty"`
+	Scopes                 []string `json:"scopes,omitempty"`
+	Resource               string   `json:"resource,omitempty"`
+	TokenStatus            string   `json:"tokenStatus,omitempty"`
+	TokenExpiresAt         string   `json:"tokenExpiresAt,omitempty"`
+	LastError              string   `json:"lastError,omitempty"`
+	UseDynamicRegistration bool     `json:"useDynamicRegistration,omitempty"`
+}
+
 // ServerConfig represents configuration for an MCP server
 type ServerConfig struct {
-	ID      string            `json:"id"`
-	Name    string            `json:"name"`
-	URL     string            `json:"url"`
-	Type    string            `json:"type"` // "openapi", "standard", "sse", "streamable-http"
-	Enabled bool              `json:"enabled"`
-	Headers map[string]string `json:"headers,omitempty"`
+	ID       string            `json:"id"`
+	Name     string            `json:"name"`
+	URL      string            `json:"url"`
+	Type     string            `json:"type"` // "openapi", "standard", "sse", "streamable-http"
+	Enabled  bool              `json:"enabled"`
+	Headers  map[string]string `json:"headers,omitempty"` // Used when AuthType is "headers"
+	AuthType AuthType          `json:"authType,omitempty"` // Authentication method (defaults to "headers")
+	OAuth    *OAuth2Config     `json:"oauth,omitempty"`    // OAuth 2.1 configuration (used when AuthType is "oauth2.1")
 }

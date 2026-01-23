@@ -29,6 +29,7 @@
     "server": "docker compose up --build",
     "sign": "npx --yes @grafana/sign-plugin@latest",
     "backend:mod": "go mod tidy",
+    "generate:oauth-key": "node -e \"const k=require('crypto').randomBytes(32).toString('base64');console.log('🔐 '+k+'\\n\\nexport MCP_OAUTH_ENCRYPTION_KEY='+k)\"",
     "validate": "npm run validate:build && npm run validate:archive && npm run validate:run",
     "validate:build": "npm run build:prod",
     "validate:archive": "PLUGIN_ID=$(node -e \"console.log(require('./src/plugin.json').id)\") && rm -rf \"${PLUGIN_ID}\" \"${PLUGIN_ID}.zip\" && mkdir -p \"${PLUGIN_ID}\" && cp -r dist/* \"${PLUGIN_ID}/\" && zip -qr \"${PLUGIN_ID}.zip\" \"${PLUGIN_ID}\" && echo \"Created ${PLUGIN_ID}.zip\"",

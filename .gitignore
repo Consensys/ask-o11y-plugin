@@ -59,5 +59,7 @@ ci/
 consensys-asko11y-app/
 consensys-asko11y-app.zip
 
-# Cursor plan file
+# ai stuff
+
 .cursor/plans/
+CLAUDE.md

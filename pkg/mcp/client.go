@@ -35,21 +35,64 @@ type Client struct {
 	ctx               context.Context
 	cancel            context.CancelFunc
 	httpClient        *http.Client
+	oauthManager      *OAuthFlowManager // OAuth flow manager (shared across users)
 }
 
-// customRoundTripper wraps http.RoundTripper to add custom headers
+// customRoundTripper wraps http.RoundTripper to add custom headers and OAuth tokens
 type customRoundTripper struct {
-	base       http.RoundTripper
-	orgID      string
-	orgName    string
-	scopeOrgId string // Direct X-Scope-OrgId value (takes priority over orgName)
-	config     ServerConfig
+	base         http.RoundTripper
+	orgID        string
+	orgName      string
+	scopeOrgId   string // Direct X-Scope-OrgId value (takes priority over orgName)
+	config       ServerConfig
+	oauthManager *OAuthFlowManager // OAuth flow manager for token injection
+	userID       int64             // User ID for user-scoped OAuth tokens
+	logger       log.Logger
 }
 
 func (t *customRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
 	// Clone the request to avoid modifying the original
 	req = req.Clone(req.Context())
 
+	// OAuth authentication (takes priority)
+	if t.config.AuthType == AuthTypeOAuth && t.config.OAuth != nil && t.oauthManager != nil {
+		token, err := t.oauthManager.GetValidToken(req.Context(), t.userID, t.config.ID, t.config.OAuth)
+		if err != nil {
+			t.logger.Error("Failed to get valid OAuth token", "error", err, "server", t.config.ID, "userId", t.userID)
+			return nil, fmt.Errorf("OAuth token error: %w", err)
+		}
+
+		// Set Authorization header with Bearer token
+		req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", token.AccessToken))
+		t.logger.Debug("OAuth token injected", "server", t.config.ID, "userId", t.userID)
+
+		// Execute request
+		resp, err := t.base.RoundTrip(req)
+		if err != nil {
+			return nil, err
+		}
+
+		// Handle token refresh on 401 Unauthorized
+		if resp.StatusCode == http.StatusUnauthorized {
+			t.logger.Info("Received 401, attempting token refresh", "server", t.config.ID, "userId", t.userID)
+			resp.Body.Close()
+
+			// Try to refresh the token
+			refreshedToken, refreshErr := t.oauthManager.RefreshToken(req.Context(), t.userID, t.config.ID, t.config.OAuth)
+			if refreshErr == nil && refreshedToken != nil {
+				// Retry with refreshed token
+				req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", refreshedToken.AccessToken))
+				t.logger.Debug("Retrying with refreshed OAuth token", "server", t.config.ID, "userId", t.userID)
+				return t.base.RoundTrip(req)
+			} else {
+				t.logger.Warn("Token refresh failed", "error", refreshErr, "server", t.config.ID, "userId", t.userID)
+			}
+		}
+
+		return resp, nil
+	}
+
+	// Header-based authentication (backward compatibility)
 	// Forward org headers to all MCP servers
 	// Each server can choose which headers to use based on its requirements
 
@@ -85,6 +128,13 @@ func NewClient(config ServerConfig, logger log.Logger) *Client {
 		ctx:               ctx,
 		cancel:            cancel,
 	}
+}
+
+// SetOAuthManager sets the OAuth manager for this client
+func (c *Client) SetOAuthManager(manager *OAuthFlowManager) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.oauthManager = manager
 }
 
 // Close closes the MCP client session
@@ -156,14 +206,14 @@ func (c *Client) connectMCP() error {
 // Headers forwarded to all MCP servers:
 //   - X-Grafana-Org-Id: Grafana's numeric organization ID
 //   - X-Scope-OrgID: Tenant identifier (scopeOrgId takes priority over orgName)
-func (c *Client) connectMCPWithOrgContext(orgID string, orgName string, scopeOrgId string) error {
+func (c *Client) connectMCPWithOrgContext(userID int64, orgID string, orgName string, scopeOrgId string) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
 	// Always close existing session to ensure we reconnect with the new org context headers.
 	// This prevents race conditions where a stale session without org headers could be reused.
 	if c.session != nil {
-		c.logger.Debug("Closing existing session to reconnect with org context", "orgID", orgID, "orgName", orgName, "scopeOrgId", scopeOrgId)
+		c.logger.Debug("Closing existing session to reconnect with org context", "userId", userID, "orgID", orgID, "orgName", orgName, "scopeOrgId", scopeOrgId)
 		c.session.Close()
 		c.session = nil
 	}
@@ -177,11 +227,14 @@ func (c *Client) connectMCPWithOrgContext(orgID string, orgName string, scopeOrg
 	// Create custom HTTP client with customRoundTripper
 	customHTTPClient := &http.Client{
 		Transport: &customRoundTripper{
-			base:       http.DefaultTransport,
-			orgID:      orgID,
-			orgName:    orgName,
-			scopeOrgId: scopeOrgId,
-			config:     c.config,
+			base:         http.DefaultTransport,
+			orgID:        orgID,
+			orgName:      orgName,
+			scopeOrgId:   scopeOrgId,
+			config:       c.config,
+			oauthManager: c.oauthManager,
+			userID:       userID,
+			logger:       c.logger,
 		},
 	}
 
@@ -349,27 +402,27 @@ func (c *Client) listMCPTools() ([]Tool, error) {
 
 // CallTool calls a tool on the MCP server
 func (c *Client) CallTool(toolName string, arguments map[string]interface{}) (*CallToolResult, error) {
-	return c.CallToolWithContext(toolName, arguments, "", "", "")
+	return c.CallToolWithContext(toolName, arguments, 0, "", "", "")
 }
 
-func (c *Client) CallToolWithContext(toolName string, arguments map[string]interface{}, orgID string, orgName string, scopeOrgId string) (*CallToolResult, error) {
+func (c *Client) CallToolWithContext(toolName string, arguments map[string]interface{}, userID int64, orgID string, orgName string, scopeOrgId string) (*CallToolResult, error) {
 	// Remove server ID prefix from tool name
 	originalName := strings.TrimPrefix(toolName, c.config.ID+"_")
 
 	switch c.config.Type {
 	case "openapi":
-		return c.callOpenAPIToolWithContext(originalName, arguments, orgID, orgName, scopeOrgId)
+		return c.callOpenAPIToolWithContext(originalName, arguments, userID, orgID, orgName, scopeOrgId)
 	case "sse", "streamable-http", "http+streamable":
-		return c.callMCPToolWithContext(originalName, arguments, orgID, orgName, scopeOrgId)
+		return c.callMCPToolWithContext(originalName, arguments, userID, orgID, orgName, scopeOrgId)
 	default:
 		// Fallback to standard MCP protocol
-		return c.callStandardTool(originalName, arguments)
+		return c.callStandardTool(originalName, arguments, userID)
 	}
 }
 
-// callMCPToolWithContext calls a tool using the MCP SDK with additional context (e.g., Org ID, Org Name, Scope Org ID)
+// callMCPToolWithContext calls a tool using the MCP SDK with additional context (e.g., User ID, Org ID, Org Name, Scope Org ID)
 // Org headers are forwarded to all MCP servers - each server can use whichever headers it needs.
-func (c *Client) callMCPToolWithContext(toolName string, arguments map[string]interface{}, orgID string, orgName string, scopeOrgId string) (*CallToolResult, error) {
+func (c *Client) callMCPToolWithContext(toolName string, arguments map[string]interface{}, userID int64, orgID string, orgName string, scopeOrgId string) (*CallToolResult, error) {
 	// Track whether we're using org context for potential reconnection
 	// Forward org headers to all MCP servers (not just specific ones)
 	useOrgContext := orgID != "" || orgName != "" || scopeOrgId != ""
@@ -377,10 +430,10 @@ func (c *Client) callMCPToolWithContext(toolName string, arguments map[string]in
 	// Reconnect with custom HTTP client that includes org headers.
 	// connectMCPWithOrgContext handles closing the existing session atomically to prevent race conditions.
 	if useOrgContext {
-		c.logger.Debug("Calling tool with org context", "server", c.config.ID, "tool", toolName, "orgID", orgID, "orgName", orgName, "scopeOrgId", scopeOrgId)
+		c.logger.Debug("Calling tool with org context", "server", c.config.ID, "tool", toolName, "userId", userID, "orgID", orgID, "orgName", orgName, "scopeOrgId", scopeOrgId)
 
-		if err := c.connectMCPWithOrgContext(orgID, orgName, scopeOrgId); err != nil {
-			c.logger.Error("Failed to connect to server with org context", "server", c.config.ID, "error", err, "orgID", orgID, "orgName", orgName, "scopeOrgId", scopeOrgId)
+		if err := c.connectMCPWithOrgContext(userID, orgID, orgName, scopeOrgId); err != nil {
+			c.logger.Error("Failed to connect to server with org context", "server", c.config.ID, "error", err, "userId", userID, "orgID", orgID, "orgName", orgName, "scopeOrgId", scopeOrgId)
 			return nil, err
 		}
 	} else {
@@ -419,7 +472,7 @@ func (c *Client) callMCPToolWithContext(toolName string, arguments map[string]in
 			var reconnectErr error
 			if useOrgContext {
 				// connectMCPWithOrgContext handles session cleanup atomically
-				reconnectErr = c.connectMCPWithOrgContext(orgID, orgName, scopeOrgId)
+				reconnectErr = c.connectMCPWithOrgContext(userID, orgID, orgName, scopeOrgId)
 			} else {
 				// Clear the session to force reconnection
 				c.mu.Lock()
@@ -528,11 +581,19 @@ func (c *Client) listOpenAPITools() ([]Tool, error) {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
-	for key, value := range c.config.Headers {
-		req.Header.Set(key, value)
+	// Create HTTP client with OAuth-aware custom round tripper
+	// For listing tools, use userID=0 (no specific user context)
+	httpClient := &http.Client{
+		Transport: &customRoundTripper{
+			base:         http.DefaultTransport,
+			config:       c.config,
+			oauthManager: c.oauthManager,
+			userID:       0,
+			logger:       c.logger,
+		},
 	}
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch OpenAPI spec: %w", err)
 	}
@@ -706,11 +767,20 @@ func (c *Client) listStandardTools() ([]Tool, error) {
 	}
 
 	req.Header.Set("Content-Type", "application/json")
-	for key, value := range c.config.Headers {
-		req.Header.Set(key, value)
+
+	// Create HTTP client with OAuth-aware custom round tripper
+	// For listing tools, use userID=0 (no specific user context)
+	httpClient := &http.Client{
+		Transport: &customRoundTripper{
+			base:         http.DefaultTransport,
+			config:       c.config,
+			oauthManager: c.oauthManager,
+			userID:       0,
+			logger:       c.logger,
+		},
 	}
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list tools: %w", err)
 	}
@@ -881,14 +951,14 @@ func getJSONType(value interface{}) string {
 	}
 }
 
-// callOpenAPIToolWithContext calls a tool on an OpenAPI server with additional context (e.g., Org ID, Org Name, Scope Org ID)
+// callOpenAPIToolWithContext calls a tool on an OpenAPI server with additional context (e.g., User ID, Org ID, Org Name, Scope Org ID)
 // Org headers are forwarded to all OpenAPI servers - each server can use whichever headers it needs.
-func (c *Client) callOpenAPIToolWithContext(toolName string, arguments map[string]interface{}, orgID string, orgName string, scopeOrgId string) (*CallToolResult, error) {
+func (c *Client) callOpenAPIToolWithContext(toolName string, arguments map[string]interface{}, userID int64, orgID string, orgName string, scopeOrgId string) (*CallToolResult, error) {
 	// Track whether we're using org context
 	useOrgContext := orgID != "" || orgName != "" || scopeOrgId != ""
 
 	if useOrgContext {
-		c.logger.Debug("Calling OpenAPI tool with org context", "server", c.config.ID, "tool", toolName, "orgID", orgID, "orgName", orgName, "scopeOrgId", scopeOrgId)
+		c.logger.Debug("Calling OpenAPI tool with org context", "server", c.config.ID, "tool", toolName, "userId", userID, "orgID", orgID, "orgName", orgName, "scopeOrgId", scopeOrgId)
 	}
 
 	// Strip server ID prefix from tool name to get the original operation ID
@@ -933,26 +1003,21 @@ func (c *Client) callOpenAPIToolWithContext(toolName string, arguments map[strin
 
 	req.Header.Set("Content-Type", "application/json")
 
-	// Forward org headers to all OpenAPI servers - each server can use whichever headers it needs.
-	// X-Grafana-Org-Id: Grafana's numeric organization ID
-	if orgID != "" {
-		req.Header.Set("X-Grafana-Org-Id", orgID)
+	// Create HTTP client with OAuth-aware custom round tripper
+	httpClient := &http.Client{
+		Transport: &customRoundTripper{
+			base:         http.DefaultTransport,
+			orgID:        orgID,
+			orgName:      orgName,
+			scopeOrgId:   scopeOrgId,
+			config:       c.config,
+			oauthManager: c.oauthManager,
+			userID:       userID,
+			logger:       c.logger,
+		},
 	}
 
-	// X-Scope-OrgID: Tenant identifier for multi-tenant systems (Mimir/Cortex/Alertmanager)
-	// Priority: scopeOrgId (direct value) > orgName (Grafana org name as fallback)
-	if scopeOrgId != "" {
-		req.Header.Set("X-Scope-OrgID", scopeOrgId)
-	} else if orgName != "" {
-		req.Header.Set("X-Scope-OrgID", orgName)
-	}
-
-	// Add any configured headers (can override the above if needed)
-	for key, value := range c.config.Headers {
-		req.Header.Set(key, value)
-	}
-
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to call tool: %w", err)
 	}
@@ -991,7 +1056,7 @@ func (c *Client) callOpenAPIToolWithContext(toolName string, arguments map[strin
 }
 
 // callStandardTool calls a tool on a standard MCP server
-func (c *Client) callStandardTool(toolName string, arguments map[string]interface{}) (*CallToolResult, error) {
+func (c *Client) callStandardTool(toolName string, arguments map[string]interface{}, userID int64) (*CallToolResult, error) {
 	url := c.config.URL
 	if !strings.HasSuffix(url, "/") {
 		url += "/"
@@ -1026,11 +1091,19 @@ func (c *Client) callStandardTool(toolName string, arguments map[string]interfac
 	}
 
 	req.Header.Set("Content-Type", "application/json")
-	for key, value := range c.config.Headers {
-		req.Header.Set(key, value)
+
+	// Create HTTP client with OAuth-aware custom round tripper
+	httpClient := &http.Client{
+		Transport: &customRoundTripper{
+			base:         http.DefaultTransport,
+			config:       c.config,
+			oauthManager: c.oauthManager,
+			userID:       userID,
+			logger:       c.logger,
+		},
 	}
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to call tool: %w", err)
 	}

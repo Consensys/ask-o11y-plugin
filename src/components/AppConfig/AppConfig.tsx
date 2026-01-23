@@ -6,12 +6,19 @@ import { Button, Field, FieldSet, Input, Icon, Switch, Alert, RadioButtonGroup, 
 import { testIds } from '../testIds';
 import { ValidationService } from '../../services/validation';
 import { SYSTEM_PROMPT } from '../Chat/constants';
-import type { AppPluginSettings, MCPServerConfig, SystemPromptMode } from '../../types/plugin';
+import type { AppPluginSettings, MCPServerConfig, SystemPromptMode, AuthType } from '../../types/plugin';
+import { OAuthConfigPanel } from './OAuthConfigPanel';
 
 const PROMPT_MODE_OPTIONS = [
   { label: 'Use default prompt', value: 'default' as SystemPromptMode },
   { label: 'Replace with custom prompt', value: 'replace' as SystemPromptMode },
   { label: 'Append to default prompt', value: 'append' as SystemPromptMode },
+];
+
+const AUTH_TYPE_OPTIONS = [
+  { label: 'None', value: 'none' as AuthType, description: 'No authentication' },
+  { label: 'Headers', value: 'headers' as AuthType, description: 'Custom HTTP headers' },
+  { label: 'OAuth 2.1', value: 'oauth2.1' as AuthType, description: 'OAuth 2.1 with PKCE' },
 ];
 
 type State = {
@@ -568,27 +575,59 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
               </select>
             </Field>
 
-            {/* Advanced Options Toggle */}
-            <div className="mt-3">
-              <button
-                type="button"
-                onClick={() => toggleAdvancedOptions(server.id)}
-                className="flex items-center gap-1 text-sm cursor-pointer bg-transparent border-none p-0"
-                style={{ color: 'var(--grafana-text-link)' }}
-                data-testid={testIds.appConfig.mcpServerAdvancedToggle(server.id)}
-              >
-                <Icon name={state.expandedAdvanced.has(server.id) ? 'angle-down' : 'angle-right'} />
-                Advanced Options
-                {server.headers && Object.keys(server.headers).length > 0 && (
-                  <span className="ml-1 text-xs" style={{ color: 'var(--grafana-text-secondary)' }}>
-                    ({Object.keys(server.headers).length} header{Object.keys(server.headers).length !== 1 ? 's' : ''})
-                  </span>
-                )}
-              </button>
-            </div>
+            {/* Authentication Type Selector */}
+            <Field label="Authentication" description="Choose authentication method for this server" className="mt-2">
+              <RadioButtonGroup
+                options={AUTH_TYPE_OPTIONS}
+                value={server.authType || 'headers'}
+                onChange={(authType) => {
+                  // Clear OAuth config when switching away from oauth2.1
+                  const updates: Partial<MCPServerConfig> = { authType };
+                  if (authType !== 'oauth2.1') {
+                    updates.oauth = undefined;
+                  }
+                  // Clear headers when switching away from headers
+                  if (authType !== 'headers') {
+                    updates.headers = undefined;
+                  }
+                  updateMCPServer(server.id, updates);
+                }}
+              />
+            </Field>
+
+            {/* OAuth Configuration Panel */}
+            {server.authType === 'oauth2.1' && (
+              <OAuthConfigPanel
+                serverId={server.id}
+                serverUrl={server.url}
+                config={server.oauth}
+                onChange={(oauth) => updateMCPServer(server.id, { oauth })}
+              />
+            )}
+
+            {/* Advanced Options Toggle - Only for header-based auth */}
+            {server.authType === 'headers' && (
+              <div className="mt-3">
+                <button
+                  type="button"
+                  onClick={() => toggleAdvancedOptions(server.id)}
+                  className="flex items-center gap-1 text-sm cursor-pointer bg-transparent border-none p-0"
+                  style={{ color: 'var(--grafana-text-link)' }}
+                  data-testid={testIds.appConfig.mcpServerAdvancedToggle(server.id)}
+                >
+                  <Icon name={state.expandedAdvanced.has(server.id) ? 'angle-down' : 'angle-right'} />
+                  Custom Headers
+                  {server.headers && Object.keys(server.headers).length > 0 && (
+                    <span className="ml-1 text-xs" style={{ color: 'var(--grafana-text-secondary)' }}>
+                      ({Object.keys(server.headers).length} header{Object.keys(server.headers).length !== 1 ? 's' : ''})
+                    </span>
+                  )}
+                </button>
+              </div>
+            )}
 
             {/* Advanced Options Content */}
-            {state.expandedAdvanced.has(server.id) && (
+            {server.authType === 'headers' && state.expandedAdvanced.has(server.id) && (
               <div
                 className="mt-2 p-3 rounded"
                 style={{
