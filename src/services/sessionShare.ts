@@ -167,12 +167,19 @@ export class SessionShareService {
   }
 
   /**
-   * Build a full share URL from a share ID
+   * Build a full share URL from a share ID or full path
    */
-  buildShareUrl(shareId: string): string {
+  buildShareUrl(shareUrlOrId: string): string {
     // Get current origin
     const origin = window.location.origin;
-    return `${origin}/a/${pluginJson.id}/shared/${shareId}`;
+
+    // If it's already a full path from backend (starts with /a/), use it
+    if (shareUrlOrId.startsWith('/a/')) {
+      return `${origin}${shareUrlOrId}`;
+    }
+
+    // Fallback for backward compatibility (just shareId)
+    return `${origin}/a/${pluginJson.id}/shared/${shareUrlOrId}`;
   }
 }
 
