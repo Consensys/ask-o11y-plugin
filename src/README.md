@@ -63,13 +63,26 @@ You can switch between visualization types on-the-fly using the built-in visuali
 
 ### 💾 **Smart Session Management**
 
-- **Auto-Save**: All conversations automatically saved every 10 seconds (never lose your work)
+- **Auto-Save**: All conversations automatically saved when streaming completes (never lose your work)
 - **Organization Scoping**: Sessions organized by Grafana organization within each user's storage (private to each user, not shared between users)
 - **Session History**: Browse, resume, and manage previous conversations
 - **Import/Export**: Backup sessions as JSON or share with team members
 - **Storage Management**: Automatic cleanup when quota is reached (oldest sessions removed first)
 - **Quick Actions**: New chat, clear all sessions, delete individual conversations
 - **Session Metadata**: Auto-generated titles, timestamps, and message counts
+
+### 🔗 **Session Sharing**
+
+Share your conversations with team members through secure, shareable links:
+
+- **Create Share Links**: Generate secure share links for any chat session with customizable expiration
+- **Expiration Options**: Choose from 1 hour, 1 day, 7 days, 30 days, 90 days, or never expire
+- **Read-Only Viewing**: Shared sessions are viewable in read-only mode, preserving the original conversation
+- **Import Functionality**: Recipients can import shared sessions into their own account to continue the conversation
+- **Manage Shares**: View all active shares for a session and revoke access at any time
+- **Rate Limiting**: 50 shares per hour per user to prevent abuse
+- **Organization Scoped**: Shares are isolated to the organization where they were created
+- **Secure**: Cryptographically secure share IDs (32-byte random tokens)
 
 ### ⚙️ **Customizable Configuration**
 
@@ -86,7 +99,7 @@ You can switch between visualization types on-the-fly using the built-in visuali
 ### **Built for Performance**
 
 - ⚡ **Streaming Responses**: See answers appear in real-time as they're generated
-- 🔄 **Auto-Save**: 10-second debounced saves prevent data loss
+- 🔄 **Auto-Save**: Automatic saves when streaming completes prevent data loss
 - 📦 **Efficient Storage**: Smart caching and automatic cleanup
 - 🎨 **Smooth UI**: Optimized React components with proper memoization
 - 🔌 **Lazy Loading**: Fast initial load times
@@ -279,7 +292,7 @@ The assistant automatically:
 
 **Your conversations are automatically saved and organized:**
 
-- ✅ **Auto-Save**: Every message saved automatically (10-second debounce)
+- ✅ **Auto-Save**: Every message saved automatically when streaming completes
 - 🏢 **Org Scoped**: Sessions organized by Grafana organization within each user's storage
 - 👤 **Per-User Storage**: Sessions are private to each user and stored using Grafana's UserStorage API (not visible to other users, even in the same organization)
 - 📚 **History**: Browse and resume any previous conversation
@@ -293,6 +306,7 @@ The assistant automatically:
 - Select from sidebar to resume previous conversations
 - Use "Clear All" to delete all sessions (with confirmation)
 - Export individual sessions for backup or sharing
+- Click the share icon on any session to create a shareable link
 
 ## Configuration
 
@@ -446,6 +460,17 @@ go test ./pkg/...        # Backend tests
 3. Try a simpler query first (e.g., "show me a simple metric")
 4. Check time range - very large ranges can timeout
 5. Refresh the page to reset the visualization state
+
+#### "Share link not working" or "Share expired"
+
+**Solutions:**
+
+1. **Check Expiration**: Verify the share link hasn't expired (check the expiration date shown when creating the share)
+2. **Organization Context**: Ensure you're accessing the share from the same Grafana organization where it was created
+3. **Rate Limit**: If you can't create new shares, you may have hit the rate limit (50 shares per hour per user). Wait and try again later
+4. **Share Revoked**: The share may have been revoked by the creator
+5. **Check URL**: Verify the share URL is complete and hasn't been truncated
+6. **Backend Issues**: Check Grafana logs for errors: `docker compose logs -f grafana | grep -i share`
 
 ### Getting Help
 

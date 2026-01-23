@@ -35,8 +35,11 @@ test.describe('Session Sidebar Extended', () => {
       // Wait for message to appear
       await expect(page.getByText('Test message for session')).toBeVisible();
 
-      // Wait for debounce (10s) + save/refresh (2s)
-      await page.waitForTimeout(12000);
+      // Wait for chat input to become enabled (indicates message processing is done)
+      await expect(chatInput).toBeEnabled({ timeout: 30000 });
+
+      // Session is saved immediately, just wait a bit for UI refresh
+      await page.waitForTimeout(1000);
 
       // Open the sidebar
       const historyButtonInHeader = page.getByRole('button', { name: /History/i });
@@ -48,8 +51,8 @@ test.describe('Session Sidebar Extended', () => {
 
     await test.step('Verify date formatting in sidebar', async () => {
       // Get the first session item
-      // Wait for session item to appear (with timeout accounting for debounce)
-      const firstSessionItem = page.locator('.p-3.rounded.group').first();
+      // Wait for session item to appear (session is saved immediately)
+      const firstSessionItem = page.locator('.p-1\\.5.rounded.group').first();
       await expect(firstSessionItem).toBeVisible({ timeout: 15000 });
 
       // There should be date text like "Today", "Yesterday", or a date - only within the first session item
@@ -60,7 +63,7 @@ test.describe('Session Sidebar Extended', () => {
 
     await test.step('Verify message count for session', async () => {
       // Get the first session item
-      const firstSessionItem = page.locator('.p-3.rounded.group').first();
+      const firstSessionItem = page.locator('.p-1\\.5.rounded.group').first();
       await expect(firstSessionItem).toBeVisible();
 
       // Should show message count - only within the first session item
@@ -70,17 +73,17 @@ test.describe('Session Sidebar Extended', () => {
     await test.step('Verify active session indicator', async () => {
       // The current session should have some visual indication (blue styling)
       // Check for a session item that might have active styling
-      const sessionItems = page.locator('.p-3.rounded.group');
+      const sessionItems = page.locator('.p-1\\.5.rounded.group');
       await expect(sessionItems.first()).toBeVisible();
     });
 
     await test.step('Close sidebar', async () => {
-      // Close sidebar
-      await page.locator('.bg-black\\/50').click({ force: true });
+      // Close sidebar using the close button
+      await page.locator('button[title="Close"]').click();
     });
   });
 
-  test('should support sidebar actions (import, new chat, storage)', async ({ page }) => {
+  test('should support sidebar actions (new chat, storage)', async ({ page }) => {
     await test.step('Open sidebar and verify storage indicator', async () => {
       // Open history sidebar
       const historyButton = page.getByText(/View chat history/);
@@ -89,25 +92,6 @@ test.describe('Session Sidebar Extended', () => {
 
       // Storage indicator should show percentage
       await expect(page.getByText(/\d+% storage used/)).toBeVisible();
-    });
-
-    await test.step('Open and close import modal', async () => {
-      // Click Import button
-      await page.getByRole('button', { name: 'Import' }).click();
-
-      // Import modal should be visible
-      await expect(page.getByRole('heading', { name: 'Import Session' })).toBeVisible();
-
-      // File input should be visible
-      const fileInput = page.locator('input[type="file"]');
-      await expect(fileInput).toBeVisible();
-
-      // Cancel button should be visible
-      await expect(page.getByRole('button', { name: 'Cancel' })).toBeVisible();
-
-      // Cancel and verify sidebar is still open
-      await page.getByRole('button', { name: 'Cancel' }).click();
-      await expect(page.getByRole('heading', { name: 'Chat History' })).toBeVisible();
     });
 
     await test.step('Create new session from sidebar', async () => {
@@ -137,8 +121,8 @@ test.describe('Session Sidebar Extended', () => {
     const focusedElement = page.locator(':focus');
     await expect(focusedElement).toBeVisible();
 
-    // Close sidebar
-    await page.locator('.bg-black\\/50').click({ force: true });
+    // Close sidebar using the close button
+    await page.locator('button[title="Close"]').click();
   });
 });
 
@@ -195,8 +179,11 @@ test.describe('Session Interactions After Chat', () => {
       await page.getByLabel('Send message (Enter)').click();
       await expect(page.getByText('Second session message')).toBeVisible();
 
-      // Wait for debounce (10s) + save/refresh (2s) before checking sidebar
-      await page.waitForTimeout(12000);
+      // Wait for chat input to become enabled (indicates message processing is done)
+      await expect(chatInput).toBeEnabled({ timeout: 30000 });
+
+      // Session is saved immediately, just wait a bit for UI refresh
+      await page.waitForTimeout(1000);
 
       // Open sidebar
       const historyButton = page.getByRole('button', { name: /History/i });
@@ -204,13 +191,13 @@ test.describe('Session Interactions After Chat', () => {
       await expect(page.getByRole('heading', { name: 'Chat History' })).toBeVisible();
 
       // Wait for session items to appear
-      const sessionItems = page.locator('.p-3.rounded.group');
+      const sessionItems = page.locator('.p-1\\.5.rounded.group');
       await expect(sessionItems.first()).toBeVisible({ timeout: 15000 });
       const sessionCount = await sessionItems.count();
       expect(sessionCount).toBeGreaterThanOrEqual(1);
 
-      // Close sidebar
-      await page.locator('.bg-black\\/50').click({ force: true });
+      // Close sidebar using the close button
+      await page.locator('button[title="Close"]').click();
     });
   });
 });

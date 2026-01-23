@@ -3,6 +3,7 @@ import type { Page } from '@playwright/test';
 import pluginJson from '../src/plugin.json';
 import * as fs from 'fs';
 import * as path from 'path';
+import { execSync } from 'child_process';
 
 type AppTestFixture = {
   appConfigPage: AppConfigPage;
@@ -125,44 +126,118 @@ export async function deleteAllPersistedSessions(page: Page) {
   await page.getByRole('heading', { name: 'Chat History' }).waitFor({ state: 'visible', timeout: 5000 }).catch(() => {});
 
   // Find all session items
-  const sessionItems = page.locator('.p-3.rounded.group');
-  const sessionCount = await sessionItems.count();
+  const sessionItems = page.locator('.p-1\\.5.rounded.group');
+  let sessionCount = await sessionItems.count();
+  
+  // If no sessions, we're done
+  if (sessionCount === 0) {
+    // Close sidebar and return
+    const closeButton = page.locator('button[title="Close"]');
+    if (await closeButton.isVisible({ timeout: 1000 }).catch(() => false)) {
+      await closeButton.click();
+    }
+    await page.waitForTimeout(300);
+    return;
+  }
 
-  // Delete each session
-  for (let i = sessionCount - 1; i >= 0; i--) {
-    const sessionItem = sessionItems.nth(i);
-    if (await sessionItem.isVisible().catch(() => false)) {
+  // Use "Clear All History" button if available (more efficient)
+  const clearAllButton = page.getByRole('button', { name: /Clear All History/i });
+  if (await clearAllButton.isVisible({ timeout: 2000 }).catch(() => false)) {
+    // Accept the confirmation dialog
+    page.once('dialog', async dialog => {
+      await dialog.accept();
+    });
+    await clearAllButton.click();
+    await page.waitForTimeout(1000);
+  } else {
+    // Fallback: delete sessions one by one (limited to prevent timeouts)
+    let maxIterations = Math.min(sessionCount, 10); // Limit to 10 deletions max
+    for (let i = 0; i < maxIterations && sessionCount > 0; i++) {
+      const sessionItem = sessionItems.first();
+      
+      if (!(await sessionItem.isVisible({ timeout: 1000 }).catch(() => false))) {
+        break;
+      }
+
       // Hover to reveal delete button
       await sessionItem.hover();
       await page.waitForTimeout(200);
 
-      // Look for delete button
+      // Look for delete button - try icon button first
       const deleteButton = sessionItem
-        .getByRole('button', { name: /delete/i })
-        .or(sessionItem.locator('[aria-label*="delete"]'))
-        .or(sessionItem.locator('[aria-label*="Delete"]'))
-        .or(sessionItem.locator('button').last());
+        .locator('button[title*="Delete"]')
+        .or(sessionItem.locator('button[aria-label*="delete" i]'))
+        .or(sessionItem.locator('button').filter({ hasText: /delete/i }))
+        .first();
 
-      if (await deleteButton.isVisible().catch(() => false)) {
+      if (await deleteButton.isVisible({ timeout: 1000 }).catch(() => false)) {
         await deleteButton.click();
-        // Wait a bit for the deletion to process
-        await page.waitForTimeout(300);
+        // Wait for deletion confirmation if needed, then wait for UI update
+        await page.waitForTimeout(500);
+        
+        // Re-count sessions after deletion
+        const newCount = await sessionItems.count();
+        if (newCount >= sessionCount) {
+          // No progress, break to avoid infinite loop
+          break;
+        }
+        sessionCount = newCount;
+      } else {
+        // If delete button not found, break to avoid infinite loop
+        break;
       }
     }
   }
 
-  // Close the sidebar
-  const backdrop = page.locator('.bg-black\\/50');
-  if (await backdrop.isVisible().catch(() => false)) {
-    await backdrop.click({ force: true });
+  // Close the sidebar using the close button
+  const closeButton = page.locator('button[title="Close"]');
+  if (await closeButton.isVisible().catch(() => false)) {
+    await closeButton.click();
   } else {
-    // Try the close button in sidebar header
-    const closeButton = page.locator('.relative.w-80 button[title="Close"]');
-    if (await closeButton.isVisible().catch(() => false)) {
-      await closeButton.click();
+    // Fallback: try clicking the backdrop (the overlay div)
+    const backdrop = page.locator('.fixed.inset-0 > div.absolute.inset-0').first();
+    if (await backdrop.isVisible().catch(() => false)) {
+      await backdrop.click();
     }
   }
 
   // Wait for sidebar to close
   await page.waitForTimeout(500);
+}
+
+/**
+ * Helper function to reset rate limits in Redis.
+ * This should be called before tests that create multiple shares to avoid rate limiting issues.
+ * Uses docker compose to execute redis-cli commands.
+ * 
+ * Note: This function will silently fail if Redis is not available (e.g., using in-memory storage),
+ * allowing tests to continue running.
+ */
+export async function resetRateLimits() {
+  try {
+    // First, get all rate limit keys
+    // Use --no-warnings to suppress warnings when no keys are found
+    const keysOutput = execSync(
+      'docker compose exec -T redis redis-cli --scan --pattern "ratelimit:*" 2>/dev/null || true',
+      { encoding: 'utf-8', stdio: 'pipe', timeout: 5000, shell: '/bin/bash' }
+    ).trim();
+
+    // If there are keys, delete them
+    if (keysOutput) {
+      const keyList = keysOutput.split('\n').filter(k => k.trim());
+      if (keyList.length > 0) {
+        // Delete all rate limit keys at once
+        // Escape keys to handle special characters
+        const escapedKeys = keyList.map(k => `"${k}"`).join(' ');
+        execSync(
+          `docker compose exec -T redis redis-cli DEL ${escapedKeys} 2>/dev/null || true`,
+          { encoding: 'utf-8', stdio: 'pipe', timeout: 5000, shell: '/bin/bash' }
+        );
+      }
+    }
+  } catch (error) {
+    // If docker compose or redis is not available, silently fail
+    // This allows tests to run even if Redis is not running (using in-memory storage)
+    // The error is expected when Redis is not available, so we don't log it
+  }
 }

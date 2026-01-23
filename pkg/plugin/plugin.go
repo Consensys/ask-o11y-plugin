@@ -5,15 +5,23 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"hash/fnv"
 	"io"
 	"net/http"
+	"os"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/grafana/grafana-plugin-sdk-go/backend"
 	"github.com/grafana/grafana-plugin-sdk-go/backend/instancemgmt"
 	"github.com/grafana/grafana-plugin-sdk-go/backend/log"
 	"github.com/grafana/grafana-plugin-sdk-go/backend/resource/httpadapter"
+	"github.com/redis/go-redis/v9"
 )
+
+// PluginID is the plugin identifier
+const PluginID = "consensys-asko11y-app"
 
 // Make sure Plugin implements required interfaces
 var (
@@ -21,6 +29,62 @@ var (
 	_ instancemgmt.InstanceDisposer = (*Plugin)(nil)
 	_ backend.CheckHealthHandler    = (*Plugin)(nil)
 )
+
+// RedisConfig holds Redis connection configuration
+type RedisConfig struct {
+	Addr     string
+	Password string
+	DB       int
+}
+
+// getRedisAddr returns the Redis address from environment variables
+func getRedisAddr() string {
+	if addr := os.Getenv("REDIS_ADDR"); addr != "" {
+		return addr
+	}
+	return "localhost:6379"
+}
+
+// createRedisClient creates a Redis client from environment variables
+func createRedisClient(logger log.Logger) (*redis.Client, error) {
+	// Try GF_PLUGIN_ASKO11Y_REDIS first (full connection string)
+	redisURL := os.Getenv("GF_PLUGIN_ASKO11Y_REDIS")
+	if redisURL != "" {
+		opt, err := redis.ParseURL(redisURL)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse GF_PLUGIN_ASKO11Y_REDIS: %w", err)
+		}
+		logger.Info("Using Redis connection from GF_PLUGIN_ASKO11Y_REDIS")
+		return redis.NewClient(opt), nil
+	}
+
+	// Fall back to individual environment variables
+	addr := getRedisAddr()
+	password := os.Getenv("REDIS_PASSWORD")
+
+	db := 0
+	if dbStr := os.Getenv("REDIS_DB"); dbStr != "" {
+		var err error
+		db, err = strconv.Atoi(dbStr)
+		if err != nil {
+			logger.Warn("Invalid REDIS_DB value, using default 0", "value", dbStr, "error", err)
+			db = 0
+		}
+	}
+
+	opt := &redis.Options{
+		Addr:     addr,
+		Password: password,
+		DB:       db,
+	}
+
+	logger.Info("Using Redis connection from individual environment variables",
+		"addr", addr,
+		"db", db,
+		"hasPassword", password != "")
+
+	return redis.NewClient(opt), nil
+}
 
 // PluginSettings represents the plugin configuration
 type PluginSettings struct {
@@ -30,8 +94,13 @@ type PluginSettings struct {
 // Plugin is the backend plugin implementation
 type Plugin struct {
 	backend.CallResourceHandler
-	logger   log.Logger
-	mcpProxy *mcp.Proxy
+	logger      log.Logger
+	mcpProxy    *mcp.Proxy
+	shareStore  ShareStoreInterface
+	redisClient *redis.Client      // Store Redis client for health checks and cleanup
+	usingRedis  bool               // Track if we're using Redis or in-memory
+	ctx         context.Context    // Plugin lifecycle context
+	cancel      context.CancelFunc // Cancel function for plugin lifecycle context
 }
 
 // NewPlugin creates a new backend plugin instance
@@ -51,12 +120,69 @@ func NewPlugin(ctx context.Context, settings backend.AppInstanceSettings) (insta
 	mcpProxy := mcp.NewProxy(logger)
 	mcpProxy.UpdateConfig(pluginSettings.MCPServers)
 
-	// Start health monitoring with 30 second intervals
-	mcpProxy.StartHealthMonitoring(30 * time.Second)
+	// Start health monitoring
+	mcpProxy.StartHealthMonitoring(MCPHealthMonitoringInterval)
+
+	// Try to create Redis-backed share store, fallback to in-memory
+	var shareStore ShareStoreInterface
+	var redisClient *redis.Client
+	usingRedis := false
+
+	redisClient, err := createRedisClient(logger)
+	if err == nil {
+		// Test connection
+		ctx, cancel := context.WithTimeout(context.Background(), RedisConnectionTimeout)
+		defer cancel()
+		if err := redisClient.Ping(ctx).Err(); err == nil {
+			// Create Redis-backed rate limiter
+			rateLimiter := NewRedisRateLimiter(redisClient, logger)
+			shareStore = NewRedisShareStore(redisClient, logger, rateLimiter)
+			usingRedis = true
+			logger.Info("Using Redis for session sharing", "redisAddr", getRedisAddr())
+		} else {
+			logger.Warn("Redis connection test failed, falling back to in-memory storage", "error", err)
+			redisClient.Close()
+			redisClient = nil
+		}
+	} else {
+		logger.Warn("Failed to create Redis client, falling back to in-memory storage", "error", err)
+	}
+
+	// Fallback to in-memory store if Redis is not available
+	if !usingRedis {
+		// Create in-memory rate limiter
+		rateLimiter := NewInMemoryRateLimiter(logger)
+		shareStore = NewShareStore(logger, rateLimiter)
+		logger.Info("Using in-memory storage for session sharing (not suitable for multi-replica deployments)")
+	}
+
+	// Create a context that lives for the plugin's lifetime (not the initialization context)
+	pluginCtx, cancel := context.WithCancel(context.Background())
 
 	p := &Plugin{
-		logger:   logger,
-		mcpProxy: mcpProxy,
+		logger:      logger,
+		mcpProxy:    mcpProxy,
+		shareStore:  shareStore,
+		redisClient: redisClient,
+		usingRedis:  usingRedis,
+		ctx:         pluginCtx,
+		cancel:      cancel,
+	}
+
+	// Start cleanup goroutine for expired shares (only needed for in-memory store)
+	if !usingRedis {
+		go func() {
+			ticker := time.NewTicker(ShareCleanupInterval)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ticker.C:
+					shareStore.CleanupExpired()
+				case <-pluginCtx.Done():
+					return
+				}
+			}
+		}()
 	}
 
 	// Setup resource handler using httpadapter
@@ -65,7 +191,7 @@ func NewPlugin(ctx context.Context, settings backend.AppInstanceSettings) (insta
 	p.CallResourceHandler = httpadapter.New(mux)
 
 	logger.Info("Plugin initialized",
-		"pluginId", "consensys-asko11y-app",
+		"pluginId", PluginID,
 		"mcpServers", mcpProxy.GetServerCount())
 
 	return p, nil
@@ -73,7 +199,16 @@ func NewPlugin(ctx context.Context, settings backend.AppInstanceSettings) (insta
 
 // Dispose cleans up plugin resources
 func (p *Plugin) Dispose() {
+	// Cancel the plugin lifecycle context to stop the cleanup goroutine
+	if p.cancel != nil {
+		p.cancel()
+	}
 	p.mcpProxy.StopHealthMonitoring()
+	if p.redisClient != nil {
+		if err := p.redisClient.Close(); err != nil {
+			p.logger.Warn("Failed to close Redis client", "error", err)
+		}
+	}
 	p.logger.Info("Plugin disposed")
 }
 
@@ -82,10 +217,27 @@ func (p *Plugin) CheckHealth(ctx context.Context, req *backend.CheckHealthReques
 	p.logger.Info("CheckHealth called")
 
 	serverCount := p.mcpProxy.GetServerCount()
+	status := backend.HealthStatusOk
 	message := fmt.Sprintf("Plugin is healthy (MCP servers: %d)", serverCount)
 
+	// Check Redis connection if using Redis
+	if p.usingRedis && p.redisClient != nil {
+		healthCtx, cancel := context.WithTimeout(ctx, HealthCheckTimeout)
+		defer cancel()
+		if err := p.redisClient.Ping(healthCtx).Err(); err != nil {
+			// Plugin is still functional, but Redis is down - use warning message
+			message = fmt.Sprintf("Plugin is healthy but Redis connection failed (MCP servers: %d). Session sharing may not work across replicas.", serverCount)
+			p.logger.Warn("Redis health check failed", "error", err)
+		} else {
+			message = fmt.Sprintf("Plugin is healthy (MCP servers: %d, Redis: connected)", serverCount)
+		}
+	} else if !p.usingRedis {
+		// Plugin is functional but using in-memory storage - include warning in message
+		message = fmt.Sprintf("Plugin is healthy but using in-memory storage (MCP servers: %d). Session sharing will not work across multiple Grafana replicas. Configure Redis for production.", serverCount)
+	}
+
 	return &backend.CheckHealthResult{
-		Status:  backend.HealthStatusOk,
+		Status:  status,
 		Message: message,
 	}, nil
 }
@@ -102,6 +254,14 @@ func (p *Plugin) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/mcp/tools", p.handleMCPTools)
 	mux.HandleFunc("/api/mcp/call-tool", p.handleMCPCallTool)
 	mux.HandleFunc("/api/mcp/servers", p.handleMCPServers)
+
+	// Session sharing endpoints
+	// IMPORTANT: Register more specific routes BEFORE general ones
+	// Go's ServeMux matches longest pattern, but we need specific routes first to avoid conflicts
+	mux.HandleFunc("/api/sessions/share", p.handleCreateShare)        // Exact match: POST /api/sessions/share
+	mux.HandleFunc("/api/sessions/shared/", p.handleGetSharedSession) // Prefix: GET /api/sessions/shared/{shareId}
+	mux.HandleFunc("/api/sessions/share/", p.handleDeleteShare)       // Prefix: DELETE /api/sessions/share/{shareId}
+	mux.HandleFunc("/api/sessions/", p.handleGetSessionShares)        // Prefix: GET /api/sessions/{sessionId}/shares (must be last)
 
 	// Fallback handler
 	mux.HandleFunc("/", p.handleDefault)
@@ -382,4 +542,338 @@ func (p *Plugin) handleDefault(w http.ResponseWriter, r *http.Request) {
 	}
 
 	json.NewEncoder(w).Encode(response)
+}
+
+// getUserID extracts the user ID from the Grafana plugin context
+// Note: Grafana SDK User struct may not have ID field directly
+// We use Login as a unique identifier, or fallback to header
+func getUserID(r *http.Request) int64 {
+	pluginContext := httpadapter.PluginConfigFromContext(r.Context())
+	if pluginContext.User != nil {
+		// Try to get user ID from Login (hash it to int64 for storage)
+		login := pluginContext.User.Login
+		if login != "" {
+			// Use FNV-1a hash for deterministic, collision-resistant hashing
+			// FNV-1a is fast, has good distribution, and avoids overflow issues
+			h := fnv.New64a()
+			h.Write([]byte(login))
+			hash := h.Sum64()
+
+			// Convert uint64 to int64 safely (take lower 63 bits to ensure positive)
+			// This avoids sign issues while maintaining good distribution
+			return int64(hash & 0x7FFFFFFFFFFFFFFF)
+		}
+	}
+
+	// Fallback: try to get from header
+	userIDHeader := r.Header.Get("X-Grafana-User-Id")
+	if userIDHeader != "" {
+		var userID int64
+		if _, err := fmt.Sscanf(userIDHeader, "%d", &userID); err == nil {
+			return userID
+		}
+	}
+
+	return 0
+}
+
+// stringPtr returns a pointer to a copy of the string, allocated on the heap
+// This ensures the pointer remains valid after the function returns
+// Go's escape analysis will move the string to the heap automatically
+func stringPtr(s string) *string {
+	// Create a new string allocation to ensure pointer remains valid
+	// The compiler will escape this to the heap
+	sCopy := s
+	return &sCopy
+}
+
+// getOrgID extracts the organization ID from the request header
+func getOrgID(r *http.Request) int64 {
+	orgIDStr := r.Header.Get("X-Grafana-Org-Id")
+	if orgIDStr == "" {
+		return 1 // Default to org 1 if not specified
+	}
+
+	var orgID int64
+	fmt.Sscanf(orgIDStr, "%d", &orgID)
+	if orgID == 0 {
+		return 1 // Default to org 1 if parsing fails
+	}
+	return orgID
+}
+
+// handleCreateShare handles POST /api/sessions/share
+func (p *Plugin) handleCreateShare(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	orgID := getOrgID(r)
+	userID := getUserID(r)
+
+	var req struct {
+		SessionID      string          `json:"sessionId"`
+		SessionData    json.RawMessage `json:"sessionData"`
+		ExpiresInDays  *int            `json:"expiresInDays,omitempty"`  // Deprecated: use ExpiresInHours (converted to hours internally)
+		ExpiresInHours *int            `json:"expiresInHours,omitempty"` // Accepts hours directly
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, fmt.Sprintf("Invalid request: %v", err), http.StatusBadRequest)
+		return
+	}
+
+	// Validate session data
+	if err := ValidateSessionData(req.SessionData); err != nil {
+		p.logger.Warn("Invalid session data", "error", err)
+		http.Error(w, fmt.Sprintf("Invalid session data: %v", err), http.StatusBadRequest)
+		return
+	}
+
+	// Validate sessionId matches session data
+	var sessionData map[string]interface{}
+	if err := json.Unmarshal(req.SessionData, &sessionData); err != nil {
+		http.Error(w, "Invalid session data format", http.StatusBadRequest)
+		return
+	}
+
+	if sessionID, ok := sessionData["id"].(string); !ok || sessionID != req.SessionID {
+		http.Error(w, "Session ID mismatch", http.StatusBadRequest)
+		return
+	}
+
+	// Handle expiration: prefer ExpiresInHours, fall back to ExpiresInDays (for backward compatibility)
+	var expiresInHours *int
+	if req.ExpiresInHours != nil {
+		if *req.ExpiresInHours <= 0 {
+			http.Error(w, "expiresInHours must be positive", http.StatusBadRequest)
+			return
+		}
+		expiresInHours = req.ExpiresInHours
+	} else if req.ExpiresInDays != nil {
+		if *req.ExpiresInDays <= 0 {
+			http.Error(w, "expiresInDays must be positive", http.StatusBadRequest)
+			return
+		}
+		// Convert days to hours for backward compatibility
+		hours := *req.ExpiresInDays * 24
+		expiresInHours = &hours
+	}
+
+	share, err := p.shareStore.CreateShare(req.SessionID, req.SessionData, orgID, userID, expiresInHours)
+	if err != nil {
+		if err.Error() == "rate limit exceeded: too many share requests" {
+			http.Error(w, "Too many share requests. Please try again later.", http.StatusTooManyRequests)
+			return
+		}
+		p.logger.Error("Failed to create share", "error", err)
+		http.Error(w, fmt.Sprintf("Failed to create share: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// Build share URL
+	shareURL := fmt.Sprintf("/a/%s/shared/%s", PluginID, share.ShareID)
+
+	var expiresAtStr *string
+	if share.ExpiresAt != nil {
+		// Allocate string on heap to avoid pointer to local variable going out of scope
+		expStr := share.ExpiresAt.Format(time.RFC3339)
+		expiresAtStr = stringPtr(expStr)
+	}
+
+	response := map[string]interface{}{
+		"shareId":   share.ShareID,
+		"shareUrl":  shareURL,
+		"expiresAt": expiresAtStr,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(response)
+}
+
+// handleGetSharedSession handles GET /api/sessions/shared/:shareId
+func (p *Plugin) handleGetSharedSession(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Extract shareId from URL path
+	// Path format: /api/sessions/shared/{shareId}
+	path := r.URL.Path
+	if !strings.HasPrefix(path, "/api/sessions/shared/") {
+		http.Error(w, "Invalid path format", http.StatusBadRequest)
+		return
+	}
+
+	shareID := strings.TrimPrefix(path, "/api/sessions/shared/")
+	if shareID == "" {
+		http.Error(w, "Share ID required", http.StatusBadRequest)
+		return
+	}
+
+	orgID := getOrgID(r)
+
+	// Get share
+	share, err := p.shareStore.GetShare(shareID)
+	if err != nil {
+		if err.Error() == "share not found" {
+			http.Error(w, "Share link not found", http.StatusNotFound)
+			return
+		}
+		if err.Error() == "share expired" {
+			http.Error(w, "This share link has expired", http.StatusNotFound)
+			return
+		}
+		p.logger.Error("Failed to get share", "error", err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	// Validate org match
+	if share.OrgID != orgID {
+		http.Error(w, "You don't have access to this shared session", http.StatusForbidden)
+		return
+	}
+
+	// Parse session data
+	var sessionData map[string]interface{}
+	if err := json.Unmarshal(share.SessionData, &sessionData); err != nil {
+		p.logger.Error("Failed to parse session data", "error", err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	// Add shared metadata
+	sessionData["isShared"] = true
+	sessionData["sharedBy"] = fmt.Sprintf("%d", share.UserID)
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(sessionData)
+}
+
+// handleDeleteShare handles DELETE /api/sessions/share/:shareId
+func (p *Plugin) handleDeleteShare(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodDelete {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Extract shareId from URL path
+	// Path format: /api/sessions/share/{shareId}
+	path := r.URL.Path
+	if !strings.HasPrefix(path, "/api/sessions/share/") {
+		http.Error(w, "Invalid path format", http.StatusBadRequest)
+		return
+	}
+
+	shareID := strings.TrimPrefix(path, "/api/sessions/share/")
+	if shareID == "" {
+		http.Error(w, "Share ID required", http.StatusBadRequest)
+		return
+	}
+
+	userID := getUserID(r)
+
+	// Get share to verify ownership
+	share, err := p.shareStore.GetShare(shareID)
+	if err != nil {
+		if err.Error() == "share not found" || err.Error() == "share expired" {
+			http.Error(w, "Share link not found", http.StatusNotFound)
+			return
+		}
+		p.logger.Error("Failed to get share", "error", err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	// Validate ownership
+	if share.UserID != userID {
+		http.Error(w, "You don't have permission to revoke this share", http.StatusForbidden)
+		return
+	}
+
+	// Delete share
+	if err := p.shareStore.DeleteShare(shareID); err != nil {
+		p.logger.Error("Failed to delete share", "error", err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	response := map[string]interface{}{
+		"success": true,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(response)
+}
+
+// handleGetSessionShares handles GET /api/sessions/:sessionId/shares
+func (p *Plugin) handleGetSessionShares(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Extract sessionId from URL path
+	// Path format: /api/sessions/{sessionId}/shares
+	// IMPORTANT: This handler must reject paths that match more specific routes
+	path := r.URL.Path
+
+	// Reject paths that should be handled by more specific routes
+	if strings.HasPrefix(path, "/api/sessions/shared/") {
+		http.Error(w, "Invalid path format", http.StatusBadRequest)
+		return
+	}
+	if strings.HasPrefix(path, "/api/sessions/share/") {
+		http.Error(w, "Invalid path format", http.StatusBadRequest)
+		return
+	}
+	if path == "/api/sessions/share" {
+		http.Error(w, "Invalid path format", http.StatusBadRequest)
+		return
+	}
+
+	prefix := "/api/sessions/"
+	suffix := "/shares"
+
+	if !strings.HasPrefix(path, prefix) || !strings.HasSuffix(path, suffix) {
+		http.Error(w, "Invalid path format", http.StatusBadRequest)
+		return
+	}
+
+	// Extract sessionId: remove prefix and suffix
+	sessionID := strings.TrimPrefix(strings.TrimSuffix(path, suffix), prefix)
+	if sessionID == "" {
+		http.Error(w, "Session ID required", http.StatusBadRequest)
+		return
+	}
+
+	userID := getUserID(r)
+
+	// Get shares for session
+	shares := p.shareStore.GetSharesBySession(sessionID)
+
+	// Filter to only shares created by this user
+	var userShares []map[string]interface{}
+	for _, share := range shares {
+		if share.UserID == userID {
+			shareURL := fmt.Sprintf("/a/%s/shared/%s", PluginID, share.ShareID)
+			var expiresAtStr *string
+			if share.ExpiresAt != nil {
+				// Allocate string on heap to avoid pointer to local variable going out of scope
+				expStr := share.ExpiresAt.Format(time.RFC3339)
+				expiresAtStr = stringPtr(expStr)
+			}
+			userShares = append(userShares, map[string]interface{}{
+				"shareId":   share.ShareID,
+				"shareUrl":  shareURL,
+				"expiresAt": expiresAtStr,
+			})
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(userShares)
 }

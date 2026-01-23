@@ -117,6 +117,9 @@ test.describe('Chat Error Recovery', () => {
     });
 
     await test.step('Verify session persistence', async () => {
+      // Wait for chat input to become enabled again (wait for isGenerating to be false)
+      await expect(chatInput).toBeEnabled({ timeout: 30000 });
+
       // Send another message
       await chatInput.fill('Message to check persistence');
       await page.getByLabel('Send message (Enter)').click();
@@ -131,8 +134,8 @@ test.describe('Chat Error Recovery', () => {
       // There should be at least one session
       await expect(page.getByText(/\d+ sessions/)).toBeVisible();
 
-      // Close sidebar
-      await page.locator('.bg-black\\/50').click({ force: true });
+      // Close sidebar using the close button instead of backdrop
+      await page.locator('button[title="Close"]').click();
     });
   });
 });

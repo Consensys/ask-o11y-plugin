@@ -9,6 +9,7 @@ import { SYSTEM_PROMPT } from '../constants';
 import { ConversationMemoryService } from '../../../services/memory';
 import { ReliabilityService } from '../../../services/reliability';
 import { ValidationService } from '../../../services/validation';
+import { ChatSession } from '../../../core/models/ChatSession';
 import type { AppPluginSettings } from '../../../types/plugin';
 
 /**
@@ -35,8 +36,12 @@ const buildEffectiveSystemPrompt = (
   }
 };
 
-export const useChat = (pluginSettings: AppPluginSettings) => {
-  console.log('[useChat] Hook initialized');
+export const useChat = (pluginSettings: AppPluginSettings, initialSession?: ChatSession, readOnly?: boolean) => {
+  console.log('[useChat] Hook initialized', { 
+    readOnly, 
+    hasInitialSession: !!initialSession,
+    initialMessageCount: initialSession?.messages?.length || 0
+  });
 
   // Get organization ID from Grafana config
   const orgId = String(config.bootData.user.orgId || '1');
@@ -50,7 +55,39 @@ export const useChat = (pluginSettings: AppPluginSettings) => {
     [systemPromptMode, customSystemPrompt]
   );
 
-  const [chatHistory, setChatHistory] = useState<ChatMessage[]>([]);
+  // Initialize chat history with initial session messages if provided
+  // Ensure messages array exists and is not empty
+  const initialMessages = initialSession?.messages || [];
+  const [chatHistory, setChatHistory] = useState<ChatMessage[]>(initialMessages);
+  
+  // Update chatHistory when initialSession changes (e.g., when SharedSession loads)
+  // Use a ref to track if we've already initialized to avoid unnecessary updates
+  const hasInitializedRef = useRef(false);
+  const initialSessionIdRef = useRef<string | undefined>(initialSession?.id);
+  const initialMessageCountRef = useRef<number>(initialSession?.messages?.length || 0);
+  
+  useEffect(() => {
+    // Only update if we have an initialSession with messages and haven't initialized yet
+    // or if the session ID or message count changed (session was updated)
+    if (initialSession?.messages && initialSession.messages.length > 0) {
+      const sessionIdChanged = initialSessionIdRef.current !== initialSession.id;
+      const messageCountChanged = initialMessageCountRef.current !== initialSession.messages.length;
+      const shouldUpdate = !hasInitializedRef.current || sessionIdChanged || messageCountChanged;
+      
+      if (shouldUpdate) {
+        console.log('[useChat] Updating chatHistory from initialSession', { 
+          messageCount: initialSession.messages.length,
+          firstMessage: initialSession.messages[0]?.content?.substring(0, 50),
+          currentHistoryLength: chatHistory.length
+        });
+        setChatHistory(initialSession.messages);
+        hasInitializedRef.current = true;
+        initialSessionIdRef.current = initialSession.id;
+        initialMessageCountRef.current = initialSession.messages.length;
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialSession?.id, initialSession?.messages?.length]); // Only depend on id and length, not the whole object or chatHistory
   const [currentInput, setCurrentInput] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
   const chatContainerRef = useRef<HTMLDivElement>(null);
@@ -83,7 +120,7 @@ export const useChat = (pluginSettings: AppPluginSettings) => {
   );
 
   // Session management with persistence
-  const sessionManager = useSessionManager(orgId, chatHistory, setChatHistory);
+  const sessionManager = useSessionManager(orgId, chatHistory, setChatHistory, readOnly);
 
   // Auto-scroll when chat history changes (only if auto-scroll is enabled)
   useEffect(() => {
@@ -160,6 +197,10 @@ export const useChat = (pluginSettings: AppPluginSettings) => {
     const newChatHistory = [...chatHistory, userMessage];
     console.log('[useChat] Adding user message to history');
     setChatHistory(newChatHistory);
+    // Save immediately after user input
+    if (!readOnly) {
+      sessionManager.saveImmediately(newChatHistory);
+    }
     setCurrentInput('');
     setIsGenerating(true);
     clearToolCalls();
@@ -214,11 +255,21 @@ export const useChat = (pluginSettings: AppPluginSettings) => {
       // Get user-friendly error message
       const errorMessage = ReliabilityService.getUserFriendlyErrorMessage(error);
 
-      setChatHistory((prev) =>
-        prev.map((msg, idx) =>
+      // Update chat history with error message and save immediately
+      setChatHistory((prev) => {
+        const updated = prev.map((msg, idx) =>
           idx === prev.length - 1 && msg.role === 'assistant' ? { ...msg, content: errorMessage } : msg
-        )
-      );
+        );
+        
+        // Save immediately after error (use setTimeout to ensure state has updated)
+        if (!readOnly) {
+          setTimeout(() => {
+            sessionManager.saveImmediately(updated);
+          }, 0);
+        }
+        
+        return updated;
+      });
 
       // Track retry count
       setRetryCount((prev) => prev + 1);
@@ -257,6 +308,17 @@ export const useChat = (pluginSettings: AppPluginSettings) => {
       updateToolCallsInChatHistory(toolCalls);
     }
   }, [toolCalls]);
+
+  // Save immediately when streaming completes (isGenerating changes from true to false)
+  const prevIsGeneratingRef = useRef(isGenerating);
+  useEffect(() => {
+    // Save when streaming completes (isGenerating goes from true to false)
+    if (prevIsGeneratingRef.current && !isGenerating && chatHistory.length > 0 && !readOnly) {
+      console.log('[useChat] Streaming completed, saving immediately');
+      sessionManager.saveImmediately(chatHistory);
+    }
+    prevIsGeneratingRef.current = isGenerating;
+  }, [isGenerating, chatHistory, sessionManager, readOnly]);
 
   // Recovery on mount
   useEffect(() => {

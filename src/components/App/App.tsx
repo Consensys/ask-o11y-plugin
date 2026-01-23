@@ -4,6 +4,7 @@ import { AppRootProps } from '@grafana/data';
 import { GrafanaThemeProvider } from '../../theme';
 import type { AppPluginSettings } from '../../types/plugin';
 const Home = React.lazy(() => import('../../pages/Home'));
+const SharedSession = React.lazy(() => import('../../pages/SharedSession'));
 // const MCPTools = React.lazy(() => import('../../pages/MCPTools'));
 
 function App(props: AppRootProps<AppPluginSettings>) {
@@ -39,6 +40,8 @@ function App(props: AppRootProps<AppPluginSettings>) {
       <Routes>
         {/* MCP Tools management page */}
         {/* <Route path="/tools" element={<MCPTools />} /> */}
+        {/* Shared session page */}
+        <Route path="/shared/:shareId" element={<SharedSession />} />
         {/* Default page */}
         <Route path="*" element={<Home pluginSettings={pluginSettings} />} />
       </Routes>

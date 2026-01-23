@@ -28,7 +28,12 @@
     "coverage": "npm run coverage:clean && npm run coverage:unit && npm run build:frontend:coverage && npm run e2e:coverage && npm run coverage:merge",
     "server": "docker compose up --build",
     "sign": "npx --yes @grafana/sign-plugin@latest",
-    "backend:mod": "go mod tidy"
+    "backend:mod": "go mod tidy",
+    "validate": "npm run validate:build && npm run validate:archive && npm run validate:run",
+    "validate:build": "npm run build:prod",
+    "validate:archive": "PLUGIN_ID=$(node -e \"console.log(require('./src/plugin.json').id)\") && rm -rf \"${PLUGIN_ID}\" \"${PLUGIN_ID}.zip\" && mkdir -p \"${PLUGIN_ID}\" && cp -r dist/* \"${PLUGIN_ID}/\" && zip -qr \"${PLUGIN_ID}.zip\" \"${PLUGIN_ID}\" && echo \"Created ${PLUGIN_ID}.zip\"",
+    "validate:run": "PLUGIN_ID=$(node -e \"console.log(require('./src/plugin.json').id)\") && npx -y @grafana/plugin-validator@latest -sourceCodeUri file://. \"${PLUGIN_ID}.zip\"",
+    "validate:clean": "PLUGIN_ID=$(node -e \"console.log(require('./src/plugin.json').id)\") && rm -rf \"${PLUGIN_ID}\" \"${PLUGIN_ID}.zip\""
   },
   "author": "Consensys",
   "license": "MIT",
@@ -38,7 +43,7 @@
     "@babel/preset-react": "^7.28.5",
     "@babel/preset-typescript": "^7.28.5",
     "@grafana/eslint-config": "^8.2.0",
-    "@grafana/plugin-e2e": "^2.2.0",
+    "@grafana/plugin-e2e": "^3.1.4",
     "@grafana/tsconfig": "^2.0.0",
     "@istanbuljs/nyc-config-typescript": "^1.0.2",
     "@jest/test-sequencer": "^29.7.0",
