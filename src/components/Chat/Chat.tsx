@@ -16,7 +16,6 @@ import {
   QuickSuggestions,
   SessionSidebar,
   SummarizationIndicator,
-  SidePanel,
 } from './components';
 import { ChatInputRef } from './components/ChatInput/ChatInput';
 import { ChatErrorBoundary } from '../ErrorBoundary';
@@ -485,17 +484,6 @@ function ChatComponent({ pluginSettings, readOnly = false, initialSession }: Cha
         )}
           </div>
         </>
-      )}
-
-      {/* Fallback: standalone SidePanel when scene is not available but panel should be shown */}
-      {!chatScene && showSidePanel && (
-        <SidePanel
-          isOpen={true}
-          onClose={() => setIsSidePanelOpen(false)}
-          pageRefs={visiblePageRefs}
-          onRemoveTab={handleRemoveTab}
-          embedded={true}
-        />
       )}
 
       {/* Session sidebar - outside scene */}
