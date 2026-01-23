@@ -107,13 +107,13 @@ export function ShareDialog({ sessionId, session, onClose, existingShares = [], 
               <div className="flex gap-1.5">
                 <Input
                   data-testid="share-url-input"
-                  value={sessionShareService.buildShareUrl(createdShare.shareId)}
+                  value={sessionShareService.buildShareUrl(createdShare.shareUrl)}
                   readOnly
                   className="flex-1"
                 />
                 <ClipboardButton
                   icon="copy"
-                  getText={() => sessionShareService.buildShareUrl(createdShare.shareId)}
+                  getText={() => sessionShareService.buildShareUrl(createdShare.shareUrl)}
                 >
                   Copy
                 </ClipboardButton>
