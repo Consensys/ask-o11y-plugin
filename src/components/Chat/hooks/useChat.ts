@@ -332,12 +332,11 @@ export const useChat = (pluginSettings: AppPluginSettings, initialSession?: Chat
   const detectedPageRefs = useMemo((): Array<GrafanaPageRef & { messageIndex: number }> => {
     for (let i = chatHistory.length - 1; i >= 0; i--) {
       const msg = chatHistory[i];
-      if (msg.role === 'assistant') {
-        if (msg.pageRefs && msg.pageRefs.length > 0) {
-          return msg.pageRefs.map((ref) => ({ ...ref, messageIndex: i }));
-        }
-        return [];
+      // Only return when we find an assistant message WITH pageRefs
+      if (msg.role === 'assistant' && msg.pageRefs && msg.pageRefs.length > 0) {
+        return msg.pageRefs.map((ref) => ({ ...ref, messageIndex: i }));
       }
+      // Continue searching if assistant message has no pageRefs
     }
     return [];
   }, [chatHistory]);

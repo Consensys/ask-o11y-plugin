@@ -1,10 +1,13 @@
-import React, { useRef, useState, useCallback, useEffect } from 'react';
+import React, { useRef, useState, useCallback, useEffect, useMemo } from 'react';
 import { useTheme2 } from '@grafana/ui';
 
 import { useChat } from './hooks/useChat';
 import { useGrafanaTheme } from './hooks/useGrafanaTheme';
 import { useKeyboardNavigation, useAnnounce } from './hooks/useKeyboardNavigation';
 import { useEmbeddingAllowed } from './hooks/useEmbeddingAllowed';
+import { useChatScene } from './hooks/useChatScene';
+import { ChatInterfaceState } from './scenes/ChatInterfaceScene';
+import { GrafanaPageState } from './scenes/GrafanaPageScene';
 import {
   ChatHeader,
   ChatHistory,
@@ -239,16 +242,95 @@ function ChatComponent({ pluginSettings, readOnly = false, initialSession }: Cha
     announce(`Suggestion selected: ${message.substring(0, 50)}...`);
   };
 
-  if (toolsError) {
-    return <div>Error: {toolsError.message}</div>;
-  }
-
   // Get current session title
   const currentSession = sessionManager.sessions.find((s: SessionMetadata) => s.id === sessionManager.currentSessionId);
   const currentSessionTitle = currentSession?.title;
 
   const hasMessages = chatHistory.length > 0;
   const showSidePanel = isSidePanelOpen && visiblePageRefs.length > 0 && allowEmbedding === true;
+
+  // Prepare state for chat scene
+  const chatInterfaceState: ChatInterfaceState = useMemo(
+    () => ({
+      chatHistory,
+      currentInput,
+      isGenerating,
+      toolsLoading,
+      currentSessionTitle,
+      isSummarizing: sessionManager.isSummarizing,
+      hasSummary: !!sessionManager.currentSummary,
+      setCurrentInput,
+      sendMessage,
+      handleKeyPress,
+      chatContainerRef,
+      chatInputRef,
+      bottomSpacerRef,
+      leftSlot: <NewChatButton onConfirm={clearChat} disabled={isGenerating} theme={theme} />,
+      rightSlot: (
+        <button
+          onClick={openHistory}
+          className="flex items-center gap-2 px-2 py-1 text-xs font-medium rounded-md hover:bg-white/10 transition-colors"
+          aria-label="Chat history"
+          title="View chat history"
+          style={{ color: theme.colors.text.secondary }}
+        >
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <circle cx="12" cy="12" r="10" />
+            <polyline points="12 6 12 12 16 14" />
+          </svg>
+          <span>View chat history ({sessionManager.sessions.length})</span>
+        </button>
+      ),
+      readOnly,
+    }),
+    [
+      chatHistory,
+      currentInput,
+      isGenerating,
+      toolsLoading,
+      currentSessionTitle,
+      sessionManager.isSummarizing,
+      sessionManager.currentSummary,
+      sessionManager.sessions.length,
+      setCurrentInput,
+      sendMessage,
+      handleKeyPress,
+      chatContainerRef,
+      chatInputRef,
+      bottomSpacerRef,
+      clearChat,
+      theme,
+      openHistory,
+      readOnly,
+    ]
+  );
+
+  // Prepare state for Grafana page scene
+  const grafanaPageState: GrafanaPageState = useMemo(
+    () => ({
+      pageRefs: visiblePageRefs,
+      activeTabIndex: 0,
+      onRemoveTab: handleRemoveTab,
+      onClose: () => setIsSidePanelOpen(false),
+    }),
+    [visiblePageRefs, handleRemoveTab]
+  );
+
+  // Create scene when side panel should be shown
+  const chatScene = useChatScene(showSidePanel, chatInterfaceState, grafanaPageState);
+
+  if (toolsError) {
+    return <div>Error: {toolsError.message}</div>;
+  }
 
   return (
     <div
@@ -259,16 +341,16 @@ function ChatComponent({ pluginSettings, readOnly = false, initialSession }: Cha
         backgroundColor: theme.isDark ? '#111217' : theme.colors.background.canvas,
       }}
     >
-      {/* Side panel for Grafana page preview */}
-      <SidePanel
-        isOpen={showSidePanel}
-        onClose={() => setIsSidePanelOpen(false)}
-        pageRefs={visiblePageRefs}
-        onRemoveTab={handleRemoveTab}
-      />
-
-      {/* Main chat area */}
-      <div className="flex-1 flex flex-col min-h-0 min-w-0">
+      {chatScene ? (
+        // Scene-based layout with SplitLayout (when side panel is shown)
+        <div className="flex-1">
+          <chatScene.Component model={chatScene} />
+        </div>
+      ) : (
+        // Regular React layout (when no side panel)
+        <>
+          {/* Main chat area */}
+          <div className="flex-1 flex flex-col min-h-0 min-w-0">
         {hasMessages ? (
           <div
             className={`flex-1 flex flex-col min-h-0 w-full px-4 ${showSidePanel ? 'max-w-none' : 'max-w-4xl mx-auto'}`}
@@ -401,9 +483,22 @@ function ChatComponent({ pluginSettings, readOnly = false, initialSession }: Cha
             </div>
           </div>
         )}
-      </div>
+          </div>
+        </>
+      )}
 
-      {/* Session sidebar */}
+      {/* Fallback: standalone SidePanel when scene is not available but panel should be shown */}
+      {!chatScene && showSidePanel && (
+        <SidePanel
+          isOpen={true}
+          onClose={() => setIsSidePanelOpen(false)}
+          pageRefs={visiblePageRefs}
+          onRemoveTab={handleRemoveTab}
+          embedded={true}
+        />
+      )}
+
+      {/* Session sidebar - outside scene */}
       <SessionSidebar
         sessionManager={sessionManager}
         currentSessionId={sessionManager.currentSessionId}
