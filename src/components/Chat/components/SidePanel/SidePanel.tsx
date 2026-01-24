@@ -10,6 +10,7 @@ export interface SidePanelProps {
   pageRefs: Array<GrafanaPageRef & { messageIndex: number }>;
   onRemoveTab?: (index: number) => void;
   embedded?: boolean; // When true, renders without sticky positioning for use in SplitLayout
+  kioskModeEnabled?: boolean; // When true, adds ?kiosk parameter to embedded URLs for chromeless display
 }
 
 function getTabLabel(ref: GrafanaPageRef, index: number): string {
@@ -23,11 +24,12 @@ function getTabLabel(ref: GrafanaPageRef, index: number): string {
 }
 
 /**
- * Converts absolute URLs to relative and adds Grafana kiosk mode for clean embedding
+ * Converts absolute URLs to relative and optionally adds Grafana kiosk mode for clean embedding
  * @param url - The Grafana URL (can be absolute or relative)
- * @returns Relative URL with kiosk parameter for chromeless embedding (hides both navbar and sidebar)
+ * @param kioskModeEnabled - Whether to add the kiosk parameter (default: true)
+ * @returns Relative URL with optional kiosk parameter for chromeless embedding (hides both navbar and sidebar)
  */
-function toRelativeUrl(url: string): string {
+function toRelativeUrl(url: string, kioskModeEnabled = true): string {
   // Strip domain if absolute URL
   let relativeUrl = url;
   if (url.startsWith('http://') || url.startsWith('https://')) {
@@ -40,12 +42,17 @@ function toRelativeUrl(url: string): string {
     return relativeUrl;
   }
 
+  // Add kiosk parameter only if enabled
+  if (!kioskModeEnabled) {
+    return relativeUrl;
+  }
+
   // Add kiosk parameter for full kiosk mode (hides both navbar and sidebar)
   const separator = relativeUrl.includes('?') ? '&' : '?';
   return `${relativeUrl}${separator}kiosk`;
 }
 
-export const SidePanel: React.FC<SidePanelProps> = ({ isOpen, onClose, pageRefs, onRemoveTab, embedded = false }) => {
+export const SidePanel: React.FC<SidePanelProps> = ({ isOpen, onClose, pageRefs, onRemoveTab, embedded = false, kioskModeEnabled = true }) => {
   const theme = useTheme2();
   const [activeIndex, setActiveIndex] = useState(0);
   const allowEmbedding = useEmbeddingAllowed();
@@ -70,7 +77,7 @@ export const SidePanel: React.FC<SidePanelProps> = ({ isOpen, onClose, pageRefs,
 
   const activeRef = pageRefs[safeActiveIndex];
   const showTabs = pageRefs.length > 1;
-  const iframeSrc = toRelativeUrl(activeRef.url);
+  const iframeSrc = toRelativeUrl(activeRef.url, kioskModeEnabled);
 
   // Dynamic styles based on embedded mode
   const containerClassName = embedded

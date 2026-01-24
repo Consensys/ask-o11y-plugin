@@ -83,38 +83,41 @@ function ChatInterfaceRenderer({ model }: SceneComponentProps<ChatInterfaceScene
   const hasMessages = chatHistory.length > 0;
 
   return (
-    <div className="flex-1 flex flex-col min-h-0 w-full px-4 max-w-4xl mx-auto">
-      {/* Header - only show when there are messages */}
-      {hasMessages && <ChatHeader isGenerating={isGenerating} currentSessionTitle={currentSessionTitle} />}
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', width: '100%', overflow: 'hidden' }}>
+      {/* Scrollable chat history area */}
+      <div className="w-full px-4 max-w-4xl mx-auto" style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, overflow: 'auto' }}>
+        {/* Header - only show when there are messages */}
+        {hasMessages && <ChatHeader isGenerating={isGenerating} currentSessionTitle={currentSessionTitle} />}
 
-      {/* Summarization indicator */}
-      {hasMessages && <SummarizationIndicator isSummarizing={isSummarizing} hasSummary={hasSummary} />}
+        {/* Summarization indicator */}
+        {hasMessages && <SummarizationIndicator isSummarizing={isSummarizing} hasSummary={hasSummary} />}
 
-      {/* Chat messages */}
-      {hasMessages && (
-        <div
-          ref={chatContainerRef}
-          className="flex-1 py-6 rounded-lg"
-          role="log"
-          aria-label="Chat messages"
-          aria-live="polite"
-          aria-relevant="additions"
-          tabIndex={0}
-          style={{
-            backgroundColor: theme.isDark ? '#1a1b1f' : theme.colors.background.primary,
-          }}
-        >
-          <div className="px-4">
-            <ChatHistory chatHistory={chatHistory} isGenerating={isGenerating} />
-            <div ref={bottomSpacerRef} className="h-16" style={{ scrollMarginBottom: '100px' }} />
+        {/* Chat messages */}
+        {hasMessages && (
+          <div
+            ref={chatContainerRef}
+            className="flex-1 py-6 rounded-lg"
+            role="log"
+            aria-label="Chat messages"
+            aria-live="polite"
+            aria-relevant="additions"
+            style={{
+              backgroundColor: theme.isDark ? '#1a1b1f' : theme.colors.background.primary,
+              minHeight: 0,
+            }}
+          >
+            <div className="px-4">
+              <ChatHistory chatHistory={chatHistory} isGenerating={isGenerating} />
+              <div ref={bottomSpacerRef} className="h-16" style={{ scrollMarginBottom: '100px' }} />
+            </div>
           </div>
-        </div>
-      )}
+        )}
+      </div>
 
-      {/* Chat input at bottom */}
+      {/* Fixed chat input at bottom */}
       {!readOnly && (
         <div
-          className="flex-shrink-0 py-4 sticky bottom-0 z-10"
+          className="w-full px-4 max-w-4xl mx-auto flex-shrink-0 py-4"
           role="region"
           aria-label="Message input"
           style={{

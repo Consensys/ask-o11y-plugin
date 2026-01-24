@@ -128,6 +128,10 @@ function ChatComponent({ pluginSettings, readOnly = false, initialSession }: Cha
   const theme = useTheme2();
   const allowEmbedding = useEmbeddingAllowed();
 
+  // Extract display settings from plugin configuration
+  const kioskModeEnabled = pluginSettings?.kioskModeEnabled ?? true;
+  const sidePanelPosition = pluginSettings?.sidePanelPosition || 'right';
+
   const {
     chatHistory,
     currentInput,
@@ -318,14 +322,15 @@ function ChatComponent({ pluginSettings, readOnly = false, initialSession }: Cha
     () => ({
       pageRefs: visiblePageRefs,
       activeTabIndex: 0,
+      kioskModeEnabled,
       onRemoveTab: handleRemoveTab,
       onClose: () => setIsSidePanelOpen(false),
     }),
-    [visiblePageRefs, handleRemoveTab]
+    [visiblePageRefs, handleRemoveTab, kioskModeEnabled]
   );
 
   // Create scene when side panel should be shown
-  const chatScene = useChatScene(showSidePanel, chatInterfaceState, grafanaPageState);
+  const chatScene = useChatScene(showSidePanel, chatInterfaceState, grafanaPageState, sidePanelPosition);
 
   if (toolsError) {
     return <div>Error: {toolsError.message}</div>;
@@ -333,7 +338,7 @@ function ChatComponent({ pluginSettings, readOnly = false, initialSession }: Cha
 
   return (
     <div
-      className="w-full min-h-full flex"
+      className="w-full h-full flex"
       role="main"
       aria-label="Chat interface"
       style={{
@@ -342,7 +347,7 @@ function ChatComponent({ pluginSettings, readOnly = false, initialSession }: Cha
     >
       {chatScene ? (
         // Scene-based layout with SplitLayout (when side panel is shown)
-        <div className="flex-1">
+        <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
           <chatScene.Component model={chatScene} />
         </div>
       ) : (

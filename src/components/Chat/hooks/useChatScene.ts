@@ -10,12 +10,14 @@ import { GrafanaPageScene, GrafanaPageState } from '../scenes/GrafanaPageScene';
  * @param showSidePanel - Whether to show the side panel with embedded pages
  * @param chatState - State for the chat interface
  * @param sidePanelState - State for the Grafana page panel
+ * @param sidePanelPosition - Position of the side panel: 'left' or 'right' (default: 'right')
  * @returns EmbeddedScene instance or null
  */
 export function useChatScene(
   showSidePanel: boolean,
   chatState: ChatInterfaceState,
-  sidePanelState: GrafanaPageState
+  sidePanelState: GrafanaPageState,
+  sidePanelPosition: 'left' | 'right' = 'right'
 ): EmbeddedScene | null {
   const [scene, setScene] = useState<EmbeddedScene | null>(null);
   const sceneRef = useRef<EmbeddedScene | null>(null);
@@ -44,11 +46,21 @@ export function useChatScene(
         const chatInterface = new ChatInterfaceScene(chatState);
         const grafanaPage = new GrafanaPageScene(sidePanelState);
 
+        // Swap primary/secondary based on side panel position
+        // When panel is on right (default): chat is primary (left), panel is secondary (right)
+        // When panel is on left: panel is primary (left), chat is secondary (right)
+        const primary = sidePanelPosition === 'right' ? chatInterface : grafanaPage;
+        const secondary = sidePanelPosition === 'right' ? grafanaPage : chatInterface;
+        // Maintain 60/40 split with chat always getting 60%
+        // When chat is primary (panel right): initialSize 0.6 gives 60% to chat
+        // When panel is primary (panel left): initialSize 0.4 gives 40% to panel, 60% to chat
+        const initialSize = sidePanelPosition === 'right' ? 0.6 : 0.4;
+
         const splitLayout = new SplitLayout({
           direction: 'row',
-          primary: chatInterface,
-          secondary: grafanaPage,
-          initialSize: 0.6, // 60% for chat, 40% for Grafana pages
+          primary,
+          secondary,
+          initialSize,
         });
 
         const embeddedScene = new EmbeddedScene({
@@ -88,7 +100,7 @@ export function useChatScene(
       sceneRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [showSidePanel]);
+  }, [showSidePanel, sidePanelPosition]);
 
   // Update scene state when props change (without recreating the scene)
   useEffect(() => {

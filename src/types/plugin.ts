@@ -14,4 +14,6 @@ export type AppPluginSettings = {
   mcpServers?: MCPServerConfig[];
   systemPromptMode?: SystemPromptMode;
   customSystemPrompt?: string;
+  kioskModeEnabled?: boolean;
+  sidePanelPosition?: 'left' | 'right';
 };

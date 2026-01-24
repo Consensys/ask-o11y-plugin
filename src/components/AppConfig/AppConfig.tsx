@@ -24,6 +24,9 @@ type State = {
   customSystemPrompt: string;
   // Track which servers have advanced options expanded
   expandedAdvanced: Set<string>;
+  // Display settings
+  kioskModeEnabled: boolean;
+  sidePanelPosition: 'left' | 'right';
 };
 
 type ValidationErrors = {
@@ -42,6 +45,8 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
     systemPromptMode: jsonData?.systemPromptMode || 'default',
     customSystemPrompt: jsonData?.customSystemPrompt || '',
     expandedAdvanced: new Set<string>(),
+    kioskModeEnabled: jsonData?.kioskModeEnabled ?? true,
+    sidePanelPosition: jsonData?.sidePanelPosition || 'right',
   });
   const [validationErrors, setValidationErrors] = useState<ValidationErrors>({
     mcpServers: {},
@@ -783,6 +788,59 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
         </div>
       </FieldSet>
 
+      {/* Display Settings */}
+      <FieldSet label="Display Settings" data-testid={testIds.appConfig.displaySettings}>
+        <Field
+          label="Kiosk Mode"
+          description="When enabled, embedded Grafana pages hide navigation bars for a cleaner view"
+          data-testid={testIds.appConfig.kioskModeField}
+        >
+          <Switch
+            value={state.kioskModeEnabled}
+            onChange={(e) => setState({ ...state, kioskModeEnabled: e.currentTarget.checked })}
+            data-testid={testIds.appConfig.kioskModeToggle}
+          />
+        </Field>
+
+        <Field
+          label="Side Panel Position"
+          description="Choose where the side panel appears when displaying Grafana pages"
+          data-testid={testIds.appConfig.sidePanelPositionField}
+        >
+          <RadioButtonGroup
+            value={state.sidePanelPosition}
+            options={[
+              { label: 'Left', value: 'left' },
+              { label: 'Right', value: 'right' },
+            ]}
+            onChange={(value) => setState({ ...state, sidePanelPosition: value as 'left' | 'right' })}
+          />
+        </Field>
+
+        <div className="mt-4">
+          <Button
+            onClick={() => {
+              const updateData = {
+                enabled,
+                pinned,
+                jsonData: {
+                  ...jsonData,
+                  kioskModeEnabled: state.kioskModeEnabled,
+                  sidePanelPosition: state.sidePanelPosition,
+                },
+              };
+              console.log('Display Settings - Update data:', updateData);
+              console.log('Display Settings - plugin.meta:', plugin.meta);
+              updatePluginAndReload(plugin.meta.id, updateData);
+            }}
+            variant="primary"
+            data-testid={testIds.appConfig.saveDisplaySettingsButton}
+          >
+            Save Display Settings
+          </Button>
+        </div>
+      </FieldSet>
+
       <Modal
         title="Default System Prompt"
         isOpen={showDefaultPromptModal}
@@ -853,6 +911,9 @@ const updatePluginAndReload = async (pluginId: string, data: Partial<PluginMeta<
 };
 
 const updatePlugin = async (pluginId: string, data: Partial<PluginMeta>) => {
+  console.log('updatePlugin - pluginId:', pluginId);
+  console.log('updatePlugin - data being sent:', JSON.stringify(data, null, 2));
+
   const response = await getBackendSrv().fetch({
     url: `/api/plugins/${pluginId}/settings`,
     method: 'POST',

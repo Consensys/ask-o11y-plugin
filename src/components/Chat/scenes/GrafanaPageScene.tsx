@@ -14,6 +14,9 @@ export interface GrafanaPageState extends SceneObjectState {
   // Currently active tab index
   activeTabIndex: number;
 
+  // Whether to enable kiosk mode for embedded pages
+  kioskModeEnabled?: boolean;
+
   // Callbacks
   onRemoveTab?: (index: number) => void;
   onClose?: () => void;
@@ -62,19 +65,19 @@ export class GrafanaPageScene extends SceneObjectBase<GrafanaPageState> {
 function GrafanaPageRenderer({ model }: SceneComponentProps<GrafanaPageScene>) {
   const state = model.useState();
 
-  const { pageRefs, onRemoveTab } = state;
+  const { pageRefs, onRemoveTab, kioskModeEnabled } = state;
 
   // Reuse the SidePanel component with embedded mode
-  // In embedded mode, it will render without sticky positioning
-  // The outer div ensures the SidePanel gets proper height from SplitLayout
+  // Pane handles scrolling via paneStyle in SplitLayout
   return (
-    <div style={{ height: '100%', width: '100%', display: 'flex', flexDirection: 'column' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', width: '100%' }}>
       <SidePanel
         isOpen={true}
         onClose={() => model.close()}
         pageRefs={pageRefs}
         onRemoveTab={onRemoveTab}
         embedded={true}
+        kioskModeEnabled={kioskModeEnabled}
       />
     </div>
   );

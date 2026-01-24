@@ -27,6 +27,13 @@ export const testIds = {
     defaultPromptContent: 'data-testid ac-default-prompt-content',
     copyDefaultPromptButton: 'data-testid ac-copy-default-prompt',
     closeDefaultPromptButton: 'data-testid ac-close-default-prompt',
+    // Display Settings test IDs
+    displaySettings: 'data-testid ac-display-settings',
+    kioskModeField: 'data-testid ac-kiosk-mode-field',
+    kioskModeToggle: 'data-testid ac-kiosk-mode-toggle',
+    sidePanelPositionField: 'data-testid ac-side-panel-position-field',
+    sidePanelPositionSelector: 'data-testid ac-side-panel-position-selector',
+    saveDisplaySettingsButton: 'data-testid ac-save-display-settings',
   },
   home: {
     container: 'data-testid home-container',

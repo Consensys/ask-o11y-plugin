@@ -259,3 +259,17 @@
   display: block !important;
   visibility: visible !important;
 }
+
+/* Apply Grafana UI ExplorePage pattern for independent scrolling panes */
+.css-11fa8fd > div[style*="flex-grow"] {
+  overflow: auto !important;
+  display: flex !important;
+  flex-direction: column !important;
+}
+
+/* Force EmbeddedScene wrappers to respect parent height constraints */
+.css-mh3ldv,
+.css-16x2e0z {
+  max-height: 100% !important;
+  overflow: hidden !important;
+}
