@@ -260,16 +260,21 @@
   visibility: visible !important;
 }
 
-/* Apply Grafana UI ExplorePage pattern for independent scrolling panes */
-.css-11fa8fd > div[style*="flex-grow"] {
+/* Apply Grafana UI ExplorePage pattern for independent scrolling panes
+ * Targets: Scene containers with flex-grow divs (used by EmbeddedScene components)
+ * Purpose: Enable independent scrolling for each visualization pane
+ */
+[data-scene-container] > div > div[style*="flex-grow"] {
   overflow: auto !important;
   display: flex !important;
   flex-direction: column !important;
 }
 
-/* Force EmbeddedScene wrappers to respect parent height constraints */
-.css-mh3ldv,
-.css-16x2e0z {
+/* Force EmbeddedScene wrappers to respect parent height constraints
+ * Targets: Direct children of scene containers (EmbeddedScene wrapper divs)
+ * Purpose: Prevent scene wrappers from exceeding container height
+ */
+[data-scene-container] > div {
   max-height: 100% !important;
   overflow: hidden !important;
 }

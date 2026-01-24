@@ -143,6 +143,7 @@ export const TracesRenderer: React.FC<TracesRendererProps> = ({
       )}
       <div
         className="p-4"
+        data-scene-container="traces"
         style={{
           backgroundColor: theme.colors.background.primary,
         }}

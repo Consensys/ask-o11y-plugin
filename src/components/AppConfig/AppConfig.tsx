@@ -829,8 +829,6 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
                   sidePanelPosition: state.sidePanelPosition,
                 },
               };
-              console.log('Display Settings - Update data:', updateData);
-              console.log('Display Settings - plugin.meta:', plugin.meta);
               updatePluginAndReload(plugin.meta.id, updateData);
             }}
             variant="primary"
@@ -911,9 +909,6 @@ const updatePluginAndReload = async (pluginId: string, data: Partial<PluginMeta<
 };
 
 const updatePlugin = async (pluginId: string, data: Partial<PluginMeta>) => {
-  console.log('updatePlugin - pluginId:', pluginId);
-  console.log('updatePlugin - data being sent:', JSON.stringify(data, null, 2));
-
   const response = await getBackendSrv().fetch({
     url: `/api/plugins/${pluginId}/settings`,
     method: 'POST',

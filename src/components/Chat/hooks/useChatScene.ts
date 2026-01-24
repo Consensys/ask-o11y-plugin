@@ -108,15 +108,22 @@ export function useChatScene(
       try {
         const layout = sceneRef.current.state.body;
         if (layout instanceof SplitLayout) {
-          const chatInterface = layout.state.primary;
-          const grafanaPage = layout.state.secondary;
+          // Identify scenes by type, not by position (primary/secondary swap based on sidePanelPosition)
+          const primary = layout.state.primary;
+          const secondary = layout.state.secondary;
 
-          if (chatInterface instanceof ChatInterfaceScene) {
-            chatInterface.setState(chatState);
+          // Find and update ChatInterfaceScene (could be in primary or secondary)
+          if (primary instanceof ChatInterfaceScene) {
+            primary.setState(chatState);
+          } else if (secondary instanceof ChatInterfaceScene) {
+            secondary.setState(chatState);
           }
 
-          if (grafanaPage instanceof GrafanaPageScene) {
-            grafanaPage.setState(sidePanelState);
+          // Find and update GrafanaPageScene (could be in primary or secondary)
+          if (primary instanceof GrafanaPageScene) {
+            primary.setState(sidePanelState);
+          } else if (secondary instanceof GrafanaPageScene) {
+            secondary.setState(sidePanelState);
           }
         }
       } catch (error) {
