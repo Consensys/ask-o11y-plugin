@@ -1,4 +1,4 @@
-import { getBackendSrv } from '@grafana/runtime';
+import { getBackendSrv, config } from '@grafana/runtime';
 import { firstValueFrom } from 'rxjs';
 import { ChatSession } from '../core/models/ChatSession';
 import { ChatMessage } from '../components/Chat/types';
@@ -168,16 +168,17 @@ export class SessionShareService {
    * Build a full share URL from a share ID or full path
    */
   buildShareUrl(shareUrlOrId: string): string {
-    // Get current origin
+    // Get current origin and orgId
     const origin = window.location.origin;
+    const orgId = String(config.bootData.user.orgId || '1');
 
     // If it's already a full path from backend (starts with /a/), use it
     if (shareUrlOrId.startsWith('/a/')) {
-      return `${origin}${shareUrlOrId}`;
+      return `${origin}${shareUrlOrId}?orgId=${orgId}`;
     }
 
     // Fallback for backward compatibility (just shareId)
-    return `${origin}/a/${pluginJson.id}/shared/${shareUrlOrId}`;
+    return `${origin}/a/${pluginJson.id}/shared/${shareUrlOrId}?orgId=${orgId}`;
   }
 }
 

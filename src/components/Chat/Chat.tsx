@@ -8,15 +8,7 @@ import { useEmbeddingAllowed } from './hooks/useEmbeddingAllowed';
 import { useChatScene } from './hooks/useChatScene';
 import { ChatInterfaceState } from './scenes/ChatInterfaceScene';
 import { GrafanaPageState } from './scenes/GrafanaPageScene';
-import {
-  ChatHeader,
-  ChatHistory,
-  ChatInput,
-  WelcomeMessage,
-  QuickSuggestions,
-  SessionSidebar,
-  SummarizationIndicator,
-} from './components';
+import { SessionSidebar } from './components';
 import { ChatInputRef } from './components/ChatInput/ChatInput';
 import { ChatErrorBoundary } from '../ErrorBoundary';
 import { SessionMetadata, ChatSession } from '../../core';
@@ -236,14 +228,14 @@ function ChatComponent({ pluginSettings, readOnly = false, initialSession }: Cha
     onFocusInput: focusChatInput,
   });
 
-  const handleSuggestionClick = (message: string) => {
+  const handleSuggestionClick = useCallback((message: string) => {
     setCurrentInput(message);
     // Focus the input after setting the message
     setTimeout(() => {
       chatInputRef.current?.focus();
     }, 100);
     announce(`Suggestion selected: ${message.substring(0, 50)}...`);
-  };
+  }, [setCurrentInput, announce]);
 
   // Get current session title
   const currentSession = sessionManager.sessions.find((s: SessionMetadata) => s.id === sessionManager.currentSessionId);
@@ -268,7 +260,7 @@ function ChatComponent({ pluginSettings, readOnly = false, initialSession }: Cha
       chatContainerRef,
       chatInputRef,
       bottomSpacerRef,
-      leftSlot: <NewChatButton onConfirm={clearChat} disabled={isGenerating} theme={theme} />,
+      leftSlot: hasMessages ? <NewChatButton onConfirm={clearChat} disabled={isGenerating} theme={theme} /> : undefined,
       rightSlot: (
         <button
           onClick={openHistory}
@@ -294,6 +286,7 @@ function ChatComponent({ pluginSettings, readOnly = false, initialSession }: Cha
         </button>
       ),
       readOnly,
+      onSuggestionClick: handleSuggestionClick,
     }),
     [
       chatHistory,
@@ -310,10 +303,12 @@ function ChatComponent({ pluginSettings, readOnly = false, initialSession }: Cha
       chatContainerRef,
       chatInputRef,
       bottomSpacerRef,
+      hasMessages,
       clearChat,
       theme,
       openHistory,
       readOnly,
+      handleSuggestionClick,
     ]
   );
 
@@ -345,150 +340,11 @@ function ChatComponent({ pluginSettings, readOnly = false, initialSession }: Cha
         backgroundColor: theme.isDark ? '#111217' : theme.colors.background.canvas,
       }}
     >
-      {chatScene ? (
-        // Scene-based layout with SplitLayout (when side panel is shown)
+      {/* Always use scene-based layout */}
+      {chatScene && (
         <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
           <chatScene.Component model={chatScene} />
         </div>
-      ) : (
-        // Regular React layout (when no side panel)
-        <>
-          {/* Main chat area */}
-          <div className="flex-1 flex flex-col min-h-0 min-w-0">
-        {hasMessages ? (
-          <div
-            className={`flex-1 flex flex-col min-h-0 w-full px-4 ${showSidePanel ? 'max-w-none' : 'max-w-4xl mx-auto'}`}
-          >
-            {/* Header - only show when there are messages */}
-            <ChatHeader isGenerating={isGenerating} currentSessionTitle={currentSessionTitle} />
-
-            {/* Summarization indicator */}
-            <SummarizationIndicator
-              isSummarizing={sessionManager.isSummarizing}
-              hasSummary={!!sessionManager.currentSummary}
-            />
-
-            {/* Chat messages */}
-            <div
-              ref={chatContainerRef}
-              className="flex-1 py-6 rounded-lg"
-              role="log"
-              aria-label="Chat messages"
-              aria-live="polite"
-              aria-relevant="additions"
-              tabIndex={0}
-              style={{
-                backgroundColor: theme.isDark ? '#1a1b1f' : theme.colors.background.primary,
-              }}
-            >
-              <div className="px-4">
-                <ChatHistory chatHistory={chatHistory} isGenerating={isGenerating} />
-                <div ref={bottomSpacerRef} className="h-16" style={{ scrollMarginBottom: '100px' }} />
-              </div>
-            </div>
-
-            {/* Chat input at bottom */}
-            {!readOnly && (
-              <div
-                className="flex-shrink-0 py-4 sticky bottom-0 z-10"
-                role="region"
-                aria-label="Message input"
-                style={{
-                  backgroundColor: theme.isDark ? '#111217' : theme.colors.background.canvas,
-                }}
-              >
-                <ChatInput
-                  ref={chatInputRef}
-                  currentInput={currentInput}
-                  isGenerating={isGenerating}
-                  toolsLoading={toolsLoading}
-                  setCurrentInput={setCurrentInput}
-                  sendMessage={sendMessage}
-                  handleKeyPress={handleKeyPress}
-                  leftSlot={<NewChatButton onConfirm={clearChat} disabled={isGenerating} theme={theme} />}
-                  rightSlot={
-                    <button
-                      onClick={openHistory}
-                      className="flex items-center gap-2 px-2 py-1 text-xs font-medium rounded-md hover:bg-white/10 transition-colors"
-                      aria-label="Chat history"
-                      title="View chat history"
-                      style={{ color: theme.colors.text.secondary }}
-                    >
-                      <svg
-                        width="14"
-                        height="14"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="2"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      >
-                        <circle cx="12" cy="12" r="10" />
-                        <polyline points="12 6 12 12 16 14" />
-                      </svg>
-                      <span>View chat history ({sessionManager.sessions.length})</span>
-                    </button>
-                  }
-                />
-              </div>
-            )}
-          </div>
-        ) : (
-          /* Welcome state - centered layout, full width background */
-          /* Welcome state - centered layout with sticky input */
-          <div className="flex-1 flex flex-col min-h-0 w-full max-w-3xl mx-auto px-4">
-            <div className="flex-1 flex flex-col items-center justify-center py-8">
-              {/* Welcome header */}
-              <WelcomeMessage />
-
-              {/* Chat Input */}
-              <div className="w-full mt-10 mb-4" role="region" aria-label="Message input">
-                <ChatInput
-                  ref={chatInputRef}
-                  currentInput={currentInput}
-                  isGenerating={isGenerating}
-                  toolsLoading={toolsLoading}
-                  setCurrentInput={setCurrentInput}
-                  sendMessage={sendMessage}
-                  handleKeyPress={handleKeyPress}
-                  leftSlot={undefined}
-                  rightSlot={
-                    <button
-                      onClick={openHistory}
-                      className="flex items-center gap-2 px-2 py-1 text-xs font-medium rounded-md hover:bg-white/10 transition-colors"
-                      aria-label="Chat history"
-                      title="View chat history"
-                      style={{ color: theme.colors.text.secondary }}
-                    >
-                      <svg
-                        width="14"
-                        height="14"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="2"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      >
-                        <circle cx="12" cy="12" r="10" />
-                        <polyline points="12 6 12 12 16 14" />
-                      </svg>
-                      <span>View chat history ({sessionManager.sessions.length})</span>
-                    </button>
-                  }
-                />
-              </div>
-
-              {/* Quick suggestions */}
-              <div className="w-full">
-                <QuickSuggestions onSuggestionClick={handleSuggestionClick} />
-              </div>
-            </div>
-          </div>
-        )}
-          </div>
-        </>
       )}
 
       {/* Session sidebar - outside scene */}

@@ -300,3 +300,31 @@
 [data-scene-container="chat"] > .chat-interface-scroll-container {
   overflow: auto !important;
 }
+
+/* Hide side panel when isVisible is false
+ * Purpose: Completely hide the GrafanaPageScene pane when side panel is closed
+ * This allows the scene to always exist without taking up visual space
+ * Target the parent wrapper div that contains the hidden child
+ */
+div:has(> div[style*="display: none"]) {
+  width: 0 !important;
+  min-width: 0 !important;
+  max-width: 0 !important;
+  overflow: hidden !important;
+  flex: 0 0 0 !important;
+}
+
+/* Also hide the separator when adjacent to hidden pane */
+div:has(> div[style*="display: none"]) + div[class*="css-"] {
+  display: none !important;
+}
+
+/* Expand chat pane to full width when side panel is completely hidden
+ * Purpose: When the side panel pane has width 0, the chat pane should expand to 100%
+ * Only apply when first pane contains a hidden child (display: none), not during drag
+ * This ensures smooth dragging while still expanding chat when panel is closed
+ */
+.css-11fa8fd:has(> div:first-child > div[style*="display: none"]) > .css-18ggn:last-child {
+  flex: 1 1 auto !important;
+  max-width: 100% !important;
+}

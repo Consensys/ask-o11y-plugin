@@ -23,28 +23,15 @@ export function useChatScene(
   const sceneRef = useRef<EmbeddedScene | null>(null);
   const deactivateRef = useRef<(() => void) | null>(null);
 
-  // Create or destroy scene based on showSidePanel
+  // Create scene once on mount (always, not conditional)
   useEffect(() => {
-    if (!showSidePanel) {
-      // Clean up scene when not needed
-      if (deactivateRef.current) {
-        try {
-          deactivateRef.current();
-        } catch (error) {
-          console.warn('[useChatScene] Error during deactivation:', error);
-        }
-        deactivateRef.current = null;
-      }
-      sceneRef.current = null;
-      setScene(null);
-      return;
-    }
-
-    // Create scene if it doesn't exist
     if (!sceneRef.current) {
       try {
         const chatInterface = new ChatInterfaceScene(chatState);
-        const grafanaPage = new GrafanaPageScene(sidePanelState);
+        const grafanaPage = new GrafanaPageScene({
+          ...sidePanelState,
+          isVisible: showSidePanel, // Initially hidden if side panel closed
+        });
 
         // Swap primary/secondary based on chat panel position
         // When chat is on right: panel is primary (left), chat is secondary (right)
@@ -73,7 +60,7 @@ export function useChatScene(
         setScene(embeddedScene);
       } catch (error) {
         console.error('[useChatScene] Error creating scene:', error);
-        // Clean up partial state
+        // Clean up on error
         if (deactivateRef.current) {
           try {
             deactivateRef.current();
@@ -100,11 +87,33 @@ export function useChatScene(
       sceneRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [showSidePanel, chatPanelPosition]);
+  }, [chatPanelPosition]); // Only recreate if position changes
+
+  // Update side panel visibility when showSidePanel changes
+  useEffect(() => {
+    if (sceneRef.current) {
+      try {
+        const layout = sceneRef.current.state.body;
+        if (layout instanceof SplitLayout) {
+          const primary = layout.state.primary;
+          const secondary = layout.state.secondary;
+
+          // Find and update GrafanaPageScene visibility
+          if (primary instanceof GrafanaPageScene) {
+            primary.setState({ isVisible: showSidePanel });
+          } else if (secondary instanceof GrafanaPageScene) {
+            secondary.setState({ isVisible: showSidePanel });
+          }
+        }
+      } catch (error) {
+        console.error('[useChatScene] Error updating visibility:', error);
+      }
+    }
+  }, [showSidePanel]);
 
   // Update scene state when props change (without recreating the scene)
   useEffect(() => {
-    if (sceneRef.current && showSidePanel) {
+    if (sceneRef.current) {
       try {
         const layout = sceneRef.current.state.body;
         if (layout instanceof SplitLayout) {
@@ -120,17 +129,20 @@ export function useChatScene(
           }
 
           // Find and update GrafanaPageScene (could be in primary or secondary)
+          // Preserve isVisible flag which is managed by the visibility effect above
           if (primary instanceof GrafanaPageScene) {
-            primary.setState(sidePanelState);
+            const currentIsVisible = primary.state.isVisible;
+            primary.setState({ ...sidePanelState, isVisible: currentIsVisible });
           } else if (secondary instanceof GrafanaPageScene) {
-            secondary.setState(sidePanelState);
+            const currentIsVisible = secondary.state.isVisible;
+            secondary.setState({ ...sidePanelState, isVisible: currentIsVisible });
           }
         }
       } catch (error) {
         console.error('[useChatScene] Error updating scene state:', error);
       }
     }
-  }, [showSidePanel, chatState, sidePanelState]);
+  }, [chatState, sidePanelState]);
 
   return scene;
 }
