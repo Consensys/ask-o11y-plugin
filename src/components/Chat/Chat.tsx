@@ -1,5 +1,6 @@
 import React, { useRef, useState, useCallback, useEffect, useMemo } from 'react';
-import { useTheme2, Theme2 } from '@grafana/ui';
+import { useTheme2 } from '@grafana/ui';
+import { GrafanaTheme2 } from '@grafana/data';
 
 import { useChat } from './hooks/useChat';
 import { useGrafanaTheme } from './hooks/useGrafanaTheme';
@@ -23,7 +24,7 @@ interface ChatProps {
 interface NewChatButtonProps {
   onConfirm: () => void;
   disabled: boolean;
-  theme: Theme2;
+  theme: GrafanaTheme2;
 }
 
 const NewChatButton: React.FC<NewChatButtonProps> = ({ onConfirm, disabled, theme }) => {
