@@ -859,7 +859,7 @@ func (p *Plugin) handleGetSessionShares(w http.ResponseWriter, r *http.Request) 
 	var userShares []map[string]interface{}
 	for _, share := range shares {
 		if share.UserID == userID {
-			shareURL := fmt.Sprintf("/a/%s/shared/%s", PluginID, share.ShareID)
+			shareURL := fmt.Sprintf("/a/%s/shared/%s?orgId=%d", PluginID, share.ShareID, share.OrgID)
 			var expiresAtStr *string
 			if share.ExpiresAt != nil {
 				// Allocate string on heap to avoid pointer to local variable going out of scope
