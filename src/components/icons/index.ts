@@ -1,1 +1,1 @@
-export { SparkleIcon, type SparkleIconProps } from './SparkleIcon';
+export { SparkleIcon } from './SparkleIcon';

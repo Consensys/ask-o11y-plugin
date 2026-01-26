@@ -116,11 +116,12 @@ export class SessionShareService {
       return sharedSession;
     } catch (error: any) {
       console.error('[SessionShareService] Failed to get shared session:', error);
-      // Preserve status code if available
-      if (error?.status) {
-        error.status = error.status;
-      }
-      throw error;
+      // Enhance error with status information from various possible locations
+      // Grafana's backendSrv can return errors with status in different places
+      const enhancedError = new Error(error?.message || error?.data?.message || 'Failed to get shared session');
+      (enhancedError as any).status = error?.status || error?.response?.status || error?.data?.status;
+      (enhancedError as any).originalError = error;
+      throw enhancedError;
     }
   }
 
