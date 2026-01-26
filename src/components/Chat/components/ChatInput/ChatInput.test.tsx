@@ -148,13 +148,14 @@ describe('ChatInput', () => {
       expect(mockHandleKeyPress).toHaveBeenCalled();
     });
 
-    it('should call handleKeyPress for Shift+Enter (new line)', () => {
+    it('should NOT call handleKeyPress for Shift+Enter (allows newline)', () => {
       render(<ChatInput {...defaultProps} currentInput="Hello" />);
-      
+
       const textarea = screen.getByPlaceholderText('Ask me anything about your metrics, logs, or observability...');
       fireEvent.keyDown(textarea, { key: 'Enter', shiftKey: true });
-      
-      expect(mockHandleKeyPress).toHaveBeenCalled();
+
+      // Shift+Enter should NOT trigger handleKeyPress - it should allow default behavior (newline)
+      expect(mockHandleKeyPress).not.toHaveBeenCalled();
     });
   });
 
