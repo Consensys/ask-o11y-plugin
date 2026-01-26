@@ -9,8 +9,8 @@ export interface SidePanelProps {
   onClose: () => void;
   pageRefs: Array<GrafanaPageRef & { messageIndex: number }>;
   onRemoveTab?: (index: number) => void;
-  embedded?: boolean; // When true, renders without sticky positioning for use in SplitLayout
-  kioskModeEnabled?: boolean; // When true, adds ?kiosk parameter to embedded URLs for chromeless display
+  embedded?: boolean;
+  kioskModeEnabled?: boolean;
 }
 
 function getTabLabel(ref: GrafanaPageRef, index: number): string {
@@ -23,31 +23,21 @@ function getTabLabel(ref: GrafanaPageRef, index: number): string {
   return ref.type === 'explore' ? 'Explore' : `Page ${index + 1}`;
 }
 
-/**
- * Converts absolute URLs to relative and optionally adds Grafana kiosk mode for clean embedding
- * @param url - The Grafana URL (can be absolute or relative)
- * @param kioskModeEnabled - Whether to add the kiosk parameter (default: true)
- * @returns Relative URL with optional kiosk parameter for chromeless embedding (hides both navbar and sidebar)
- */
 function toRelativeUrl(url: string, kioskModeEnabled = true): string {
-  // Strip domain if absolute URL
   let relativeUrl = url;
   if (url.startsWith('http://') || url.startsWith('https://')) {
     const match = url.match(/https?:\/\/[^/]+(\/.*)/);
     relativeUrl = match ? match[1] : url;
   }
 
-  // Skip adding kiosk if URL already has kiosk or viewPanel (already in focused mode)
   if (relativeUrl.includes('kiosk') || relativeUrl.includes('viewPanel')) {
     return relativeUrl;
   }
 
-  // Add kiosk parameter only if enabled
   if (!kioskModeEnabled) {
     return relativeUrl;
   }
 
-  // Add kiosk parameter for full kiosk mode (hides both navbar and sidebar)
   const separator = relativeUrl.includes('?') ? '&' : '?';
   return `${relativeUrl}${separator}kiosk`;
 }
@@ -65,12 +55,10 @@ export const SidePanel: React.FC<SidePanelProps> = ({ isOpen, onClose, pageRefs,
     }
   }, [activeIndex, safeActiveIndex]);
 
-  // When embedded, skip the embedding check (parent scene handles it)
   if (!embedded && (!isOpen || pageRefs.length === 0 || allowEmbedding === null || !allowEmbedding)) {
     return null;
   }
 
-  // When not embedded, still check for basic conditions
   if (!isOpen || pageRefs.length === 0) {
     return null;
   }
@@ -79,7 +67,6 @@ export const SidePanel: React.FC<SidePanelProps> = ({ isOpen, onClose, pageRefs,
   const showTabs = pageRefs.length > 1;
   const iframeSrc = toRelativeUrl(activeRef.url, kioskModeEnabled);
 
-  // Dynamic styles based on embedded mode
   const containerClassName = embedded
     ? 'flex flex-col h-full border-l transition-all duration-300 ease-in-out'
     : 'flex flex-col h-screen sticky top-0 border-r transition-all duration-300 ease-in-out';

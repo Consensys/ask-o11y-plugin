@@ -9,10 +9,6 @@ import { SummarizationIndicator } from '../components/SummarizationIndicator/Sum
 import { WelcomeMessage } from '../components/WelcomeMessage/WelcomeMessage';
 import { QuickSuggestions } from '../components/QuickSuggestions/QuickSuggestions';
 
-/**
- * State interface for ChatInterfaceScene
- * Contains all props needed to render the chat interface
- */
 export interface ChatInterfaceState extends SceneObjectState {
   // Chat history and state
   chatHistory: ChatMessageType[];
@@ -46,10 +42,6 @@ export interface ChatInterfaceState extends SceneObjectState {
   onSuggestionClick?: (message: string) => void;
 }
 
-/**
- * Custom scene object for the chat interface
- * Wraps ChatHeader, ChatHistory, and ChatInput in a scene-compatible component
- */
 export class ChatInterfaceScene extends SceneObjectBase<ChatInterfaceState> {
   public static Component = ChatInterfaceRenderer;
 
@@ -58,10 +50,6 @@ export class ChatInterfaceScene extends SceneObjectBase<ChatInterfaceState> {
   }
 }
 
-/**
- * React renderer for ChatInterfaceScene
- * Renders the chat interface using Grafana theme
- */
 function ChatInterfaceRenderer({ model }: SceneComponentProps<ChatInterfaceScene>) {
   const state = model.useState();
   const theme = useTheme2();
@@ -145,7 +133,6 @@ function ChatInterfaceRenderer({ model }: SceneComponentProps<ChatInterfaceScene
           )}
         </>
       ) : (
-        /* Welcome state - centered layout with sticky input */
         <div className="flex-1 flex flex-col min-h-0 w-full max-w-3xl mx-auto px-4">
           <div className="flex-1 flex flex-col items-center justify-center py-8">
             {/* Welcome header */}

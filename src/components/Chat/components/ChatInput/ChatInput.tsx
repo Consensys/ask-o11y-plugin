@@ -68,27 +68,21 @@ export const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(
       autoResize();
     };
 
-    // Enhanced send handler with validation
     const handleSendClick = () => {
       if (validationError) {
-        return; // Don't send if there's a validation error
+        return;
       }
       sendMessage();
     };
 
-    // Enhanced key press handler
     const handleKeyDown = (e: React.KeyboardEvent) => {
-      // Only handle Enter key specifically
       if (e.key === 'Enter' && !e.shiftKey) {
-        // Prevent sending if there's a validation error
         if (validationError) {
           e.preventDefault();
         } else {
-          // Let handleKeyPress handle the submission
           handleKeyPress(e);
         }
       }
-      // For Shift+Enter and all other keys, let default behavior happen
     };
 
     return (

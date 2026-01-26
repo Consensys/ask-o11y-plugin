@@ -1,5 +1,5 @@
 import React, { useRef, useState, useCallback, useEffect, useMemo } from 'react';
-import { useTheme2 } from '@grafana/ui';
+import { useTheme2, Theme2 } from '@grafana/ui';
 
 import { useChat } from './hooks/useChat';
 import { useGrafanaTheme } from './hooks/useGrafanaTheme';
@@ -23,7 +23,7 @@ interface ChatProps {
 interface NewChatButtonProps {
   onConfirm: () => void;
   disabled: boolean;
-  theme: any;
+  theme: Theme2;
 }
 
 const NewChatButton: React.FC<NewChatButtonProps> = ({ onConfirm, disabled, theme }) => {
@@ -115,12 +115,10 @@ const NewChatButton: React.FC<NewChatButtonProps> = ({ onConfirm, disabled, them
 };
 
 function ChatComponent({ pluginSettings, readOnly = false, initialSession }: ChatProps) {
-  // Sync Grafana theme to CSS custom properties
   useGrafanaTheme();
   const theme = useTheme2();
   const allowEmbedding = useEmbeddingAllowed();
 
-  // Extract display settings from plugin configuration
   const kioskModeEnabled = pluginSettings?.kioskModeEnabled ?? true;
   const chatPanelPosition = pluginSettings?.chatPanelPosition || 'right';
 
@@ -149,18 +147,14 @@ function ChatComponent({ pluginSettings, readOnly = false, initialSession }: Cha
   const prevSessionIdRef = useRef<string | null>(null);
   const announce = useAnnounce();
 
-  // Refresh sessions and load current session when component mounts (e.g., on page refresh)
   useEffect(() => {
     if (!readOnly) {
-      // Refresh sessions list first
       sessionManager.refreshSessions().then(() => {
-        // Then load current session if chatHistory is empty (e.g., on page refresh)
-        // This ensures we have the latest sessions list before checking for current session
         sessionManager.loadCurrentSessionIfNeeded();
       });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); // Only run on mount
+  }, []);
 
   const visiblePageRefs = detectedPageRefs.filter((ref) => !removedTabUrls.has(ref.url));
 
@@ -175,24 +169,20 @@ function ChatComponent({ pluginSettings, readOnly = false, initialSession }: Cha
   );
 
   useEffect(() => {
-    // Get the message index that the current page refs come from
     const currentSourceIndex = detectedPageRefs.length > 0 ? detectedPageRefs[0].messageIndex : null;
     const prevSourceIndex = prevSourceMessageIndexRef.current;
     const currentSessionId = sessionManager.currentSessionId;
     const prevSessionId = prevSessionIdRef.current;
 
-    // Reset state when session changes OR when page refs come from a different message
     const sessionChanged = currentSessionId !== prevSessionId;
     const messageIndexChanged = currentSourceIndex !== null && currentSourceIndex !== prevSourceIndex;
 
     if (sessionChanged) {
-      // Always reset removed tabs when switching sessions to prevent cross-session state bleed
       setRemovedTabUrls(new Set());
       if (currentSourceIndex !== null) {
         setIsSidePanelOpen(true);
       }
     } else if (messageIndexChanged) {
-      // New page refs from a different message in the same session
       setIsSidePanelOpen(true);
       setRemovedTabUrls(new Set());
     }
@@ -201,7 +191,6 @@ function ChatComponent({ pluginSettings, readOnly = false, initialSession }: Cha
     prevSessionIdRef.current = currentSessionId;
   }, [detectedPageRefs, sessionManager.currentSessionId]);
 
-  // Keyboard navigation callbacks
   const focusChatInput = useCallback(() => {
     chatInputRef.current?.focus();
     announce('Chat input focused');
@@ -212,7 +201,6 @@ function ChatComponent({ pluginSettings, readOnly = false, initialSession }: Cha
     announce('Chat history opened');
   }, [announce]);
 
-  // Set up keyboard shortcuts
   useKeyboardNavigation({
     onNewChat: () => {
       sessionManager.createNewSession();
@@ -230,21 +218,18 @@ function ChatComponent({ pluginSettings, readOnly = false, initialSession }: Cha
 
   const handleSuggestionClick = useCallback((message: string) => {
     setCurrentInput(message);
-    // Focus the input after setting the message
     setTimeout(() => {
       chatInputRef.current?.focus();
     }, 100);
     announce(`Suggestion selected: ${message.substring(0, 50)}...`);
   }, [setCurrentInput, announce]);
 
-  // Get current session title
   const currentSession = sessionManager.sessions.find((s: SessionMetadata) => s.id === sessionManager.currentSessionId);
   const currentSessionTitle = currentSession?.title;
 
   const hasMessages = chatHistory.length > 0;
   const showSidePanel = isSidePanelOpen && visiblePageRefs.length > 0 && allowEmbedding === true;
 
-  // Prepare state for chat scene
   const chatInterfaceState: ChatInterfaceState = useMemo(
     () => ({
       chatHistory,
@@ -312,7 +297,6 @@ function ChatComponent({ pluginSettings, readOnly = false, initialSession }: Cha
     ]
   );
 
-  // Prepare state for Grafana page scene
   const grafanaPageState: GrafanaPageState = useMemo(
     () => ({
       pageRefs: visiblePageRefs,
@@ -324,7 +308,6 @@ function ChatComponent({ pluginSettings, readOnly = false, initialSession }: Cha
     [visiblePageRefs, handleRemoveTab, kioskModeEnabled]
   );
 
-  // Create scene when side panel should be shown
   const chatScene = useChatScene(showSidePanel, chatInterfaceState, grafanaPageState, chatPanelPosition);
 
   if (toolsError) {
@@ -340,14 +323,12 @@ function ChatComponent({ pluginSettings, readOnly = false, initialSession }: Cha
         backgroundColor: theme.isDark ? '#111217' : theme.colors.background.canvas,
       }}
     >
-      {/* Always use scene-based layout */}
       {chatScene && (
         <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
           <chatScene.Component model={chatScene} />
         </div>
       )}
 
-      {/* Session sidebar - outside scene */}
       <SessionSidebar
         sessionManager={sessionManager}
         currentSessionId={sessionManager.currentSessionId}
@@ -358,7 +339,6 @@ function ChatComponent({ pluginSettings, readOnly = false, initialSession }: Cha
   );
 }
 
-// Export the Chat component wrapped with error boundary
 export function Chat(props: ChatProps) {
   return (
     <ChatErrorBoundary>
