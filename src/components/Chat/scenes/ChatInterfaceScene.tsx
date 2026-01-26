@@ -108,6 +108,7 @@ function ChatInterfaceRenderer({ model }: SceneComponentProps<ChatInterfaceScene
               aria-label="Chat messages"
               aria-live="polite"
               aria-relevant="additions"
+              tabIndex={0}
               style={{
                 backgroundColor: theme.isDark ? '#1a1b1f' : theme.colors.background.primary,
               }}
