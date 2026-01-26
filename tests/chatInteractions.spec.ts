@@ -194,14 +194,20 @@ test.describe('Chat Input Field', () => {
   test('should allow multiline input with Shift+Enter', async ({ page }) => {
     const chatInput = page.getByLabel('Chat input');
 
-    // Type first line
-    await chatInput.fill('First line');
+    // Click to focus the input
+    await chatInput.click();
 
-    // Add newline with Shift+Enter
+    // Type the entire multiline input sequentially
+    await chatInput.pressSequentially('First line');
+
+    // Press Shift+Enter to add newline
     await chatInput.press('Shift+Enter');
 
+    // Wait a brief moment for the newline to be registered in the DOM
+    await page.waitForTimeout(50);
+
     // Type second line
-    await chatInput.type('Second line');
+    await chatInput.pressSequentially('Second line');
 
     // The input should contain both lines
     const value = await chatInput.inputValue();
