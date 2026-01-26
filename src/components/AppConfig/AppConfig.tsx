@@ -26,7 +26,7 @@ type State = {
   expandedAdvanced: Set<string>;
   // Display settings
   kioskModeEnabled: boolean;
-  sidePanelPosition: 'left' | 'right';
+  chatPanelPosition: 'left' | 'right';
 };
 
 type ValidationErrors = {
@@ -46,7 +46,7 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
     customSystemPrompt: jsonData?.customSystemPrompt || '',
     expandedAdvanced: new Set<string>(),
     kioskModeEnabled: jsonData?.kioskModeEnabled ?? true,
-    sidePanelPosition: jsonData?.sidePanelPosition || 'right',
+    chatPanelPosition: jsonData?.chatPanelPosition || 'right',
   });
   const [validationErrors, setValidationErrors] = useState<ValidationErrors>({
     mcpServers: {},
@@ -803,17 +803,17 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
         </Field>
 
         <Field
-          label="Side Panel Position"
-          description="Choose where the side panel appears when displaying Grafana pages"
-          data-testid={testIds.appConfig.sidePanelPositionField}
+          label="Chat Panel Position"
+          description="Choose where the chat panel appears when displaying Grafana pages"
+          data-testid={testIds.appConfig.chatPanelPositionField}
         >
           <RadioButtonGroup
-            value={state.sidePanelPosition}
+            value={state.chatPanelPosition}
             options={[
               { label: 'Left', value: 'left' },
               { label: 'Right', value: 'right' },
             ]}
-            onChange={(value) => setState({ ...state, sidePanelPosition: value as 'left' | 'right' })}
+            onChange={(value) => setState({ ...state, chatPanelPosition: value as 'left' | 'right' })}
           />
         </Field>
 
@@ -826,7 +826,7 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
                 jsonData: {
                   ...jsonData,
                   kioskModeEnabled: state.kioskModeEnabled,
-                  sidePanelPosition: state.sidePanelPosition,
+                  chatPanelPosition: state.chatPanelPosition,
                 },
               };
               updatePluginAndReload(plugin.meta.id, updateData);

@@ -15,5 +15,5 @@ export type AppPluginSettings = {
   systemPromptMode?: SystemPromptMode;
   customSystemPrompt?: string;
   kioskModeEnabled?: boolean;
-  sidePanelPosition?: 'left' | 'right';
+  chatPanelPosition?: 'left' | 'right';
 };

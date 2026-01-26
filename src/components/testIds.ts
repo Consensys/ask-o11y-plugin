@@ -31,8 +31,8 @@ export const testIds = {
     displaySettings: 'data-testid ac-display-settings',
     kioskModeField: 'data-testid ac-kiosk-mode-field',
     kioskModeToggle: 'data-testid ac-kiosk-mode-toggle',
-    sidePanelPositionField: 'data-testid ac-side-panel-position-field',
-    sidePanelPositionSelector: 'data-testid ac-side-panel-position-selector',
+    chatPanelPositionField: 'data-testid ac-chat-panel-position-field',
+    chatPanelPositionSelector: 'data-testid ac-chat-panel-position-selector',
     saveDisplaySettingsButton: 'data-testid ac-save-display-settings',
   },
   home: {

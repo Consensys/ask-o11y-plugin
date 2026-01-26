@@ -10,14 +10,14 @@ import { GrafanaPageScene, GrafanaPageState } from '../scenes/GrafanaPageScene';
  * @param showSidePanel - Whether to show the side panel with embedded pages
  * @param chatState - State for the chat interface
  * @param sidePanelState - State for the Grafana page panel
- * @param sidePanelPosition - Position of the side panel: 'left' or 'right' (default: 'right')
+ * @param chatPanelPosition - Position of the chat panel: 'left' or 'right' (default: 'right')
  * @returns EmbeddedScene instance or null
  */
 export function useChatScene(
   showSidePanel: boolean,
   chatState: ChatInterfaceState,
   sidePanelState: GrafanaPageState,
-  sidePanelPosition: 'left' | 'right' = 'right'
+  chatPanelPosition: 'left' | 'right' = 'right'
 ): EmbeddedScene | null {
   const [scene, setScene] = useState<EmbeddedScene | null>(null);
   const sceneRef = useRef<EmbeddedScene | null>(null);
@@ -46,15 +46,15 @@ export function useChatScene(
         const chatInterface = new ChatInterfaceScene(chatState);
         const grafanaPage = new GrafanaPageScene(sidePanelState);
 
-        // Swap primary/secondary based on side panel position
-        // When panel is on right (default): chat is primary (left), panel is secondary (right)
-        // When panel is on left: panel is primary (left), chat is secondary (right)
-        const primary = sidePanelPosition === 'right' ? chatInterface : grafanaPage;
-        const secondary = sidePanelPosition === 'right' ? grafanaPage : chatInterface;
+        // Swap primary/secondary based on chat panel position
+        // When chat is on right: panel is primary (left), chat is secondary (right)
+        // When chat is on left: chat is primary (left), panel is secondary (right)
+        const primary = chatPanelPosition === 'right' ? grafanaPage : chatInterface;
+        const secondary = chatPanelPosition === 'right' ? chatInterface : grafanaPage;
         // Maintain 60/40 split with chat always getting 60%
-        // When chat is primary (panel right): initialSize 0.6 gives 60% to chat
-        // When panel is primary (panel left): initialSize 0.4 gives 40% to panel, 60% to chat
-        const initialSize = sidePanelPosition === 'right' ? 0.6 : 0.4;
+        // When chat is on right: initialSize 0.4 gives 40% to panel (left), 60% to chat (right)
+        // When chat is on left: initialSize 0.6 gives 60% to chat (left), 40% to panel (right)
+        const initialSize = chatPanelPosition === 'right' ? 0.4 : 0.6;
 
         const splitLayout = new SplitLayout({
           direction: 'row',
@@ -100,7 +100,7 @@ export function useChatScene(
       sceneRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [showSidePanel, sidePanelPosition]);
+  }, [showSidePanel, chatPanelPosition]);
 
   // Update scene state when props change (without recreating the scene)
   useEffect(() => {
@@ -108,7 +108,7 @@ export function useChatScene(
       try {
         const layout = sceneRef.current.state.body;
         if (layout instanceof SplitLayout) {
-          // Identify scenes by type, not by position (primary/secondary swap based on sidePanelPosition)
+          // Identify scenes by type, not by position (primary/secondary swap based on chatPanelPosition)
           const primary = layout.state.primary;
           const secondary = layout.state.secondary;
 

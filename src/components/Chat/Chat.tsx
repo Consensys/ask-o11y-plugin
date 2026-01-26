@@ -130,7 +130,7 @@ function ChatComponent({ pluginSettings, readOnly = false, initialSession }: Cha
 
   // Extract display settings from plugin configuration
   const kioskModeEnabled = pluginSettings?.kioskModeEnabled ?? true;
-  const sidePanelPosition = pluginSettings?.sidePanelPosition || 'right';
+  const chatPanelPosition = pluginSettings?.chatPanelPosition || 'right';
 
   const {
     chatHistory,
@@ -330,7 +330,7 @@ function ChatComponent({ pluginSettings, readOnly = false, initialSession }: Cha
   );
 
   // Create scene when side panel should be shown
-  const chatScene = useChatScene(showSidePanel, chatInterfaceState, grafanaPageState, sidePanelPosition);
+  const chatScene = useChatScene(showSidePanel, chatInterfaceState, grafanaPageState, chatPanelPosition);
 
   if (toolsError) {
     return <div>Error: {toolsError.message}</div>;
