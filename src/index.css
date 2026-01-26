@@ -278,3 +278,25 @@
   max-height: 100% !important;
   overflow: hidden !important;
 }
+
+/* Constrain chat scene wrappers using viewport height to account for Grafana header
+ * Purpose: Prevent scene wrappers from overflowing viewport (they start at y=40 due to header)
+ * Using calc(100vh - 40px) instead of 100% to account for the Grafana header positioning
+ */
+.css-mh3ldv:has([data-scene-container="chat"]),
+.css-16x2e0z:has([data-scene-container="chat"]) {
+  max-height: calc(100vh - 40px) !important;
+  overflow: hidden !important;
+}
+
+/* Ensure chat scene container uses viewport-based height */
+[data-scene-container="chat"] {
+  max-height: calc(100vh - 40px) !important;
+}
+
+/* Ensure chat interface has proper scrolling behavior within SplitLayout scenes
+ * Purpose: Enable scrolling for chat messages when embedded in scene-based layouts
+ */
+[data-scene-container="chat"] > .chat-interface-scroll-container {
+  overflow: auto !important;
+}

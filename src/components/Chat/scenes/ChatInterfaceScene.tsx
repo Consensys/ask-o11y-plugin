@@ -83,9 +83,9 @@ function ChatInterfaceRenderer({ model }: SceneComponentProps<ChatInterfaceScene
   const hasMessages = chatHistory.length > 0;
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', width: '100%', overflow: 'hidden' }}>
+    <div data-scene-container="chat" style={{ display: 'flex', flexDirection: 'column', height: '100%', width: '100%', overflow: 'hidden' }}>
       {/* Scrollable chat history area */}
-      <div className="w-full px-4 max-w-4xl mx-auto" style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, overflow: 'auto' }}>
+      <div className="chat-interface-scroll-container w-full px-4 max-w-4xl mx-auto" style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, overflow: 'auto' }}>
         {/* Header - only show when there are messages */}
         {hasMessages && <ChatHeader isGenerating={isGenerating} currentSessionTitle={currentSessionTitle} />}
 
@@ -96,14 +96,13 @@ function ChatInterfaceRenderer({ model }: SceneComponentProps<ChatInterfaceScene
         {hasMessages && (
           <div
             ref={chatContainerRef}
-            className="flex-1 py-6 rounded-lg"
+            className="py-6 rounded-lg"
             role="log"
             aria-label="Chat messages"
             aria-live="polite"
             aria-relevant="additions"
             style={{
               backgroundColor: theme.isDark ? '#1a1b1f' : theme.colors.background.primary,
-              minHeight: 0,
             }}
           >
             <div className="px-4">
