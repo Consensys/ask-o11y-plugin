@@ -282,9 +282,9 @@
 /* Constrain chat scene wrappers using viewport height to account for Grafana header
  * Purpose: Prevent scene wrappers from overflowing viewport (they start at y=40 due to header)
  * Using calc(100vh - 40px) instead of 100% to account for the Grafana header positioning
- * Target any parent container of the chat scene using stable data attribute
+ * Target ONLY the direct parent container using direct child selector (>)
  */
-div:has([data-scene-container="chat"]) {
+div:has(> [data-scene-container="chat"]) {
   max-height: calc(100vh - 40px) !important;
   overflow: hidden !important;
 }
