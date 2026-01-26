@@ -282,9 +282,9 @@
 /* Constrain chat scene wrappers using viewport height to account for Grafana header
  * Purpose: Prevent scene wrappers from overflowing viewport (they start at y=40 due to header)
  * Using calc(100vh - 40px) instead of 100% to account for the Grafana header positioning
+ * Target any parent container of the chat scene using stable data attribute
  */
-.css-mh3ldv:has([data-scene-container="chat"]),
-.css-16x2e0z:has([data-scene-container="chat"]) {
+div:has([data-scene-container="chat"]) {
   max-height: calc(100vh - 40px) !important;
   overflow: hidden !important;
 }
@@ -315,7 +315,7 @@ div:has(> div[style*="display: none"]) {
 }
 
 /* Also hide the separator when adjacent to hidden pane */
-div:has(> div[style*="display: none"]) + div[class*="css-"] {
+div:has(> div[style*="display: none"]) + div[role="separator"] {
   display: none !important;
 }
 
@@ -323,8 +323,9 @@ div:has(> div[style*="display: none"]) + div[class*="css-"] {
  * Purpose: When the side panel pane has width 0, the chat pane should expand to 100%
  * Only apply when first pane contains a hidden child (display: none), not during drag
  * This ensures smooth dragging while still expanding chat when panel is closed
+ * Use structural selectors without emotion classes
  */
-.css-11fa8fd:has(> div:first-child > div[style*="display: none"]) > .css-18ggn:last-child {
+div:has(> div:first-child > div[style*="display: none"]) > div:last-child {
   flex: 1 1 auto !important;
   max-width: 100% !important;
 }
