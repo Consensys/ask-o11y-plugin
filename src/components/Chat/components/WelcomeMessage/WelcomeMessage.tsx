@@ -1,23 +1,6 @@
 import React from 'react';
 import { useTheme2 } from '@grafana/ui';
-
-// Sparkle SVG icon component matching Grafana's style
-const SparkleIcon: React.FC<{ className?: string; style?: React.CSSProperties }> = ({ className, style }) => (
-  <svg
-    className={className}
-    style={style}
-    width="44"
-    height="44"
-    viewBox="0 0 24 24"
-    fill="none"
-    xmlns="http://www.w3.org/2000/svg"
-  >
-    <path
-      d="M12 2L13.09 8.26L18 6L14.74 10.91L21 12L14.74 13.09L18 18L13.09 15.74L12 22L10.91 15.74L6 18L9.26 13.09L3 12L9.26 10.91L6 6L10.91 8.26L12 2Z"
-      fill="currentColor"
-    />
-  </svg>
-);
+import { SparkleIcon } from '../../../icons';
 
 export const WelcomeMessage: React.FC = () => {
   const theme = useTheme2();
@@ -31,7 +14,7 @@ export const WelcomeMessage: React.FC = () => {
 
       {/* Title with sparkle icon */}
       <div className="flex items-center justify-center gap-3 mb-5">
-        <SparkleIcon className="animate-sparkle" style={{ color: theme.colors.text.primary }} />
+        <SparkleIcon size={44} color={theme.colors.text.primary} className="animate-sparkle" />
         <h1 className="text-5xl font-bold tracking-tight" style={{ color: theme.colors.text.primary }}>
           Ask O11y Assistant
         </h1>
