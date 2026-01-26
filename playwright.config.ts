@@ -40,14 +40,26 @@ export default defineConfig<PluginOptions>({
       testDir: pluginE2eAuth,
       testMatch: [/.*\.js/],
     },
-    // 2. Run tests in Google Chrome. Every test will start authenticated as admin user.
+    // 2. Run session-related tests serially (single worker) to avoid storage conflicts
     {
-      name: 'chromium',
+      name: 'chromium-session-tests',
+      testMatch: [/session.*\.spec\.ts/],
       use: {
         ...devices['Desktop Chrome'],
         storageState: 'playwright/.auth/admin.json',
       },
       dependencies: ['auth'],
+      fullyParallel: false,
+    },
+    // 3. Run other tests in parallel
+    {
+      name: 'chromium',
+      testIgnore: [/session.*\.spec\.ts/],
+      use: {
+        ...devices['Desktop Chrome'],
+        storageState: 'playwright/.auth/admin.json',
+      },
+      dependencies: ['chromium-session-tests'],
     },
   ],
 });

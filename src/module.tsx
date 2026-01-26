@@ -1,7 +1,7 @@
 import React, { Suspense, lazy } from 'react';
 import { AppPlugin, type AppRootProps } from '@grafana/data';
-import { LoadingPlaceholder } from '@grafana/ui';
 import { ErrorBoundary } from './components/ErrorBoundary';
+import { AppLoader, InlineAppLoader } from './components/AppLoader';
 import type { AppConfigProps } from './components/AppConfig/AppConfig';
 import type { AppPluginSettings } from './types/plugin';
 
@@ -14,7 +14,7 @@ const LazyMCPStatus = lazy(() => import('./components/MCPStatus').then((module) 
 
 const App = (props: AppRootProps) => (
   <ErrorBoundary fallbackTitle="Application Error">
-    <Suspense fallback={<LoadingPlaceholder text="" />}>
+    <Suspense fallback={<AppLoader />}>
       <LazyApp {...props} />
     </Suspense>
   </ErrorBoundary>
@@ -22,7 +22,7 @@ const App = (props: AppRootProps) => (
 
 const AppConfig = (props: AppConfigProps) => (
   <ErrorBoundary fallbackTitle="Configuration Error">
-    <Suspense fallback={<LoadingPlaceholder text="" />}>
+    <Suspense fallback={<InlineAppLoader text="Loading configuration..." />}>
       <LazyAppConfig {...props} />
     </Suspense>
   </ErrorBoundary>
@@ -30,7 +30,7 @@ const AppConfig = (props: AppConfigProps) => (
 
 const MCPStatus = (props: any) => (
   <ErrorBoundary fallbackTitle="MCP Status Error">
-    <Suspense fallback={<LoadingPlaceholder text="" />}>
+    <Suspense fallback={<InlineAppLoader text="Loading MCP status..." />}>
       <LazyMCPStatus onClose={() => {}} />
     </Suspense>
   </ErrorBoundary>

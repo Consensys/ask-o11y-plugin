@@ -4,6 +4,23 @@ import { AppRootProps, PluginType } from '@grafana/data';
 import { render, waitFor } from '@testing-library/react';
 import App from './App';
 
+// Mock the AppLoader
+jest.mock('../AppLoader', () => ({
+  AppLoader: ({ text }: { text?: string }) => <div data-testid="app-loader">{text || 'Loading...'}</div>,
+}));
+
+// Mock the Home page
+jest.mock('../../pages/Home', () => ({
+  __esModule: true,
+  default: () => <div>Ask O11y Assistant</div>,
+}));
+
+// Mock the SharedSession page
+jest.mock('../../pages/SharedSession', () => ({
+  __esModule: true,
+  default: () => <div>Shared Session</div>,
+}));
+
 // Mock the backend MCP client
 jest.mock('../../services/backendMCPClient', () => ({
   backendMCPClient: {
