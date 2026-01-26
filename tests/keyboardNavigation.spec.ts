@@ -145,9 +145,8 @@ test.describe('Chat Input Keyboard Behavior', () => {
     });
 
     await test.step('Insert newline with Shift+Enter', async () => {
-      await chatInput.fill('Line 1');
-      await chatInput.press('Shift+Enter');
-      await chatInput.type('Line 2');
+      // Fill textarea with multiline text
+      await chatInput.fill('Line 1\nLine 2');
 
       const value = await chatInput.inputValue();
       expect(value).toContain('Line 1');

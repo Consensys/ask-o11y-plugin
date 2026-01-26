@@ -78,13 +78,17 @@ export const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(
 
     // Enhanced key press handler
     const handleKeyDown = (e: React.KeyboardEvent) => {
-      if (e.key === 'Enter' && !e.shiftKey && !validationError) {
-        handleKeyPress(e);
-      } else if (e.key === 'Enter' && !e.shiftKey && validationError) {
-        e.preventDefault(); // Prevent sending invalid input
-      } else {
-        handleKeyPress(e);
+      // Only handle Enter key specifically
+      if (e.key === 'Enter' && !e.shiftKey) {
+        // Prevent sending if there's a validation error
+        if (validationError) {
+          e.preventDefault();
+        } else {
+          // Let handleKeyPress handle the submission
+          handleKeyPress(e);
+        }
       }
+      // For Shift+Enter and all other keys, let default behavior happen
     };
 
     return (
