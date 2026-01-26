@@ -16,6 +16,7 @@ describe('AppLoader', () => {
   it('should render with default text', () => {
     render(<AppLoader />);
 
+    expect(screen.getByTestId('app-loader')).toBeInTheDocument();
     expect(screen.getByTestId('spinner')).toBeInTheDocument();
     expect(screen.getByText('Loading Ask O11y...')).toBeInTheDocument();
   });
@@ -37,6 +38,7 @@ describe('InlineAppLoader', () => {
   it('should render with default text', () => {
     render(<InlineAppLoader />);
 
+    expect(screen.getByTestId('inline-app-loader')).toBeInTheDocument();
     expect(screen.getByTestId('spinner')).toBeInTheDocument();
     expect(screen.getByText('Loading Ask O11y...')).toBeInTheDocument();
   });
