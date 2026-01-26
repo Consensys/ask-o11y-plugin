@@ -673,7 +673,7 @@ func (p *Plugin) handleCreateShare(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Build share URL
-	shareURL := fmt.Sprintf("/a/%s/shared/%s", PluginID, share.ShareID)
+	shareURL := fmt.Sprintf("/a/%s/shared/%s?orgId=%d", PluginID, share.ShareID, orgID)
 
 	var expiresAtStr *string
 	if share.ExpiresAt != nil {

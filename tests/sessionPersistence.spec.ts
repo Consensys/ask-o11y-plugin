@@ -2,6 +2,9 @@ import { test, expect, clearPersistedSession, deleteAllPersistedSessions } from 
 import { ROUTES } from '../src/constants';
 
 test.describe('Session Persistence Tests', () => {
+  // Run session tests serially to avoid conflicts with shared storage
+  test.describe.configure({ mode: 'serial' });
+
   test.beforeEach(async ({ gotoPage, page }) => {
     await gotoPage(`/${ROUTES.Home}`);
 
@@ -13,6 +16,12 @@ test.describe('Session Persistence Tests', () => {
   });
 
   test('should persist and load sessions correctly', async ({ page }) => {
+    // Delete all sessions first to ensure a clean slate for this test
+    await deleteAllPersistedSessions(page);
+
+    // After deleting all sessions, ensure welcome message is visible
+    await expect(page.getByRole('heading', { name: 'Ask O11y Assistant' })).toBeVisible({ timeout: 10000 });
+
     const chatInput = page.getByLabel('Chat input');
 
     await test.step('Save session after message', async () => {
@@ -71,14 +80,14 @@ test.describe('Session Persistence Tests', () => {
 
       // Click on the existing session
       await sessionItem.click();
-      
+
       // Wait for the chat to load the session
       await page.waitForTimeout(1000);
 
       // The old message should be visible again - wait for it with multiple strategies
       const chatLog = page.locator('[role="log"]');
       await expect(chatLog).toBeVisible({ timeout: 5000 });
-      
+
       // Wait for the message text to appear
       await page.waitForSelector('text=Message to persist', { timeout: 10000 });
       await expect(chatLog.getByText('Message to persist')).toBeVisible({ timeout: 10000 });
@@ -110,7 +119,10 @@ test.describe('Session Persistence Tests', () => {
       await sessionItem.hover();
 
       // Look for delete button (trash icon or similar)
-      const deleteButton = sessionItem.getByRole('button', { name: /delete/i }).or(sessionItem.locator('[aria-label*="delete"]')).or(sessionItem.locator('button').last());
+      const deleteButton = sessionItem
+        .getByRole('button', { name: /delete/i })
+        .or(sessionItem.locator('[aria-label*="delete"]'))
+        .or(sessionItem.locator('button').last());
 
       if (await deleteButton.isVisible()) {
         await deleteButton.click();
@@ -157,7 +169,10 @@ test.describe('Session Persistence Tests', () => {
 
       // Should show date (Today, Yesterday, or date) - only within the first session item
       await expect(
-        firstSessionItem.getByText('Today').or(firstSessionItem.getByText('Yesterday')).or(firstSessionItem.getByText(/\d+ days ago/))
+        firstSessionItem
+          .getByText('Today')
+          .or(firstSessionItem.getByText('Yesterday'))
+          .or(firstSessionItem.getByText(/\d+ days ago/))
       ).toBeVisible();
 
       // Should show message count - only within the first session item
@@ -165,4 +180,3 @@ test.describe('Session Persistence Tests', () => {
     });
   });
 });
-

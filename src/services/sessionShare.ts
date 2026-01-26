@@ -116,11 +116,9 @@ export class SessionShareService {
       return sharedSession;
     } catch (error: any) {
       console.error('[SessionShareService] Failed to get shared session:', error);
-      // Preserve status code if available
-      if (error?.status) {
-        error.status = error.status;
-      }
-      throw error;
+      const enhancedError = new Error(error?.message || error?.data?.message || 'Failed to get shared session');
+      (enhancedError as any).status = error?.status || error?.response?.status || error?.data?.status;
+      throw enhancedError;
     }
   }
 
@@ -167,12 +165,19 @@ export class SessionShareService {
   }
 
   /**
-   * Build a full share URL from a share ID
+   * Build a full share URL from a share ID or full path
    */
-  buildShareUrl(shareId: string): string {
+  buildShareUrl(shareUrlOrId: string): string {
     // Get current origin
     const origin = window.location.origin;
-    return `${origin}/a/${pluginJson.id}/shared/${shareId}`;
+
+    // If it's already a full path from backend (starts with /a/), use it
+    if (shareUrlOrId.startsWith('/a/')) {
+      return `${origin}${shareUrlOrId}`;
+    }
+
+    // Fallback for backward compatibility (just shareId)
+    return `${origin}/a/${pluginJson.id}/shared/${shareUrlOrId}`;
   }
 }
 

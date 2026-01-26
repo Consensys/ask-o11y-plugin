@@ -1,4 +1,8 @@
 export const testIds = {
+  appLoader: {
+    container: 'app-loader',
+    inline: 'inline-app-loader',
+  },
   appConfig: {
     apiKey: 'data-testid ac-api-key',
     apiUrl: 'data-testid ac-api-url',

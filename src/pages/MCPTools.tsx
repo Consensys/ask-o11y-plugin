@@ -4,19 +4,8 @@
  */
 
 import React, { useState, useEffect, useMemo } from 'react';
-import {
-  Alert,
-  Badge,
-  Button,
-  Card,
-  Checkbox,
-  Combobox,
-  Icon,
-  Input,
-  LoadingPlaceholder,
-  Stack,
-  useTheme2,
-} from '@grafana/ui';
+import { Alert, Badge, Button, Card, Checkbox, Combobox, Icon, Input, Stack, useTheme2 } from '@grafana/ui';
+import { AppLoader } from '../components/AppLoader';
 import { SelectableValue } from '@grafana/data';
 import { PluginPage, config } from '@grafana/runtime';
 import { css } from '@emotion/css';
@@ -182,9 +171,7 @@ export function MCPToolsPage() {
   if (loading) {
     return (
       <PluginPage>
-        <div className="flex items-center justify-center h-full">
-          <LoadingPlaceholder text="Loading MCP tools..." />
-        </div>
+        <AppLoader text="Loading MCP tools..." />
       </PluginPage>
     );
   }
