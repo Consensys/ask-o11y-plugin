@@ -314,18 +314,19 @@ div:has(> div[style*="display: none"]) {
   flex: 0 0 0 !important;
 }
 
-/* Also hide the separator when adjacent to hidden pane */
-div:has(> div[style*="display: none"]) + div[role="separator"] {
+/* Hide separator when any sibling pane is hidden (both positions)
+ * Use descendant selector (space) instead of child (>) to handle any nesting depth
+ * This accounts for SceneComponentWrapper or other intermediate elements
+ */
+div:has(> div div[style*="display: none"]) > div[role="separator"] {
   display: none !important;
 }
 
-/* Expand chat pane to full width when side panel is completely hidden
- * Purpose: When the side panel pane has width 0, the chat pane should expand to 100%
- * Only apply when first pane contains a hidden child (display: none), not during drag
- * This ensures smooth dragging while still expanding chat when panel is closed
- * Use structural selectors without emotion classes
+/* Expand visible pane to full width when sibling pane is hidden (both positions)
+ * Use descendant selector to handle any nesting depth (SceneComponentWrapper, etc.)
+ * Target panes that don't contain a hidden div and aren't the separator
  */
-div:has(> div:first-child > div[style*="display: none"]) > div:last-child {
+div:has(> div div[style*="display: none"]) > div:not(:has(div[style*="display: none"])):not([role="separator"]) {
   flex: 1 1 auto !important;
   max-width: 100% !important;
 }
