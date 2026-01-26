@@ -47,11 +47,9 @@ export function SharedSession() {
         setSharedSession(session);
       } catch (err: any) {
         console.error('[SharedSession] Failed to load shared session:', err);
-        // Grafana's backendSrv can have status in different locations depending on error type
         const status = err?.status || err?.response?.status || err?.data?.status;
-        const message = err?.message || err?.data?.message || err?.statusText || '';
+        const message = (err?.message || err?.data?.message || err?.statusText || '').toLowerCase();
         
-        // Check for 404/not found conditions
         if (status === 404 || message.includes('not found') || message.includes('expired')) {
           setError('This share link is not found or has expired.');
         } else if (status === 403 || message.includes('access') || message.includes('permission')) {
