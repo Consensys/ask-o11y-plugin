@@ -112,6 +112,7 @@ test.describe('Session Sharing', () => {
       await expect(shareUrlInput).toBeVisible();
       const shareUrl = await shareUrlInput.inputValue();
       expect(shareUrl).toContain('/shared/');
+      expect(shareUrl).toContain('?orgId=');
       expect(shareUrl.length).toBeGreaterThan(0);
     });
 
