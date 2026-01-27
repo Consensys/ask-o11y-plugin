@@ -70,7 +70,7 @@ describe('ChatSession', () => {
         id: 'session-123',
         title: 'Test Session',
         messages: [
-          { role: 'user', content: 'Hello', timestamp: '2024-01-01T00:00:00Z' },
+          { role: 'user' as const, content: 'Hello', timestamp: '2024-01-01T00:00:00Z' },
         ],
         createdAt: '2024-01-01T00:00:00Z',
         updatedAt: '2024-01-02T00:00:00Z',
@@ -93,7 +93,7 @@ describe('ChatSession', () => {
         id: 'session-123',
         title: 'Test',
         messages: [
-          { role: 'user', content: 'Test', timestamp: '2024-06-15T10:30:00Z' },
+          { role: 'user' as const, content: 'Test', timestamp: '2024-06-15T10:30:00Z' },
         ],
         createdAt: '2024-01-01T00:00:00Z',
         updatedAt: '2024-01-01T00:00:00Z',
@@ -102,7 +102,7 @@ describe('ChatSession', () => {
 
       const session = ChatSession.fromStorage(storageData);
 
-      expect((session.messages[0] as any).timestamp).toBeInstanceOf(Date);
+      expect(session.messages[0].timestamp).toBeInstanceOf(Date);
     });
   });
 

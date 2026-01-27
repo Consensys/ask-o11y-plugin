@@ -38,19 +38,19 @@ export class SessionShareService {
     expiresInDays?: number,
     expiresInHours?: number
   ): Promise<CreateShareResponse> {
+    const requestData: Record<string, unknown> = {
+      sessionId,
+      sessionData: sessionData.toStorage(),
+    };
+
+    // Send expiresInHours if provided, otherwise expiresInDays
+    if (expiresInHours !== undefined) {
+      requestData.expiresInHours = expiresInHours;
+    } else if (expiresInDays !== undefined) {
+      requestData.expiresInDays = expiresInDays;
+    }
+
     try {
-      const requestData: any = {
-        sessionId,
-        sessionData: sessionData.toStorage(),
-      };
-      
-      // Send expiresInHours if provided, otherwise expiresInDays
-      if (expiresInHours !== undefined) {
-        requestData.expiresInHours = expiresInHours;
-      } else if (expiresInDays !== undefined) {
-        requestData.expiresInDays = expiresInDays;
-      }
-      
       const response = await firstValueFrom(
         getBackendSrv().fetch<CreateShareResponse>({
           url: `${this.baseUrl}/api/sessions/share`,
@@ -60,7 +60,7 @@ export class SessionShareService {
         })
       );
 
-      if (!response || !response.data) {
+      if (!response?.data) {
         throw new Error('No response from backend');
       }
 
@@ -77,34 +77,33 @@ export class SessionShareService {
   async getSharedSession(shareId: string): Promise<SharedSession> {
     try {
       const response = await firstValueFrom(
-        getBackendSrv().fetch<any>({
+        getBackendSrv().fetch<Record<string, unknown>>({
           url: `${this.baseUrl}/api/sessions/shared/${shareId}`,
           method: 'GET',
           showErrorAlert: false,
         })
       );
 
-      if (!response || !response.data) {
+      if (!response?.data) {
         throw new Error('No response from backend');
       }
 
       const data = response.data;
-      
+
       // Ensure messages array exists and is properly formatted
       if (!data.messages || !Array.isArray(data.messages)) {
         console.error('[SessionShareService] Invalid session data format:', data);
         throw new Error('Invalid session data: messages array is missing or invalid');
       }
 
-      // Convert to SharedSession format, ensuring all required fields are present
       const sharedSession: SharedSession = {
-        id: data.id || '',
-        title: data.title || 'Shared Session',
-        messages: data.messages || [],
-        createdAt: data.createdAt || new Date().toISOString(),
-        updatedAt: data.updatedAt || new Date().toISOString(),
+        id: (data.id as string) || '',
+        title: (data.title as string) || 'Shared Session',
+        messages: data.messages as ChatMessage[],
+        createdAt: (data.createdAt as string) || new Date().toISOString(),
+        updatedAt: (data.updatedAt as string) || new Date().toISOString(),
         isShared: true,
-        sharedBy: data.sharedBy,
+        sharedBy: data.sharedBy as string | undefined,
       };
 
       console.log('[SessionShareService] Parsed shared session', {
@@ -114,10 +113,11 @@ export class SessionShareService {
       });
 
       return sharedSession;
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('[SessionShareService] Failed to get shared session:', error);
-      const enhancedError = new Error(error?.message || error?.data?.message || 'Failed to get shared session');
-      (enhancedError as any).status = error?.status || error?.response?.status || error?.data?.status;
+      const errorObj = error as { message?: string; data?: { message?: string; status?: number }; status?: number; response?: { status?: number } };
+      const enhancedError = new Error(errorObj?.message || errorObj?.data?.message || 'Failed to get shared session') as Error & { status?: number };
+      enhancedError.status = errorObj?.status || errorObj?.response?.status || errorObj?.data?.status;
       throw enhancedError;
     }
   }
@@ -153,11 +153,7 @@ export class SessionShareService {
         })
       );
 
-      if (!response || !response.data) {
-        return [];
-      }
-
-      return response.data;
+      return response?.data ?? [];
     } catch (error) {
       console.error('[SessionShareService] Failed to get session shares:', error);
       return [];

@@ -64,21 +64,23 @@ export function findExpiryOptionByKey(key: string): ExpiryOption | undefined {
   return EXPIRY_OPTIONS.find((opt) => expiryConfigToKey(opt.config) === key);
 }
 
+interface MessageWithTimestamp {
+  timestamp?: Date | string | number;
+}
+
 // Transform message timestamp to Date object
 // Handles both string and Date timestamps, with fallback to current time
-export function normalizeMessageTimestamp(msg: any): Date {
-  if (!msg.timestamp) {
+export function normalizeMessageTimestamp(msg: MessageWithTimestamp): Date {
+  const { timestamp } = msg;
+
+  if (!timestamp) {
     return new Date();
   }
 
-  if (typeof msg.timestamp === 'string') {
-    return new Date(msg.timestamp);
+  if (timestamp instanceof Date) {
+    return timestamp;
   }
 
-  if (msg.timestamp instanceof Date) {
-    return msg.timestamp;
-  }
-
-  // Fallback for numeric timestamps or other types
-  return new Date(msg.timestamp);
+  // Handles string and numeric timestamps
+  return new Date(timestamp);
 }

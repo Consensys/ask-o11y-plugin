@@ -1,6 +1,30 @@
 import { ChatMessage } from '../../components/Chat/types';
 
 /**
+ * Message format in storage (timestamp can be string when serialized)
+ */
+export interface StorageMessage {
+  role: 'user' | 'assistant';
+  content: string;
+  toolCalls?: ChatMessage['toolCalls'];
+  pageRefs?: ChatMessage['pageRefs'];
+  timestamp?: string | Date;
+}
+
+/**
+ * Storage format for ChatSession
+ */
+export interface ChatSessionStorageData {
+  id: string;
+  title: string;
+  messages: StorageMessage[];
+  createdAt: string | Date;
+  updatedAt: string | Date;
+  messageCount: number;
+  summary?: string;
+}
+
+/**
  * Chat session domain model with validation and factory methods
  */
 export class ChatSession {
@@ -28,13 +52,13 @@ export class ChatSession {
   /**
    * Create from storage data (with date parsing)
    */
-  static fromStorage(data: any): ChatSession {
+  static fromStorage(data: ChatSessionStorageData): ChatSession {
     return new ChatSession(
       data.id,
       data.title,
-      data.messages.map((msg: any) => ({
+      data.messages.map((msg) => ({
         ...msg,
-        timestamp: new Date(msg.timestamp),
+        timestamp: msg.timestamp ? new Date(msg.timestamp) : undefined,
       })),
       new Date(data.createdAt),
       new Date(data.updatedAt),
@@ -46,7 +70,7 @@ export class ChatSession {
   /**
    * Convert to storage format
    */
-  toStorage(): any {
+  toStorage(): ChatSessionStorageData {
     return {
       id: this.id,
       title: this.title,

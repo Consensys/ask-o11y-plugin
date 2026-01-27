@@ -23,6 +23,13 @@ function getTabLabel(ref: GrafanaPageRef, index: number): string {
   return ref.type === 'explore' ? 'Explore' : `Page ${index + 1}`;
 }
 
+function getTabBackgroundColor(isActive: boolean, isDark: boolean, primaryColor: string): string {
+  if (isActive) {
+    return primaryColor;
+  }
+  return isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)';
+}
+
 function toRelativeUrl(url: string, kioskModeEnabled = true): string {
   let relativeUrl = url;
   if (url.startsWith('http://') || url.startsWith('https://')) {
@@ -55,11 +62,13 @@ export const SidePanel: React.FC<SidePanelProps> = ({ isOpen, onClose, pageRefs,
     }
   }, [activeIndex, safeActiveIndex]);
 
-  if (!embedded && (!isOpen || pageRefs.length === 0 || allowEmbedding === null || !allowEmbedding)) {
+  // Early return if panel should not be shown
+  if (!isOpen || pageRefs.length === 0) {
     return null;
   }
 
-  if (!isOpen || pageRefs.length === 0) {
+  // Non-embedded mode requires embedding to be allowed
+  if (!embedded && (allowEmbedding === null || !allowEmbedding)) {
     return null;
   }
 
@@ -151,26 +160,23 @@ export const SidePanel: React.FC<SidePanelProps> = ({ isOpen, onClose, pageRefs,
           }}
           role="tablist"
         >
-          {pageRefs.map((ref, idx) => (
+          {pageRefs.map((ref, idx) => {
+            const isActive = idx === safeActiveIndex;
+            return (
             <div
               key={`${ref.url}-${idx}`}
               className="flex items-center gap-1 flex-1 min-w-0 rounded-md transition-colors"
               style={{
-                backgroundColor:
-                  idx === safeActiveIndex
-                    ? theme.colors.primary.main
-                    : theme.isDark
-                    ? 'rgba(255,255,255,0.05)'
-                    : 'rgba(0,0,0,0.05)',
+                backgroundColor: getTabBackgroundColor(isActive, theme.isDark, theme.colors.primary.main),
               }}
               role="tab"
-              aria-selected={idx === safeActiveIndex}
+              aria-selected={isActive}
             >
               <button
                 onClick={() => setActiveIndex(idx)}
                 className="flex-1 min-w-0 px-3 py-1.5 text-xs truncate text-left"
                 style={{
-                  color: idx === safeActiveIndex ? theme.colors.primary.contrastText : theme.colors.text.secondary,
+                  color: isActive ? theme.colors.primary.contrastText : theme.colors.text.secondary,
                 }}
                 title={ref.url}
               >
@@ -179,11 +185,12 @@ export const SidePanel: React.FC<SidePanelProps> = ({ isOpen, onClose, pageRefs,
               {onRemoveTab && (
                 <TabCloseButton
                   onClick={() => onRemoveTab(idx)}
-                  color={idx === safeActiveIndex ? theme.colors.primary.contrastText : theme.colors.text.secondary}
+                  color={isActive ? theme.colors.primary.contrastText : theme.colors.text.secondary}
                 />
               )}
             </div>
-          ))}
+          );
+          })}
         </div>
       )}
 

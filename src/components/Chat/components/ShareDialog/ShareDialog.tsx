@@ -95,7 +95,6 @@ export function ShareDialog({ sessionId, session, onClose, existingShares = [], 
     }
   };
 
-
   return (
     <Modal title="Share Session" isOpen={true} onDismiss={onClose}>
       <div className="min-w-[400px]">

@@ -10,6 +10,13 @@ import { ChatMessage } from '../components/Chat/types';
 import type { AppPluginSettings } from '../types/plugin';
 import { normalizeMessageTimestamp } from '../utils/shareUtils';
 
+function normalizeMessages(messages: ChatMessage[]): ChatMessage[] {
+  return messages.map((msg) => ({
+    ...msg,
+    timestamp: normalizeMessageTimestamp({ timestamp: msg.timestamp }),
+  }));
+}
+
 export function SharedSession() {
   const { shareId } = useParams<{ shareId: string }>();
   const navigate = useNavigate();
@@ -45,11 +52,12 @@ export function SharedSession() {
         }
         
         setSharedSession(session);
-      } catch (err: any) {
+      } catch (err: unknown) {
         console.error('[SharedSession] Failed to load shared session:', err);
-        const status = err?.status || err?.response?.status || err?.data?.status;
-        const message = (err?.message || err?.data?.message || err?.statusText || '').toLowerCase();
-        
+        const errorObj = err as { status?: number; response?: { status?: number }; data?: { status?: number; message?: string }; message?: string; statusText?: string };
+        const status = errorObj?.status || errorObj?.response?.status || errorObj?.data?.status;
+        const message = (errorObj?.message || errorObj?.data?.message || errorObj?.statusText || '').toLowerCase();
+
         if (status === 404 || message.includes('not found') || message.includes('expired')) {
           setError('This share link is not found or has expired.');
         } else if (status === 403 || message.includes('access') || message.includes('permission')) {
@@ -73,12 +81,7 @@ export function SharedSession() {
     setImporting(true);
     try {
       const sessionService = ServiceFactory.getSessionService(storage);
-
-      // Convert shared session to ChatSession format
-      const messages: ChatMessage[] = sharedSession.messages.map((msg: any) => ({
-        ...msg,
-        timestamp: normalizeMessageTimestamp(msg),
-      }));
+      const messages = normalizeMessages(sharedSession.messages);
 
       // Create new session with imported data
       // createSession already sets it as the active session
@@ -131,35 +134,13 @@ export function SharedSession() {
   }
 
   // Convert shared session to ChatSession for display
-  // Ensure messages are properly formatted
-  const messages: ChatMessage[] = (sharedSession.messages || []).map((msg: any) => ({
-    ...msg,
-    timestamp: normalizeMessageTimestamp(msg),
-  }));
+  const messages = normalizeMessages(sharedSession.messages || []);
 
   console.log('[SharedSession] Rendering with messages', {
     messageCount: messages.length,
     sessionId: sharedSession.id,
     firstMessage: messages[0]?.content?.substring(0, 50)
   });
-
-  // Validate we have messages before creating session
-  if (messages.length === 0) {
-    return (
-      <div className="min-h-full w-full flex items-center justify-center p-4">
-        <div className="max-w-md w-full">
-          <Alert title="Error" severity="error">
-            This shared session has no messages.
-          </Alert>
-          <div className="mt-4">
-            <Button variant="primary" onClick={() => navigate('/')}>
-              Go to Home
-            </Button>
-          </div>
-        </div>
-      </div>
-    );
-  }
 
   const session = ChatSession.fromStorage({
     id: sharedSession.id,

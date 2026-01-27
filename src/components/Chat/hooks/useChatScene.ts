@@ -3,6 +3,23 @@ import { EmbeddedScene, SplitLayout } from '@grafana/scenes';
 import { ChatInterfaceScene, ChatInterfaceState } from '../scenes/ChatInterfaceScene';
 import { GrafanaPageScene, GrafanaPageState } from '../scenes/GrafanaPageScene';
 
+type SceneComponent = ChatInterfaceScene | GrafanaPageScene;
+
+function findSceneComponent<T extends SceneComponent>(
+  layout: SplitLayout,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  type: new (...args: any[]) => T
+): T | null {
+  const { primary, secondary } = layout.state;
+  if (primary instanceof type) {
+    return primary;
+  }
+  if (secondary instanceof type) {
+    return secondary;
+  }
+  return null;
+}
+
 export function useChatScene(
   showSidePanel: boolean,
   chatState: ChatInterfaceState,
@@ -14,106 +31,92 @@ export function useChatScene(
   const deactivateRef = useRef<(() => void) | null>(null);
 
   useEffect(() => {
-    if (!sceneRef.current) {
-      try {
-        const chatInterface = new ChatInterfaceScene(chatState);
-        const grafanaPage = new GrafanaPageScene({
-          ...sidePanelState,
-          isVisible: showSidePanel,
-        });
+    if (sceneRef.current) {
+      return;
+    }
 
-        const primary = chatPanelPosition === 'right' ? grafanaPage : chatInterface;
-        const secondary = chatPanelPosition === 'right' ? chatInterface : grafanaPage;
-        const initialSize = chatPanelPosition === 'right' ? 0.4 : 0.6;
+    try {
+      const chatInterface = new ChatInterfaceScene(chatState);
+      const grafanaPage = new GrafanaPageScene({
+        ...sidePanelState,
+        isVisible: showSidePanel,
+      });
 
-        const splitLayout = new SplitLayout({
-          direction: 'row',
-          primary,
-          secondary,
-          initialSize,
-        });
+      const primary = chatPanelPosition === 'right' ? grafanaPage : chatInterface;
+      const secondary = chatPanelPosition === 'right' ? chatInterface : grafanaPage;
+      const initialSize = chatPanelPosition === 'right' ? 0.4 : 0.6;
 
-        const embeddedScene = new EmbeddedScene({
-          body: splitLayout,
-        });
+      const splitLayout = new SplitLayout({
+        direction: 'row',
+        primary,
+        secondary,
+        initialSize,
+      });
 
-        deactivateRef.current = embeddedScene.activate();
-        sceneRef.current = embeddedScene;
-        setScene(embeddedScene);
-      } catch (error) {
-        console.error('[useChatScene] Error creating scene:', error);
-        if (deactivateRef.current) {
-          try {
-            deactivateRef.current();
-          } catch (cleanupError) {
-            console.warn('[useChatScene] Error during cleanup after failed creation:', cleanupError);
-          }
-        }
-        deactivateRef.current = null;
-        sceneRef.current = null;
-        setScene(null);
-      }
+      const embeddedScene = new EmbeddedScene({
+        body: splitLayout,
+      });
+
+      deactivateRef.current = embeddedScene.activate();
+      sceneRef.current = embeddedScene;
+      setScene(embeddedScene);
+    } catch (error) {
+      console.error('[useChatScene] Error creating scene:', error);
+      safeDeactivate();
+      sceneRef.current = null;
+      setScene(null);
     }
 
     return () => {
+      safeDeactivate();
+      sceneRef.current = null;
+    };
+
+    function safeDeactivate(): void {
       if (deactivateRef.current) {
         try {
           deactivateRef.current();
-        } catch (error) {
-          console.warn('[useChatScene] Error during unmount deactivation:', error);
+        } catch (err) {
+          console.warn('[useChatScene] Error during deactivation:', err);
         }
         deactivateRef.current = null;
       }
-      sceneRef.current = null;
-    };
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [chatPanelPosition]);
 
   useEffect(() => {
-    if (sceneRef.current) {
-      try {
-        const layout = sceneRef.current.state.body;
-        if (layout instanceof SplitLayout) {
-          const primary = layout.state.primary;
-          const secondary = layout.state.secondary;
-
-          if (primary instanceof GrafanaPageScene) {
-            primary.setState({ isVisible: showSidePanel });
-          } else if (secondary instanceof GrafanaPageScene) {
-            secondary.setState({ isVisible: showSidePanel });
-          }
-        }
-      } catch (error) {
-        console.error('[useChatScene] Error updating visibility:', error);
+    if (!sceneRef.current) {
+      return;
+    }
+    try {
+      const layout = sceneRef.current.state.body;
+      if (layout instanceof SplitLayout) {
+        const grafanaPage = findSceneComponent(layout, GrafanaPageScene);
+        grafanaPage?.setState({ isVisible: showSidePanel });
       }
+    } catch (error) {
+      console.error('[useChatScene] Error updating visibility:', error);
     }
   }, [showSidePanel]);
 
   useEffect(() => {
-    if (sceneRef.current) {
-      try {
-        const layout = sceneRef.current.state.body;
-        if (layout instanceof SplitLayout) {
-          const primary = layout.state.primary;
-          const secondary = layout.state.secondary;
+    if (!sceneRef.current) {
+      return;
+    }
+    try {
+      const layout = sceneRef.current.state.body;
+      if (layout instanceof SplitLayout) {
+        const chatInterface = findSceneComponent(layout, ChatInterfaceScene);
+        chatInterface?.setState(chatState);
 
-          if (primary instanceof ChatInterfaceScene) {
-            primary.setState(chatState);
-          } else if (secondary instanceof ChatInterfaceScene) {
-            secondary.setState(chatState);
-          }
-
-          if (primary instanceof GrafanaPageScene) {
-            const currentIsVisible = primary.state.isVisible;
-            primary.setState({ ...sidePanelState, isVisible: currentIsVisible });
-          } else if (secondary instanceof GrafanaPageScene) {
-            const currentIsVisible = secondary.state.isVisible;
-            secondary.setState({ ...sidePanelState, isVisible: currentIsVisible });
-          }
+        const grafanaPage = findSceneComponent(layout, GrafanaPageScene);
+        if (grafanaPage) {
+          grafanaPage.setState({ ...sidePanelState, isVisible: grafanaPage.state.isVisible });
         }
-      } catch (error) {
-        console.error('[useChatScene] Error updating scene state:', error);
       }
+    } catch (error) {
+      console.error('[useChatScene] Error updating scene state:', error);
     }
   }, [chatState, sidePanelState]);
 

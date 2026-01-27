@@ -10,92 +10,23 @@ import { WelcomeMessage } from '../components/WelcomeMessage/WelcomeMessage';
 import { QuickSuggestions } from '../components/QuickSuggestions/QuickSuggestions';
 
 export interface ChatInterfaceState extends SceneObjectState {
-  // Chat history and state
   chatHistory: ChatMessageType[];
   currentInput: string;
   isGenerating: boolean;
   toolsLoading: boolean;
-
-  // Session info
   currentSessionTitle?: string;
   isSummarizing: boolean;
   hasSummary: boolean;
-
-  // Callbacks
   setCurrentInput: (value: string) => void;
   sendMessage: () => void;
   handleKeyPress: (e: React.KeyboardEvent) => void;
-
-  // Refs
   chatContainerRef: React.RefObject<HTMLDivElement>;
   chatInputRef: React.RefObject<ChatInputRef>;
   bottomSpacerRef: React.RefObject<HTMLDivElement>;
-
-  // Slots for custom buttons
   leftSlot?: React.ReactNode;
   rightSlot?: React.ReactNode;
-
-  // Read-only mode flag
   readOnly?: boolean;
-
-  // Welcome screen props (for when chatHistory is empty)
   onSuggestionClick?: (message: string) => void;
-}
-
-export interface ChatInterfaceProps {
-  // Chat history and state
-  chatHistory: ChatMessageType[];
-  currentInput: string;
-  isGenerating: boolean;
-  toolsLoading: boolean;
-
-  // Session info
-  currentSessionTitle?: string;
-  isSummarizing: boolean;
-  hasSummary: boolean;
-
-  // Callbacks
-  setCurrentInput: (value: string) => void;
-  sendMessage: () => void;
-  handleKeyPress: (e: React.KeyboardEvent) => void;
-
-  // Refs
-  chatContainerRef: React.RefObject<HTMLDivElement>;
-  chatInputRef: React.RefObject<ChatInputRef>;
-  bottomSpacerRef: React.RefObject<HTMLDivElement>;
-
-  // Slots for custom buttons
-  leftSlot?: React.ReactNode;
-  rightSlot?: React.ReactNode;
-
-  // Read-only mode flag
-  readOnly?: boolean;
-
-  // Welcome screen props (for when chatHistory is empty)
-  onSuggestionClick?: (message: string) => void;
-}
-
-function useChatInterface(model: ChatInterfaceScene): ChatInterfaceProps {
-  const state = model.useState();
-  return {
-    chatHistory: state.chatHistory,
-    currentInput: state.currentInput,
-    isGenerating: state.isGenerating,
-    toolsLoading: state.toolsLoading,
-    currentSessionTitle: state.currentSessionTitle,
-    isSummarizing: state.isSummarizing,
-    hasSummary: state.hasSummary,
-    setCurrentInput: state.setCurrentInput,
-    sendMessage: state.sendMessage,
-    handleKeyPress: state.handleKeyPress,
-    chatContainerRef: state.chatContainerRef,
-    chatInputRef: state.chatInputRef,
-    bottomSpacerRef: state.bottomSpacerRef,
-    leftSlot: state.leftSlot,
-    rightSlot: state.rightSlot,
-    readOnly: state.readOnly,
-    onSuggestionClick: state.onSuggestionClick,
-  };
 }
 
 export class ChatInterfaceScene extends SceneObjectBase<ChatInterfaceState> {
@@ -107,7 +38,7 @@ export class ChatInterfaceScene extends SceneObjectBase<ChatInterfaceState> {
 }
 
 function ChatInterfaceRenderer({ model }: SceneComponentProps<ChatInterfaceScene>) {
-  const props = useChatInterface(model);
+  const state = model.useState();
   const theme = useTheme2();
 
   const {
@@ -128,7 +59,7 @@ function ChatInterfaceRenderer({ model }: SceneComponentProps<ChatInterfaceScene
     rightSlot,
     readOnly,
     onSuggestionClick,
-  } = props;
+  } = state;
 
   const hasMessages = chatHistory.length > 0;
 

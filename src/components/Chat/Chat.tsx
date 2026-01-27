@@ -171,21 +171,16 @@ function ChatComponent({ pluginSettings, readOnly = false, initialSession }: Cha
 
   useEffect(() => {
     const currentSourceIndex = detectedPageRefs.length > 0 ? detectedPageRefs[0].messageIndex : null;
-    const prevSourceIndex = prevSourceMessageIndexRef.current;
     const currentSessionId = sessionManager.currentSessionId;
-    const prevSessionId = prevSessionIdRef.current;
 
-    const sessionChanged = currentSessionId !== prevSessionId;
-    const messageIndexChanged = currentSourceIndex !== null && currentSourceIndex !== prevSourceIndex;
+    const sessionChanged = currentSessionId !== prevSessionIdRef.current;
+    const messageIndexChanged = currentSourceIndex !== null && currentSourceIndex !== prevSourceMessageIndexRef.current;
 
-    if (sessionChanged) {
+    if (sessionChanged || messageIndexChanged) {
       setRemovedTabUrls(new Set());
       if (currentSourceIndex !== null) {
         setIsSidePanelOpen(true);
       }
-    } else if (messageIndexChanged) {
-      setIsSidePanelOpen(true);
-      setRemovedTabUrls(new Set());
     }
 
     prevSourceMessageIndexRef.current = currentSourceIndex;

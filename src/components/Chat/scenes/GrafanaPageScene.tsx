@@ -21,32 +21,6 @@ export interface GrafanaPageState extends SceneObjectState {
   onClose?: () => void;
 }
 
-export interface GrafanaPageProps {
-  // Page references to embed (supports both dashboard and explore)
-  pageRefs: Array<GrafanaPageRef & { messageIndex: number }>;
-
-  // Whether to enable kiosk mode for embedded pages
-  kioskModeEnabled?: boolean;
-
-  // Whether the panel is visible (used to hide when side panel is closed)
-  isVisible?: boolean;
-
-  // Callbacks
-  onRemoveTab?: (index: number) => void;
-  onClose?: () => void;
-}
-
-function useGrafanaPage(model: GrafanaPageScene): GrafanaPageProps {
-  const state = model.useState();
-  return {
-    pageRefs: state.pageRefs,
-    kioskModeEnabled: state.kioskModeEnabled,
-    isVisible: state.isVisible,
-    onRemoveTab: state.onRemoveTab,
-    onClose: state.onClose,
-  };
-}
-
 export class GrafanaPageScene extends SceneObjectBase<GrafanaPageState> {
   public static Component = GrafanaPageRenderer;
 
@@ -71,9 +45,7 @@ export class GrafanaPageScene extends SceneObjectBase<GrafanaPageState> {
 }
 
 function GrafanaPageRenderer({ model }: SceneComponentProps<GrafanaPageScene>) {
-  const props = useGrafanaPage(model);
-
-  const { pageRefs, onRemoveTab, kioskModeEnabled, isVisible = true } = props;
+  const { pageRefs, onRemoveTab, kioskModeEnabled, isVisible = true } = model.useState();
 
   if (!isVisible || pageRefs.length === 0) {
     return <div style={{ display: 'none' }} />;

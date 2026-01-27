@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useMemo } from 'react';
 import { llm } from '@grafana/llm';
 import { config } from '@grafana/runtime';
-import { ChatMessage, GrafanaPageRef } from '../types';
+import { ChatMessage, GrafanaPageRef, RenderedToolCall } from '../types';
 import { useMCPManager } from './useMCPManager';
 import { useStreamManager } from './useStreamManager';
 import { useSessionManager } from './useSessionManager';
@@ -293,7 +293,7 @@ export const useChat = (pluginSettings: AppPluginSettings, initialSession?: Chat
   };
 
   // Update chat history with tool calls
-  const updateToolCallsInChatHistory = (toolCallsMap: Map<string, any>) => {
+  const updateToolCallsInChatHistory = (toolCallsMap: Map<string, RenderedToolCall>) => {
     const toolCallsArray = Array.from(toolCallsMap.values());
     setChatHistory((prev) =>
       prev.map((msg, idx) =>

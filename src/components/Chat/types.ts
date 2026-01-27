@@ -1,9 +1,14 @@
+export interface ToolCallResponse {
+  content?: Array<{ type: string; text?: string }>;
+  isError?: boolean;
+}
+
 export interface RenderedToolCall {
   name: string;
   arguments: string;
   running: boolean;
   error?: string;
-  response?: any;
+  response?: ToolCallResponse;
 }
 
 export interface GrafanaPageRef {
@@ -18,4 +23,5 @@ export interface ChatMessage {
   content: string;
   toolCalls?: RenderedToolCall[];
   pageRefs?: GrafanaPageRef[];
+  timestamp?: Date;
 }
