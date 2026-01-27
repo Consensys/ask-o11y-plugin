@@ -88,9 +88,9 @@ test.describe('Session Persistence Tests', () => {
       const chatLog = page.locator('[role="log"]');
       await expect(chatLog).toBeVisible({ timeout: 5000 });
 
-      // Wait for the message text to appear
+      // Wait for the message text to appear (use first() to avoid strict mode violation)
       await page.waitForSelector('text=Message to persist', { timeout: 10000 });
-      await expect(chatLog.getByText('Message to persist')).toBeVisible({ timeout: 10000 });
+      await expect(chatLog.getByText('Message to persist').first()).toBeVisible({ timeout: 10000 });
     });
   });
 

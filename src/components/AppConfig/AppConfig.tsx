@@ -24,6 +24,9 @@ type State = {
   customSystemPrompt: string;
   // Track which servers have advanced options expanded
   expandedAdvanced: Set<string>;
+  // Display settings
+  kioskModeEnabled: boolean;
+  chatPanelPosition: 'left' | 'right';
 };
 
 type ValidationErrors = {
@@ -42,6 +45,8 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
     systemPromptMode: jsonData?.systemPromptMode || 'default',
     customSystemPrompt: jsonData?.customSystemPrompt || '',
     expandedAdvanced: new Set<string>(),
+    kioskModeEnabled: jsonData?.kioskModeEnabled ?? true,
+    chatPanelPosition: jsonData?.chatPanelPosition || 'right',
   });
   const [validationErrors, setValidationErrors] = useState<ValidationErrors>({
     mcpServers: {},
@@ -779,6 +784,57 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
             data-testid={testIds.appConfig.saveSystemPromptButton}
           >
             Save System Prompt
+          </Button>
+        </div>
+      </FieldSet>
+
+      {/* Display Settings */}
+      <FieldSet label="Display Settings" data-testid={testIds.appConfig.displaySettings}>
+        <Field
+          label="Kiosk Mode"
+          description="When enabled, embedded Grafana pages hide navigation bars for a cleaner view"
+          data-testid={testIds.appConfig.kioskModeField}
+        >
+          <Switch
+            value={state.kioskModeEnabled}
+            onChange={(e) => setState({ ...state, kioskModeEnabled: e.currentTarget.checked })}
+            data-testid={testIds.appConfig.kioskModeToggle}
+          />
+        </Field>
+
+        <Field
+          label="Chat Panel Position"
+          description="Choose where the chat panel appears when displaying Grafana pages"
+          data-testid={testIds.appConfig.chatPanelPositionField}
+        >
+          <RadioButtonGroup
+            value={state.chatPanelPosition}
+            options={[
+              { label: 'Left', value: 'left' },
+              { label: 'Right', value: 'right' },
+            ]}
+            onChange={(value) => setState({ ...state, chatPanelPosition: value as 'left' | 'right' })}
+          />
+        </Field>
+
+        <div className="mt-4">
+          <Button
+            onClick={() => {
+              const updateData = {
+                enabled,
+                pinned,
+                jsonData: {
+                  ...jsonData,
+                  kioskModeEnabled: state.kioskModeEnabled,
+                  chatPanelPosition: state.chatPanelPosition,
+                },
+              };
+              updatePluginAndReload(plugin.meta.id, updateData);
+            }}
+            variant="primary"
+            data-testid={testIds.appConfig.saveDisplaySettingsButton}
+          >
+            Save Display Settings
           </Button>
         </div>
       </FieldSet>

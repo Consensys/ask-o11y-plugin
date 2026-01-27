@@ -206,9 +206,14 @@ describe('SessionShareService', () => {
   });
 
   describe('buildShareUrl', () => {
-    it('should build a full share URL', () => {
+    it('should build a full share URL with orgId', () => {
       const url = sessionShareService.buildShareUrl('test-share-id');
-      expect(url).toBe('http://localhost:3000/a/consensys-asko11y-app/shared/test-share-id');
+      expect(url).toBe('http://localhost:3000/a/consensys-asko11y-app/shared/test-share-id?orgId=1');
+    });
+
+    it('should build a full share URL from backend path with orgId', () => {
+      const url = sessionShareService.buildShareUrl('/a/consensys-asko11y-app/shared/test-share-id');
+      expect(url).toBe('http://localhost:3000/a/consensys-asko11y-app/shared/test-share-id?orgId=1');
     });
   });
 });

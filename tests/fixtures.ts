@@ -69,17 +69,26 @@ export { expect } from '@grafana/plugin-e2e';
  * This should be called before tests that expect the welcome heading to be visible.
  */
 export async function clearPersistedSession(page: Page) {
-  // Wait for page to load - check if there's an existing chat session
+  // Wait for page to load
   const chatInput = page.getByLabel('Chat input');
   await chatInput.waitFor({ state: 'visible', timeout: 5000 }).catch(() => {});
 
   // Wait a bit for the page to fully render
   await page.waitForTimeout(500);
 
-  // If there's a "New Chat" button visible, there's an existing session - clear it first
+  // Check if welcome heading is already visible
+  const welcomeHeading = page.getByRole('heading', { name: 'Ask O11y Assistant' });
+  const isWelcomeAlreadyVisible = await welcomeHeading.isVisible().catch(() => false);
+
+  if (isWelcomeAlreadyVisible) {
+    // Welcome screen is already showing, nothing to clear
+    return;
+  }
+
+  // If there's a "New Chat" button visible, there's an existing session - clear it
   const newChatButton = page.getByRole('button', { name: /New Chat/i });
   const hasExistingSession = await newChatButton.isVisible().catch(() => false);
-  
+
   if (hasExistingSession) {
     // Clear existing session to show welcome message
     await newChatButton.click();
@@ -90,9 +99,9 @@ export async function clearPersistedSession(page: Page) {
       await page.waitForTimeout(500);
     }
   }
-  
-  // Always wait for the welcome message to be visible (whether we cleared a session or not)
-  await page.getByRole('heading', { name: 'Ask O11y Assistant' }).waitFor({ state: 'visible', timeout: 10000 });
+
+  // Wait for the welcome message to be visible after clearing
+  await welcomeHeading.waitFor({ state: 'visible', timeout: 10000 });
 }
 
 /**
@@ -209,7 +218,7 @@ export async function deleteAllPersistedSessions(page: Page) {
  * Helper function to reset rate limits in Redis.
  * This should be called before tests that create multiple shares to avoid rate limiting issues.
  * Uses docker compose to execute redis-cli commands.
- * 
+ *
  * Note: This function will silently fail if Redis is not available (e.g., using in-memory storage),
  * allowing tests to continue running.
  */
@@ -241,3 +250,4 @@ export async function resetRateLimits() {
     // The error is expected when Redis is not available, so we don't log it
   }
 }
+

@@ -291,6 +291,7 @@ const GraphRendererComponent: React.FC<GraphRendererProps> = ({
       {/* Graph area with loading overlay */}
       <div
         className="p-4 relative"
+        data-scene-container="graph"
         style={{
           backgroundColor: theme.colors.background.primary,
           minHeight: isExpanded ? height * 2 : height,

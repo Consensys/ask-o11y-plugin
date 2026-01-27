@@ -68,22 +68,20 @@ export const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(
       autoResize();
     };
 
-    // Enhanced send handler with validation
     const handleSendClick = () => {
       if (validationError) {
-        return; // Don't send if there's a validation error
+        return;
       }
       sendMessage();
     };
 
-    // Enhanced key press handler
     const handleKeyDown = (e: React.KeyboardEvent) => {
-      if (e.key === 'Enter' && !e.shiftKey && !validationError) {
-        handleKeyPress(e);
-      } else if (e.key === 'Enter' && !e.shiftKey && validationError) {
-        e.preventDefault(); // Prevent sending invalid input
-      } else {
-        handleKeyPress(e);
+      if (e.key === 'Enter' && !e.shiftKey) {
+        if (validationError) {
+          e.preventDefault();
+        } else {
+          handleKeyPress(e);
+        }
       }
     };
 

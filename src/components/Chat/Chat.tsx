@@ -1,20 +1,15 @@
-import React, { useRef, useState, useCallback, useEffect } from 'react';
+import React, { useRef, useState, useCallback, useEffect, useMemo } from 'react';
 import { useTheme2 } from '@grafana/ui';
+import { GrafanaTheme2 } from '@grafana/data';
 
 import { useChat } from './hooks/useChat';
 import { useGrafanaTheme } from './hooks/useGrafanaTheme';
 import { useKeyboardNavigation, useAnnounce } from './hooks/useKeyboardNavigation';
 import { useEmbeddingAllowed } from './hooks/useEmbeddingAllowed';
-import {
-  ChatHeader,
-  ChatHistory,
-  ChatInput,
-  WelcomeMessage,
-  QuickSuggestions,
-  SessionSidebar,
-  SummarizationIndicator,
-  SidePanel,
-} from './components';
+import { useChatScene } from './hooks/useChatScene';
+import { ChatInterfaceState } from './scenes/ChatInterfaceScene';
+import { GrafanaPageState } from './scenes/GrafanaPageScene';
+import { SessionSidebar } from './components';
 import { ChatInputRef } from './components/ChatInput/ChatInput';
 import { ChatErrorBoundary } from '../ErrorBoundary';
 import { SessionMetadata, ChatSession } from '../../core';
@@ -29,7 +24,7 @@ interface ChatProps {
 interface NewChatButtonProps {
   onConfirm: () => void;
   disabled: boolean;
-  theme: any;
+  theme: GrafanaTheme2;
 }
 
 const NewChatButton: React.FC<NewChatButtonProps> = ({ onConfirm, disabled, theme }) => {
@@ -121,10 +116,12 @@ const NewChatButton: React.FC<NewChatButtonProps> = ({ onConfirm, disabled, them
 };
 
 function ChatComponent({ pluginSettings, readOnly = false, initialSession }: ChatProps) {
-  // Sync Grafana theme to CSS custom properties
   useGrafanaTheme();
   const theme = useTheme2();
   const allowEmbedding = useEmbeddingAllowed();
+
+  const kioskModeEnabled = pluginSettings?.kioskModeEnabled ?? true;
+  const chatPanelPosition = pluginSettings?.chatPanelPosition || 'right';
 
   const {
     chatHistory,
@@ -151,18 +148,14 @@ function ChatComponent({ pluginSettings, readOnly = false, initialSession }: Cha
   const prevSessionIdRef = useRef<string | null>(null);
   const announce = useAnnounce();
 
-  // Refresh sessions and load current session when component mounts (e.g., on page refresh)
   useEffect(() => {
     if (!readOnly) {
-      // Refresh sessions list first
       sessionManager.refreshSessions().then(() => {
-        // Then load current session if chatHistory is empty (e.g., on page refresh)
-        // This ensures we have the latest sessions list before checking for current session
         sessionManager.loadCurrentSessionIfNeeded();
       });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); // Only run on mount
+  }, []);
 
   const visiblePageRefs = detectedPageRefs.filter((ref) => !removedTabUrls.has(ref.url));
 
@@ -177,24 +170,20 @@ function ChatComponent({ pluginSettings, readOnly = false, initialSession }: Cha
   );
 
   useEffect(() => {
-    // Get the message index that the current page refs come from
     const currentSourceIndex = detectedPageRefs.length > 0 ? detectedPageRefs[0].messageIndex : null;
     const prevSourceIndex = prevSourceMessageIndexRef.current;
     const currentSessionId = sessionManager.currentSessionId;
     const prevSessionId = prevSessionIdRef.current;
 
-    // Reset state when session changes OR when page refs come from a different message
     const sessionChanged = currentSessionId !== prevSessionId;
     const messageIndexChanged = currentSourceIndex !== null && currentSourceIndex !== prevSourceIndex;
 
     if (sessionChanged) {
-      // Always reset removed tabs when switching sessions to prevent cross-session state bleed
       setRemovedTabUrls(new Set());
       if (currentSourceIndex !== null) {
         setIsSidePanelOpen(true);
       }
     } else if (messageIndexChanged) {
-      // New page refs from a different message in the same session
       setIsSidePanelOpen(true);
       setRemovedTabUrls(new Set());
     }
@@ -203,7 +192,6 @@ function ChatComponent({ pluginSettings, readOnly = false, initialSession }: Cha
     prevSessionIdRef.current = currentSessionId;
   }, [detectedPageRefs, sessionManager.currentSessionId]);
 
-  // Keyboard navigation callbacks
   const focusChatInput = useCallback(() => {
     chatInputRef.current?.focus();
     announce('Chat input focused');
@@ -214,7 +202,6 @@ function ChatComponent({ pluginSettings, readOnly = false, initialSession }: Cha
     announce('Chat history opened');
   }, [announce]);
 
-  // Set up keyboard shortcuts
   useKeyboardNavigation({
     onNewChat: () => {
       sessionManager.createNewSession();
@@ -230,180 +217,119 @@ function ChatComponent({ pluginSettings, readOnly = false, initialSession }: Cha
     onFocusInput: focusChatInput,
   });
 
-  const handleSuggestionClick = (message: string) => {
+  const handleSuggestionClick = useCallback((message: string) => {
     setCurrentInput(message);
-    // Focus the input after setting the message
     setTimeout(() => {
       chatInputRef.current?.focus();
     }, 100);
     announce(`Suggestion selected: ${message.substring(0, 50)}...`);
-  };
+  }, [setCurrentInput, announce]);
 
-  if (toolsError) {
-    return <div>Error: {toolsError.message}</div>;
-  }
-
-  // Get current session title
   const currentSession = sessionManager.sessions.find((s: SessionMetadata) => s.id === sessionManager.currentSessionId);
   const currentSessionTitle = currentSession?.title;
 
   const hasMessages = chatHistory.length > 0;
   const showSidePanel = isSidePanelOpen && visiblePageRefs.length > 0 && allowEmbedding === true;
 
+  const chatInterfaceState: ChatInterfaceState = useMemo(
+    () => ({
+      chatHistory,
+      currentInput,
+      isGenerating,
+      toolsLoading,
+      currentSessionTitle,
+      isSummarizing: sessionManager.isSummarizing,
+      hasSummary: !!sessionManager.currentSummary,
+      setCurrentInput,
+      sendMessage,
+      handleKeyPress,
+      chatContainerRef,
+      chatInputRef,
+      bottomSpacerRef,
+      leftSlot: hasMessages ? <NewChatButton onConfirm={clearChat} disabled={isGenerating} theme={theme} /> : undefined,
+      rightSlot: (
+        <button
+          onClick={openHistory}
+          className="flex items-center gap-2 px-2 py-1 text-xs font-medium rounded-md hover:bg-white/10 transition-colors"
+          aria-label="Chat history"
+          title="View chat history"
+          style={{ color: theme.colors.text.secondary }}
+        >
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <circle cx="12" cy="12" r="10" />
+            <polyline points="12 6 12 12 16 14" />
+          </svg>
+          <span>View chat history ({sessionManager.sessions.length})</span>
+        </button>
+      ),
+      readOnly,
+      onSuggestionClick: handleSuggestionClick,
+    }),
+    [
+      chatHistory,
+      currentInput,
+      isGenerating,
+      toolsLoading,
+      currentSessionTitle,
+      sessionManager.isSummarizing,
+      sessionManager.currentSummary,
+      sessionManager.sessions.length,
+      setCurrentInput,
+      sendMessage,
+      handleKeyPress,
+      chatContainerRef,
+      chatInputRef,
+      bottomSpacerRef,
+      hasMessages,
+      clearChat,
+      theme,
+      openHistory,
+      readOnly,
+      handleSuggestionClick,
+    ]
+  );
+
+  const grafanaPageState: GrafanaPageState = useMemo(
+    () => ({
+      pageRefs: visiblePageRefs,
+      activeTabIndex: 0,
+      kioskModeEnabled,
+      onRemoveTab: handleRemoveTab,
+      onClose: () => setIsSidePanelOpen(false),
+    }),
+    [visiblePageRefs, handleRemoveTab, kioskModeEnabled]
+  );
+
+  const chatScene = useChatScene(showSidePanel, chatInterfaceState, grafanaPageState, chatPanelPosition);
+
+  if (toolsError) {
+    return <div>Error: {toolsError.message}</div>;
+  }
+
   return (
     <div
-      className="w-full min-h-full flex"
+      className="w-full h-full flex"
       role="main"
       aria-label="Chat interface"
       style={{
         backgroundColor: theme.isDark ? '#111217' : theme.colors.background.canvas,
       }}
     >
-      {/* Side panel for Grafana page preview */}
-      <SidePanel
-        isOpen={showSidePanel}
-        onClose={() => setIsSidePanelOpen(false)}
-        pageRefs={visiblePageRefs}
-        onRemoveTab={handleRemoveTab}
-      />
+      {chatScene && (
+        <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+          <chatScene.Component model={chatScene} />
+        </div>
+      )}
 
-      {/* Main chat area */}
-      <div className="flex-1 flex flex-col min-h-0 min-w-0">
-        {hasMessages ? (
-          <div
-            className={`flex-1 flex flex-col min-h-0 w-full px-4 ${showSidePanel ? 'max-w-none' : 'max-w-4xl mx-auto'}`}
-          >
-            {/* Header - only show when there are messages */}
-            <ChatHeader isGenerating={isGenerating} currentSessionTitle={currentSessionTitle} />
-
-            {/* Summarization indicator */}
-            <SummarizationIndicator
-              isSummarizing={sessionManager.isSummarizing}
-              hasSummary={!!sessionManager.currentSummary}
-            />
-
-            {/* Chat messages */}
-            <div
-              ref={chatContainerRef}
-              className="flex-1 py-6 rounded-lg"
-              role="log"
-              aria-label="Chat messages"
-              aria-live="polite"
-              aria-relevant="additions"
-              tabIndex={0}
-              style={{
-                backgroundColor: theme.isDark ? '#1a1b1f' : theme.colors.background.primary,
-              }}
-            >
-              <div className="px-4">
-                <ChatHistory chatHistory={chatHistory} isGenerating={isGenerating} />
-                <div ref={bottomSpacerRef} className="h-16" style={{ scrollMarginBottom: '100px' }} />
-              </div>
-            </div>
-
-            {/* Chat input at bottom */}
-            {!readOnly && (
-              <div
-                className="flex-shrink-0 py-4 sticky bottom-0 z-10"
-                role="region"
-                aria-label="Message input"
-                style={{
-                  backgroundColor: theme.isDark ? '#111217' : theme.colors.background.canvas,
-                }}
-              >
-                <ChatInput
-                  ref={chatInputRef}
-                  currentInput={currentInput}
-                  isGenerating={isGenerating}
-                  toolsLoading={toolsLoading}
-                  setCurrentInput={setCurrentInput}
-                  sendMessage={sendMessage}
-                  handleKeyPress={handleKeyPress}
-                  leftSlot={<NewChatButton onConfirm={clearChat} disabled={isGenerating} theme={theme} />}
-                  rightSlot={
-                    <button
-                      onClick={openHistory}
-                      className="flex items-center gap-2 px-2 py-1 text-xs font-medium rounded-md hover:bg-white/10 transition-colors"
-                      aria-label="Chat history"
-                      title="View chat history"
-                      style={{ color: theme.colors.text.secondary }}
-                    >
-                      <svg
-                        width="14"
-                        height="14"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="2"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      >
-                        <circle cx="12" cy="12" r="10" />
-                        <polyline points="12 6 12 12 16 14" />
-                      </svg>
-                      <span>View chat history ({sessionManager.sessions.length})</span>
-                    </button>
-                  }
-                />
-              </div>
-            )}
-          </div>
-        ) : (
-          /* Welcome state - centered layout, full width background */
-          /* Welcome state - centered layout with sticky input */
-          <div className="flex-1 flex flex-col min-h-0 w-full max-w-3xl mx-auto px-4">
-            <div className="flex-1 flex flex-col items-center justify-center py-8">
-              {/* Welcome header */}
-              <WelcomeMessage />
-
-              {/* Chat Input */}
-              <div className="w-full mt-10 mb-4" role="region" aria-label="Message input">
-                <ChatInput
-                  ref={chatInputRef}
-                  currentInput={currentInput}
-                  isGenerating={isGenerating}
-                  toolsLoading={toolsLoading}
-                  setCurrentInput={setCurrentInput}
-                  sendMessage={sendMessage}
-                  handleKeyPress={handleKeyPress}
-                  leftSlot={undefined}
-                  rightSlot={
-                    <button
-                      onClick={openHistory}
-                      className="flex items-center gap-2 px-2 py-1 text-xs font-medium rounded-md hover:bg-white/10 transition-colors"
-                      aria-label="Chat history"
-                      title="View chat history"
-                      style={{ color: theme.colors.text.secondary }}
-                    >
-                      <svg
-                        width="14"
-                        height="14"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="2"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      >
-                        <circle cx="12" cy="12" r="10" />
-                        <polyline points="12 6 12 12 16 14" />
-                      </svg>
-                      <span>View chat history ({sessionManager.sessions.length})</span>
-                    </button>
-                  }
-                />
-              </div>
-
-              {/* Quick suggestions */}
-              <div className="w-full">
-                <QuickSuggestions onSuggestionClick={handleSuggestionClick} />
-              </div>
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* Session sidebar */}
       <SessionSidebar
         sessionManager={sessionManager}
         currentSessionId={sessionManager.currentSessionId}
@@ -414,7 +340,6 @@ function ChatComponent({ pluginSettings, readOnly = false, initialSession }: Cha
   );
 }
 
-// Export the Chat component wrapped with error boundary
 export function Chat(props: ChatProps) {
   return (
     <ChatErrorBoundary>

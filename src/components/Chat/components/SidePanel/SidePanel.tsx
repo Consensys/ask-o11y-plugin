@@ -9,6 +9,8 @@ export interface SidePanelProps {
   onClose: () => void;
   pageRefs: Array<GrafanaPageRef & { messageIndex: number }>;
   onRemoveTab?: (index: number) => void;
+  embedded?: boolean;
+  kioskModeEnabled?: boolean;
 }
 
 function getTabLabel(ref: GrafanaPageRef, index: number): string {
@@ -21,15 +23,26 @@ function getTabLabel(ref: GrafanaPageRef, index: number): string {
   return ref.type === 'explore' ? 'Explore' : `Page ${index + 1}`;
 }
 
-function toRelativeUrl(url: string): string {
+function toRelativeUrl(url: string, kioskModeEnabled = true): string {
+  let relativeUrl = url;
   if (url.startsWith('http://') || url.startsWith('https://')) {
     const match = url.match(/https?:\/\/[^/]+(\/.*)/);
-    return match ? match[1] : url;
+    relativeUrl = match ? match[1] : url;
   }
-  return url;
+
+  if (relativeUrl.includes('kiosk') || relativeUrl.includes('viewPanel')) {
+    return relativeUrl;
+  }
+
+  if (!kioskModeEnabled) {
+    return relativeUrl;
+  }
+
+  const separator = relativeUrl.includes('?') ? '&' : '?';
+  return `${relativeUrl}${separator}kiosk`;
 }
 
-export const SidePanel: React.FC<SidePanelProps> = ({ isOpen, onClose, pageRefs, onRemoveTab }) => {
+export const SidePanel: React.FC<SidePanelProps> = ({ isOpen, onClose, pageRefs, onRemoveTab, embedded = false, kioskModeEnabled = true }) => {
   const theme = useTheme2();
   const [activeIndex, setActiveIndex] = useState(0);
   const allowEmbedding = useEmbeddingAllowed();
@@ -42,24 +55,39 @@ export const SidePanel: React.FC<SidePanelProps> = ({ isOpen, onClose, pageRefs,
     }
   }, [activeIndex, safeActiveIndex]);
 
-  if (!isOpen || pageRefs.length === 0 || allowEmbedding === null || !allowEmbedding) {
+  if (!embedded && (!isOpen || pageRefs.length === 0 || allowEmbedding === null || !allowEmbedding)) {
+    return null;
+  }
+
+  if (!isOpen || pageRefs.length === 0) {
     return null;
   }
 
   const activeRef = pageRefs[safeActiveIndex];
   const showTabs = pageRefs.length > 1;
-  const iframeSrc = toRelativeUrl(activeRef.url);
+  const iframeSrc = toRelativeUrl(activeRef.url, kioskModeEnabled);
 
-  return (
-    <div
-      className="flex flex-col h-screen sticky top-0 border-r transition-all duration-300 ease-in-out"
-      style={{
+  const containerClassName = embedded
+    ? 'flex flex-col h-full border-l transition-all duration-300 ease-in-out'
+    : 'flex flex-col h-screen sticky top-0 border-r transition-all duration-300 ease-in-out';
+
+  const containerStyle = embedded
+    ? {
+        backgroundColor: theme.isDark ? '#1a1b1f' : theme.colors.background.primary,
+        borderColor: theme.colors.border.weak,
+      }
+    : {
         width: '800px',
         minWidth: '400px',
         maxWidth: '65%',
         backgroundColor: theme.isDark ? '#1a1b1f' : theme.colors.background.primary,
         borderColor: theme.colors.border.weak,
-      }}
+      };
+
+  return (
+    <div
+      className={containerClassName}
+      style={containerStyle}
       role="complementary"
       aria-label="Grafana page preview"
     >

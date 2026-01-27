@@ -259,3 +259,74 @@
   display: block !important;
   visibility: visible !important;
 }
+
+/* Apply Grafana UI ExplorePage pattern for independent scrolling panes
+ * Targets: Scene containers with flex-grow divs (used by EmbeddedScene components)
+ * Purpose: Enable independent scrolling for each visualization pane
+ */
+[data-scene-container] > div > div[style*="flex-grow"] {
+  overflow: auto !important;
+  display: flex !important;
+  flex-direction: column !important;
+}
+
+/* Force EmbeddedScene wrappers to respect parent height constraints
+ * Targets: Direct children of scene containers (EmbeddedScene wrapper divs)
+ * Purpose: Prevent scene wrappers from exceeding container height
+ */
+[data-scene-container] > div {
+  max-height: 100% !important;
+  overflow: hidden !important;
+}
+
+/* Constrain chat scene wrappers using viewport height to account for Grafana header
+ * Purpose: Prevent scene wrappers from overflowing viewport (they start at y=40 due to header)
+ * Using calc(100vh - 40px) instead of 100% to account for the Grafana header positioning
+ * Target ONLY the direct parent container using direct child selector (>)
+ */
+div:has(> [data-scene-container="chat"]) {
+  max-height: calc(100vh - 40px) !important;
+  overflow: hidden !important;
+}
+
+/* Ensure chat scene container uses viewport-based height */
+[data-scene-container="chat"] {
+  max-height: calc(100vh - 40px) !important;
+}
+
+/* Ensure chat interface has proper scrolling behavior within SplitLayout scenes
+ * Purpose: Enable scrolling for chat messages when embedded in scene-based layouts
+ */
+[data-scene-container="chat"] > .chat-interface-scroll-container {
+  overflow: auto !important;
+}
+
+/* Hide side panel when isVisible is false
+ * Purpose: Completely hide the GrafanaPageScene pane when side panel is closed
+ * This allows the scene to always exist without taking up visual space
+ * Target the parent wrapper div that contains the hidden child
+ */
+div:has(> div[style*="display: none"]) {
+  width: 0 !important;
+  min-width: 0 !important;
+  max-width: 0 !important;
+  overflow: hidden !important;
+  flex: 0 0 0 !important;
+}
+
+/* Hide separator when any sibling pane is hidden (both positions)
+ * Use descendant selector (space) instead of child (>) to handle any nesting depth
+ * This accounts for SceneComponentWrapper or other intermediate elements
+ */
+div:has(> div div[style*="display: none"]) > div[role="separator"] {
+  display: none !important;
+}
+
+/* Expand visible pane to full width when sibling pane is hidden (both positions)
+ * Use descendant selector to handle any nesting depth (SceneComponentWrapper, etc.)
+ * Target panes that don't contain a hidden div and aren't the separator
+ */
+div:has(> div div[style*="display: none"]) > div:not(:has(div[style*="display: none"])):not([role="separator"]) {
+  flex: 1 1 auto !important;
+  max-width: 100% !important;
+}

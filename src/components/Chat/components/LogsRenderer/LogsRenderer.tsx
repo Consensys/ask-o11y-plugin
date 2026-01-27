@@ -152,6 +152,7 @@ export const LogsRenderer: React.FC<LogsRendererProps> = ({
       )}
       <div
         className="p-4"
+        data-scene-container="logs"
         style={{
           backgroundColor: theme.colors.background.primary,
         }}
