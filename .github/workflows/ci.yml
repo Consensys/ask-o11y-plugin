@@ -44,7 +44,7 @@ jobs:
       - name: Unit tests
         run: npm run test:ci
       - name: Build frontend
-        run: npm run build:prod
+        run: npm run build
 
       - name: Check for backend
         id: check-for-backend

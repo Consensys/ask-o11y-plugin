@@ -375,7 +375,7 @@ npm install
 npm run server           # Full Docker stack with hot reload (Grafana + MCP servers + Redis + Alertmanager)
 
 # Build
-npm run build:prod       # Full production build (frontend + backend all platforms)
+npm run build       # Full production build (frontend + backend all platforms)
 npm run build:frontend:prod  # Frontend production build only
 npm run build:backend    # Backend for current platform
 mage build               # Backend for current platform (alternative)

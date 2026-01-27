@@ -95,7 +95,7 @@ nvm use 22 && npm run server
 ### Building
 ```bash
 # Full production build (frontend + backend for all platforms)
-nvm use 22 && npm run build:prod
+nvm use 22 && npm run build
 
 # Frontend only (production build)
 nvm use 22 && npm run build:frontend:prod
@@ -527,7 +527,7 @@ RBAC checking pattern:
 nvm use 22 && node --version
 
 # Clear and rebuild
-nvm use 22 && rm -rf node_modules package-lock.json dist && npm install && npm run build:prod
+nvm use 22 && rm -rf node_modules package-lock.json dist && npm install && npm run build
 ```
 
 **Backend not loading:**

@@ -149,7 +149,7 @@ git remote add upstream https://github.com/Consensys/ask-o11y-plugin.git
 npm install
 
 # Build the plugin
-npm run build:prod
+npm run build
 
 # Start development environment
 npm run server
