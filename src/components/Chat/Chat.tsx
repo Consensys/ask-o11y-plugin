@@ -327,7 +327,7 @@ function ChatComponent({ pluginSettings, readOnly = false, initialSession }: Cha
       }}
     >
       {chatScene && (
-        <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+        <div data-plugin-split-layout style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
           <chatScene.Component model={chatScene} />
         </div>
       )}
