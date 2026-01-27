@@ -35,7 +35,7 @@ jobs:
           npm install @swc/core @swc/helpers
 
       - name: Build plugin
-        run: npm run build:prod
+        run: npm run build
 
       - name: Find module.ts or module.tsx
         id: find-module-ts

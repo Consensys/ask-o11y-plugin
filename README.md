@@ -221,7 +221,7 @@ Then restart your Grafana instance.
 git clone https://github.com/Consensys/ask-o11y-plugin.git
 cd ask-o11y-plugin
 npm install
-npm run build:prod
+npm run build
 # Copy dist/ to your Grafana plugins directory
 ```
 
@@ -331,7 +331,7 @@ Want to contribute or customize the plugin?
 npm install
 
 # Build the plugin
-npm run build:prod
+npm run build
 
 # Start development environment
 npm run server
@@ -410,7 +410,7 @@ cd ask-o11y-plugin
 
 # Install dependencies and build
 npm install
-npm run build:prod
+npm run build
 
 # Start development environment
 npm run server
@@ -541,7 +541,7 @@ For detailed troubleshooting, see the [Troubleshooting Guide](src/README.md#trou
    ```bash
    rm -rf node_modules package-lock.json dist
    npm install
-   npm run build:prod
+   npm run build
    ```
 4. Check for port conflicts (dev server uses port 3000)
 5. Ensure Mage is installed: `go install github.com/magefile/mage@latest`
