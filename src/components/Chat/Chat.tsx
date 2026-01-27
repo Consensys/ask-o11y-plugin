@@ -157,7 +157,9 @@ function ChatComponent({ pluginSettings, readOnly = false, initialSession }: Cha
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const visiblePageRefs = detectedPageRefs.filter((ref) => !removedTabUrls.has(ref.url));
+  const visiblePageRefs = detectedPageRefs
+    .filter((ref) => !removedTabUrls.has(ref.url))
+    .slice(-4);
 
   const handleRemoveTab = useCallback(
     (index: number) => {
