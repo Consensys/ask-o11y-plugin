@@ -9,7 +9,7 @@ import { SummarizationIndicator } from '../components/SummarizationIndicator/Sum
 import { WelcomeMessage } from '../components/WelcomeMessage/WelcomeMessage';
 import { QuickSuggestions } from '../components/QuickSuggestions/QuickSuggestions';
 
-export interface ChatInterfaceState extends SceneObjectState {
+export interface ChatInterfaceProps extends SceneObjectState {
   chatHistory: ChatMessageType[];
   currentInput: string;
   isGenerating: boolean;
@@ -29,10 +29,10 @@ export interface ChatInterfaceState extends SceneObjectState {
   onSuggestionClick?: (message: string) => void;
 }
 
-export class ChatInterfaceScene extends SceneObjectBase<ChatInterfaceState> {
+export class ChatInterfaceScene extends SceneObjectBase<ChatInterfaceProps> {
   public static Component = ChatInterfaceRenderer;
 
-  constructor(state: ChatInterfaceState) {
+  constructor(state: ChatInterfaceProps) {
     super(state);
   }
 }

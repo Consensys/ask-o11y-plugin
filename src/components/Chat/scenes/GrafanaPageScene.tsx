@@ -3,7 +3,7 @@ import { SceneObjectBase, SceneObjectState, SceneComponentProps } from '@grafana
 import { GrafanaPageRef } from '../types';
 import { SidePanel } from '../components/SidePanel/SidePanel';
 
-export interface GrafanaPageState extends SceneObjectState {
+export interface GrafanaPageProps extends SceneObjectState {
   // Page references to embed (supports both dashboard and explore)
   pageRefs: Array<GrafanaPageRef & { messageIndex: number }>;
 
@@ -21,10 +21,10 @@ export interface GrafanaPageState extends SceneObjectState {
   onClose?: () => void;
 }
 
-export class GrafanaPageScene extends SceneObjectBase<GrafanaPageState> {
+export class GrafanaPageScene extends SceneObjectBase<GrafanaPageProps> {
   public static Component = GrafanaPageRenderer;
 
-  constructor(state: Omit<GrafanaPageState, 'activeTabIndex'> & { activeTabIndex?: number }) {
+  constructor(state: Omit<GrafanaPageProps, 'activeTabIndex'> & { activeTabIndex?: number }) {
     super({
       activeTabIndex: 0,
       ...state,

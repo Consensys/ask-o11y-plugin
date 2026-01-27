@@ -1,14 +1,13 @@
-import React, { useRef, useState, useCallback, useEffect, useMemo } from 'react';
+import React, { useRef, useState, useCallback, useEffect } from 'react';
 import { useTheme2 } from '@grafana/ui';
-import { GrafanaTheme2 } from '@grafana/data';
 
 import { useChat } from './hooks/useChat';
 import { useGrafanaTheme } from './hooks/useGrafanaTheme';
 import { useKeyboardNavigation, useAnnounce } from './hooks/useKeyboardNavigation';
 import { useEmbeddingAllowed } from './hooks/useEmbeddingAllowed';
 import { useChatScene } from './hooks/useChatScene';
-import { ChatInterfaceState } from './scenes/ChatInterfaceScene';
-import { GrafanaPageState } from './scenes/GrafanaPageScene';
+import { useChatInterface } from './hooks/useChatInterface';
+import { useGrafanaPage } from './hooks/useGrafanaPage';
 import { SessionSidebar } from './components';
 import { ChatInputRef } from './components/ChatInput/ChatInput';
 import { ChatErrorBoundary } from '../ErrorBoundary';
@@ -20,100 +19,6 @@ interface ChatProps {
   readOnly?: boolean;
   initialSession?: ChatSession;
 }
-
-interface NewChatButtonProps {
-  onConfirm: () => void;
-  disabled: boolean;
-  theme: GrafanaTheme2;
-}
-
-const NewChatButton: React.FC<NewChatButtonProps> = ({ onConfirm, disabled, theme }) => {
-  const [isOpen, setIsOpen] = useState(false);
-  const popupRef = useRef<HTMLDivElement>(null);
-
-  // Close popup when clicking outside
-  React.useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (popupRef.current && !popupRef.current.contains(event.target as Node)) {
-        setIsOpen(false);
-      }
-    };
-
-    if (isOpen) {
-      document.addEventListener('mousedown', handleClickOutside);
-    }
-    return () => {
-      document.removeEventListener('mousedown', handleClickOutside);
-    };
-  }, [isOpen]);
-
-  return (
-    <div className="relative">
-      <button
-        onClick={() => setIsOpen(!isOpen)}
-        disabled={disabled}
-        className="p-2 rounded-md hover:bg-white/10 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
-        aria-label="New chat"
-        title="New chat"
-        style={{ color: theme.colors.text.secondary }}
-      >
-        <svg
-          width="18"
-          height="18"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        >
-          <line x1="12" y1="5" x2="12" y2="19"></line>
-          <line x1="5" y1="12" x2="19" y2="12"></line>
-        </svg>
-      </button>
-
-      {isOpen && (
-        <div
-          ref={popupRef}
-          className="absolute bottom-full left-0 mb-2 w-48 p-3 rounded-lg shadow-xl border z-50 flex flex-col gap-2"
-          style={{
-            backgroundColor: theme.colors.background.primary,
-            borderColor: theme.colors.border.weak,
-          }}
-        >
-          <p className="text-xs font-medium mb-1" style={{ color: theme.colors.text.primary }}>
-            Start a new chat?
-          </p>
-          <div className="flex gap-2">
-            <button
-              onClick={() => {
-                onConfirm();
-                setIsOpen(false);
-              }}
-              className="flex-1 px-2 py-1 text-xs rounded font-medium transition-colors"
-              style={{
-                backgroundColor: theme.colors.primary.main,
-                color: theme.colors.text.primary,
-              }}
-            >
-              Yes
-            </button>
-            <button
-              onClick={() => setIsOpen(false)}
-              className="flex-1 px-2 py-1 text-xs rounded font-medium transition-colors hover:bg-white/10"
-              style={{
-                color: theme.colors.text.secondary,
-                border: `1px solid ${theme.colors.border.weak}`,
-              }}
-            >
-              No
-            </button>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-};
 
 function ChatComponent({ pluginSettings, readOnly = false, initialSession }: ChatProps) {
   useGrafanaTheme();
@@ -223,88 +128,35 @@ function ChatComponent({ pluginSettings, readOnly = false, initialSession }: Cha
   const currentSession = sessionManager.sessions.find((s: SessionMetadata) => s.id === sessionManager.currentSessionId);
   const currentSessionTitle = currentSession?.title;
 
-  const hasMessages = chatHistory.length > 0;
   const showSidePanel = isSidePanelOpen && visiblePageRefs.length > 0 && allowEmbedding === true;
 
-  const chatInterfaceState: ChatInterfaceState = useMemo(
-    () => ({
-      chatHistory,
-      currentInput,
-      isGenerating,
-      toolsLoading,
-      currentSessionTitle,
-      isSummarizing: sessionManager.isSummarizing,
-      hasSummary: !!sessionManager.currentSummary,
-      setCurrentInput,
-      sendMessage,
-      handleKeyPress,
-      chatContainerRef,
-      chatInputRef,
-      bottomSpacerRef,
-      leftSlot: hasMessages ? <NewChatButton onConfirm={clearChat} disabled={isGenerating} theme={theme} /> : undefined,
-      rightSlot: (
-        <button
-          onClick={openHistory}
-          className="flex items-center gap-2 px-2 py-1 text-xs font-medium rounded-md hover:bg-white/10 transition-colors"
-          aria-label="Chat history"
-          title="View chat history"
-          style={{ color: theme.colors.text.secondary }}
-        >
-          <svg
-            width="14"
-            height="14"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          >
-            <circle cx="12" cy="12" r="10" />
-            <polyline points="12 6 12 12 16 14" />
-          </svg>
-          <span>View chat history ({sessionManager.sessions.length})</span>
-        </button>
-      ),
-      readOnly,
-      onSuggestionClick: handleSuggestionClick,
-    }),
-    [
-      chatHistory,
-      currentInput,
-      isGenerating,
-      toolsLoading,
-      currentSessionTitle,
-      sessionManager.isSummarizing,
-      sessionManager.currentSummary,
-      sessionManager.sessions.length,
-      setCurrentInput,
-      sendMessage,
-      handleKeyPress,
-      chatContainerRef,
-      chatInputRef,
-      bottomSpacerRef,
-      hasMessages,
-      clearChat,
-      theme,
-      openHistory,
-      readOnly,
-      handleSuggestionClick,
-    ]
-  );
+  const chatInterfaceProps = useChatInterface({
+    chatHistory,
+    currentInput,
+    isGenerating,
+    toolsLoading,
+    setCurrentInput,
+    sendMessage,
+    handleKeyPress,
+    chatContainerRef,
+    chatInputRef,
+    bottomSpacerRef,
+    sessionManager,
+    currentSessionTitle,
+    clearChat,
+    openHistory,
+    handleSuggestionClick,
+    readOnly,
+  });
 
-  const grafanaPageState: GrafanaPageState = useMemo(
-    () => ({
-      pageRefs: visiblePageRefs,
-      activeTabIndex: 0,
-      kioskModeEnabled,
-      onRemoveTab: handleRemoveTab,
-      onClose: () => setIsSidePanelOpen(false),
-    }),
-    [visiblePageRefs, handleRemoveTab, kioskModeEnabled]
-  );
+  const grafanaPageProps = useGrafanaPage({
+    visiblePageRefs,
+    kioskModeEnabled,
+    handleRemoveTab,
+    onClose: () => setIsSidePanelOpen(false),
+  });
 
-  const chatScene = useChatScene(showSidePanel, chatInterfaceState, grafanaPageState, chatPanelPosition);
+  const chatScene = useChatScene(showSidePanel, chatInterfaceProps, grafanaPageProps, chatPanelPosition);
 
   if (toolsError) {
     return <div>Error: {toolsError.message}</div>;

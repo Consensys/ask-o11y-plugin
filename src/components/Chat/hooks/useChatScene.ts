@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { EmbeddedScene, SplitLayout } from '@grafana/scenes';
-import { ChatInterfaceScene, ChatInterfaceState } from '../scenes/ChatInterfaceScene';
-import { GrafanaPageScene, GrafanaPageState } from '../scenes/GrafanaPageScene';
+import { ChatInterfaceScene, ChatInterfaceProps } from '../scenes/ChatInterfaceScene';
+import { GrafanaPageScene, GrafanaPageProps } from '../scenes/GrafanaPageScene';
 
 type SceneComponent = ChatInterfaceScene | GrafanaPageScene;
 
@@ -22,8 +22,8 @@ function findSceneComponent<T extends SceneComponent>(
 
 export function useChatScene(
   showSidePanel: boolean,
-  chatState: ChatInterfaceState,
-  sidePanelState: GrafanaPageState,
+  chatState: ChatInterfaceProps,
+  sidePanelState: GrafanaPageProps,
   chatPanelPosition: 'left' | 'right' = 'right'
 ): EmbeddedScene | null {
   const [scene, setScene] = useState<EmbeddedScene | null>(null);

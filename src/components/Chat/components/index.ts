@@ -12,3 +12,4 @@ export { GraphRenderer } from './GraphRenderer/GraphRenderer';
 export { LogsRenderer } from './LogsRenderer/LogsRenderer';
 export { TracesRenderer } from './TracesRenderer/TracesRenderer';
 export { SidePanel } from './SidePanel/SidePanel';
+export { NewChatButton } from './NewChatButton';

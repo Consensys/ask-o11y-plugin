@@ -1,0 +1,96 @@
+import React, { useState, useRef } from 'react';
+import { GrafanaTheme2 } from '@grafana/data';
+
+export interface NewChatButtonProps {
+  onConfirm: () => void;
+  disabled: boolean;
+  theme: GrafanaTheme2;
+}
+
+export const NewChatButton: React.FC<NewChatButtonProps> = ({ onConfirm, disabled, theme }) => {
+  const [isOpen, setIsOpen] = useState(false);
+  const popupRef = useRef<HTMLDivElement>(null);
+
+  // Close popup when clicking outside
+  React.useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (popupRef.current && !popupRef.current.contains(event.target as Node)) {
+        setIsOpen(false);
+      }
+    };
+
+    if (isOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [isOpen]);
+
+  return (
+    <div className="relative">
+      <button
+        onClick={() => setIsOpen(!isOpen)}
+        disabled={disabled}
+        className="p-2 rounded-md hover:bg-white/10 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+        aria-label="New chat"
+        title="New chat"
+        style={{ color: theme.colors.text.secondary }}
+      >
+        <svg
+          width="18"
+          height="18"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
+          <line x1="12" y1="5" x2="12" y2="19"></line>
+          <line x1="5" y1="12" x2="19" y2="12"></line>
+        </svg>
+      </button>
+
+      {isOpen && (
+        <div
+          ref={popupRef}
+          className="absolute bottom-full left-0 mb-2 w-48 p-3 rounded-lg shadow-xl border z-50 flex flex-col gap-2"
+          style={{
+            backgroundColor: theme.colors.background.primary,
+            borderColor: theme.colors.border.weak,
+          }}
+        >
+          <p className="text-xs font-medium mb-1" style={{ color: theme.colors.text.primary }}>
+            Start a new chat?
+          </p>
+          <div className="flex gap-2">
+            <button
+              onClick={() => {
+                onConfirm();
+                setIsOpen(false);
+              }}
+              className="flex-1 px-2 py-1 text-xs rounded font-medium transition-colors"
+              style={{
+                backgroundColor: theme.colors.primary.main,
+                color: theme.colors.text.primary,
+              }}
+            >
+              Yes
+            </button>
+            <button
+              onClick={() => setIsOpen(false)}
+              className="flex-1 px-2 py-1 text-xs rounded font-medium transition-colors hover:bg-white/10"
+              style={{
+                color: theme.colors.text.secondary,
+                border: `1px solid ${theme.colors.border.weak}`,
+              }}
+            >
+              No
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
