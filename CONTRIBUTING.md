@@ -149,7 +149,7 @@ git remote add upstream https://github.com/Consensys/ask-o11y-plugin.git
 npm install
 
 # Build the plugin
-npm run build
+npm run build:prod
 
 # Start development environment
 npm run server
@@ -162,9 +162,9 @@ npm run server
 
 **Frontend Development (Hot Reload):**
 ```bash
-npm run dev
+npm run server
 ```
-Changes to React components will reload automatically.
+The Docker development environment provides automatic hot reload for frontend changes. React component changes will reload automatically via Docker volume mounts. The full Docker stack includes Grafana, MCP servers, Redis, and Alertmanager.
 
 **Backend Development:**
 ```bash

@@ -95,10 +95,7 @@ nvm use 22 && npm run server
 ### Building
 ```bash
 # Full production build (frontend + backend for all platforms)
-nvm use 22 && npm run build
-
-# Frontend only (development mode with hot reload)
-nvm use 22 && npm run dev
+nvm use 22 && npm run build:prod
 
 # Frontend only (production build)
 nvm use 22 && npm run build:frontend:prod
@@ -150,6 +147,17 @@ nvm use 22 && npm run lint
 # Auto-fix linting + format with Prettier
 nvm use 22 && npm run lint:fix
 ```
+
+### Development Workflow
+
+**Frontend Development:**
+The `npm run server` command starts the full Docker development environment with automatic hot reload for frontend changes:
+- Frontend code changes are automatically detected and rebuilt
+- Browser auto-refreshes via Docker volume mounts
+- No need to manually restart or rebuild for frontend changes
+- Includes all required services: Grafana, Redis, MCP servers, Alertmanager
+
+**Note:** For frontend-only changes, the Docker environment provides the best development experience with hot reload. There is no separate `npm run dev` command.
 
 ### Backend Development Workflow
 ```bash
@@ -519,7 +527,7 @@ RBAC checking pattern:
 nvm use 22 && node --version
 
 # Clear and rebuild
-nvm use 22 && rm -rf node_modules package-lock.json dist && npm install && npm run build
+nvm use 22 && rm -rf node_modules package-lock.json dist && npm install && npm run build:prod
 ```
 
 **Backend not loading:**
