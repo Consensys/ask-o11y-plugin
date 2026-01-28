@@ -1,0 +1,13 @@
+services:
+  grafana:
+    extends:
+      file: .config/docker-compose-base.yaml
+      service: grafana
+    environment:
+      GF_INSTALL_PLUGINS: 'grafana-llm-app'
+      GF_AUTH_BASIC_ENABLED: false
+      GF_AUTH_ANONYMOUS_ENABLED: true
+      GF_SECURITY_ALLOW_EMBEDDING: true
+      GF_FEATURE_TOGGLES_ENABLE: 'externalServiceAccounts'
+      GF_AUTH_MANAGED_SERVICE_ACCOUNTS_ENABLED: 'true'
+      LLM_API_KEY: ${LLM_API_KEY:-}

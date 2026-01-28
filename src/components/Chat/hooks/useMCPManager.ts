@@ -3,8 +3,10 @@ import { useAsync } from 'react-use';
 import { llm, mcp } from '@grafana/llm';
 import { CallToolResultSchema } from '@modelcontextprotocol/sdk/types';
 import { backendMCPClient } from '../../../services/backendMCPClient';
+import { builtInMCPClient } from '../../../services/builtInMCPClient';
 import { toolRequestQueue } from '../../../services/queue';
 import { RenderedToolCall } from '../types';
+import { usePluginJsonData } from '../../../hooks/usePluginJsonData';
 
 export const useMCPManager = () => {
   const [toolCalls, setToolCalls] = useState<Map<string, RenderedToolCall>>(new Map());
@@ -12,6 +14,11 @@ export const useMCPManager = () => {
   // Track active tool call promises for cleanup
   const activeToolCallsRef = useRef<Set<Promise<any>>>(new Set());
   const isMountedRef = useRef(true);
+
+  // Determine which MCP client to use based on plugin settings
+  const pluginSettings = usePluginJsonData();
+  const useBuiltInMCP = pluginSettings?.useBuiltInMCP ?? false;
+  const mcpClient = useBuiltInMCP ? builtInMCPClient : backendMCPClient;
 
   // Cleanup on unmount
   useEffect(() => {
@@ -23,8 +30,12 @@ export const useMCPManager = () => {
         console.log('[useMCPManager] Cleaning up:', activeToolCalls.size, 'active tool calls');
         activeToolCalls.clear();
       }
+      // Disconnect built-in MCP client if used
+      if (useBuiltInMCP) {
+        builtInMCPClient.disconnect();
+      }
     };
-  }, []);
+  }, [useBuiltInMCP]);
 
   const clearToolCalls = useCallback(() => {
     setToolCalls(new Map());
@@ -32,17 +43,22 @@ export const useMCPManager = () => {
 
   const getAvailableTools = useCallback(async () => {
     try {
-      // Get all tools from backend MCP proxy
-      const tools = await backendMCPClient.listTools();
+      // Get tools from the selected MCP client
+      const tools = await mcpClient.listTools();
 
-      console.log('[useMCPManager] Available tools from backend:', tools.length);
+      console.log(
+        '[useMCPManager] Available tools from',
+        useBuiltInMCP ? 'built-in' : 'backend',
+        'MCP:',
+        tools.length
+      );
 
       return { tools };
     } catch (error) {
       console.error('Error fetching tools:', error);
       return { tools: [] };
     }
-  }, []);
+  }, [mcpClient, useBuiltInMCP]);
 
   const handleToolCall = useCallback(
     async (toolCall: { function: { name: string; arguments: string }; id: string }, messages: llm.Message[]) => {
@@ -59,11 +75,16 @@ export const useMCPManager = () => {
       const toolCallPromise = toolRequestQueue
         .add(
           async () => {
-            console.log('[useMCPManager] Calling backend MCP tool:', f.name);
+            console.log(
+              '[useMCPManager] Calling',
+              useBuiltInMCP ? 'built-in' : 'backend',
+              'MCP tool:',
+              f.name
+            );
 
-            const response = await backendMCPClient.callTool({ name: f.name, arguments: args });
+            const response = await mcpClient.callTool({ name: f.name, arguments: args });
             if (!response) {
-              throw new Error('Backend MCP tool call returned null');
+              throw new Error('MCP tool call returned null');
             }
 
             const toolResult = CallToolResultSchema.parse(response);
@@ -115,7 +136,7 @@ export const useMCPManager = () => {
       // Wait for the tool call to complete
       await toolCallPromise;
     },
-    []
+    [mcpClient, useBuiltInMCP]
   );
 
   const handleToolCalls = useCallback(
@@ -159,5 +180,7 @@ export const useMCPManager = () => {
     hasRunningToolCalls,
     formatToolsForOpenAI,
     getAvailableTools,
+    // Expose which mode is active for debugging
+    usingBuiltInMCP: useBuiltInMCP,
   };
 };

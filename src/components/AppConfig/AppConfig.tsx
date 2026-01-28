@@ -1,8 +1,9 @@
-import React, { ChangeEvent, useState } from 'react';
+import React, { ChangeEvent, useState, useEffect } from 'react';
 import { lastValueFrom } from 'rxjs';
 import { AppPluginMeta, PluginConfigPageProps, PluginMeta } from '@grafana/data';
 import { getBackendSrv } from '@grafana/runtime';
 import { Button, Field, FieldSet, Input, Icon, Switch, Alert, RadioButtonGroup, TextArea, Modal } from '@grafana/ui';
+import { mcp } from '@grafana/llm';
 import { testIds } from '../testIds';
 import { ValidationService } from '../../services/validation';
 import { SYSTEM_PROMPT } from '../Chat/constants';
@@ -19,6 +20,9 @@ type State = {
   maxTotalTokens: number;
   // MCP server configurations
   mcpServers: MCPServerConfig[];
+  // Built-in MCP configuration
+  useBuiltInMCP: boolean;
+  builtInMCPAvailable: boolean | null; // null = checking, true/false = result
   // System prompt configuration
   systemPromptMode: SystemPromptMode;
   customSystemPrompt: string;
@@ -42,6 +46,8 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
   const [state, setState] = useState<State>({
     maxTotalTokens: jsonData?.maxTotalTokens || 50000,
     mcpServers: jsonData?.mcpServers || [],
+    useBuiltInMCP: jsonData?.useBuiltInMCP ?? false,
+    builtInMCPAvailable: null,
     systemPromptMode: jsonData?.systemPromptMode || 'default',
     customSystemPrompt: jsonData?.customSystemPrompt || '',
     expandedAdvanced: new Set<string>(),
@@ -53,6 +59,21 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
   });
   const [showDefaultPromptModal, setShowDefaultPromptModal] = useState(false);
   const [copySuccess, setCopySuccess] = useState(false);
+
+  // Check built-in MCP availability on mount
+  useEffect(() => {
+    const checkAvailability = async () => {
+      try {
+        const available = await mcp.enabled();
+        setState((prev) => ({ ...prev, builtInMCPAvailable: available }));
+      } catch (error) {
+        console.error('Error checking built-in MCP availability:', error);
+        setState((prev) => ({ ...prev, builtInMCPAvailable: false }));
+      }
+    };
+
+    checkAvailability();
+  }, []);
 
   const isLLMSettingsDisabled = Boolean(!state.maxTotalTokens || state.maxTotalTokens < 1000);
 
@@ -370,6 +391,17 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
     });
   };
 
+  const onSubmitMCPMode = () => {
+    updatePluginAndReload(plugin.meta.id, {
+      enabled,
+      pinned,
+      jsonData: {
+        ...jsonData,
+        useBuiltInMCP: state.useBuiltInMCP,
+      },
+    });
+  };
+
   const onSubmitMCPServers = () => {
     // Validate all MCP servers before saving
     const errors: ValidationErrors['mcpServers'] = {};
@@ -482,14 +514,76 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
         </div>
       </FieldSet>
 
+      <FieldSet label="MCP Mode" className="mt-4">
+        <p className="text-sm text-secondary mb-3">
+          Choose how to connect to MCP (Model Context Protocol) tools. Built-in mode uses Grafana&apos;s integrated MCP
+          server, while External mode connects to custom MCP servers you configure.
+        </p>
+
+        {state.builtInMCPAvailable === null && (
+          <Alert severity="info" title="Checking availability">
+            Checking if built-in MCP is available...
+          </Alert>
+        )}
+
+        {state.builtInMCPAvailable === false && (
+          <Alert severity="warning" title="Built-in MCP unavailable">
+            The grafana-llm-app plugin is not installed or MCP is not enabled. To use built-in MCP, install and
+            configure grafana-llm-app.
+          </Alert>
+        )}
+
+        <Field
+          label="Use Built-in Grafana MCP"
+          description={
+            state.useBuiltInMCP
+              ? "Using Grafana's built-in MCP server. External MCP servers below will be disabled."
+              : 'Using external MCP servers configured below. Built-in MCP is disabled.'
+          }
+          data-testid={testIds.appConfig.useBuiltInMCPField}
+        >
+          <Switch
+            value={state.useBuiltInMCP}
+            onChange={(e) => setState({ ...state, useBuiltInMCP: e.currentTarget.checked })}
+            disabled={state.builtInMCPAvailable === false}
+            data-testid={testIds.appConfig.useBuiltInMCPToggle}
+          />
+        </Field>
+
+        {state.useBuiltInMCP && state.builtInMCPAvailable && (
+          <Alert severity="info" title="Built-in MCP enabled" className="mt-2">
+            Using Grafana&apos;s built-in MCP server with observability tools. External MCP servers configured below
+            will be ignored while this mode is active.
+          </Alert>
+        )}
+
+        <div className="mt-3">
+          <Button
+            onClick={onSubmitMCPMode}
+            variant="primary"
+            disabled={state.builtInMCPAvailable === null}
+            data-testid={testIds.appConfig.saveMCPModeButton}
+          >
+            Save MCP Mode
+          </Button>
+        </div>
+      </FieldSet>
+
       <FieldSet label="MCP Server Connections" className="mt-4">
+        {state.useBuiltInMCP && (
+          <Alert severity="info" title="External MCP servers disabled" className="mb-3">
+            External MCP server configuration is disabled while built-in MCP mode is active. Switch to external mode
+            above to configure custom MCP servers.
+          </Alert>
+        )}
+
         <p className="text-sm text-secondary mb-3">
           Configure additional MCP (Model Context Protocol) servers to extend tool capabilities. Supports OpenAPI-based
           servers like{' '}
           <a href="https://github.com/open-webui/mcpo" target="_blank" rel="noopener noreferrer">
             MCPO
           </a>
-          .
+          .{state.useBuiltInMCP && ' (Currently disabled - built-in MCP mode is active)'}
         </p>
 
         {state.mcpServers.map((server) => (
@@ -511,12 +605,14 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
                 <Switch
                   value={server.enabled}
                   onChange={(e) => updateMCPServer(server.id, { enabled: e.currentTarget.checked })}
+                  disabled={state.useBuiltInMCP}
                 />
                 <Button
                   variant="secondary"
                   size="sm"
                   icon="trash-alt"
                   onClick={() => removeMCPServer(server.id)}
+                  disabled={state.useBuiltInMCP}
                   data-testid={testIds.appConfig.mcpServerRemoveButton(server.id)}
                 >
                   Remove
@@ -535,6 +631,7 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
                 placeholder="My MCP Server"
                 onChange={(e) => updateMCPServer(server.id, { name: e.currentTarget.value })}
                 invalid={!!validationErrors.mcpServers[server.id]?.name}
+                disabled={state.useBuiltInMCP}
                 data-testid={testIds.appConfig.mcpServerNameInput(server.id)}
               />
             </Field>
@@ -551,6 +648,7 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
                 placeholder="https://mcp-server.example.com"
                 onChange={(e) => updateMCPServer(server.id, { url: e.currentTarget.value })}
                 invalid={!!validationErrors.mcpServers[server.id]?.url}
+                disabled={state.useBuiltInMCP}
                 data-testid={testIds.appConfig.mcpServerUrlInput(server.id)}
               />
             </Field>
@@ -564,6 +662,7 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
                     type: e.target.value as 'openapi' | 'standard' | 'sse' | 'streamable-http',
                   })
                 }
+                disabled={state.useBuiltInMCP}
                 style={{ width: '240px', height: '32px' }}
               >
                 <option value="openapi">OpenAPI</option>
@@ -580,6 +679,7 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
                 onClick={() => toggleAdvancedOptions(server.id)}
                 className="flex items-center gap-1 text-sm cursor-pointer bg-transparent border-none p-0"
                 style={{ color: 'var(--grafana-text-link)' }}
+                disabled={state.useBuiltInMCP}
                 data-testid={testIds.appConfig.mcpServerAdvancedToggle(server.id)}
               >
                 <Icon name={state.expandedAdvanced.has(server.id) ? 'angle-down' : 'angle-right'} />
@@ -633,6 +733,7 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
                           onChange={(e) => updateHeader(server.id, key, e.currentTarget.value, value)}
                           data-testid={testIds.appConfig.mcpServerHeaderKeyInput(server.id, index)}
                           invalid={hasCollision}
+                          disabled={state.useBuiltInMCP}
                         />
                         <Input
                           width={30}
@@ -640,6 +741,7 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
                           placeholder="Header value"
                           onChange={(e) => updateHeader(server.id, key, key, e.currentTarget.value)}
                           data-testid={testIds.appConfig.mcpServerHeaderValueInput(server.id, index)}
+                          disabled={state.useBuiltInMCP}
                         />
                         <Button
                           variant="secondary"
@@ -648,6 +750,7 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
                           onClick={() => removeHeader(server.id, key)}
                           data-testid={testIds.appConfig.mcpServerHeaderRemoveButton(server.id, index)}
                           aria-label="Remove header"
+                          disabled={state.useBuiltInMCP}
                         />
                       </div>
                       {hasCollision && (
@@ -679,7 +782,7 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
                       size="sm"
                       icon="plus"
                       onClick={() => addHeader(server.id)}
-                      disabled={hasIncompleteHeader}
+                      disabled={state.useBuiltInMCP || hasIncompleteHeader}
                       data-testid={testIds.appConfig.mcpServerAddHeaderButton(server.id)}
                     >
                       Add Header
@@ -695,6 +798,7 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
           variant="secondary"
           icon="plus"
           onClick={addMCPServer}
+          disabled={state.useBuiltInMCP}
           data-testid={testIds.appConfig.addMcpServerButton}
         >
           Add MCP Server
@@ -709,7 +813,7 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
           <Button
             onClick={onSubmitMCPServers}
             variant="primary"
-            disabled={Object.keys(validationErrors.mcpServers).length > 0}
+            disabled={state.useBuiltInMCP || Object.keys(validationErrors.mcpServers).length > 0}
             data-testid={testIds.appConfig.saveMcpServersButton}
           >
             Save MCP Server Connections

@@ -14,7 +14,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **Core Architecture:**
 - Clean Architecture pattern with Repository Pattern (frontend)
-- MCP proxy aggregates multiple MCP servers (Grafana, Alertmanager, custom)
+- MCP proxy aggregates multiple MCP servers (Grafana MCP, custom servers)
 - Multi-tenant organization isolation with per-user session storage
 - RBAC enforcement at tool listing AND execution
 
@@ -86,7 +86,7 @@ npm run lint
 # Initial setup
 nvm use 22 && npm install
 
-# Start full development environment (Docker: Grafana + Redis + MCP servers + Alertmanager)
+# Start full development environment (Docker: Grafana + Redis + MCP servers)
 nvm use 22 && npm run server
 
 # Access: http://localhost:3000 (admin/admin)
@@ -155,7 +155,7 @@ The `npm run server` command starts the full Docker development environment with
 - Frontend code changes are automatically detected and rebuilt
 - Browser auto-refreshes via Docker volume mounts
 - No need to manually restart or rebuild for frontend changes
-- Includes all required services: Grafana, Redis, MCP servers, Alertmanager
+- Includes all required services: Grafana, Redis, MCP servers
 
 **Note:** For frontend-only changes, the Docker environment provides the best development experience with hot reload. There is no separate `npm run dev` command.
 
@@ -231,8 +231,7 @@ go test ./pkg/plugin -run TestFunctionName
                            ↕ MCP Protocol
 ┌─────────────────────────────────────────────────────────────┐
 │  External MCP Servers                                        │
-│  ├─ mcp-grafana (56+ Grafana tools)                         │
-│  ├─ mcp-alertmanager (alerting tools)                       │
+│  ├─ mcp-grafana (56+ Grafana tools, including alerting)     │
 │  └─ Custom MCP servers (extensible)                         │
 └─────────────────────────────────────────────────────────────┘
 ```

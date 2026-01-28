@@ -1,16 +1,4 @@
 services:
-  redis:
-    image: redis:7-alpine
-    ports:
-      - "127.0.0.1:6379:6379"
-    command: redis-server --appendonly yes
-    volumes:
-      - redis-data:/data
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 5s
-      timeout: 3s
-      retries: 5
 
   grafana:
     extends:
@@ -41,25 +29,18 @@ services:
     depends_on:
       - grafana
 
-  alertmanager:
-    image: grafana/mimir:2.16.0
+  redis:
+    image: redis:7-alpine
     ports:
-      - '127.0.0.1:8082:8080'
-    command: --target=alertmanager --config.file=/etc/alertmanager/config.yml
+      - "127.0.0.1:6379:6379"
+    command: redis-server --appendonly yes
     volumes:
-      - ./provisioning/alertmanager/alertmanager.yml:/etc/alertmanager/config.yml
-
-  mcp-alertmanager:
-    image: ghcr.io/ntk148v/alertmanager-mcp-server:sha-e9e2a1ea094b360ce299ac6ec828f70019584332
-    ports:
-      - 127.0.0.1:9090:8000/tcp
-    environment:
-      ALERTMANAGER_URL: http://alertmanager:8080/alertmanager
-      MCP_PORT: 8000
-      MCP_TRANSPORT: http
-    depends_on:
-      - grafana
-      - alertmanager
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
 
   mcpo:
     image: ghcr.io/open-webui/mcpo

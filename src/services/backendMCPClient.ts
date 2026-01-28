@@ -11,7 +11,7 @@ import type { Tool, CallToolResult } from '@modelcontextprotocol/sdk/types';
 interface CallToolParams {
   name: string;
   arguments?: Record<string, unknown>;
-  scopeOrgId?: string; // Optional: Direct X-Scope-OrgId value (takes priority over orgName for mcp-alertmanager)
+  scopeOrgId?: string; // Optional: Direct X-Scope-OrgId value for multi-tenant systems (takes priority over orgName)
 }
 
 export class BackendMCPClient {
@@ -55,7 +55,7 @@ export class BackendMCPClient {
    * We pass orgName and scopeOrgId in the request body (not headers) because Grafana's proxy
    * does not forward custom headers to backend plugins.
    *
-   * For mcp-alertmanager:
+   * For multi-tenant MCP servers (Mimir, Cortex, Loki):
    * - If scopeOrgId is provided, it's used directly as X-Scope-OrgId
    * - Otherwise, orgName is used as the X-Scope-OrgId value
    */
@@ -75,7 +75,7 @@ export class BackendMCPClient {
             name: params.name,
             arguments: params.arguments || {},
             orgName: orgName,
-            scopeOrgId: params.scopeOrgId || '', // Direct X-Scope-OrgId (priority over orgName for mcp-alertmanager)
+            scopeOrgId: params.scopeOrgId || '', // Direct X-Scope-OrgId for multi-tenant systems (priority over orgName)
           },
           showErrorAlert: false,
         })

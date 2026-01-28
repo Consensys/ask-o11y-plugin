@@ -1,0 +1,78 @@
+apiVersion: 1
+
+apps:
+  - type: grafana-llm-app
+    org_id: 1
+    jsonData:
+      enableDevSandbox: true
+      provider: anthropic
+      models:
+        default: large
+        mapping:
+          base: claude-haiku-4-5-20251001
+          large: claude-haiku-4-5-20251001
+    secureJsonData:
+      anthropicKey: $LLM_API_KEY
+  - type: consensys-asko11y-app
+    org_id: 1
+    jsonData:
+      maxTotalTokens: 100000
+      mcpServers:
+        - id: 'time'
+          name: 'Time Server'
+          url: 'http://mcpo:8000/time'
+          enabled: true
+          type: 'openapi'
+        - id: 'sequential-thinking'
+          name: 'sequential-thinking Server'
+          url: 'http://mcpo:8000/sequential-thinking'
+          enabled: true
+          type: 'openapi'
+        - id: 'fetch'
+          name: 'fetch Server'
+          url: 'http://mcpo:8000/fetch'
+          enabled: true
+          type: 'openapi'
+        - id: 'mcp-grafana'
+          name: 'grafana'
+          url: 'http://mcp-grafana:8000/mcp'
+          enabled: true
+          type: 'streamable-http'
+  - type: grafana-llm-app
+    org_id: 2
+    jsonData:
+      enableDevSandbox: true
+      provider: anthropic
+      models:
+        default: large
+        mapping:
+          base: claude-haiku-4-5-20251001
+          large: claude-haiku-4-5-20251001
+    secureJsonData:
+      anthropicKey: $LLM_API_KEY
+  - type: consensys-asko11y-app
+    org_id: 2
+    jsonData:
+      maxTotalTokens: 50000
+      mcpServers:
+        - id: 'time'
+          name: 'Time Server'
+          url: 'http://mcpo:8000/time'
+          enabled: true
+          type: 'openapi'
+        - id: 'sequential-thinking'
+          name: 'sequential-thinking Server'
+          url: 'http://mcpo:8000/sequential-thinking'
+          enabled: true
+          type: 'openapi'
+        - id: 'fetch'
+          name: 'fetch Server'
+          url: 'http://mcpo:8000/fetch'
+          enabled: true
+          type: 'openapi'
+        - id: 'mcp-grafana'
+          name: 'grafana'
+          url: 'http://mcp-grafana:8000/mcp'
+          enabled: true
+          type: 'streamable-http'
+
