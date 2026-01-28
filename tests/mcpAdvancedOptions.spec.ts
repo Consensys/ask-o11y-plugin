@@ -5,8 +5,6 @@ test.describe('MCP Server Advanced Options', () => {
   test.beforeEach(async ({ appConfigPage, page }) => {
     void appConfigPage;
 
-    // Disable built-in MCP mode to enable external MCP server configuration
-
     // Wait for the Add MCP Server button to be visible (page fully loaded)
     const addButton = page.locator('[data-testid="data-testid ac-add-mcp-server"]');
     await expect(addButton).toBeVisible();

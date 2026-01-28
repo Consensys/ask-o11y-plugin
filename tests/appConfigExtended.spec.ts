@@ -43,8 +43,6 @@ test.describe('AppConfig MCP Server Management', () => {
   test('should manage MCP server CRUD operations', async ({ appConfigPage, page }) => {
     void appConfigPage;
 
-    // Disable built-in MCP mode to enable external MCP server configuration
-
     await test.step('Verify add MCP server button and add new card', async () => {
       const addButton = page.locator('[data-testid="data-testid ac-add-mcp-server"]');
       await expect(addButton).toBeVisible();
@@ -106,8 +104,6 @@ test.describe('AppConfig MCP Server Management', () => {
 
   test('should configure MCP server advanced options with headers', async ({ appConfigPage, page }) => {
     void appConfigPage;
-
-    // Disable built-in MCP mode to enable external MCP server configuration
 
     await test.step('Add server and expand advanced options', async () => {
       const addButton = page.locator('[data-testid="data-testid ac-add-mcp-server"]');

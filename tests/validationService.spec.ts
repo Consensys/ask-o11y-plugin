@@ -39,8 +39,6 @@ test.describe('Validation Service via UI', () => {
   test('should validate MCP server URL format', async ({ appConfigPage, page }) => {
     void appConfigPage;
 
-    // Disable built-in MCP mode to enable external MCP server configuration
-
     // Add a server
     const addButton = page.locator('[data-testid="data-testid ac-add-mcp-server"]');
     await addButton.click();
@@ -60,8 +58,6 @@ test.describe('Validation Service via UI', () => {
 
   test('should validate MCP server name is not empty', async ({ appConfigPage, page }) => {
     void appConfigPage;
-
-    // Disable built-in MCP mode to enable external MCP server configuration
 
     // Add a server
     const addButton = page.locator('[data-testid="data-testid ac-add-mcp-server"]');
@@ -152,8 +148,6 @@ test.describe('Validation Service via UI', () => {
 
   test('should prevent duplicate header keys', async ({ appConfigPage, page }) => {
     void appConfigPage;
-
-    // Disable built-in MCP mode to enable external MCP server configuration
 
     // Add a server
     const addButton = page.locator('[data-testid="data-testid ac-add-mcp-server"]');

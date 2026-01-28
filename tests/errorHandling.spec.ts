@@ -24,8 +24,6 @@ test.describe('AppConfig Error Handling', () => {
   test('should validate AppConfig inputs with edge cases', async ({ appConfigPage, page }) => {
     void appConfigPage;
 
-    // Disable built-in MCP mode to enable external MCP server configuration
-
     await test.step('Handle empty MCP server URL', async () => {
       // Add a server
       const addButton = page.locator('[data-testid="data-testid ac-add-mcp-server"]');
