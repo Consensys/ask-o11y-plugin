@@ -12,54 +12,42 @@ import { usePluginJsonData } from '../../../hooks/usePluginJsonData';
 export const useMCPManager = () => {
   const [toolCalls, setToolCalls] = useState<Map<string, RenderedToolCall>>(new Map());
 
-  // Track active tool call promises for cleanup
   const activeToolCallsRef = useRef<Set<Promise<any>>>(new Set());
   const isMountedRef = useRef(true);
 
-  // Determine which MCP client to use based on plugin settings
   const pluginSettings = usePluginJsonData();
   const useBuiltInMCP = pluginSettings?.useBuiltInMCP ?? false;
   const hasExternalServers = pluginSettings?.mcpServers?.some((s) => s.enabled) ?? false;
 
-  // Select appropriate MCP client based on configuration
-  const mcpClient = useMemo(() => {
+  const mcpMode = useMemo(() => {
     if (useBuiltInMCP && hasExternalServers) {
-      // Combined mode: use aggregated client
-      console.log('[useMCPManager] Using combined mode (built-in + external)');
+      return 'combined';
+    }
+    return useBuiltInMCP ? 'built-in' : 'backend';
+  }, [useBuiltInMCP, hasExternalServers]);
+
+  const mcpClient = useMemo(() => {
+    if (mcpMode === 'combined') {
       return new AggregatedMCPClient({
         builtInClient: builtInMCPClient,
         backendClient: backendMCPClient,
         useBuiltIn: true,
         useBackend: true,
       });
-    } else if (useBuiltInMCP) {
-      // Built-in only
-      console.log('[useMCPManager] Using built-in MCP only');
-      return builtInMCPClient;
-    } else {
-      // External only (or neither)
-      console.log('[useMCPManager] Using backend MCP only');
-      return backendMCPClient;
     }
-  }, [useBuiltInMCP, hasExternalServers]);
-
-  // Determine mode for logging
-  const mcpMode = useBuiltInMCP && hasExternalServers ? 'combined' : useBuiltInMCP ? 'built-in' : 'backend';
+    return useBuiltInMCP ? builtInMCPClient : backendMCPClient;
+  }, [mcpMode, useBuiltInMCP]);
 
   // Cleanup on unmount
   useEffect(() => {
     const activeToolCalls = activeToolCallsRef.current;
     return () => {
       isMountedRef.current = false;
-      // Clear any pending tool calls
       if (activeToolCalls.size > 0) {
-        console.log('[useMCPManager] Cleaning up:', activeToolCalls.size, 'active tool calls');
         activeToolCalls.clear();
       }
-      // Disconnect built-in MCP client if used
       if (useBuiltInMCP) {
         if (mcpClient instanceof AggregatedMCPClient) {
-          // Aggregated client handles cleanup internally
           mcpClient.disconnect();
         } else {
           builtInMCPClient.disconnect();
@@ -74,43 +62,39 @@ export const useMCPManager = () => {
 
   const getAvailableTools = useCallback(async () => {
     try {
-      // Get tools from the selected MCP client
       const tools = await mcpClient.listTools();
-
-      console.log('[useMCPManager] Available tools from', mcpMode, 'MCP:', tools.length);
-
-      // Log statistics if using aggregated client
-      if (mcpClient instanceof AggregatedMCPClient) {
-        const stats = mcpClient.getStats();
-        console.log(
-          `[useMCPManager] Combined mode stats - Built-in: ${stats.builtInTools}, Backend: ${stats.backendTools}, Total: ${stats.totalTools}`
-        );
-      }
-
       return { tools };
     } catch (error) {
       console.error('Error fetching tools:', error);
       return { tools: [] };
     }
-  }, [mcpClient, mcpMode]);
+  }, [mcpClient]);
+
+  const updateToolCallState = useCallback(
+    (id: string, updates: Partial<RenderedToolCall>) => {
+      if (isMountedRef.current) {
+        setToolCalls((prev) => {
+          const existing = prev.get(id);
+          return new Map(prev).set(id, { ...existing!, ...updates });
+        });
+      }
+    },
+    []
+  );
 
   const handleToolCall = useCallback(
     async (toolCall: { function: { name: string; arguments: string }; id: string }, messages: llm.Message[]) => {
       const { function: f, id } = toolCall;
 
-      // Only update state if still mounted
       if (isMountedRef.current) {
         setToolCalls((prev) => new Map(prev).set(id, { name: f.name, arguments: f.arguments, running: true }));
       }
 
       const args = JSON.parse(f.arguments);
 
-      // Create and track the tool call promise with queuing
       const toolCallPromise = toolRequestQueue
         .add(
           async () => {
-            console.log('[useMCPManager] Calling', mcpMode, 'MCP tool:', f.name);
-
             const response = await mcpClient.callTool({ name: f.name, arguments: args });
             if (!response) {
               throw new Error('MCP tool call returned null');
@@ -118,19 +102,15 @@ export const useMCPManager = () => {
 
             const toolResult = CallToolResultSchema.parse(response);
             const textContent = toolResult.content
-              .filter((c: any) => c.type === 'text')
-              .map((c: any) => c.text)
+              .filter((c): c is { type: 'text'; text: string } => c.type === 'text')
+              .map((c) => c.text)
               .join('');
 
             // Ensure we always have content - Anthropic API rejects empty tool results
             const finalContent = textContent.trim() || 'No results returned (empty response)';
 
             messages.push({ role: 'tool', tool_call_id: id, content: finalContent });
-
-            // Only update state if still mounted
-            if (isMountedRef.current) {
-              setToolCalls((prev) => new Map(prev).set(id, { ...prev.get(id)!, running: false, response }));
-            }
+            updateToolCallState(id, { running: false, response });
 
             return response;
           },
@@ -140,18 +120,12 @@ export const useMCPManager = () => {
             id: `tool-${id}`,
           }
         )
-        .catch((error: any) => {
+        .catch((error: Error | { message?: string; toString(): string }) => {
           const errorMessage = error.message ?? error.toString();
           console.error('Tool call error:', errorMessage);
 
           messages.push({ role: 'tool', tool_call_id: id, content: errorMessage });
-
-          // Only update state if still mounted
-          if (isMountedRef.current) {
-            setToolCalls((prev) => new Map(prev).set(id, { ...prev.get(id)!, running: false, error: errorMessage }));
-          }
-
-          // Don't re-throw to avoid unhandled rejection
+          updateToolCallState(id, { running: false, error: errorMessage });
           return null;
         });
 
@@ -166,7 +140,7 @@ export const useMCPManager = () => {
       // Wait for the tool call to complete
       await toolCallPromise;
     },
-    [mcpClient, mcpMode]
+    [mcpClient, updateToolCallState]
   );
 
   const handleToolCalls = useCallback(

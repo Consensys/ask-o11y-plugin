@@ -10,6 +10,10 @@
 
 export type UserRole = 'Admin' | 'Editor' | 'Viewer';
 
+// Patterns for identifying Grafana tool types by name prefix
+const GRAFANA_READ_ONLY_PATTERN = /^(get_|list_|query_|search_|find_|generate_|fetch_)/;
+const GRAFANA_WRITE_PATTERN = /^(create_|update_|delete_|set_|add_|remove_|execute_)/;
+
 /**
  * Checks if a tool is read-only (safe for Viewers).
  *
@@ -75,9 +79,7 @@ export function isReadOnlyTool(toolName: string): boolean {
   }
 
   // For tools without prefix, check if they match Grafana read-only patterns
-  // Built-in Grafana tools follow specific naming patterns
-  const grafanaReadOnlyPatterns = /^(get_|list_|query_|search_|find_|generate_|fetch_)/;
-  return grafanaReadOnlyPatterns.test(toolName);
+  return GRAFANA_READ_ONLY_PATTERN.test(toolName);
 }
 
 /**
@@ -102,16 +104,13 @@ export function canAccessTool(role: UserRole | string, toolName: string): boolea
   }
 
   // For tools without prefix, distinguish between Grafana built-in and external tools
-  const grafanaReadOnlyPatterns = /^(get_|list_|query_|search_|find_|generate_|fetch_)/;
-  const grafanaWritePatterns = /^(create_|update_|delete_|set_|add_|remove_|execute_)/;
-
   // If tool matches Grafana read pattern, allow (read-only Grafana tool)
-  if (grafanaReadOnlyPatterns.test(toolName)) {
+  if (GRAFANA_READ_ONLY_PATTERN.test(toolName)) {
     return true;
   }
 
   // If tool matches Grafana write pattern, deny (write Grafana tool)
-  if (grafanaWritePatterns.test(toolName)) {
+  if (GRAFANA_WRITE_PATTERN.test(toolName)) {
     return false;
   }
 

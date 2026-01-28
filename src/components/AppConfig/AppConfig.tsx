@@ -15,6 +15,21 @@ const PROMPT_MODE_OPTIONS = [
   { label: 'Append to default prompt', value: 'append' as SystemPromptMode },
 ];
 
+function normalizeHeaderKey(key: string): string {
+  const trimmed = key.trim();
+  if (trimmed.includes('__collision_')) {
+    return trimmed.split('__collision_')[0].trim();
+  }
+  return trimmed;
+}
+
+function getCollisionId(key: string): string | null {
+  if (key.includes('__collision_')) {
+    return key.split('__collision_')[1];
+  }
+  return null;
+}
+
 type State = {
   // Maximum total tokens for LLM requests
   maxTotalTokens: number;
@@ -220,62 +235,7 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
     const currentHeaders = server.headers || {};
     const keyOrder = Object.keys(currentHeaders);
 
-    // Helper to normalize a key for comparison (trim and extract base from collision markers)
-    const normalizeKey = (k: string): string => {
-      let normalized = k.trim();
-      if (normalized.includes('__collision_')) {
-        normalized = normalized.split('__collision_')[0].trim();
-      }
-      return normalized;
-    };
-
-    // Helper to extract collision ID from a key, if present
-    const getCollisionId = (k: string): string | null => {
-      if (k.includes('__collision_')) {
-        return k.split('__collision_')[1];
-      }
-      return null;
-    };
-
-    // If key changed
-    let finalKey = newKey;
-    if (oldKey !== newKey) {
-      // Check if newKey would collide with an existing key (excluding the one we're editing)
-      // Normalize keys to catch whitespace variants that would collide after save cleanup
-      const normalizedNewKey = normalizeKey(newKey);
-      const existingKeys = keyOrder.filter((k) => k !== oldKey);
-
-      // Find which existing key(s) would conflict
-      const conflictingKey = existingKeys.find((k) => normalizeKey(k) === normalizedNewKey);
-
-      if (normalizedNewKey && conflictingKey) {
-        // Collision detected - determine stable collision ID
-        let uniquePart: string;
-
-        // Priority for stable collision ID:
-        // 1. If oldKey already has a collision marker, preserve its ID
-        // 2. If the conflicting key has a collision marker, use a paired ID
-        // 3. Otherwise generate a new stable ID based on the entry's identity
-        const oldCollisionId = getCollisionId(oldKey);
-        const conflictingCollisionId = getCollisionId(conflictingKey);
-
-        if (oldCollisionId) {
-          // Preserve existing collision ID when editing a collision-marked entry
-          uniquePart = oldCollisionId;
-        } else if (conflictingCollisionId) {
-          // The other entry is marked - create a paired ID to show these two conflict
-          uniquePart = `pair_${conflictingCollisionId}`;
-        } else if (oldKey.startsWith('__new_header_')) {
-          // Use the new header's unique ID
-          uniquePart = oldKey.replace('__new_header_', '');
-        } else {
-          // Generate new ID based on the key content and timestamp
-          uniquePart = `id_${oldKey.replace(/[^a-zA-Z0-9]/g, '_')}_${Date.now()}`;
-        }
-
-        finalKey = `${newKey}__collision_${uniquePart}`;
-      }
-    }
+    const finalKey = computeFinalHeaderKey(oldKey, newKey, keyOrder);
 
     // Rebuild headers preserving order - replace oldKey with finalKey at the same position
     const newHeaders: Record<string, string> = {};
@@ -288,6 +248,36 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
     }
 
     updateMCPServer(serverId, { headers: newHeaders });
+  };
+
+  const computeFinalHeaderKey = (oldKey: string, newKey: string, existingKeys: string[]): string => {
+    if (oldKey === newKey) {
+      return newKey;
+    }
+
+    const normalizedNewKey = normalizeHeaderKey(newKey);
+    const otherKeys = existingKeys.filter((k) => k !== oldKey);
+    const conflictingKey = otherKeys.find((k) => normalizeHeaderKey(k) === normalizedNewKey);
+
+    if (!normalizedNewKey || !conflictingKey) {
+      return newKey;
+    }
+
+    const oldCollisionId = getCollisionId(oldKey);
+    const conflictingCollisionId = getCollisionId(conflictingKey);
+
+    let uniquePart: string;
+    if (oldCollisionId) {
+      uniquePart = oldCollisionId;
+    } else if (conflictingCollisionId) {
+      uniquePart = `pair_${conflictingCollisionId}`;
+    } else if (oldKey.startsWith('__new_header_')) {
+      uniquePart = oldKey.replace('__new_header_', '');
+    } else {
+      uniquePart = `id_${oldKey.replace(/[^a-zA-Z0-9]/g, '_')}_${Date.now()}`;
+    }
+
+    return `${newKey}__collision_${uniquePart}`;
   };
 
   const removeHeader = (serverId: string, key: string) => {
@@ -730,14 +720,14 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
                           onChange={(e) => updateHeader(server.id, key, e.currentTarget.value, value)}
                           data-testid={testIds.appConfig.mcpServerHeaderKeyInput(server.id, index)}
                           invalid={hasCollision}
-                                />
+                        />
                         <Input
                           width={30}
                           value={value}
                           placeholder="Header value"
                           onChange={(e) => updateHeader(server.id, key, key, e.currentTarget.value)}
                           data-testid={testIds.appConfig.mcpServerHeaderValueInput(server.id, index)}
-                                />
+                        />
                         <Button
                           variant="secondary"
                           size="sm"
@@ -745,7 +735,7 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
                           onClick={() => removeHeader(server.id, key)}
                           data-testid={testIds.appConfig.mcpServerHeaderRemoveButton(server.id, index)}
                           aria-label="Remove header"
-                                />
+                        />
                       </div>
                       {hasCollision && (
                         <span className="text-xs mt-1 block" style={{ color: 'var(--grafana-text-error)' }}>
