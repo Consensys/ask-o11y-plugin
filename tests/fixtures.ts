@@ -273,15 +273,3 @@ export async function resetRateLimits() {
   }
 }
 
-/**
- * Helper function to disable built-in MCP mode if it's enabled.
- *
- * @deprecated This function is no longer needed since combined mode is now supported.
- * External MCP servers can be configured even when built-in MCP is enabled.
- * Kept for backward compatibility with existing tests.
- */
-export async function disableBuiltInMCP(_page: Page) {
-  // No-op: External MCP configuration is now always available (combined mode supported)
-  console.log('[disableBuiltInMCP] Skipped: External MCP is always available (combined mode)');
-}
-

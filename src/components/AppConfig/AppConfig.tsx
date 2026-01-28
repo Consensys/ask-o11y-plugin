@@ -550,7 +550,7 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
           />
         </Field>
 
-        {state.useBuiltInMCP && state.builtInMCPAvailable && (
+        {state.useBuiltInMCP && state.builtInMCPAvailable && !state.mcpServers.some((s) => s.enabled) && (
           <Alert severity="info" title="Built-in MCP enabled" className="mt-2">
             Using Grafana&apos;s built-in MCP server with observability tools. You can also configure external servers
             below - all tools will be available together.

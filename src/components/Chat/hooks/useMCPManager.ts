@@ -210,8 +210,5 @@ export const useMCPManager = () => {
     hasRunningToolCalls,
     formatToolsForOpenAI,
     getAvailableTools,
-    // Expose which mode is active for debugging
-    usingBuiltInMCP: useBuiltInMCP,
-    mcpMode, // 'builtin', 'backend', or 'combined'
   };
 };

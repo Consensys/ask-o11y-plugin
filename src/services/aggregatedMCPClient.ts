@@ -102,10 +102,8 @@ export class AggregatedMCPClient {
     // Register built-in tools (no prefix needed)
     builtInTools.forEach((tool) => {
       if (this.toolRegistry.has(tool.name)) {
-        // Conflict detected - log warning and prioritize built-in
-        console.warn(
-          `[AggregatedMCPClient] Tool name conflict: '${tool.name}' exists in both built-in and backend. Prioritizing built-in.`
-        );
+        // Duplicate within built-in tools - log warning and skip
+        console.warn(`[AggregatedMCPClient] Duplicate tool name in built-in tools: '${tool.name}' - skipping duplicate.`);
       } else {
         this.toolRegistry.set(tool.name, 'builtin');
       }
@@ -308,18 +306,4 @@ export class AggregatedMCPClient {
       backendTools,
     };
   }
-}
-
-// Create and export a singleton instance for use in useMCPManager
-// Note: This will be created on-demand when both sources are enabled
-export function createAggregatedMCPClient(
-  builtInClient: BuiltInMCPClient,
-  backendClient: BackendMCPClient
-): AggregatedMCPClient {
-  return new AggregatedMCPClient({
-    builtInClient,
-    backendClient,
-    useBuiltIn: true,
-    useBackend: true,
-  });
 }

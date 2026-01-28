@@ -13,14 +13,12 @@ import { filterToolsByRole, type UserRole } from '../utils/rbac';
 interface CallToolParams {
   name: string;
   arguments?: Record<string, unknown>;
-  scopeOrgId?: string;
 }
 
 export class BuiltInMCPClient {
   private mcpClient: InstanceType<typeof mcp.Client> | null = null;
   private isConnected = false;
   private cachedTools: Tool[] | null = null;
-  private connectionError: Error | null = null;
   private connectionPromise: Promise<void> | null = null;
 
   constructor() {
@@ -76,14 +74,13 @@ export class BuiltInMCPClient {
       // Connect
       await this.mcpClient.connect(transport);
       this.isConnected = true;
-      this.connectionError = null;
 
       console.log('[BuiltInMCPClient] Connected to built-in MCP server');
     } catch (error) {
-      this.connectionError = error instanceof Error ? error : new Error('Unknown connection error');
+      const connectionError = error instanceof Error ? error : new Error('Unknown connection error');
       this.isConnected = false;
       this.mcpClient = null;
-      throw new Error(`Failed to connect to built-in MCP server: ${this.connectionError.message}`);
+      throw new Error(`Failed to connect to built-in MCP server: ${connectionError.message}`);
     }
   }
 
@@ -147,8 +144,7 @@ export class BuiltInMCPClient {
         };
       }
 
-      await this.ensureConnected();
-
+      // Connection is already established by listTools() above
       if (!this.mcpClient) {
         throw new Error('MCP client not initialized');
       }
