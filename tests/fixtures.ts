@@ -67,6 +67,7 @@ export { expect } from '@grafana/plugin-e2e';
 /**
  * Helper function to clear any persisted chat session to ensure the welcome message is visible.
  * This should be called before tests that expect the welcome heading to be visible.
+ * Now deletes ALL persisted sessions to ensure a completely clean state.
  */
 export async function clearPersistedSession(page: Page) {
   // Wait for page to load
@@ -76,31 +77,26 @@ export async function clearPersistedSession(page: Page) {
   // Wait a bit for the page to fully render
   await page.waitForTimeout(500);
 
-  // Check if welcome heading is already visible
+  // Delete all existing sessions first to ensure a clean slate
+  await deleteAllPersistedSessions(page);
+
+  // After deleting sessions, check if we're on welcome screen
   const welcomeHeading = page.getByRole('heading', { name: 'Ask O11y Assistant' });
-  const isWelcomeAlreadyVisible = await welcomeHeading.isVisible().catch(() => false);
+  const isWelcomeVisible = await welcomeHeading.isVisible().catch(() => false);
 
-  if (isWelcomeAlreadyVisible) {
-    // Welcome screen is already showing, nothing to clear
-    return;
-  }
-
-  // If there's a "New Chat" button visible, there's an existing session - clear it
-  const newChatButton = page.getByRole('button', { name: /New Chat/i });
-  const hasExistingSession = await newChatButton.isVisible().catch(() => false);
-
-  if (hasExistingSession) {
-    // Clear existing session to show welcome message
-    await newChatButton.click();
-    const confirmButton = page.getByRole('button', { name: 'Yes' });
-    if (await confirmButton.isVisible().catch(() => false)) {
-      await confirmButton.click();
-      // Wait for the confirmation dialog to close
-      await page.waitForTimeout(500);
+  if (!isWelcomeVisible) {
+    // If not on welcome screen, click "New Chat" to clear the current view
+    const newChatButton = page.getByRole('button', { name: /New Chat/i });
+    if (await newChatButton.isVisible().catch(() => false)) {
+      await newChatButton.click();
+      const confirmButton = page.getByRole('button', { name: 'Yes' });
+      if (await confirmButton.isVisible().catch(() => false)) {
+        await confirmButton.click();
+      }
     }
   }
 
-  // Wait for the welcome message to be visible after clearing
+  // Verify welcome message is now visible
   await welcomeHeading.waitFor({ state: 'visible', timeout: 10000 });
 }
 
@@ -249,5 +245,60 @@ export async function resetRateLimits() {
     // This allows tests to run even if Redis is not running (using in-memory storage)
     // The error is expected when Redis is not available, so we don't log it
   }
+}
+
+/**
+ * Helper function to disable built-in MCP mode if it's enabled.
+ * This ensures external MCP server configuration is available for tests.
+ * Should be called before tests that need to add/configure MCP servers.
+ */
+export async function disableBuiltInMCP(page: Page) {
+  // Navigate to AppConfig page
+  await page.goto('/plugins/consensys-asko11y-app');
+
+  // Wait for the page to load
+  await page.waitForTimeout(500);
+
+  // Check if the built-in MCP toggle exists and is checked
+  const toggle = page.locator('[data-testid="data-testid ac-use-builtin-mcp-toggle"]');
+
+  // Wait for toggle to be visible
+  await toggle.waitFor({ state: 'visible', timeout: 5000 }).catch(() => {
+    console.log('[disableBuiltInMCP] Toggle not found - may already be in external mode');
+  });
+
+  const isToggleVisible = await toggle.isVisible().catch(() => false);
+
+  if (isToggleVisible) {
+    // Check if it's currently enabled (checked)
+    const isEnabled = await toggle.isChecked().catch(() => false);
+
+    if (isEnabled) {
+      // Toggle it off to enable external MCP server configuration
+      // Use force: true to click through any overlapping elements
+      await toggle.click({ force: true });
+
+      // Wait a bit for the state to update
+      await page.waitForTimeout(500);
+
+      // Save the MCP mode setting
+      const saveMCPModeButton = page.locator('[data-testid="data-testid ac-save-mcp-mode"]');
+      if (await saveMCPModeButton.isVisible().catch(() => false)) {
+        await saveMCPModeButton.click();
+        await page.waitForTimeout(1000); // Wait for save to complete
+      }
+
+      // Verify the toggle is now off
+      const isStillEnabled = await toggle.isChecked().catch(() => false);
+      if (isStillEnabled) {
+        throw new Error('[disableBuiltInMCP] Failed to disable built-in MCP mode');
+      }
+    }
+  }
+
+  // Verify that the "Add MCP Server" button is now enabled
+  const addButton = page.locator('[data-testid="data-testid ac-add-mcp-server"]');
+  const { expect } = await import('@grafana/plugin-e2e');
+  await expect(addButton).toBeEnabled({ timeout: 5000 });
 }
 

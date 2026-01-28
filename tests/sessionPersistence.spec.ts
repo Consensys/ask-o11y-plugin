@@ -61,34 +61,38 @@ test.describe('Session Persistence Tests', () => {
       const chatInput = page.getByLabel('Chat input');
       await expect(chatInput).toBeEnabled({ timeout: 30000 });
 
-      // Create a new session
+      // Clear the current view to go back to welcome screen
       await page.getByRole('button', { name: /New Chat/i }).click();
-
-      // Confirm by clicking Yes
       await page.getByRole('button', { name: 'Yes' }).click();
-
       await expect(page.getByRole('heading', { name: 'Ask O11y Assistant' })).toBeVisible();
 
-      // Open sidebar
+      // Now open sidebar to load the saved session
       await page.getByText(/View chat history/).click();
       await expect(page.getByRole('heading', { name: 'Chat History' })).toBeVisible();
 
-      // Wait for session items to appear
-      await page.waitForSelector('.p-1\\.5.rounded.group', { timeout: 10000 });
-      const sessionItem = page.locator('.p-1\\.5.rounded.group').first();
+      // Wait for session items to appear - should have exactly 1 session
+      await page.waitForSelector('[data-testid="session-item"]', { timeout: 10000 });
+      const sessionItems = page.locator('[data-testid="session-item"]');
+      await expect(sessionItems).toHaveCount(1, { timeout: 5000 }); // Should have exactly 1 session
+
+      // Click on the session with "Message to persist"
+      const sessionItem = sessionItems.first();
       await expect(sessionItem).toBeVisible({ timeout: 10000 });
 
-      // Click on the existing session
+      // Verify it's the correct session by checking the title
+      await expect(sessionItem.getByRole('heading', { name: 'Message to persist' })).toBeVisible();
+
+      // Click to load the session
       await sessionItem.click();
 
       // Wait for the chat to load the session
       await page.waitForTimeout(1000);
 
-      // The old message should be visible again - wait for it with multiple strategies
+      // The old message should be visible again
       const chatLog = page.locator('[role="log"]');
       await expect(chatLog).toBeVisible({ timeout: 5000 });
 
-      // Wait for the message text to appear (use first() to avoid strict mode violation)
+      // Verify the message content is loaded
       await page.waitForSelector('text=Message to persist', { timeout: 10000 });
       await expect(chatLog.getByText('Message to persist').first()).toBeVisible({ timeout: 10000 });
     });

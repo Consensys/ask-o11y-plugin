@@ -1,4 +1,4 @@
-import { test, expect, clearPersistedSession } from './fixtures';
+import { test, expect, clearPersistedSession, disableBuiltInMCP } from './fixtures';
 import { ROUTES } from '../src/constants';
 
 test.describe('Error Handling Tests', () => {
@@ -23,6 +23,9 @@ test.describe('Error Handling Tests', () => {
 test.describe('AppConfig Error Handling', () => {
   test('should validate AppConfig inputs with edge cases', async ({ appConfigPage, page }) => {
     void appConfigPage;
+
+    // Disable built-in MCP mode to enable external MCP server configuration
+    await disableBuiltInMCP(page);
 
     await test.step('Handle empty MCP server URL', async () => {
       // Add a server

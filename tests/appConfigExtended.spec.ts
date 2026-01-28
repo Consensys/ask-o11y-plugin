@@ -1,4 +1,4 @@
-import { test, expect } from './fixtures';
+import { test, expect, disableBuiltInMCP } from './fixtures';
 
 test.describe('AppConfig LLM Settings', () => {
   test('should configure LLM settings with complete validation flow', async ({ appConfigPage, page }) => {
@@ -42,6 +42,9 @@ test.describe('AppConfig LLM Settings', () => {
 test.describe('AppConfig MCP Server Management', () => {
   test('should manage MCP server CRUD operations', async ({ appConfigPage, page }) => {
     void appConfigPage;
+
+    // Disable built-in MCP mode to enable external MCP server configuration
+    await disableBuiltInMCP(page);
 
     await test.step('Verify add MCP server button and add new card', async () => {
       const addButton = page.locator('[data-testid="data-testid ac-add-mcp-server"]');
@@ -104,6 +107,9 @@ test.describe('AppConfig MCP Server Management', () => {
 
   test('should configure MCP server advanced options with headers', async ({ appConfigPage, page }) => {
     void appConfigPage;
+
+    // Disable built-in MCP mode to enable external MCP server configuration
+    await disableBuiltInMCP(page);
 
     await test.step('Add server and expand advanced options', async () => {
       const addButton = page.locator('[data-testid="data-testid ac-add-mcp-server"]');

@@ -1,4 +1,4 @@
-import { test, expect } from './fixtures';
+import { test, expect, disableBuiltInMCP } from './fixtures';
 
 test.describe('App Configuration', () => {
   test('should be possible to save app configuration', async ({ appConfigPage, page }) => {
@@ -40,6 +40,9 @@ test.describe('App Configuration', () => {
     // Suppress the appConfigPage unused variable warning
     void appConfigPage;
 
+    // Disable built-in MCP mode to enable external MCP server configuration
+    await disableBuiltInMCP(page);
+
     // Wait for the Add MCP Server button to be visible (page fully loaded) - using test ID
     // Note: testIds include 'data-testid ' prefix in their values
     const addButton = page.locator('[data-testid="data-testid ac-add-mcp-server"]');
@@ -78,6 +81,9 @@ test.describe('App Configuration', () => {
   test('should be able to remove an MCP server', async ({ appConfigPage, page }) => {
     // Suppress the appConfigPage unused variable warning
     void appConfigPage;
+
+    // Disable built-in MCP mode to enable external MCP server configuration
+    await disableBuiltInMCP(page);
 
     // Wait for the Add MCP Server button to be visible (page fully loaded) - using test ID
     // Note: testIds include 'data-testid ' prefix in their values

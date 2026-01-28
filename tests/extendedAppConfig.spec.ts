@@ -1,8 +1,11 @@
-import { test, expect } from './fixtures';
+import { test, expect, disableBuiltInMCP } from './fixtures';
 
 test.describe('Extended App Configuration Tests', () => {
   test('should configure MCP servers with all fields', async ({ appConfigPage, page }) => {
     void appConfigPage;
+
+    // Disable built-in MCP mode to enable external MCP server configuration
+    await disableBuiltInMCP(page);
 
     await test.step('Verify initial token limit and MCP section', async () => {
       // Find the token limit input
@@ -81,6 +84,9 @@ test.describe('Extended App Configuration Tests', () => {
   test('should show validation alert when there are errors', async ({ appConfigPage, page }) => {
     void appConfigPage;
 
+    // Disable built-in MCP mode to enable external MCP server configuration
+    await disableBuiltInMCP(page);
+
     // Add a server
     const addButton = page.locator('[data-testid="data-testid ac-add-mcp-server"]');
     await addButton.click();
@@ -99,6 +105,9 @@ test.describe('Extended App Configuration Tests', () => {
 
   test('should show all server type options', async ({ appConfigPage, page }) => {
     void appConfigPage;
+
+    // Disable built-in MCP mode to enable external MCP server configuration
+    await disableBuiltInMCP(page);
 
     // Add a server
     const addButton = page.locator('[data-testid="data-testid ac-add-mcp-server"]');
