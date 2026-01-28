@@ -568,7 +568,10 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
           <Button
             onClick={onSubmitMCPMode}
             variant="primary"
-            disabled={state.builtInMCPAvailable === null}
+            disabled={
+              state.builtInMCPAvailable === null ||
+              (state.useBuiltInMCP && state.builtInMCPAvailable === false)
+            }
             data-testid={testIds.appConfig.saveMCPModeButton}
           >
             Save MCP Mode

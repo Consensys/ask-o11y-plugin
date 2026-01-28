@@ -21,6 +21,7 @@ export class BuiltInMCPClient {
   private isConnected = false;
   private cachedTools: Tool[] | null = null;
   private connectionError: Error | null = null;
+  private connectionPromise: Promise<void> | null = null;
 
   constructor() {
     // Client will be initialized on-demand
@@ -30,10 +31,30 @@ export class BuiltInMCPClient {
    * Initialize and connect to the built-in MCP server
    */
   private async ensureConnected(): Promise<void> {
+    // Return existing connection if already connected
     if (this.isConnected && this.mcpClient) {
       return;
     }
 
+    // If connection is in progress, wait for it
+    if (this.connectionPromise) {
+      return this.connectionPromise;
+    }
+
+    // Start new connection
+    this.connectionPromise = this.connect();
+
+    try {
+      await this.connectionPromise;
+    } finally {
+      this.connectionPromise = null;
+    }
+  }
+
+  /**
+   * Perform the actual connection (called by ensureConnected)
+   */
+  private async connect(): Promise<void> {
     // Check if MCP is enabled
     const mcpEnabled = await mcp.enabled();
     if (!mcpEnabled) {

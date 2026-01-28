@@ -23,7 +23,7 @@ services:
       GRAFANA_URL: http://grafana:3000
       GRAFANA_USERNAME: admin
       GRAFANA_PASSWORD: admin
-      PORT: 8001
+      PORT: 8000
     command: >
       -t streamable-http --log-level debug --disable-incident	--disable-oncall	--disable-sift	--disable-admin	--disable-asserts	--disable-annotations
     depends_on:

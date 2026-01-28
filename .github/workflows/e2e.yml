@@ -99,7 +99,6 @@ jobs:
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
-          docker compose pull mcp-grafana mcpo troubleshoot || true
           ANONYMOUS_AUTH_ENABLED=false DEVELOPMENT=false docker compose up -d grafana
 
       - name: Wait for Grafana server
