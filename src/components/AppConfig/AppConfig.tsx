@@ -1,8 +1,9 @@
-import React, { ChangeEvent, useState } from 'react';
+import React, { ChangeEvent, useState, useEffect } from 'react';
 import { lastValueFrom } from 'rxjs';
 import { AppPluginMeta, PluginConfigPageProps, PluginMeta } from '@grafana/data';
 import { getBackendSrv } from '@grafana/runtime';
 import { Button, Field, FieldSet, Input, Icon, Switch, Alert, RadioButtonGroup, TextArea, Modal } from '@grafana/ui';
+import { mcp } from '@grafana/llm';
 import { testIds } from '../testIds';
 import { ValidationService } from '../../services/validation';
 import { SYSTEM_PROMPT } from '../Chat/constants';
@@ -14,11 +15,29 @@ const PROMPT_MODE_OPTIONS = [
   { label: 'Append to default prompt', value: 'append' as SystemPromptMode },
 ];
 
+function normalizeHeaderKey(key: string): string {
+  const trimmed = key.trim();
+  if (trimmed.includes('__collision_')) {
+    return trimmed.split('__collision_')[0].trim();
+  }
+  return trimmed;
+}
+
+function getCollisionId(key: string): string | null {
+  if (key.includes('__collision_')) {
+    return key.split('__collision_')[1];
+  }
+  return null;
+}
+
 type State = {
   // Maximum total tokens for LLM requests
   maxTotalTokens: number;
   // MCP server configurations
   mcpServers: MCPServerConfig[];
+  // Built-in MCP configuration
+  useBuiltInMCP: boolean;
+  builtInMCPAvailable: boolean | null; // null = checking, true/false = result
   // System prompt configuration
   systemPromptMode: SystemPromptMode;
   customSystemPrompt: string;
@@ -42,6 +61,8 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
   const [state, setState] = useState<State>({
     maxTotalTokens: jsonData?.maxTotalTokens || 50000,
     mcpServers: jsonData?.mcpServers || [],
+    useBuiltInMCP: jsonData?.useBuiltInMCP ?? false,
+    builtInMCPAvailable: null,
     systemPromptMode: jsonData?.systemPromptMode || 'default',
     customSystemPrompt: jsonData?.customSystemPrompt || '',
     expandedAdvanced: new Set<string>(),
@@ -53,6 +74,21 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
   });
   const [showDefaultPromptModal, setShowDefaultPromptModal] = useState(false);
   const [copySuccess, setCopySuccess] = useState(false);
+
+  // Check built-in MCP availability on mount
+  useEffect(() => {
+    const checkAvailability = async () => {
+      try {
+        const available = await mcp.enabled();
+        setState((prev) => ({ ...prev, builtInMCPAvailable: available }));
+      } catch (error) {
+        console.error('Error checking built-in MCP availability:', error);
+        setState((prev) => ({ ...prev, builtInMCPAvailable: false }));
+      }
+    };
+
+    checkAvailability();
+  }, []);
 
   const isLLMSettingsDisabled = Boolean(!state.maxTotalTokens || state.maxTotalTokens < 1000);
 
@@ -199,62 +235,7 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
     const currentHeaders = server.headers || {};
     const keyOrder = Object.keys(currentHeaders);
 
-    // Helper to normalize a key for comparison (trim and extract base from collision markers)
-    const normalizeKey = (k: string): string => {
-      let normalized = k.trim();
-      if (normalized.includes('__collision_')) {
-        normalized = normalized.split('__collision_')[0].trim();
-      }
-      return normalized;
-    };
-
-    // Helper to extract collision ID from a key, if present
-    const getCollisionId = (k: string): string | null => {
-      if (k.includes('__collision_')) {
-        return k.split('__collision_')[1];
-      }
-      return null;
-    };
-
-    // If key changed
-    let finalKey = newKey;
-    if (oldKey !== newKey) {
-      // Check if newKey would collide with an existing key (excluding the one we're editing)
-      // Normalize keys to catch whitespace variants that would collide after save cleanup
-      const normalizedNewKey = normalizeKey(newKey);
-      const existingKeys = keyOrder.filter((k) => k !== oldKey);
-
-      // Find which existing key(s) would conflict
-      const conflictingKey = existingKeys.find((k) => normalizeKey(k) === normalizedNewKey);
-
-      if (normalizedNewKey && conflictingKey) {
-        // Collision detected - determine stable collision ID
-        let uniquePart: string;
-
-        // Priority for stable collision ID:
-        // 1. If oldKey already has a collision marker, preserve its ID
-        // 2. If the conflicting key has a collision marker, use a paired ID
-        // 3. Otherwise generate a new stable ID based on the entry's identity
-        const oldCollisionId = getCollisionId(oldKey);
-        const conflictingCollisionId = getCollisionId(conflictingKey);
-
-        if (oldCollisionId) {
-          // Preserve existing collision ID when editing a collision-marked entry
-          uniquePart = oldCollisionId;
-        } else if (conflictingCollisionId) {
-          // The other entry is marked - create a paired ID to show these two conflict
-          uniquePart = `pair_${conflictingCollisionId}`;
-        } else if (oldKey.startsWith('__new_header_')) {
-          // Use the new header's unique ID
-          uniquePart = oldKey.replace('__new_header_', '');
-        } else {
-          // Generate new ID based on the key content and timestamp
-          uniquePart = `id_${oldKey.replace(/[^a-zA-Z0-9]/g, '_')}_${Date.now()}`;
-        }
-
-        finalKey = `${newKey}__collision_${uniquePart}`;
-      }
-    }
+    const finalKey = computeFinalHeaderKey(oldKey, newKey, keyOrder);
 
     // Rebuild headers preserving order - replace oldKey with finalKey at the same position
     const newHeaders: Record<string, string> = {};
@@ -267,6 +248,36 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
     }
 
     updateMCPServer(serverId, { headers: newHeaders });
+  };
+
+  const computeFinalHeaderKey = (oldKey: string, newKey: string, existingKeys: string[]): string => {
+    if (oldKey === newKey) {
+      return newKey;
+    }
+
+    const normalizedNewKey = normalizeHeaderKey(newKey);
+    const otherKeys = existingKeys.filter((k) => k !== oldKey);
+    const conflictingKey = otherKeys.find((k) => normalizeHeaderKey(k) === normalizedNewKey);
+
+    if (!normalizedNewKey || !conflictingKey) {
+      return newKey;
+    }
+
+    const oldCollisionId = getCollisionId(oldKey);
+    const conflictingCollisionId = getCollisionId(conflictingKey);
+
+    let uniquePart: string;
+    if (oldCollisionId) {
+      uniquePart = oldCollisionId;
+    } else if (conflictingCollisionId) {
+      uniquePart = `pair_${conflictingCollisionId}`;
+    } else if (oldKey.startsWith('__new_header_')) {
+      uniquePart = oldKey.replace('__new_header_', '');
+    } else {
+      uniquePart = `id_${oldKey.replace(/[^a-zA-Z0-9]/g, '_')}_${Date.now()}`;
+    }
+
+    return `${newKey}__collision_${uniquePart}`;
   };
 
   const removeHeader = (serverId: string, key: string) => {
@@ -366,6 +377,17 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
       jsonData: {
         ...jsonData,
         maxTotalTokens: state.maxTotalTokens,
+      },
+    });
+  };
+
+  const onSubmitMCPMode = () => {
+    updatePluginAndReload(plugin.meta.id, {
+      enabled,
+      pinned,
+      jsonData: {
+        ...jsonData,
+        useBuiltInMCP: state.useBuiltInMCP,
       },
     });
   };
@@ -478,6 +500,71 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
             disabled={isLLMSettingsDisabled || !!validationErrors.maxTotalTokens}
           >
             Save LLM settings
+          </Button>
+        </div>
+      </FieldSet>
+
+      <FieldSet label="MCP Mode" className="mt-4">
+        <p className="text-sm text-secondary mb-3">
+          Choose how to connect to MCP (Model Context Protocol) tools. Built-in mode uses Grafana&apos;s integrated MCP
+          server, while External mode connects to custom MCP servers you configure.
+        </p>
+
+        {state.builtInMCPAvailable === null && (
+          <Alert severity="info" title="Checking availability">
+            Checking if built-in MCP is available...
+          </Alert>
+        )}
+
+        {state.builtInMCPAvailable === false && (
+          <Alert severity="warning" title="Built-in MCP unavailable">
+            The grafana-llm-app plugin is not installed or MCP is not enabled. To use built-in MCP, install and
+            configure grafana-llm-app.
+          </Alert>
+        )}
+
+        <Field
+          label="Use Built-in Grafana MCP"
+          description={
+            state.useBuiltInMCP
+              ? "Enable Grafana's built-in MCP server. Can be used together with external servers below."
+              : 'Using external MCP servers configured below. Built-in MCP is disabled.'
+          }
+          data-testid={testIds.appConfig.useBuiltInMCPField}
+        >
+          <Switch
+            value={state.useBuiltInMCP}
+            onChange={(e) => setState({ ...state, useBuiltInMCP: e.currentTarget.checked })}
+            disabled={state.builtInMCPAvailable === false}
+            data-testid={testIds.appConfig.useBuiltInMCPToggle}
+          />
+        </Field>
+
+        {state.useBuiltInMCP && state.builtInMCPAvailable && !state.mcpServers.some((s) => s.enabled) && (
+          <Alert severity="info" title="Built-in MCP enabled" className="mt-2">
+            Using Grafana&apos;s built-in MCP server with observability tools. You can also configure external servers
+            below - all tools will be available together.
+          </Alert>
+        )}
+
+        {state.useBuiltInMCP && state.builtInMCPAvailable && state.mcpServers.some((s) => s.enabled) && (
+          <Alert severity="success" title="Combined mode active" className="mt-2">
+            Using both built-in Grafana MCP and {state.mcpServers.filter((s) => s.enabled).length} external server(s).
+            All tools available in chat.
+          </Alert>
+        )}
+
+        <div className="mt-3">
+          <Button
+            onClick={onSubmitMCPMode}
+            variant="primary"
+            disabled={
+              state.builtInMCPAvailable === null ||
+              (state.useBuiltInMCP && state.builtInMCPAvailable === false)
+            }
+            data-testid={testIds.appConfig.saveMCPModeButton}
+          >
+            Save MCP Mode
           </Button>
         </div>
       </FieldSet>

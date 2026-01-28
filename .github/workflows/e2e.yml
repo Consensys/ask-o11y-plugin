@@ -99,8 +99,7 @@ jobs:
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
-          docker compose pull mcp-grafana alertmanager mcpo troubleshoot || true
-          ANONYMOUS_AUTH_ENABLED=false DEVELOPMENT=false docker compose up -d grafana
+          docker compose up -d grafana
 
       - name: Wait for Grafana server
         uses: grafana/plugin-actions/wait-for-grafana@main
@@ -112,7 +111,7 @@ jobs:
 
       - name: Run E2E tests with coverage
         id: run-tests
-        run: npm run e2e:coverage -- --workers=2
+        run: npm run e2e:coverage -- --workers=1
 
       - name: Generate coverage report
         if: always()

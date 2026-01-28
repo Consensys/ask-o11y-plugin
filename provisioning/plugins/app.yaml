@@ -1,0 +1,19 @@
+apiVersion: 1
+
+apps:
+  - type: grafana-llm-app
+    org_id: 1
+    jsonData:
+      enableDevSandbox: true
+      provider: anthropic
+      models:
+        default: large
+        mapping:
+          base: claude-haiku-4-5-20251001
+          large: claude-haiku-4-5-20251001
+    secureJsonData:
+      anthropicKey: $LLM_API_KEY
+  - type: consensys-asko11y-app
+    org_id: 1
+    jsonData:
+        useBuiltInMCP: true

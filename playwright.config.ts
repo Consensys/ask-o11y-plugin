@@ -50,6 +50,7 @@ export default defineConfig<PluginOptions>({
       },
       dependencies: ['auth'],
       fullyParallel: false,
+      workers: 1, // Force single worker to avoid storage conflicts between test files
     },
     // 3. Run other tests in parallel
     {

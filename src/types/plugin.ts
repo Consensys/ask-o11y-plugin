@@ -16,4 +16,5 @@ export type AppPluginSettings = {
   customSystemPrompt?: string;
   kioskModeEnabled?: boolean;
   chatPanelPosition?: 'left' | 'right';
+  useBuiltInMCP?: boolean;
 };

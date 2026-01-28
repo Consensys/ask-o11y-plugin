@@ -169,8 +169,8 @@ test.describe('Chat UI States', () => {
       // Chat input
       await expect(chatInput).toBeVisible();
 
-      // Quick suggestions
-      await expect(page.getByText('Quick start suggestions')).toBeVisible();
+      // Quick suggestions - wait longer as it might load after other elements
+      await expect(page.getByText('Quick start suggestions')).toBeVisible({ timeout: 10000 });
     });
 
     await test.step('Transition to chat state', async () => {

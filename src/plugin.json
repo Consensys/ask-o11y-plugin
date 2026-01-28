@@ -84,21 +84,5 @@
         "name": "LLM"
       }
     ]
-  },
-  "iam": {
-    "permissions": [
-      {
-        "action": "datasources:read",
-        "scope": "datasources:*"
-      },
-      {
-        "action": "datasources:query",
-        "scope": "datasources:*"
-      },
-      {
-        "action": "datasources:explore",
-        "scope": "datasources:*"
-      }
-    ]
   }
 }

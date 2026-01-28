@@ -8,6 +8,10 @@ export const testIds = {
     apiUrl: 'data-testid ac-api-url',
     maxTotalTokens: 'data-testid ac-max-total-tokens',
     submit: 'data-testid ac-submit-form',
+    // Built-in MCP test IDs
+    useBuiltInMCPField: 'data-testid ac-use-builtin-mcp-field',
+    useBuiltInMCPToggle: 'data-testid ac-use-builtin-mcp-toggle',
+    saveMCPModeButton: 'data-testid ac-save-mcp-mode',
     // MCP Server test IDs
     addMcpServerButton: 'data-testid ac-add-mcp-server',
     saveMcpServersButton: 'data-testid ac-save-mcp-servers',

@@ -57,9 +57,8 @@ describe('MCPToolsPage utilities', () => {
       if (toolName.startsWith('grafana_')) {
         return 'Grafana';
       }
-      if (toolName.startsWith('alertmanager_')) {
-        return 'Alerting';
-      }
+      // Alerting tools are now part of mcp-grafana (e.g., mcp-grafana_list_alert_rules)
+      // Legacy standalone alertmanager_ prefix no longer used
       return 'Other';
     };
 
@@ -86,8 +85,9 @@ describe('MCPToolsPage utilities', () => {
       expect(getToolCategory('grafana_datasource_list')).toBe('Grafana');
     });
 
-    it('should categorize alertmanager tools as Alerting', () => {
-      expect(getToolCategory('alertmanager_silence')).toBe('Alerting');
+    it('should categorize alerting tools from grafana', () => {
+      expect(getToolCategory('grafana_list_alert_rules')).toBe('Grafana');
+      expect(getToolCategory('grafana_get_alert_group')).toBe('Grafana');
     });
 
     it('should categorize unknown tools as Other', () => {

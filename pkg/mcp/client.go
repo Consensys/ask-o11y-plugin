@@ -58,7 +58,7 @@ func (t *customRoundTripper) RoundTrip(req *http.Request) (*http.Response, error
 		req.Header.Set("X-Grafana-Org-Id", t.orgID)
 	}
 
-	// X-Scope-OrgID: Tenant identifier for multi-tenant systems (Mimir/Cortex/Alertmanager)
+	// X-Scope-OrgID: Tenant identifier for multi-tenant systems (Mimir/Cortex/Loki)
 	// Priority: scopeOrgId (direct value) > orgName (Grafana org name as fallback)
 	if t.scopeOrgId != "" {
 		req.Header.Set("X-Scope-OrgID", t.scopeOrgId)
@@ -939,7 +939,7 @@ func (c *Client) callOpenAPIToolWithContext(toolName string, arguments map[strin
 		req.Header.Set("X-Grafana-Org-Id", orgID)
 	}
 
-	// X-Scope-OrgID: Tenant identifier for multi-tenant systems (Mimir/Cortex/Alertmanager)
+	// X-Scope-OrgID: Tenant identifier for multi-tenant systems (Mimir/Cortex/Loki)
 	// Priority: scopeOrgId (direct value) > orgName (Grafana org name as fallback)
 	if scopeOrgId != "" {
 		req.Header.Set("X-Scope-OrgID", scopeOrgId)
