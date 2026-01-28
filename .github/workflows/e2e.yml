@@ -99,7 +99,7 @@ jobs:
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
-          ANONYMOUS_AUTH_ENABLED=false DEVELOPMENT=false docker compose up -d grafana
+          docker compose up -d grafana
 
       - name: Wait for Grafana server
         uses: grafana/plugin-actions/wait-for-grafana@main

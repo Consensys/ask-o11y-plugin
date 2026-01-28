@@ -1,7 +1,7 @@
 import { AggregatedMCPClient } from '../aggregatedMCPClient';
 import type { BackendMCPClient } from '../backendMCPClient';
 import type { BuiltInMCPClient } from '../builtInMCPClient';
-import type { Tool, CallToolResult } from '@modelcontextprotocol/sdk/types';
+import type { Tool } from '@modelcontextprotocol/sdk/types';
 
 // Mock clients
 const createMockBuiltInClient = (
@@ -164,7 +164,7 @@ describe('AggregatedMCPClient', () => {
         {
           name: 'query_prometheus',
           description: 'Backend Prometheus',
-          inputSchema: { type: 'object' },
+          inputSchema: { type: 'object' } as const,
         },
       ];
 
@@ -343,7 +343,10 @@ describe('AggregatedMCPClient', () => {
         arguments: { query: 'up' },
       });
       expect(backendClient.callTool).not.toHaveBeenCalled();
-      expect(result.content[0].text).toContain('Built-in result');
+      expect(result.content[0]).toHaveProperty('type', 'text');
+      if (result.content[0].type === 'text') {
+        expect(result.content[0].text).toContain('Built-in result');
+      }
     });
 
     it('should route backend tools to backendClient', async () => {
@@ -357,7 +360,10 @@ describe('AggregatedMCPClient', () => {
         arguments: { query: '{job="varlogs"}' },
       });
       expect(builtInClient.callTool).not.toHaveBeenCalled();
-      expect(result.content[0].text).toContain('Backend result');
+      expect(result.content[0]).toHaveProperty('type', 'text');
+      if (result.content[0].type === 'text') {
+        expect(result.content[0].text).toContain('Backend result');
+      }
     });
 
     it('should pass tool names as-is (no manipulation)', async () => {
@@ -394,7 +400,10 @@ describe('AggregatedMCPClient', () => {
       });
 
       expect(result.isError).toBe(true);
-      expect(result.content[0].text).toContain('not available');
+      expect(result.content[0]).toHaveProperty('type', 'text');
+      if (result.content[0].type === 'text') {
+        expect(result.content[0].text).toContain('not available');
+      }
       expect(builtInClient.callTool).not.toHaveBeenCalled();
       expect(backendClient.callTool).not.toHaveBeenCalled();
     });
@@ -408,7 +417,10 @@ describe('AggregatedMCPClient', () => {
       });
 
       expect(result.isError).toBe(true);
-      expect(result.content[0].text).toContain('Error calling tool');
+      expect(result.content[0]).toHaveProperty('type', 'text');
+      if (result.content[0].type === 'text') {
+        expect(result.content[0].text).toContain('Error calling tool');
+      }
     });
   });
 

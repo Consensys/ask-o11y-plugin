@@ -59,7 +59,7 @@ export class AggregatedMCPClient {
       return this.cachedTools;
     }
 
-    const promises: Promise<Tool[]>[] = [];
+    const promises: Array<Promise<Tool[]>> = [];
 
     if (this.useBuiltIn) {
       promises.push(this.builtInClient.listTools());
@@ -208,7 +208,7 @@ export class AggregatedMCPClient {
    * Get aggregated health status from both sources
    */
   async getHealth(): Promise<{ status: string; mcpServers: number; message: string }> {
-    const promises: Promise<{ status: string; mcpServers: number; message: string }>[] = [];
+    const promises: Array<Promise<{ status: string; mcpServers: number; message: string }>> = [];
 
     if (this.useBuiltIn) {
       promises.push(this.builtInClient.getHealth());
