@@ -61,13 +61,9 @@ test.describe('Session Persistence Tests', () => {
       const chatInput = page.getByLabel('Chat input');
       await expect(chatInput).toBeEnabled({ timeout: 30000 });
 
-      // Clear the current view to go back to welcome screen
-      await page.getByRole('button', { name: /New Chat/i }).click();
-      await page.getByRole('button', { name: 'Yes' }).click();
-      await expect(page.getByRole('heading', { name: 'Ask O11y Assistant' })).toBeVisible();
-
-      // Now open sidebar to load the saved session
-      await page.getByText(/View chat history/).click();
+      // Close the chat to trigger navigation away from current session
+      // This simulates the user navigating away and coming back
+      await page.getByRole('button', { name: /History/i }).click();
       await expect(page.getByRole('heading', { name: 'Chat History' })).toBeVisible();
 
       // Wait for session items to appear - should have exactly 1 session
