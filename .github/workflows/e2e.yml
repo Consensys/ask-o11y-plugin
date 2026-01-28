@@ -112,7 +112,7 @@ jobs:
 
       - name: Run E2E tests with coverage
         id: run-tests
-        run: npm run e2e:coverage -- --workers=2
+        run: npm run e2e:coverage -- --workers=1
 
       - name: Generate coverage report
         if: always()
