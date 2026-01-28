@@ -341,9 +341,12 @@ npm run server
 
 ### Development Workflow
 
-**Frontend Development (with hot reload):**
+**Full Development Environment (with hot reload):**
 ```bash
-npm run dev
+npm run server
+# Starts Docker stack with Grafana + MCP servers + Redis + Alertmanager
+# Frontend changes auto-reload via Docker volume mounts
+# Backend changes require rebuild (see below)
 ```
 
 **Backend Development:**

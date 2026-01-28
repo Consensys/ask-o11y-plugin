@@ -372,13 +372,14 @@ Want to contribute or customize the plugin? See the development documentation:
 npm install
 
 # Start development environment
-npm run dev              # Frontend with hot reload
-npm run server           # Full Docker stack (Grafana + MCP servers)
+npm run server           # Full Docker stack with hot reload (Grafana + MCP servers + Redis + Alertmanager)
 
 # Build
-npm run build            # Full build (frontend + backend)
-npm run build:frontend   # Frontend only
-mage build               # Backend only
+npm run build       # Full production build (frontend + backend all platforms)
+npm run build:frontend:prod  # Frontend production build only
+npm run build:backend    # Backend for current platform
+mage build               # Backend for current platform (alternative)
+mage buildAll            # Backend for all platforms
 
 # Test
 npm test                 # Frontend tests

@@ -162,17 +162,19 @@ export function SharedSession() {
 
   return (
     <div className="min-h-full w-full flex flex-col">
-      <div className="bg-primary/10 border-b border-primary/20 p-2">
-        <div className="flex items-center justify-between">
-          <div>
-            <h2 className="text-sm font-semibold text-primary">Viewing Shared Session</h2>
-            <p className="text-xs text-secondary mt-0.5">
+      <div className="bg-primary/10 border-b border-primary/20 px-3 py-2 flex-shrink-0 flex-grow-0">
+        <div className="flex items-center justify-between gap-4 max-w-full">
+          <div className="flex-1 min-w-0">
+            <h2 className="text-sm font-semibold text-primary truncate">Viewing Shared Session</h2>
+            <p className="text-xs text-secondary mt-0.5 truncate">
               This is a shared session. You can view it or import it to your account.
             </p>
           </div>
-          <Button variant="primary" size="sm" onClick={handleImport} disabled={importing}>
-            {importing ? 'Importing...' : 'Import as New Session'}
-          </Button>
+          <div className="flex-shrink-0">
+            <Button variant="primary" size="sm" onClick={handleImport} disabled={importing}>
+              {importing ? 'Importing...' : 'Import as New Session'}
+            </Button>
+          </div>
         </div>
       </div>
       <div className="flex-1 flex flex-col min-h-0">

@@ -283,8 +283,9 @@
  * Purpose: Prevent scene wrappers from overflowing viewport (they start at y=40 due to header)
  * Using calc(100vh - 40px) instead of 100% to account for the Grafana header positioning
  * Target ONLY the direct parent container using direct child selector (>)
+ * Scoped to plugin's split layout to avoid interfering with Grafana's native split view
  */
-div:has(> [data-scene-container="chat"]) {
+[data-plugin-split-layout] div:has(> [data-scene-container="chat"]) {
   max-height: calc(100vh - 40px) !important;
   overflow: hidden !important;
 }
@@ -305,8 +306,9 @@ div:has(> [data-scene-container="chat"]) {
  * Purpose: Completely hide the GrafanaPageScene pane when side panel is closed
  * This allows the scene to always exist without taking up visual space
  * Target the parent wrapper div that contains the hidden child
+ * Scoped to plugin's split layout to avoid interfering with Grafana's native split view
  */
-div:has(> div[style*="display: none"]) {
+[data-plugin-split-layout] div:has(> div[style*="display: none"]) {
   width: 0 !important;
   min-width: 0 !important;
   max-width: 0 !important;
@@ -317,16 +319,18 @@ div:has(> div[style*="display: none"]) {
 /* Hide separator when any sibling pane is hidden (both positions)
  * Use descendant selector (space) instead of child (>) to handle any nesting depth
  * This accounts for SceneComponentWrapper or other intermediate elements
+ * Scoped to plugin's split layout to avoid interfering with Grafana's native split view
  */
-div:has(> div div[style*="display: none"]) > div[role="separator"] {
+[data-plugin-split-layout] div:has(> div div[style*="display: none"]) > div[role="separator"] {
   display: none !important;
 }
 
 /* Expand visible pane to full width when sibling pane is hidden (both positions)
  * Use descendant selector to handle any nesting depth (SceneComponentWrapper, etc.)
  * Target panes that don't contain a hidden div and aren't the separator
+ * Scoped to plugin's split layout to avoid interfering with Grafana's native split view
  */
-div:has(> div div[style*="display: none"]) > div:not(:has(div[style*="display: none"])):not([role="separator"]) {
+[data-plugin-split-layout] div:has(> div div[style*="display: none"]) > div:not(:has(div[style*="display: none"])):not([role="separator"]) {
   flex: 1 1 auto !important;
   max-width: 100% !important;
 }

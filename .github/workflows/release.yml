@@ -26,7 +26,7 @@ jobs:
       - uses: grafana/plugin-actions/build-plugin@main # zizmor: ignore[unpinned-uses] provided by grafana
         with:
           node-version: '22'
-          go-version: '1.24'
+          go-version: '1.25'
           attestation: true # Enable build provenance attestation
           # Plugin signing enabled with Grafana Access Policy token
           # (For more info see https://grafana.com/developers/plugin-tools/publish-a-plugin/sign-a-plugin#generate-an-access-policy-token)

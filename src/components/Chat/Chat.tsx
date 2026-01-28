@@ -62,7 +62,9 @@ function ChatComponent({ pluginSettings, readOnly = false, initialSession }: Cha
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const visiblePageRefs = detectedPageRefs.filter((ref) => !removedTabUrls.has(ref.url));
+  const visiblePageRefs = detectedPageRefs
+    .filter((ref) => !removedTabUrls.has(ref.url))
+    .slice(-4);
 
   const handleRemoveTab = useCallback(
     (index: number) => {
@@ -172,7 +174,7 @@ function ChatComponent({ pluginSettings, readOnly = false, initialSession }: Cha
       }}
     >
       {chatScene && (
-        <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+        <div data-plugin-split-layout style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
           <chatScene.Component model={chatScene} />
         </div>
       )}
