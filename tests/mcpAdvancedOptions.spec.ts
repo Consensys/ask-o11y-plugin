@@ -1,4 +1,4 @@
-import { test, expect, disableBuiltInMCP } from './fixtures';
+import { test, expect } from './fixtures';
 import { testIds } from '../src/components/testIds';
 
 test.describe('MCP Server Advanced Options', () => {
@@ -6,7 +6,6 @@ test.describe('MCP Server Advanced Options', () => {
     void appConfigPage;
 
     // Disable built-in MCP mode to enable external MCP server configuration
-    await disableBuiltInMCP(page);
 
     // Wait for the Add MCP Server button to be visible (page fully loaded)
     const addButton = page.locator('[data-testid="data-testid ac-add-mcp-server"]');

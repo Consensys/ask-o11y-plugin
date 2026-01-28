@@ -1,9 +1,10 @@
-import { useState, useCallback, useEffect, useRef } from 'react';
+import { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import { useAsync } from 'react-use';
 import { llm, mcp } from '@grafana/llm';
 import { CallToolResultSchema } from '@modelcontextprotocol/sdk/types';
 import { backendMCPClient } from '../../../services/backendMCPClient';
 import { builtInMCPClient } from '../../../services/builtInMCPClient';
+import { AggregatedMCPClient } from '../../../services/aggregatedMCPClient';
 import { toolRequestQueue } from '../../../services/queue';
 import { RenderedToolCall } from '../types';
 import { usePluginJsonData } from '../../../hooks/usePluginJsonData';
@@ -18,7 +19,32 @@ export const useMCPManager = () => {
   // Determine which MCP client to use based on plugin settings
   const pluginSettings = usePluginJsonData();
   const useBuiltInMCP = pluginSettings?.useBuiltInMCP ?? false;
-  const mcpClient = useBuiltInMCP ? builtInMCPClient : backendMCPClient;
+  const hasExternalServers = pluginSettings?.mcpServers?.some((s) => s.enabled) ?? false;
+
+  // Select appropriate MCP client based on configuration
+  const mcpClient = useMemo(() => {
+    if (useBuiltInMCP && hasExternalServers) {
+      // Combined mode: use aggregated client
+      console.log('[useMCPManager] Using combined mode (built-in + external)');
+      return new AggregatedMCPClient({
+        builtInClient: builtInMCPClient,
+        backendClient: backendMCPClient,
+        useBuiltIn: true,
+        useBackend: true,
+      });
+    } else if (useBuiltInMCP) {
+      // Built-in only
+      console.log('[useMCPManager] Using built-in MCP only');
+      return builtInMCPClient;
+    } else {
+      // External only (or neither)
+      console.log('[useMCPManager] Using backend MCP only');
+      return backendMCPClient;
+    }
+  }, [useBuiltInMCP, hasExternalServers]);
+
+  // Determine mode for logging
+  const mcpMode = useBuiltInMCP && hasExternalServers ? 'combined' : useBuiltInMCP ? 'built-in' : 'backend';
 
   // Cleanup on unmount
   useEffect(() => {
@@ -32,10 +58,15 @@ export const useMCPManager = () => {
       }
       // Disconnect built-in MCP client if used
       if (useBuiltInMCP) {
-        builtInMCPClient.disconnect();
+        if (mcpClient instanceof AggregatedMCPClient) {
+          // Aggregated client handles cleanup internally
+          mcpClient.disconnect();
+        } else {
+          builtInMCPClient.disconnect();
+        }
       }
     };
-  }, [useBuiltInMCP]);
+  }, [useBuiltInMCP, mcpClient]);
 
   const clearToolCalls = useCallback(() => {
     setToolCalls(new Map());
@@ -46,19 +77,22 @@ export const useMCPManager = () => {
       // Get tools from the selected MCP client
       const tools = await mcpClient.listTools();
 
-      console.log(
-        '[useMCPManager] Available tools from',
-        useBuiltInMCP ? 'built-in' : 'backend',
-        'MCP:',
-        tools.length
-      );
+      console.log('[useMCPManager] Available tools from', mcpMode, 'MCP:', tools.length);
+
+      // Log statistics if using aggregated client
+      if (mcpClient instanceof AggregatedMCPClient) {
+        const stats = mcpClient.getStats();
+        console.log(
+          `[useMCPManager] Combined mode stats - Built-in: ${stats.builtInTools}, Backend: ${stats.backendTools}, Total: ${stats.totalTools}`
+        );
+      }
 
       return { tools };
     } catch (error) {
       console.error('Error fetching tools:', error);
       return { tools: [] };
     }
-  }, [mcpClient, useBuiltInMCP]);
+  }, [mcpClient, mcpMode]);
 
   const handleToolCall = useCallback(
     async (toolCall: { function: { name: string; arguments: string }; id: string }, messages: llm.Message[]) => {
@@ -75,12 +109,7 @@ export const useMCPManager = () => {
       const toolCallPromise = toolRequestQueue
         .add(
           async () => {
-            console.log(
-              '[useMCPManager] Calling',
-              useBuiltInMCP ? 'built-in' : 'backend',
-              'MCP tool:',
-              f.name
-            );
+            console.log('[useMCPManager] Calling', mcpMode, 'MCP tool:', f.name);
 
             const response = await mcpClient.callTool({ name: f.name, arguments: args });
             if (!response) {
@@ -122,7 +151,8 @@ export const useMCPManager = () => {
             setToolCalls((prev) => new Map(prev).set(id, { ...prev.get(id)!, running: false, error: errorMessage }));
           }
 
-          throw error; // Re-throw for tracking
+          // Don't re-throw to avoid unhandled rejection
+          return null;
         });
 
       // Track the promise
@@ -136,7 +166,7 @@ export const useMCPManager = () => {
       // Wait for the tool call to complete
       await toolCallPromise;
     },
-    [mcpClient, useBuiltInMCP]
+    [mcpClient, mcpMode]
   );
 
   const handleToolCalls = useCallback(
@@ -182,5 +212,6 @@ export const useMCPManager = () => {
     getAvailableTools,
     // Expose which mode is active for debugging
     usingBuiltInMCP: useBuiltInMCP,
+    mcpMode, // 'builtin', 'backend', or 'combined'
   };
 };

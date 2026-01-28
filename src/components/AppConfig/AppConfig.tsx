@@ -537,7 +537,7 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
           label="Use Built-in Grafana MCP"
           description={
             state.useBuiltInMCP
-              ? "Using Grafana's built-in MCP server. External MCP servers below will be disabled."
+              ? "Enable Grafana's built-in MCP server. Can be used together with external servers below."
               : 'Using external MCP servers configured below. Built-in MCP is disabled.'
           }
           data-testid={testIds.appConfig.useBuiltInMCPField}
@@ -552,8 +552,15 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
 
         {state.useBuiltInMCP && state.builtInMCPAvailable && (
           <Alert severity="info" title="Built-in MCP enabled" className="mt-2">
-            Using Grafana&apos;s built-in MCP server with observability tools. External MCP servers configured below
-            will be ignored while this mode is active.
+            Using Grafana&apos;s built-in MCP server with observability tools. You can also configure external servers
+            below - all tools will be available together.
+          </Alert>
+        )}
+
+        {state.useBuiltInMCP && state.builtInMCPAvailable && state.mcpServers.some((s) => s.enabled) && (
+          <Alert severity="success" title="Combined mode active" className="mt-2">
+            Using both built-in Grafana MCP and {state.mcpServers.filter((s) => s.enabled).length} external server(s).
+            All tools available in chat.
           </Alert>
         )}
 
@@ -570,20 +577,13 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
       </FieldSet>
 
       <FieldSet label="MCP Server Connections" className="mt-4">
-        {state.useBuiltInMCP && (
-          <Alert severity="info" title="External MCP servers disabled" className="mb-3">
-            External MCP server configuration is disabled while built-in MCP mode is active. Switch to external mode
-            above to configure custom MCP servers.
-          </Alert>
-        )}
-
         <p className="text-sm text-secondary mb-3">
           Configure additional MCP (Model Context Protocol) servers to extend tool capabilities. Supports OpenAPI-based
           servers like{' '}
           <a href="https://github.com/open-webui/mcpo" target="_blank" rel="noopener noreferrer">
             MCPO
           </a>
-          .{state.useBuiltInMCP && ' (Currently disabled - built-in MCP mode is active)'}
+          .
         </p>
 
         {state.mcpServers.map((server) => (
@@ -605,14 +605,12 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
                 <Switch
                   value={server.enabled}
                   onChange={(e) => updateMCPServer(server.id, { enabled: e.currentTarget.checked })}
-                  disabled={state.useBuiltInMCP}
                 />
                 <Button
                   variant="secondary"
                   size="sm"
                   icon="trash-alt"
                   onClick={() => removeMCPServer(server.id)}
-                  disabled={state.useBuiltInMCP}
                   data-testid={testIds.appConfig.mcpServerRemoveButton(server.id)}
                 >
                   Remove
@@ -631,7 +629,6 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
                 placeholder="My MCP Server"
                 onChange={(e) => updateMCPServer(server.id, { name: e.currentTarget.value })}
                 invalid={!!validationErrors.mcpServers[server.id]?.name}
-                disabled={state.useBuiltInMCP}
                 data-testid={testIds.appConfig.mcpServerNameInput(server.id)}
               />
             </Field>
@@ -648,7 +645,6 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
                 placeholder="https://mcp-server.example.com"
                 onChange={(e) => updateMCPServer(server.id, { url: e.currentTarget.value })}
                 invalid={!!validationErrors.mcpServers[server.id]?.url}
-                disabled={state.useBuiltInMCP}
                 data-testid={testIds.appConfig.mcpServerUrlInput(server.id)}
               />
             </Field>
@@ -662,7 +658,6 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
                     type: e.target.value as 'openapi' | 'standard' | 'sse' | 'streamable-http',
                   })
                 }
-                disabled={state.useBuiltInMCP}
                 style={{ width: '240px', height: '32px' }}
               >
                 <option value="openapi">OpenAPI</option>
@@ -679,7 +674,6 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
                 onClick={() => toggleAdvancedOptions(server.id)}
                 className="flex items-center gap-1 text-sm cursor-pointer bg-transparent border-none p-0"
                 style={{ color: 'var(--grafana-text-link)' }}
-                disabled={state.useBuiltInMCP}
                 data-testid={testIds.appConfig.mcpServerAdvancedToggle(server.id)}
               >
                 <Icon name={state.expandedAdvanced.has(server.id) ? 'angle-down' : 'angle-right'} />
@@ -733,16 +727,14 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
                           onChange={(e) => updateHeader(server.id, key, e.currentTarget.value, value)}
                           data-testid={testIds.appConfig.mcpServerHeaderKeyInput(server.id, index)}
                           invalid={hasCollision}
-                          disabled={state.useBuiltInMCP}
-                        />
+                                />
                         <Input
                           width={30}
                           value={value}
                           placeholder="Header value"
                           onChange={(e) => updateHeader(server.id, key, key, e.currentTarget.value)}
                           data-testid={testIds.appConfig.mcpServerHeaderValueInput(server.id, index)}
-                          disabled={state.useBuiltInMCP}
-                        />
+                                />
                         <Button
                           variant="secondary"
                           size="sm"
@@ -750,8 +742,7 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
                           onClick={() => removeHeader(server.id, key)}
                           data-testid={testIds.appConfig.mcpServerHeaderRemoveButton(server.id, index)}
                           aria-label="Remove header"
-                          disabled={state.useBuiltInMCP}
-                        />
+                                />
                       </div>
                       {hasCollision && (
                         <span className="text-xs mt-1 block" style={{ color: 'var(--grafana-text-error)' }}>
@@ -782,7 +773,7 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
                       size="sm"
                       icon="plus"
                       onClick={() => addHeader(server.id)}
-                      disabled={state.useBuiltInMCP || hasIncompleteHeader}
+                      disabled={hasIncompleteHeader}
                       data-testid={testIds.appConfig.mcpServerAddHeaderButton(server.id)}
                     >
                       Add Header
@@ -798,7 +789,6 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
           variant="secondary"
           icon="plus"
           onClick={addMCPServer}
-          disabled={state.useBuiltInMCP}
           data-testid={testIds.appConfig.addMcpServerButton}
         >
           Add MCP Server
@@ -813,7 +803,7 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
           <Button
             onClick={onSubmitMCPServers}
             variant="primary"
-            disabled={state.useBuiltInMCP || Object.keys(validationErrors.mcpServers).length > 0}
+            disabled={Object.keys(validationErrors.mcpServers).length > 0}
             data-testid={testIds.appConfig.saveMcpServersButton}
           >
             Save MCP Server Connections

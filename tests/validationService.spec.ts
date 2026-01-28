@@ -1,4 +1,4 @@
-import { test, expect, disableBuiltInMCP } from './fixtures';
+import { test, expect } from './fixtures';
 
 test.describe('Validation Service via UI', () => {
   test('should validate token limit with min/max/valid values', async ({ appConfigPage, page }) => {
@@ -40,7 +40,6 @@ test.describe('Validation Service via UI', () => {
     void appConfigPage;
 
     // Disable built-in MCP mode to enable external MCP server configuration
-    await disableBuiltInMCP(page);
 
     // Add a server
     const addButton = page.locator('[data-testid="data-testid ac-add-mcp-server"]');
@@ -63,7 +62,6 @@ test.describe('Validation Service via UI', () => {
     void appConfigPage;
 
     // Disable built-in MCP mode to enable external MCP server configuration
-    await disableBuiltInMCP(page);
 
     // Add a server
     const addButton = page.locator('[data-testid="data-testid ac-add-mcp-server"]');
@@ -156,7 +154,6 @@ test.describe('Validation Service via UI', () => {
     void appConfigPage;
 
     // Disable built-in MCP mode to enable external MCP server configuration
-    await disableBuiltInMCP(page);
 
     // Add a server
     const addButton = page.locator('[data-testid="data-testid ac-add-mcp-server"]');

@@ -74,9 +74,6 @@ export async function clearPersistedSession(page: Page) {
   const chatInput = page.getByLabel('Chat input');
   await chatInput.waitFor({ state: 'visible', timeout: 5000 }).catch(() => {});
 
-  // Wait a bit for the page to fully render
-  await page.waitForTimeout(500);
-
   // Delete all existing sessions first to ensure a clean slate
   await deleteAllPersistedSessions(page);
 
@@ -130,8 +127,8 @@ export async function deleteAllPersistedSessions(page: Page) {
   // Wait for sidebar to open
   await page.getByRole('heading', { name: 'Chat History' }).waitFor({ state: 'visible', timeout: 5000 }).catch(() => {});
 
-  // Find all session items
-  const sessionItems = page.locator('.p-1\\.5.rounded.group');
+  // Find all session items using data-testid
+  const sessionItems = page.getByTestId('session-item');
   let sessionCount = await sessionItems.count();
   
   // If no sessions, we're done
@@ -141,22 +138,18 @@ export async function deleteAllPersistedSessions(page: Page) {
     if (await closeButton.isVisible({ timeout: 1000 }).catch(() => false)) {
       await closeButton.click();
     }
-    await page.waitForTimeout(300);
     return;
   }
 
   // Use "Clear All History" button if available (more efficient)
   const clearAllButton = page.getByRole('button', { name: /Clear All History/i });
   if (await clearAllButton.isVisible({ timeout: 2000 }).catch(() => false)) {
-    // Set up dialog handler before clicking
-    const dialogPromise = page.waitForEvent('dialog');
-    await clearAllButton.click();
+    // Set up dialog handler BEFORE clicking to avoid race condition
+    // Use page.once to auto-accept the confirm dialog
+    page.once('dialog', dialog => dialog.accept());
 
-    // Wait for and accept the dialog
-    const dialog = await dialogPromise.catch(() => null);
-    if (dialog) {
-      await dialog.accept();
-    }
+    // Click the button - the dialog will be auto-accepted
+    await clearAllButton.click();
 
     // Wait for sessions to be deleted - check that session count becomes 0
     await page.waitForFunction(
@@ -164,14 +157,14 @@ export async function deleteAllPersistedSessions(page: Page) {
         const items = document.querySelectorAll('[data-testid="session-item"]');
         return items.length === 0;
       },
-      { timeout: 5000 }
+      { timeout: 10000 }
     ).catch(() => {
       // If timeout, log warning but continue (sessions might already be deleted)
       console.warn('[deleteAllPersistedSessions] Timeout waiting for sessions to clear');
     });
 
-    // Additional wait to ensure storage is updated
-    await page.waitForTimeout(500);
+    // Wait for storage operations to complete
+    await page.waitForTimeout(1000);
   } else {
     // Fallback: delete sessions one by one (limited to prevent timeouts)
     let maxIterations = Math.min(sessionCount, 10); // Limit to 10 deletions max
@@ -184,7 +177,6 @@ export async function deleteAllPersistedSessions(page: Page) {
 
       // Hover to reveal delete button
       await sessionItem.hover();
-      await page.waitForTimeout(200);
 
       // Look for delete button - try icon button first
       const deleteButton = sessionItem
@@ -195,8 +187,8 @@ export async function deleteAllPersistedSessions(page: Page) {
 
       if (await deleteButton.isVisible({ timeout: 1000 }).catch(() => false)) {
         await deleteButton.click();
-        // Wait for deletion confirmation if needed, then wait for UI update
-        await page.waitForTimeout(500);
+        // Wait for UI update after deletion
+        await page.waitForTimeout(300);
         
         // Re-count sessions after deletion
         const newCount = await sessionItems.count();
@@ -216,16 +208,15 @@ export async function deleteAllPersistedSessions(page: Page) {
   const closeButton = page.locator('button[title="Close"]');
   if (await closeButton.isVisible().catch(() => false)) {
     await closeButton.click();
+    // Wait for sidebar to fully close
+    await page.getByRole('heading', { name: 'Chat History' }).waitFor({ state: 'hidden', timeout: 2000 }).catch(() => {});
   } else {
-    // Fallback: try clicking the backdrop (the overlay div)
-    const backdrop = page.locator('.fixed.inset-0 > div.absolute.inset-0').first();
-    if (await backdrop.isVisible().catch(() => false)) {
-      await backdrop.click();
+    // Fallback: try clicking outside the sidebar to close it
+    const chatInput = page.getByLabel('Chat input');
+    if (await chatInput.isVisible().catch(() => false)) {
+      await chatInput.click().catch(() => {});
     }
   }
-
-  // Wait for sidebar to close
-  await page.waitForTimeout(500);
 }
 
 /**
@@ -267,56 +258,13 @@ export async function resetRateLimits() {
 
 /**
  * Helper function to disable built-in MCP mode if it's enabled.
- * This ensures external MCP server configuration is available for tests.
- * Should be called before tests that need to add/configure MCP servers.
+ *
+ * @deprecated This function is no longer needed since combined mode is now supported.
+ * External MCP servers can be configured even when built-in MCP is enabled.
+ * Kept for backward compatibility with existing tests.
  */
-export async function disableBuiltInMCP(page: Page) {
-  // Navigate to AppConfig page
-  await page.goto('/plugins/consensys-asko11y-app');
-
-  // Wait for the page to load
-  await page.waitForTimeout(500);
-
-  // Check if the built-in MCP toggle exists and is checked
-  const toggle = page.locator('[data-testid="data-testid ac-use-builtin-mcp-toggle"]');
-
-  // Wait for toggle to be visible
-  await toggle.waitFor({ state: 'visible', timeout: 5000 }).catch(() => {
-    console.log('[disableBuiltInMCP] Toggle not found - may already be in external mode');
-  });
-
-  const isToggleVisible = await toggle.isVisible().catch(() => false);
-
-  if (isToggleVisible) {
-    // Check if it's currently enabled (checked)
-    const isEnabled = await toggle.isChecked().catch(() => false);
-
-    if (isEnabled) {
-      // Toggle it off to enable external MCP server configuration
-      // Use force: true to click through any overlapping elements
-      await toggle.click({ force: true });
-
-      // Wait a bit for the state to update
-      await page.waitForTimeout(500);
-
-      // Save the MCP mode setting
-      const saveMCPModeButton = page.locator('[data-testid="data-testid ac-save-mcp-mode"]');
-      if (await saveMCPModeButton.isVisible().catch(() => false)) {
-        await saveMCPModeButton.click();
-        await page.waitForTimeout(1000); // Wait for save to complete
-      }
-
-      // Verify the toggle is now off
-      const isStillEnabled = await toggle.isChecked().catch(() => false);
-      if (isStillEnabled) {
-        throw new Error('[disableBuiltInMCP] Failed to disable built-in MCP mode');
-      }
-    }
-  }
-
-  // Verify that the "Add MCP Server" button is now enabled
-  const addButton = page.locator('[data-testid="data-testid ac-add-mcp-server"]');
-  const { expect } = await import('@grafana/plugin-e2e');
-  await expect(addButton).toBeEnabled({ timeout: 5000 });
+export async function disableBuiltInMCP(_page: Page) {
+  // No-op: External MCP configuration is now always available (combined mode supported)
+  console.log('[disableBuiltInMCP] Skipped: External MCP is always available (combined mode)');
 }
 
