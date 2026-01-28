@@ -124,8 +124,14 @@ export async function deleteAllPersistedSessions(page: Page) {
     }
   }
 
-  // Wait for sidebar to open
-  await page.getByRole('heading', { name: 'Chat History' }).waitFor({ state: 'visible', timeout: 5000 }).catch(() => {});
+  // Wait for sidebar to open - MUST succeed or we can't delete sessions
+  const sidebarHeading = page.getByRole('heading', { name: 'Chat History' });
+  const sidebarOpened = await sidebarHeading.isVisible({ timeout: 5000 }).catch(() => false);
+
+  if (!sidebarOpened) {
+    console.warn('[deleteAllPersistedSessions] Could not open sidebar - skipping deletion');
+    return;
+  }
 
   // Find all session items using data-testid
   const sessionItems = page.getByTestId('session-item');
@@ -152,19 +158,26 @@ export async function deleteAllPersistedSessions(page: Page) {
     await clearAllButton.click();
 
     // Wait for sessions to be deleted - check that session count becomes 0
-    await page.waitForFunction(
+    const deletionSucceeded = await page.waitForFunction(
       () => {
         const items = document.querySelectorAll('[data-testid="session-item"]');
         return items.length === 0;
       },
       { timeout: 10000 }
-    ).catch(() => {
-      // If timeout, log warning but continue (sessions might already be deleted)
-      console.warn('[deleteAllPersistedSessions] Timeout waiting for sessions to clear');
-    });
+    ).then(() => true).catch(() => false);
+
+    if (!deletionSucceeded) {
+      console.warn('[deleteAllPersistedSessions] Timeout waiting for sessions to clear - sessions may not be deleted');
+    }
 
     // Wait for storage operations to complete
     await page.waitForTimeout(1000);
+
+    // Verify deletion succeeded
+    const remainingSessionsAfterDelete = await page.getByTestId('session-item').count();
+    if (remainingSessionsAfterDelete > 0) {
+      console.error(`[deleteAllPersistedSessions] Failed to delete all sessions - ${remainingSessionsAfterDelete} sessions remaining`);
+    }
   } else {
     // Fallback: delete sessions one by one (limited to prevent timeouts)
     let maxIterations = Math.min(sessionCount, 10); // Limit to 10 deletions max
@@ -209,9 +222,13 @@ export async function deleteAllPersistedSessions(page: Page) {
   if (await closeButton.isVisible().catch(() => false)) {
     await closeButton.click();
     // Wait for sidebar to fully close
-    await page.getByRole('heading', { name: 'Chat History' }).waitFor({ state: 'hidden', timeout: 2000 }).catch(() => {});
+    const sidebarClosed = await page.getByRole('heading', { name: 'Chat History' }).isVisible({ timeout: 2000 }).then(() => false).catch(() => true);
+    if (!sidebarClosed) {
+      console.warn('[deleteAllPersistedSessions] Sidebar did not close properly');
+    }
   } else {
     // Fallback: try clicking outside the sidebar to close it
+    console.warn('[deleteAllPersistedSessions] Close button not found, trying fallback method');
     const chatInput = page.getByLabel('Chat input');
     if (await chatInput.isVisible().catch(() => false)) {
       await chatInput.click().catch(() => {});
