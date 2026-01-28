@@ -1,19 +1,29 @@
 import { test, expect } from './fixtures';
+import type { Page } from '@playwright/test';
+
+/**
+ * Ensure built-in MCP is enabled, clicking the toggle and saving if needed.
+ */
+async function ensureBuiltInMCPEnabled(page: Page, shouldReload = false): Promise<void> {
+  const builtInToggle = page.locator('[data-testid="data-testid ac-use-builtin-mcp-toggle"]');
+  const isBuiltInEnabled = await builtInToggle.isChecked().catch(() => false);
+
+  if (!isBuiltInEnabled) {
+    await builtInToggle.click();
+    const saveMCPModeButton = page.locator('[data-testid="data-testid ac-save-mcp-mode"]');
+    await saveMCPModeButton.click();
+    await page.waitForTimeout(1000);
+    if (shouldReload) {
+      await page.reload();
+    }
+  }
+}
 
 test.describe('Combined MCP Mode', () => {
   test('should allow configuring external servers with built-in MCP enabled', async ({ appConfigPage, page }) => {
     void appConfigPage;
 
-    // Ensure built-in MCP is enabled
-    const builtInToggle = page.locator('[data-testid="data-testid ac-use-builtin-mcp-toggle"]');
-    const isBuiltInEnabled = await builtInToggle.isChecked().catch(() => false);
-
-    if (!isBuiltInEnabled) {
-      await builtInToggle.click();
-      const saveMCPModeButton = page.locator('[data-testid="data-testid ac-save-mcp-mode"]');
-      await saveMCPModeButton.click();
-      await page.waitForTimeout(1000);
-    }
+    await ensureBuiltInMCPEnabled(page);
 
     // Verify external MCP server configuration is available (not disabled)
     const addButton = page.locator('[data-testid="data-testid ac-add-mcp-server"]');
@@ -48,17 +58,7 @@ test.describe('Combined MCP Mode', () => {
   }) => {
     void appConfigPage;
 
-    // Enable built-in MCP
-    const builtInToggle = page.locator('[data-testid="data-testid ac-use-builtin-mcp-toggle"]');
-    const isBuiltInEnabled = await builtInToggle.isChecked().catch(() => false);
-
-    if (!isBuiltInEnabled) {
-      await builtInToggle.click();
-      const saveMCPModeButton = page.locator('[data-testid="data-testid ac-save-mcp-mode"]');
-      await saveMCPModeButton.click();
-      await page.waitForTimeout(1000);
-      await page.reload();
-    }
+    await ensureBuiltInMCPEnabled(page, true);
 
     // Verify the old blocking alert is NOT shown
     const disabledAlert = page.getByText(/external mcp servers disabled/i);
@@ -72,16 +72,7 @@ test.describe('Combined MCP Mode', () => {
   test('should allow editing external servers with built-in enabled', async ({ appConfigPage, page }) => {
     void appConfigPage;
 
-    // Enable built-in MCP
-    const builtInToggle = page.locator('[data-testid="data-testid ac-use-builtin-mcp-toggle"]');
-    const isBuiltInEnabled = await builtInToggle.isChecked().catch(() => false);
-
-    if (!isBuiltInEnabled) {
-      await builtInToggle.click();
-      const saveMCPModeButton = page.locator('[data-testid="data-testid ac-save-mcp-mode"]');
-      await saveMCPModeButton.click();
-      await page.waitForTimeout(1000);
-    }
+    await ensureBuiltInMCPEnabled(page);
 
     // Add an external server
     const addButton = page.locator('[data-testid="data-testid ac-add-mcp-server"]');
@@ -116,16 +107,7 @@ test.describe('Combined MCP Mode', () => {
   test('should allow removing external servers with built-in enabled', async ({ appConfigPage, page }) => {
     void appConfigPage;
 
-    // Enable built-in MCP
-    const builtInToggle = page.locator('[data-testid="data-testid ac-use-builtin-mcp-toggle"]');
-    const isBuiltInEnabled = await builtInToggle.isChecked().catch(() => false);
-
-    if (!isBuiltInEnabled) {
-      await builtInToggle.click();
-      const saveMCPModeButton = page.locator('[data-testid="data-testid ac-save-mcp-mode"]');
-      await saveMCPModeButton.click();
-      await page.waitForTimeout(1000);
-    }
+    await ensureBuiltInMCPEnabled(page);
 
     // Count existing servers first (before adding)
     const initialServerCount = await page.locator('[data-testid^="data-testid ac-mcp-server-name-"]').count();

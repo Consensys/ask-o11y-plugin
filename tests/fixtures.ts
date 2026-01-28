@@ -101,138 +101,153 @@ export async function clearPersistedSession(page: Page) {
  * Helper function to delete all persisted chat sessions.
  * This should be called before tests that need a clean slate with no existing sessions.
  */
-export async function deleteAllPersistedSessions(page: Page) {
+export async function deleteAllPersistedSessions(page: Page): Promise<void> {
   // Wait for page to load
   const chatInput = page.getByLabel('Chat input');
   await chatInput.waitFor({ state: 'visible', timeout: 5000 }).catch(() => {});
 
-  // Try to open the sidebar - check if we're on welcome screen or in a chat
+  // Open the history sidebar
+  const sidebarOpened = await openHistorySidebar(page);
+  if (!sidebarOpened) {
+    console.warn('[deleteAllPersistedSessions] Could not open sidebar - skipping deletion');
+    return;
+  }
+
+  // Find all session items
+  const sessionItems = page.getByTestId('session-item');
+  const sessionCount = await sessionItems.count();
+
+  // If no sessions, close sidebar and return
+  if (sessionCount === 0) {
+    await closeSidebar(page);
+    return;
+  }
+
+  // Try to clear all sessions at once, fall back to one-by-one deletion
+  const cleared = await clearAllSessionsViaButton(page);
+  if (!cleared) {
+    await deleteSessionsOneByOne(page, sessionItems);
+  }
+
+  await closeSidebar(page);
+}
+
+/**
+ * Open the history sidebar, handling both welcome screen and chat views.
+ */
+async function openHistorySidebar(page: Page): Promise<boolean> {
   const welcomeHeading = page.getByRole('heading', { name: 'Ask O11y Assistant' });
   const isWelcomeVisible = await welcomeHeading.isVisible().catch(() => false);
 
   if (isWelcomeVisible) {
-    // On welcome screen - use the "View chat history" button
     const historyButton = page.getByText(/View chat history/);
     if (await historyButton.isVisible().catch(() => false)) {
       await historyButton.click();
     }
   } else {
-    // In a chat - use the History button in header
     const historyButtonInHeader = page.getByRole('button', { name: /History/i });
     if (await historyButtonInHeader.isVisible().catch(() => false)) {
       await historyButtonInHeader.click();
     }
   }
 
-  // Wait for sidebar to open - MUST succeed or we can't delete sessions
   const sidebarHeading = page.getByRole('heading', { name: 'Chat History' });
-  const sidebarOpened = await sidebarHeading.isVisible({ timeout: 5000 }).catch(() => false);
+  return await sidebarHeading.isVisible({ timeout: 5000 }).catch(() => false);
+}
 
-  if (!sidebarOpened) {
-    console.warn('[deleteAllPersistedSessions] Could not open sidebar - skipping deletion');
-    return;
-  }
-
-  // Find all session items using data-testid
-  const sessionItems = page.getByTestId('session-item');
-  let sessionCount = await sessionItems.count();
-  
-  // If no sessions, we're done
-  if (sessionCount === 0) {
-    // Close sidebar and return
-    const closeButton = page.locator('button[title="Close"]');
-    if (await closeButton.isVisible({ timeout: 1000 }).catch(() => false)) {
-      await closeButton.click();
-    }
-    return;
-  }
-
-  // Use "Clear All History" button if available (more efficient)
-  const clearAllButton = page.getByRole('button', { name: /Clear All History/i });
-  if (await clearAllButton.isVisible({ timeout: 2000 }).catch(() => false)) {
-    // Set up dialog handler BEFORE clicking to avoid race condition
-    // Use page.once to auto-accept the confirm dialog
-    page.once('dialog', dialog => dialog.accept());
-
-    // Click the button - the dialog will be auto-accepted
-    await clearAllButton.click();
-
-    // Wait for sessions to be deleted - check that session count becomes 0
-    const deletionSucceeded = await page.waitForFunction(
-      () => {
-        const items = document.querySelectorAll('[data-testid="session-item"]');
-        return items.length === 0;
-      },
-      { timeout: 10000 }
-    ).then(() => true).catch(() => false);
-
-    if (!deletionSucceeded) {
-      console.warn('[deleteAllPersistedSessions] Timeout waiting for sessions to clear - sessions may not be deleted');
-    }
-
-    // Wait for storage operations to complete
-    await page.waitForTimeout(1000);
-
-    // Verify deletion succeeded
-    const remainingSessionsAfterDelete = await page.getByTestId('session-item').count();
-    if (remainingSessionsAfterDelete > 0) {
-      console.error(`[deleteAllPersistedSessions] Failed to delete all sessions - ${remainingSessionsAfterDelete} sessions remaining`);
-    }
-  } else {
-    // Fallback: delete sessions one by one (limited to prevent timeouts)
-    let maxIterations = Math.min(sessionCount, 10); // Limit to 10 deletions max
-    for (let i = 0; i < maxIterations && sessionCount > 0; i++) {
-      const sessionItem = sessionItems.first();
-      
-      if (!(await sessionItem.isVisible({ timeout: 1000 }).catch(() => false))) {
-        break;
-      }
-
-      // Hover to reveal delete button
-      await sessionItem.hover();
-
-      // Look for delete button - try icon button first
-      const deleteButton = sessionItem
-        .locator('button[title*="Delete"]')
-        .or(sessionItem.locator('button[aria-label*="delete" i]'))
-        .or(sessionItem.locator('button').filter({ hasText: /delete/i }))
-        .first();
-
-      if (await deleteButton.isVisible({ timeout: 1000 }).catch(() => false)) {
-        await deleteButton.click();
-        // Wait for UI update after deletion
-        await page.waitForTimeout(300);
-        
-        // Re-count sessions after deletion
-        const newCount = await sessionItems.count();
-        if (newCount >= sessionCount) {
-          // No progress, break to avoid infinite loop
-          break;
-        }
-        sessionCount = newCount;
-      } else {
-        // If delete button not found, break to avoid infinite loop
-        break;
-      }
-    }
-  }
-
-  // Close the sidebar using the close button
+/**
+ * Close the history sidebar.
+ */
+async function closeSidebar(page: Page): Promise<void> {
   const closeButton = page.locator('button[title="Close"]');
   if (await closeButton.isVisible().catch(() => false)) {
     await closeButton.click();
-    // Wait for sidebar to fully close
-    const sidebarClosed = await page.getByRole('heading', { name: 'Chat History' }).isVisible({ timeout: 2000 }).then(() => false).catch(() => true);
-    if (!sidebarClosed) {
+    // Wait for sidebar to close
+    await page.getByRole('heading', { name: 'Chat History' }).waitFor({ state: 'hidden', timeout: 2000 }).catch(() => {
       console.warn('[deleteAllPersistedSessions] Sidebar did not close properly');
-    }
+    });
   } else {
-    // Fallback: try clicking outside the sidebar to close it
+    // Fallback: try clicking the chat input to close sidebar
     console.warn('[deleteAllPersistedSessions] Close button not found, trying fallback method');
     const chatInput = page.getByLabel('Chat input');
     if (await chatInput.isVisible().catch(() => false)) {
       await chatInput.click().catch(() => {});
     }
+  }
+}
+
+/**
+ * Try to clear all sessions using the "Clear All History" button.
+ * Returns true if successful, false if button not found.
+ */
+async function clearAllSessionsViaButton(page: Page): Promise<boolean> {
+  const clearAllButton = page.getByRole('button', { name: /Clear All History/i });
+  if (!(await clearAllButton.isVisible({ timeout: 2000 }).catch(() => false))) {
+    return false;
+  }
+
+  // Set up dialog handler before clicking
+  page.once('dialog', (dialog) => dialog.accept());
+  await clearAllButton.click();
+
+  // Wait for sessions to be deleted
+  const deletionSucceeded = await page
+    .waitForFunction(() => document.querySelectorAll('[data-testid="session-item"]').length === 0, { timeout: 10000 })
+    .then(() => true)
+    .catch(() => false);
+
+  if (!deletionSucceeded) {
+    console.warn('[deleteAllPersistedSessions] Timeout waiting for sessions to clear');
+  }
+
+  // Wait for storage operations
+  await page.waitForTimeout(1000);
+
+  const remaining = await page.getByTestId('session-item').count();
+  if (remaining > 0) {
+    console.error(`[deleteAllPersistedSessions] Failed to delete all sessions - ${remaining} remaining`);
+  }
+
+  return true;
+}
+
+/**
+ * Delete sessions one by one (fallback when Clear All button is unavailable).
+ */
+async function deleteSessionsOneByOne(
+  page: Page,
+  sessionItems: ReturnType<Page['getByTestId']>
+): Promise<void> {
+  let sessionCount = await sessionItems.count();
+  const maxIterations = Math.min(sessionCount, 10);
+
+  for (let i = 0; i < maxIterations && sessionCount > 0; i++) {
+    const sessionItem = sessionItems.first();
+
+    if (!(await sessionItem.isVisible({ timeout: 1000 }).catch(() => false))) {
+      break;
+    }
+
+    await sessionItem.hover();
+
+    const deleteButton = sessionItem
+      .locator('button[title*="Delete"]')
+      .or(sessionItem.locator('button[aria-label*="delete" i]'))
+      .or(sessionItem.locator('button').filter({ hasText: /delete/i }))
+      .first();
+
+    if (!(await deleteButton.isVisible({ timeout: 1000 }).catch(() => false))) {
+      break;
+    }
+
+    await deleteButton.click();
+    await page.waitForTimeout(300);
+
+    const newCount = await sessionItems.count();
+    if (newCount >= sessionCount) {
+      break; // No progress, avoid infinite loop
+    }
+    sessionCount = newCount;
   }
 }
 
