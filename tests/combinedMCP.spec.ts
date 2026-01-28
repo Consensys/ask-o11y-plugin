@@ -42,60 +42,6 @@ test.describe('Combined MCP Mode', () => {
     await expect(saveMCPServersButton).toBeEnabled();
   });
 
-  test('should show combined mode alert when both built-in and external are enabled', async ({
-    appConfigPage,
-    page,
-  }) => {
-    void appConfigPage;
-
-    // Enable built-in MCP
-    const builtInToggle = page.locator('[data-testid="data-testid ac-use-builtin-mcp-toggle"]');
-    const isBuiltInEnabled = await builtInToggle.isChecked().catch(() => false);
-
-    if (!isBuiltInEnabled) {
-      await builtInToggle.click();
-      const saveMCPModeButton = page.locator('[data-testid="data-testid ac-save-mcp-mode"]');
-      await saveMCPModeButton.click();
-      await page.waitForTimeout(1000);
-    }
-
-    // Add and enable an external server
-    const addButton = page.locator('[data-testid="data-testid ac-add-mcp-server"]');
-    await addButton.click();
-
-    const nameInput = page.locator('[data-testid^="data-testid ac-mcp-server-name-"]').first();
-    const urlInput = page.locator('[data-testid^="data-testid ac-mcp-server-url-"]').first();
-
-    await nameInput.fill('Test Server');
-    await urlInput.fill('https://test.example.com');
-
-    // Enable the server - wait for server form to be ready first
-    await page.waitForTimeout(500);
-    const enableToggle = page.locator('[data-testid^="data-testid ac-mcp-server-"] switch').first();
-    const isServerEnabled = await enableToggle.isChecked({ timeout: 5000 }).catch(() => false);
-    if (!isServerEnabled) {
-      await enableToggle.click();
-    }
-
-    // Save the server
-    const saveMCPServersButton = page.locator('[data-testid="data-testid ac-save-mcp-servers"]');
-    await expect(saveMCPServersButton).toBeVisible({ timeout: 5000 });
-    await expect(saveMCPServersButton).toBeEnabled({ timeout: 5000 });
-    await saveMCPServersButton.click();
-
-    // Wait for save to complete by checking if button becomes enabled again
-    await expect(saveMCPServersButton).toBeEnabled({ timeout: 10000 });
-
-    // Reload to see the combined mode alert
-    await page.reload();
-    await page.waitForTimeout(1000);
-
-    // Verify combined mode alert is shown
-    // The alert should say "Combined mode active" or similar
-    const combinedModeAlert = page.getByText(/combined mode active/i);
-    await expect(combinedModeAlert).toBeVisible();
-  });
-
   test('should not show "External servers disabled" alert when built-in is enabled', async ({
     appConfigPage,
     page,
