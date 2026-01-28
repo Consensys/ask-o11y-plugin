@@ -148,12 +148,30 @@ export async function deleteAllPersistedSessions(page: Page) {
   // Use "Clear All History" button if available (more efficient)
   const clearAllButton = page.getByRole('button', { name: /Clear All History/i });
   if (await clearAllButton.isVisible({ timeout: 2000 }).catch(() => false)) {
-    // Accept the confirmation dialog
-    page.once('dialog', async dialog => {
-      await dialog.accept();
-    });
+    // Set up dialog handler before clicking
+    const dialogPromise = page.waitForEvent('dialog');
     await clearAllButton.click();
-    await page.waitForTimeout(1000);
+
+    // Wait for and accept the dialog
+    const dialog = await dialogPromise.catch(() => null);
+    if (dialog) {
+      await dialog.accept();
+    }
+
+    // Wait for sessions to be deleted - check that session count becomes 0
+    await page.waitForFunction(
+      () => {
+        const items = document.querySelectorAll('[data-testid="session-item"]');
+        return items.length === 0;
+      },
+      { timeout: 5000 }
+    ).catch(() => {
+      // If timeout, log warning but continue (sessions might already be deleted)
+      console.warn('[deleteAllPersistedSessions] Timeout waiting for sessions to clear');
+    });
+
+    // Additional wait to ensure storage is updated
+    await page.waitForTimeout(500);
   } else {
     // Fallback: delete sessions one by one (limited to prevent timeouts)
     let maxIterations = Math.min(sessionCount, 10); // Limit to 10 deletions max

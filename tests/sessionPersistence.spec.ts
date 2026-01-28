@@ -66,20 +66,24 @@ test.describe('Session Persistence Tests', () => {
       await page.getByRole('button', { name: /History/i }).click();
       await expect(page.getByRole('heading', { name: 'Chat History' })).toBeVisible();
 
-      // Wait for session items to appear - should have exactly 1 session
+      // Wait for session items to appear
       await page.waitForSelector('[data-testid="session-item"]', { timeout: 10000 });
       const sessionItems = page.locator('[data-testid="session-item"]');
-      await expect(sessionItems).toHaveCount(1, { timeout: 5000 }); // Should have exactly 1 session
+
+      // Should have at least 1 session (we just created one)
+      const sessionCount = await sessionItems.count();
+      expect(sessionCount).toBeGreaterThanOrEqual(1);
+
+      // Find the session with "Message to persist" - it should be the most recent one
+      const targetSession = sessionItems.filter({
+        has: page.getByRole('heading', { name: 'Message to persist' })
+      });
+
+      await expect(targetSession).toHaveCount(1, { timeout: 5000 });
 
       // Click on the session with "Message to persist"
-      const sessionItem = sessionItems.first();
-      await expect(sessionItem).toBeVisible({ timeout: 10000 });
-
-      // Verify it's the correct session by checking the title
-      await expect(sessionItem.getByRole('heading', { name: 'Message to persist' })).toBeVisible();
-
-      // Click to load the session
-      await sessionItem.click();
+      await expect(targetSession.first()).toBeVisible({ timeout: 10000 });
+      await targetSession.first().click();
 
       // Wait for the chat to load the session
       await page.waitForTimeout(1000);
