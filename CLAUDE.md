@@ -14,7 +14,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **Core Architecture:**
 - Clean Architecture pattern with Repository Pattern (frontend)
-- MCP proxy aggregates multiple MCP servers (Grafana, Alertmanager, custom)
+- MCP proxy aggregates multiple MCP servers (Grafana MCP, custom servers)
 - Multi-tenant organization isolation with per-user session storage
 - RBAC enforcement at tool listing AND execution
 
@@ -86,7 +86,7 @@ npm run lint
 # Initial setup
 nvm use 22 && npm install
 
-# Start full development environment (Docker: Grafana + Redis + MCP servers + Alertmanager)
+# Start full development environment (Docker: Grafana + Redis + MCP servers)
 nvm use 22 && npm run server
 
 # Access: http://localhost:3000 (admin/admin)
@@ -155,7 +155,7 @@ The `npm run server` command starts the full Docker development environment with
 - Frontend code changes are automatically detected and rebuilt
 - Browser auto-refreshes via Docker volume mounts
 - No need to manually restart or rebuild for frontend changes
-- Includes all required services: Grafana, Redis, MCP servers, Alertmanager
+- Includes all required services: Grafana, Redis, MCP servers
 
 **Note:** For frontend-only changes, the Docker environment provides the best development experience with hot reload. There is no separate `npm run dev` command.
 
@@ -231,8 +231,7 @@ go test ./pkg/plugin -run TestFunctionName
                            ↕ MCP Protocol
 ┌─────────────────────────────────────────────────────────────┐
 │  External MCP Servers                                        │
-│  ├─ mcp-grafana (56+ Grafana tools)                         │
-│  ├─ mcp-alertmanager (alerting tools)                       │
+│  ├─ mcp-grafana (56+ Grafana tools, including alerting)     │
 │  └─ Custom MCP servers (extensible)                         │
 └─────────────────────────────────────────────────────────────┘
 ```
@@ -355,6 +354,36 @@ The plugin supports OAuth 2.0 authentication flows for MCP servers that require 
 - Encryption key via `MCP_OAUTH_ENCRYPTION_KEY` env var
 - Generate key: `npm run generate:oauth-key`
 
+### MCP Configuration Modes
+
+Ask O11y supports three MCP modes for flexible tool integration:
+
+**1. Built-in Only**: Use Grafana's built-in MCP server (grafana-llm-app)
+- Provides 56+ native Grafana observability tools
+- Automatically configured when grafana-llm-app is installed
+- Enabled via `useBuiltInMCP: true` in plugin settings
+
+**2. External Only**: Use user-configured external MCP servers
+- Supports OpenAPI, SSE, Standard MCP, and Streamable HTTP protocols
+- Configured in AppConfig UI or via `provisioning/plugins/app.yaml`
+- Enabled when `useBuiltInMCP: false` and external servers configured
+
+**3. Combined Mode** (NEW): Use both built-in AND external servers simultaneously
+- All tools from both sources available together
+- Enabled when `useBuiltInMCP: true` AND external servers configured
+- Shows "Combined mode active" alert in AppConfig UI
+
+**Tool Naming Convention:**
+- Built-in tools: Original names (e.g., `query_prometheus`, `get_dashboard`)
+- External tools: Prefixed by backend with `{serverid}_` (e.g., `mcp-grafana_query_prometheus`)
+- Natural disambiguation - conflicts extremely unlikely due to prefixing
+
+**Implementation:**
+- Frontend: `AggregatedMCPClient` ([src/services/aggregatedMCPClient.ts](src/services/aggregatedMCPClient.ts)) combines both sources
+- Tool routing: Registry-based lookup routes calls to correct client
+- Error isolation: If one source fails, the other continues to work
+- RBAC: Filtering applied by each underlying client independently
+
 ## Critical Implementation Details
 
 ### Theme Integration (CRITICAL)
@@ -395,6 +424,8 @@ The plugin supports OAuth 2.0 authentication flows for MCP servers that require 
 
 ### Adding a New MCP Server
 
+**Note**: External MCP servers can be used alongside built-in MCP (combined mode) or independently.
+
 1. **Add configuration** to `provisioning/plugins/apps.yaml`:
 ```yaml
 mcpServers:
@@ -410,6 +441,8 @@ mcpServers:
 3. **Headers automatically forwarded:**
    - `X-Grafana-Org-Id`: numeric org ID
    - `X-Scope-OrgID`: tenant name
+
+4. **Tool naming**: External tools will be automatically prefixed with `{server-id}_` to avoid conflicts with built-in tools
 
 ### Session Management Implementation
 

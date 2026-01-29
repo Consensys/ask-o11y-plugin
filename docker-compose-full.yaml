@@ -1,0 +1,58 @@
+services:
+
+  grafana:
+    extends:
+      file: .config/docker-compose-base.yaml
+      service: grafana
+    environment:
+      GF_INSTALL_PLUGINS: 'grafana-llm-app'
+      GF_AUTH_BASIC_ENABLED: true
+      GF_AUTH_ANONYMOUS_ENABLED: false
+      GF_SECURITY_ALLOW_EMBEDDING: true
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      GF_PLUGIN_ASKO11Y_REDIS: ${GF_PLUGIN_ASKO11Y_REDIS:-redis://redis:6379/0}
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  mcp-grafana:
+    image: grafana/mcp-grafana
+    ports:
+      - 127.0.0.1:8001:8000/tcp
+    environment:
+      GRAFANA_URL: http://grafana:3000
+      GRAFANA_USERNAME: admin
+      GRAFANA_PASSWORD: admin
+      PORT: 8000
+    command: >
+      -t streamable-http --log-level debug --disable-incident	--disable-oncall	--disable-sift	--disable-admin	--disable-asserts	--disable-annotations
+    depends_on:
+      - grafana
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "127.0.0.1:6379:6379"
+    command: redis-server --appendonly yes
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  mcpo:
+    image: ghcr.io/open-webui/mcpo
+    ports:
+      - 127.0.0.1:8000:8000/tcp
+    volumes:
+      - ./mcpo:/mcpo
+    command: >
+      --config /mcpo/config.json
+    depends_on:
+      - mcp-grafana
+
+volumes:
+  redis-data:
+

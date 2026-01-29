@@ -100,6 +100,7 @@ See [Grafana documentation on allow_embedding](https://grafana.com/docs/grafana/
 - **Dynamic Tool Discovery**: Automatically detects available tools from configured MCP servers
 - **Multiple Transport Types**: Supports standard MCP, OpenAPI/REST, SSE streaming, and HTTP streamable
 - **Custom Server Support**: Add your own MCP servers for internal tools and APIs
+- **Combined Mode**: Use built-in and external MCP servers simultaneously for maximum flexibility
 
 **Available Tool Categories:**
 - **Datasource Operations**: Query, list, test connectivity
