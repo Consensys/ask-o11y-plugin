@@ -14,7 +14,7 @@ interface ChatInputProps {
 }
 
 export interface ChatInputRef {
-  focus: () => void;
+  focus: (moveCursorToEnd?: boolean) => void;
 }
 
 export const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(
@@ -27,10 +27,12 @@ export const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(
     const theme = useTheme2();
 
     useImperativeHandle(ref, () => ({
-      focus: () => {
+      focus: (moveCursorToEnd = false) => {
         if (textareaRef.current) {
           textareaRef.current.focus();
-          textareaRef.current.setSelectionRange(textareaRef.current.value.length, textareaRef.current.value.length);
+          if (moveCursorToEnd) {
+            textareaRef.current.setSelectionRange(textareaRef.current.value.length, textareaRef.current.value.length);
+          }
         }
       },
     }));
