@@ -195,7 +195,7 @@ function ChatComponent({ pluginSettings, readOnly = false, initialSession }: Cha
   }, [detectedPageRefs, sessionManager.currentSessionId]);
 
   const focusChatInput = useCallback(() => {
-    chatInputRef.current?.focus(false);
+    chatInputRef.current?.focus();
     announce('Chat input focused');
   }, [announce]);
 
@@ -222,7 +222,7 @@ function ChatComponent({ pluginSettings, readOnly = false, initialSession }: Cha
   const handleSuggestionClick = useCallback((message: string) => {
     setCurrentInput(message);
     setTimeout(() => {
-      chatInputRef.current?.focus(true);
+      chatInputRef.current?.focus();
     }, 100);
     announce(`Suggestion selected: ${message.substring(0, 50)}...`);
   }, [setCurrentInput, announce]);
