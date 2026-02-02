@@ -15,6 +15,7 @@ interface ChatInputProps {
 
 export interface ChatInputRef {
   focus: () => void;
+  clear: () => void;
 }
 
 export const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(
@@ -25,11 +26,18 @@ export const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(
     const textareaRef = useRef<HTMLTextAreaElement>(null);
     const [validationError, setValidationError] = useState<string | null>(null);
     const theme = useTheme2();
+    const isComposingRef = useRef(false);
 
     useImperativeHandle(ref, () => ({
       focus: () => {
         if (textareaRef.current) {
           textareaRef.current.focus();
+        }
+      },
+      clear: () => {
+        if (textareaRef.current) {
+          textareaRef.current.value = '';
+          autoResize();
         }
       },
     }));
@@ -42,12 +50,23 @@ export const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(
       }
     };
 
+    // Sync external changes to textarea (e.g., from suggestion clicks, clearing chat)
     useEffect(() => {
-      autoResize();
+      if (textareaRef.current) {
+        // Always sync, even if value appears the same (handles edge cases like clearing after send)
+        textareaRef.current.value = currentInput;
+        autoResize();
+      }
+      // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [currentInput]);
 
     const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
       const rawValue = e.target.value;
+
+      // Don't update state during composition (IME input)
+      if (isComposingRef.current) {
+        return;
+      }
 
       // Allow setting the value even if it's invalid (for better UX)
       setCurrentInput(rawValue);
@@ -120,9 +139,14 @@ export const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(
             {/* Text input area */}
             <textarea
               ref={textareaRef}
-              value={currentInput}
+              defaultValue={currentInput}
               onChange={handleInputChange}
               onKeyDown={handleKeyDown}
+              onCompositionStart={() => { isComposingRef.current = true; }}
+              onCompositionEnd={(e) => {
+                isComposingRef.current = false;
+                handleInputChange(e as any);
+              }}
               placeholder="Ask me anything about your metrics, logs, or observability..."
               disabled={isGenerating || toolsLoading}
               rows={1}
