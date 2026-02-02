@@ -12,7 +12,7 @@ import (
 func TestNewPlugin_RedisFallback(t *testing.T) {
 	// Save original environment
 	originalRedisURL := os.Getenv("GF_PLUGIN_ASKO11Y_REDIS")
-	originalRedisAddr := os.Getenv("REDIS_ADDR")
+	originalRedisAddr := os.Getenv("GF_PLUGIN_ASKO11Y_REDIS_ADDR")
 
 	// Clean up after test
 	defer func() {
@@ -22,16 +22,16 @@ func TestNewPlugin_RedisFallback(t *testing.T) {
 			os.Unsetenv("GF_PLUGIN_ASKO11Y_REDIS")
 		}
 		if originalRedisAddr != "" {
-			os.Setenv("REDIS_ADDR", originalRedisAddr)
+			os.Setenv("GF_PLUGIN_ASKO11Y_REDIS_ADDR", originalRedisAddr)
 		} else {
-			os.Unsetenv("REDIS_ADDR")
+			os.Unsetenv("GF_PLUGIN_ASKO11Y_REDIS_ADDR")
 		}
 	}()
 
 	// Test 1: Redis unavailable - should fallback to in-memory
 	os.Unsetenv("GF_PLUGIN_ASKO11Y_REDIS")
-	os.Unsetenv("REDIS_ADDR")
-	os.Setenv("REDIS_ADDR", "localhost:9999") // Non-existent Redis
+	os.Unsetenv("GF_PLUGIN_ASKO11Y_REDIS_ADDR")
+	os.Setenv("GF_PLUGIN_ASKO11Y_REDIS_ADDR", "localhost:9999") // Non-existent Redis
 
 	settings := backend.AppInstanceSettings{
 		JSONData: []byte(`{"mcpServers":[]}`),
@@ -53,8 +53,8 @@ func TestNewPlugin_RedisFallback(t *testing.T) {
 
 	// Test 2: Redis available - should use Redis
 	// This test requires Redis to be running, so we'll skip if not available
-	os.Setenv("REDIS_ADDR", "localhost:6379")
-	os.Setenv("REDIS_DB", "15") // Use test database
+	os.Setenv("GF_PLUGIN_ASKO11Y_REDIS_ADDR", "localhost:6379")
+	os.Setenv("GF_PLUGIN_ASKO11Y_REDIS_DB", "15") // Use test database
 
 	plugin2, err := NewPlugin(ctx, settings)
 	if err != nil {
@@ -89,9 +89,9 @@ func TestCreateRedisClient_FromURL(t *testing.T) {
 
 	// Test with GF_PLUGIN_ASKO11Y_REDIS
 	os.Setenv("GF_PLUGIN_ASKO11Y_REDIS", "redis://localhost:6379/15")
-	os.Unsetenv("REDIS_ADDR")
-	os.Unsetenv("REDIS_PASSWORD")
-	os.Unsetenv("REDIS_DB")
+	os.Unsetenv("GF_PLUGIN_ASKO11Y_REDIS_ADDR")
+	os.Unsetenv("GF_PLUGIN_ASKO11Y_REDIS_PASSWORD")
+	os.Unsetenv("GF_PLUGIN_ASKO11Y_REDIS_DB")
 
 	client, err := createRedisClient(log.DefaultLogger)
 	if err != nil {
@@ -108,8 +108,8 @@ func TestCreateRedisClient_FromURL(t *testing.T) {
 
 func TestCreateRedisClient_FromIndividualVars(t *testing.T) {
 	originalRedisURL := os.Getenv("GF_PLUGIN_ASKO11Y_REDIS")
-	originalRedisAddr := os.Getenv("REDIS_ADDR")
-	originalRedisDB := os.Getenv("REDIS_DB")
+	originalRedisAddr := os.Getenv("GF_PLUGIN_ASKO11Y_REDIS_ADDR")
+	originalRedisDB := os.Getenv("GF_PLUGIN_ASKO11Y_REDIS_DB")
 
 	defer func() {
 		if originalRedisURL != "" {
@@ -118,21 +118,21 @@ func TestCreateRedisClient_FromIndividualVars(t *testing.T) {
 			os.Unsetenv("GF_PLUGIN_ASKO11Y_REDIS")
 		}
 		if originalRedisAddr != "" {
-			os.Setenv("REDIS_ADDR", originalRedisAddr)
+			os.Setenv("GF_PLUGIN_ASKO11Y_REDIS_ADDR", originalRedisAddr)
 		} else {
-			os.Unsetenv("REDIS_ADDR")
+			os.Unsetenv("GF_PLUGIN_ASKO11Y_REDIS_ADDR")
 		}
 		if originalRedisDB != "" {
-			os.Setenv("REDIS_DB", originalRedisDB)
+			os.Setenv("GF_PLUGIN_ASKO11Y_REDIS_DB", originalRedisDB)
 		} else {
-			os.Unsetenv("REDIS_DB")
+			os.Unsetenv("GF_PLUGIN_ASKO11Y_REDIS_DB")
 		}
 	}()
 
 	// Test with individual environment variables
 	os.Unsetenv("GF_PLUGIN_ASKO11Y_REDIS")
-	os.Setenv("REDIS_ADDR", "localhost:6379")
-	os.Setenv("REDIS_DB", "15")
+	os.Setenv("GF_PLUGIN_ASKO11Y_REDIS_ADDR", "localhost:6379")
+	os.Setenv("GF_PLUGIN_ASKO11Y_REDIS_DB", "15")
 
 	client, err := createRedisClient(log.DefaultLogger)
 	if err != nil {
