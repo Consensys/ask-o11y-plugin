@@ -36,7 +36,7 @@ describe('WelcomeMessage', () => {
 
   it('should render the version number', () => {
     render(<WelcomeMessage />);
-    expect(screen.getByText('v0.2.2')).toBeInTheDocument();
+    expect(screen.getByText('v0.2.3')).toBeInTheDocument();
   });
 
   it('should render the description', () => {
