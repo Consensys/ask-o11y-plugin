@@ -19,7 +19,7 @@ This file provides context and instructions to help AI agents work effectively o
 - Role-based access control (Admin, Editor, Viewer)
 - Multi-tenant organization isolation
 - Real-time streaming LLM responses
-- Session persistence in localStorage
+- Session persistence via Grafana UserStorage API
 
 ## Build and Test Commands
 
@@ -286,7 +286,7 @@ pkg/
 - Grafana session-based authentication (automatic)
 - Role extraction from plugin context
 - RBAC enforcement at tool listing AND execution (double-check)
-- Org-level data isolation (localStorage keys, HTTP headers)
+- Org-level data isolation (UserStorage API, HTTP headers)
 - Backend filtering: `filterToolsByRole()` and `canAccessTool()` in `pkg/plugin/plugin.go:192-233`
 
 ### Rate Limiting
@@ -386,9 +386,9 @@ docker compose exec grafana curl http://mcp-grafana:8000/mcp
 **Session storage issues:**
 
 ```bash
-# Check browser console for localStorage errors
-# Verify quota: each org has 5MB limit
-# Manual cleanup: localStorage.clear() (dev tools console)
+# Check browser console for storage errors
+# Verify quota: 5MB per user via Grafana UserStorage API
+# Sessions are stored via Grafana's UserStorage API
 # Auto-cleanup: triggers at quota limit
 ```
 
@@ -420,7 +420,7 @@ docker compose logs -f grafana | grep -i "share\|redis"
 - `pkg/plugin/shares_redis.go` - Redis-backed share store implementation
 - `pkg/mcp/client.go:49-75` - Multi-tenant header injection
 - `src/core/services/SessionService.ts` - Session business logic
-- `src/core/repositories/GrafanaUserStorageRepository.ts` - Session persistence (uses Grafana UserStorage API - per-user storage with localStorage fallback, organized by organization)
+- `src/core/repositories/GrafanaUserStorageRepository.ts` - Session persistence (uses Grafana UserStorage API - per-user storage, organized by organization)
 - `src/services/sessionShare.ts` - Session sharing client service
 - `src/components/Chat/components/ShareDialog/ShareDialog.tsx` - Share dialog UI component
 - `src/pages/SharedSession.tsx` - Shared session read-only view page

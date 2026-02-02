@@ -439,7 +439,7 @@ For detailed contribution guidelines, see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 - **"I don't see visualizations"**: Check datasource configuration and time range
 - **"Tool execution failed"**: Verify RBAC permissions and MCP server health
-- **"Session not loading"**: Ensure correct organization and localStorage is enabled
+- **"Session not loading"**: Ensure correct organization and browser storage is enabled
 - **"LLM plugin not found"**: Install and configure grafana-llm-app plugin
 
 For detailed troubleshooting, see the [Troubleshooting Guide](src/README.md#troubleshooting).

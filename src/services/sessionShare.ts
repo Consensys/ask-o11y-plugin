@@ -102,7 +102,6 @@ export class SessionShareService {
     const data = response.data;
 
     if (!data.messages || !Array.isArray(data.messages)) {
-      console.error('[SessionShareService] Invalid session data format:', data);
       throw new SessionShareError(
         'Invalid session data: messages array is missing or invalid',
         'INVALID_RESPONSE'
@@ -118,12 +117,6 @@ export class SessionShareService {
       isShared: true,
       sharedBy: data.sharedBy,
     };
-
-    console.log('[SessionShareService] Parsed shared session', {
-      id: sharedSession.id,
-      title: sharedSession.title,
-      messageCount: sharedSession.messages.length,
-    });
 
     return sharedSession;
   }

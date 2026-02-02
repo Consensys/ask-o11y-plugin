@@ -67,7 +67,6 @@ export class MCPServerStatusService {
 
       return response.data;
     } catch (error) {
-      console.error('[MCPServerStatusService] Failed to fetch server statuses:', error);
       return {
         servers: [],
         systemHealth: {

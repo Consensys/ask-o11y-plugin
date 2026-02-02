@@ -43,7 +43,7 @@ export const useSessionManager = (
   setChatHistory: React.Dispatch<React.SetStateAction<ChatMessage[]>>,
   readOnly?: boolean
 ): UseSessionManagerReturn => {
-  // Get Grafana user storage (automatically falls back to localStorage when user is not signed in)
+  // Get Grafana UserStorage API for persistent per-user storage
   const storage = usePluginUserStorage();
 
   // Get session service instance (memoized with storage dependency)
@@ -111,7 +111,6 @@ export const useSessionManager = (
         setCurrentSessionId(session.id);
         setChatHistory(session.messages);
         setCurrentSummary(session.summary);
-        console.log(`[SessionManager] Loaded current session on refresh: ${session.title} (${session.messages.length} messages)`);
       }
     } catch (error) {
       console.error('[SessionManager] Failed to load current session:', error);
@@ -126,13 +125,9 @@ export const useSessionManager = (
     // Only initialize once per orgId, not on every chatHistory change
     // This prevents re-initialization when chatHistory changes after mount
     if (lastInitializedOrgIdRef.current === orgId) {
-      console.log('[SessionManager] Already initialized for orgId:', orgId, '- skipping');
       return;
     }
     
-    console.log('[SessionManager] Initializing with orgId:', orgId);
-    console.log('[SessionManager] Using Grafana user storage (falls back to localStorage if not signed in)');
-    console.log('[SessionManager] Initial chatHistory length:', initialChatHistoryLengthRef.current);
     
     // Mark this orgId as initialized immediately to prevent race conditions
     lastInitializedOrgIdRef.current = orgId;
@@ -142,12 +137,9 @@ export const useSessionManager = (
     const initialize = async () => {
       try {
         const loadedSessions = await sessionService.getAllSessions(orgId);
-        console.log('[SessionManager] Loaded sessions from storage:', loadedSessions.length);
         if (!cancelled) {
           setSessions(loadedSessions);
-          console.log('[SessionManager] Set sessions state:', loadedSessions.length);
         } else {
-          console.log('[SessionManager] Effect was cancelled, not setting sessions');
         }
         
         const stats = await sessionService.getStorageStats(orgId);
@@ -164,10 +156,8 @@ export const useSessionManager = (
             setCurrentSessionId(session.id);
             setChatHistory(session.messages);
             setCurrentSummary(session.summary);
-            console.log(`[SessionManager] Loaded session: ${session.title} (${session.messages.length} messages)`);
           }
         } else {
-          console.log('[SessionManager] Skipping session load - chatHistory already has messages (read-only mode)');
         }
       } catch (error) {
         if (!cancelled) {
@@ -183,7 +173,6 @@ export const useSessionManager = (
     initialize();
     
     return () => {
-      console.log('[SessionManager] Cleanup: marking effect as cancelled');
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -199,7 +188,6 @@ export const useSessionManager = (
     setCurrentSummary(undefined);
     try {
       await sessionService.clearActiveSession(orgId);
-      console.log('[SessionManager] Created new session');
     } catch (error) {
       console.error('[SessionManager] Failed to clear active session:', error);
     }
@@ -217,7 +205,6 @@ export const useSessionManager = (
           setChatHistory(session.messages);
           setCurrentSummary(session.summary);
           await sessionService.setActiveSession(orgId, session.id);
-          console.log(`[SessionManager] Loaded session: ${session.title} (${session.messages.length} messages)`);
         } else {
           console.error(`[SessionManager] Session ${sessionId} not found`);
         }
@@ -242,7 +229,6 @@ export const useSessionManager = (
           await createNewSession();
         }
 
-        console.log(`[SessionManager] Deleted session: ${sessionId}`);
       } catch (error) {
         console.error('[SessionManager] Error deleting session:', error);
       }
@@ -258,7 +244,6 @@ export const useSessionManager = (
       await sessionService.deleteAllSessions(orgId);
       await refreshSessions();
       await createNewSession();
-      console.log('[SessionManager] Deleted all sessions');
     } catch (error) {
       console.error('[SessionManager] Error deleting all sessions:', error);
     }
@@ -273,7 +258,6 @@ export const useSessionManager = (
   const saveImmediately = useCallback(
     async (messages: ChatMessage[]) => {
       if (readOnly) {
-        console.log('[SessionManager] Skipping save - read-only mode');
         return;
       }
 
@@ -283,7 +267,6 @@ export const useSessionManager = (
 
       // Prevent concurrent saves
       if (isSavingRef.current) {
-        console.log('[SessionManager] Save already in progress, skipping');
         return;
       }
 
@@ -295,7 +278,6 @@ export const useSessionManager = (
         
         if (sessionIdAtStart) {
           await sessionService.updateSession(orgId, sessionIdAtStart, messages, currentSummary);
-          console.log(`[SessionManager] Immediately saved session: ${sessionIdAtStart}`);
         } else if (messages.length > 0) {
           const newSession = await sessionService.createSession(orgId, messages);
           // Only update if currentSessionId is still null (no session was loaded in the meantime)
@@ -304,10 +286,8 @@ export const useSessionManager = (
               return newSession.id;
             }
             // Session was loaded while creating, don't overwrite it
-            console.log(`[SessionManager] Session ${prevId} was loaded during creation, keeping it instead of ${newSession.id}`);
             return prevId;
           });
-          console.log(`[SessionManager] Created and immediately saved new session: ${newSession.id}`);
         }
         await refreshSessions();
       } catch (error) {
@@ -329,7 +309,6 @@ export const useSessionManager = (
       }
 
       setIsSummarizing(true);
-      console.log('[SessionManager] Starting conversation summarization...');
 
       try {
         const messagesToSummarize = currentSummary ? messages.slice(0, -10) : messages.slice(0, -5);
@@ -341,7 +320,6 @@ export const useSessionManager = (
           // Update session with summary
           if (currentSessionId) {
             await sessionService.updateSession(orgId, currentSessionId, messages, summary);
-            console.log('[SessionManager] Summarization complete and saved');
           }
         }
       } catch (error) {
@@ -372,7 +350,6 @@ export const useSessionManager = (
 
   // Debug: Log sessions state when it changes
   useEffect(() => {
-    console.log('[SessionManager] Sessions state updated:', sessions.length, sessions.map(s => s.id));
   }, [sessions]);
 
   return {

@@ -5,8 +5,7 @@ import type { UserStorage } from '@grafana/data';
 
 /**
  * Grafana User Storage implementation of Session Repository
- * Uses Grafana's user storage API which automatically falls back to localStorage
- * if the user is not signed in
+ * Uses Grafana's UserStorage API for persistent per-user storage
  */
 export class GrafanaUserStorageRepository implements SessionRepository {
   private readonly storageKeyPrefix = 'grafana-o11y-chat-';
@@ -21,16 +20,13 @@ export class GrafanaUserStorageRepository implements SessionRepository {
   async findAll(orgId: string): Promise<SessionMetadata[]> {
     try {
       const indexKey = this.getSessionsIndexKey(orgId);
-      console.log('[GrafanaUserStorageRepository] findAll - orgId:', orgId, 'indexKey:', indexKey);
       const indexData = await this.storage.getItem(indexKey);
-      console.log('[GrafanaUserStorageRepository] findAll - indexData:', indexData ? 'found' : 'not found');
 
       if (!indexData) {
         return [];
       }
 
       const sessions = JSON.parse(indexData);
-      console.log('[GrafanaUserStorageRepository] findAll - found sessions:', sessions.length);
       return sessions.map((meta: any) => ({
         ...meta,
         createdAt: new Date(meta.createdAt),
@@ -68,15 +64,13 @@ export class GrafanaUserStorageRepository implements SessionRepository {
       // Save session
       const sessionKey = this.getSessionKey(orgId, session.id);
       const sessionData = JSON.stringify(session.toStorage());
-      console.log('[GrafanaUserStorageRepository] save - orgId:', orgId, 'sessionId:', session.id, 'key:', sessionKey, 'size:', sessionData.length, 'bytes');
       await this.storage.setItem(sessionKey, sessionData);
-      console.log('[GrafanaUserStorageRepository] save - saved to user storage');
 
       // Update index
       await this.updateSessionIndex(orgId, session);
     } catch (error) {
       console.error('[GrafanaUserStorageRepository] Failed to save session:', error);
-      // Check if it's a quota error (localStorage fallback)
+      // Check if it's a quota error
       if (error instanceof Error && error.name === 'QuotaExceededError') {
         await this.handleQuotaExceeded(orgId, session);
       } else {
@@ -188,9 +182,7 @@ export class GrafanaUserStorageRepository implements SessionRepository {
     // Save index
     const indexKey = this.getSessionsIndexKey(orgId);
     const indexData = JSON.stringify(limited);
-    console.log('[GrafanaUserStorageRepository] saveSessionsIndex - orgId:', orgId, 'key:', indexKey, 'sessions:', limited.length);
     await this.storage.setItem(indexKey, indexData);
-    console.log('[GrafanaUserStorageRepository] saveSessionsIndex - saved index to user storage');
 
     // Clean up overflow
     if (sorted.length > this.maxSessions) {
@@ -203,8 +195,6 @@ export class GrafanaUserStorageRepository implements SessionRepository {
   }
 
   private async handleQuotaExceeded(orgId: string, session: ChatSession): Promise<void> {
-    console.warn('[GrafanaUserStorageRepository] Storage quota exceeded, cleaning up old sessions');
-
     // Delete 10 oldest sessions
     const sessions = await this.findAll(orgId);
     const sortedByOldest = sessions.sort((a, b) => a.updatedAt.getTime() - b.updatedAt.getTime());

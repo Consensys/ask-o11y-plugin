@@ -31,7 +31,6 @@ function getTokenizer(model = 'gpt-4'): Tiktoken {
     tokenizerCache.set(model, tokenizer);
     return tokenizer;
   } catch (error) {
-    console.warn(`[Tokenizer] Model ${model} not recognized, falling back to gpt-4 encoding`);
     // Fallback to GPT-4 encoding if model is not recognized
     const tokenizer = encodingForModel('gpt-4');
     tokenizerCache.set(model, tokenizer);
@@ -47,7 +46,6 @@ export class TokenizerService {
    * @param model The model name (e.g., 'gpt-4', 'gpt-3.5-turbo')
    */
   static initialize(model = 'gpt-4') {
-    console.log(`[TokenizerService] Initializing with model: ${model}`);
     this.tokenizer = getTokenizer(model);
   }
 

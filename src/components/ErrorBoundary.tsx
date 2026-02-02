@@ -199,9 +199,6 @@ export class ChatErrorBoundary extends Component<{ children: ReactNode }, State>
   }
 
   resetChat = () => {
-    // Clear chat-specific state if needed
-    localStorage.removeItem('chat_recovery_state');
-
     this.setState({
       hasError: false,
       error: null,

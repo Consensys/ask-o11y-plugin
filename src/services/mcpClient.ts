@@ -100,10 +100,6 @@ export class ExternalMCPClient {
         });
 
         if (!response.ok) {
-          console.error(
-            `[ExternalMCPClient] Failed to fetch OpenAPI spec from ${this.config.name}:`,
-            response.statusText
-          );
           return { tools: [] };
         }
 
@@ -164,7 +160,6 @@ export class ExternalMCPClient {
       });
 
       if (!response.ok) {
-        console.error(`[ExternalMCPClient] Failed to fetch tools from ${this.config.name}:`, response.statusText);
         return { tools: [] };
       }
 
@@ -173,7 +168,6 @@ export class ExternalMCPClient {
 
       return result;
     } catch (error) {
-      console.error(`[ExternalMCPClient] Error fetching tools from ${this.config.name}:`, error);
       return { tools: [] };
     }
   }
@@ -421,7 +415,6 @@ export class ExternalMCPManager {
       if (config.enabled && config.url) {
         const client = new ExternalMCPClient(config);
         this.clients.set(config.id, client);
-        console.log(`[ExternalMCPManager] Initialized MCP client for ${config.name} (${config.url})`);
       }
     }
   }
@@ -432,12 +425,12 @@ export class ExternalMCPManager {
   async listAllTools(): Promise<Tool[]> {
     const allTools: Tool[] = [];
 
-    for (const [id, client] of this.clients.entries()) {
+    for (const [, client] of this.clients.entries()) {
       try {
         const result = await client.listTools();
         allTools.push(...result.tools);
       } catch (error) {
-        console.error(`[ExternalMCPManager] Error listing tools from ${id}:`, error);
+        // Silently handle errors from individual clients
       }
     }
 

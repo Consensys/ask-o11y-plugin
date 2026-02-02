@@ -89,7 +89,6 @@ export class BuiltInMCPClient {
 
       return filterToolsByRole(this.cachedTools, userRole);
     } catch (error) {
-      console.error('[BuiltInMCPClient] Failed to list tools:', error);
       return [];
     }
   }
@@ -123,8 +122,6 @@ export class BuiltInMCPClient {
 
       return response as CallToolResult;
     } catch (error) {
-      console.error('[BuiltInMCPClient] Failed to call tool:', error);
-
       return {
         content: [
           {
@@ -156,7 +153,7 @@ export class BuiltInMCPClient {
       try {
         await this.mcpClient.close();
       } catch (error) {
-        console.error('[BuiltInMCPClient] Error disconnecting:', error);
+        // Silently handle disconnect errors
       }
     }
     this.isConnected = false;
@@ -168,7 +165,6 @@ export class BuiltInMCPClient {
     try {
       return await mcp.enabled();
     } catch (error) {
-      console.error('[BuiltInMCPClient] Error checking availability:', error);
       return false;
     }
   }
