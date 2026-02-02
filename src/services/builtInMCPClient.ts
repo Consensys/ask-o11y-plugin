@@ -54,7 +54,7 @@ export class BuiltInMCPClient {
     try {
       this.mcpClient = new mcp.Client({
         name: 'ask-o11y-plugin',
-        version: '0.2.0',
+        version: '0.2.1',
       });
 
       const transport = new mcp.StreamableHTTPClientTransport(mcp.streamableHTTPURL());
@@ -142,10 +142,7 @@ export class BuiltInMCPClient {
       return false;
     }
 
-    if (!this.cachedTools.some((tool) => tool.name === toolName)) {
-      return false;
-    }
-
+    // Check if tool exists in cache and is accessible to user's role
     const filteredTools = filterToolsByRole(this.cachedTools, getUserRole());
     return filteredTools.some((tool) => tool.name === toolName);
   }

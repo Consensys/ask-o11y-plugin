@@ -12,29 +12,35 @@ export class ValidationService {
   static readonly MAX_SYSTEM_PROMPT_LENGTH = 15000;
 
   /**
+   * Helper to validate and trim a non-empty string
+   */
+  private static validateNonEmptyString(value: string, fieldName: string, maxLength: number): string {
+    if (!value || typeof value !== 'string') {
+      throw new Error(`${fieldName} must be a non-empty string`);
+    }
+
+    const trimmed = value.trim();
+
+    if (trimmed.length === 0) {
+      throw new Error(`${fieldName} cannot be empty`);
+    }
+
+    if (trimmed.length > maxLength) {
+      throw new Error(`${fieldName} exceeds maximum length of ${maxLength} characters`);
+    }
+
+    return trimmed;
+  }
+
+  /**
    * Validates and sanitizes user chat input
    * @param input Raw user input
    * @returns Sanitized input or throws error if invalid
    */
   static validateChatInput(input: string): string {
-    if (!input || typeof input !== 'string') {
-      throw new Error('Input must be a non-empty string');
-    }
-
-    // Trim whitespace
-    const trimmed = input.trim();
-
-    if (trimmed.length === 0) {
-      throw new Error('Input cannot be empty');
-    }
-
-    if (trimmed.length > this.MAX_INPUT_LENGTH) {
-      throw new Error(`Input exceeds maximum length of ${this.MAX_INPUT_LENGTH} characters`);
-    }
-
+    const trimmed = this.validateNonEmptyString(input, 'Input', this.MAX_INPUT_LENGTH);
     const cleaned = this.removeControlCharacters(trimmed);
 
-    // Check for potential script injection patterns
     if (this.containsScriptInjection(cleaned)) {
       throw new Error('Input contains potentially harmful content');
     }
@@ -49,19 +55,7 @@ export class ValidationService {
    * @returns Validated query or throws error
    */
   static validateQuery(query: string, language: 'promql' | 'logql'): string {
-    if (!query || typeof query !== 'string') {
-      throw new Error('Query must be a non-empty string');
-    }
-
-    const trimmed = query.trim();
-
-    if (trimmed.length === 0) {
-      throw new Error('Query cannot be empty');
-    }
-
-    if (trimmed.length > this.MAX_QUERY_LENGTH) {
-      throw new Error(`Query exceeds maximum length of ${this.MAX_QUERY_LENGTH} characters`);
-    }
+    const trimmed = this.validateNonEmptyString(query, 'Query', this.MAX_QUERY_LENGTH);
 
     // Basic validation for common injection patterns
     const dangerousPatterns = [
@@ -96,19 +90,7 @@ export class ValidationService {
    * @returns Validated URL or throws error
    */
   static validateMCPServerURL(url: string): string {
-    if (!url || typeof url !== 'string') {
-      throw new Error('URL must be a non-empty string');
-    }
-
-    const trimmed = url.trim();
-
-    if (trimmed.length === 0) {
-      throw new Error('URL cannot be empty');
-    }
-
-    if (trimmed.length > this.MAX_URL_LENGTH) {
-      throw new Error(`URL exceeds maximum length of ${this.MAX_URL_LENGTH} characters`);
-    }
+    const trimmed = this.validateNonEmptyString(url, 'URL', this.MAX_URL_LENGTH);
 
     try {
       const parsed = new URL(trimmed);
@@ -293,60 +275,30 @@ export class ValidationService {
     return dangerousPatterns.some((pattern) => pattern.test(input));
   }
 
+  /**
+   * Check if brackets are balanced in a string
+   */
+  private static checkBalancedBrackets(query: string, openChar: string, closeChar: string, bracketName: string): void {
+    let count = 0;
+    for (const char of query) {
+      if (char === openChar) {
+        count++;
+      } else if (char === closeChar) {
+        count--;
+      }
+      if (count < 0) {
+        throw new Error(`Unbalanced ${bracketName} in PromQL query`);
+      }
+    }
+    if (count !== 0) {
+      throw new Error(`Unbalanced ${bracketName} in PromQL query`);
+    }
+  }
+
   private static validatePromQL(query: string): void {
-    // Basic PromQL structure validation
-    // This is a simplified validation - full PromQL parsing would be complex
-
-    // Check for balanced parentheses
-    let parenCount = 0;
-    for (const char of query) {
-      if (char === '(') {
-        parenCount++;
-      }
-      if (char === ')') {
-        parenCount--;
-      }
-      if (parenCount < 0) {
-        throw new Error('Unbalanced parentheses in PromQL query');
-      }
-    }
-    if (parenCount !== 0) {
-      throw new Error('Unbalanced parentheses in PromQL query');
-    }
-
-    // Check for balanced brackets
-    let bracketCount = 0;
-    for (const char of query) {
-      if (char === '[') {
-        bracketCount++;
-      }
-      if (char === ']') {
-        bracketCount--;
-      }
-      if (bracketCount < 0) {
-        throw new Error('Unbalanced brackets in PromQL query');
-      }
-    }
-    if (bracketCount !== 0) {
-      throw new Error('Unbalanced brackets in PromQL query');
-    }
-
-    // Check for balanced braces
-    let braceCount = 0;
-    for (const char of query) {
-      if (char === '{') {
-        braceCount++;
-      }
-      if (char === '}') {
-        braceCount--;
-      }
-      if (braceCount < 0) {
-        throw new Error('Unbalanced braces in PromQL query');
-      }
-    }
-    if (braceCount !== 0) {
-      throw new Error('Unbalanced braces in PromQL query');
-    }
+    this.checkBalancedBrackets(query, '(', ')', 'parentheses');
+    this.checkBalancedBrackets(query, '[', ']', 'brackets');
+    this.checkBalancedBrackets(query, '{', '}', 'braces');
   }
 
   private static validateLogQL(query: string): void {
@@ -453,31 +405,25 @@ export class ValidationService {
    * @returns Validated prompt or throws error
    */
   static validateCustomSystemPrompt(prompt: string, isRequired: boolean): string {
-    if (isRequired) {
-      if (!prompt || typeof prompt !== 'string') {
+    // Handle empty/invalid prompt
+    if (!prompt || typeof prompt !== 'string') {
+      if (isRequired) {
         throw new Error('Custom system prompt is required');
       }
-
-      const trimmed = prompt.trim();
-
-      if (trimmed.length === 0) {
-        throw new Error('Custom system prompt cannot be empty');
-      }
-
-      if (trimmed.length > this.MAX_SYSTEM_PROMPT_LENGTH) {
-        throw new Error(`Custom system prompt exceeds maximum length of ${this.MAX_SYSTEM_PROMPT_LENGTH} characters`);
-      }
-
-      return this.removeControlCharacters(trimmed);
-    }
-
-    // If not required and empty, return empty string
-    if (!prompt || typeof prompt !== 'string') {
       return '';
     }
 
     const trimmed = prompt.trim();
 
+    // Handle empty trimmed prompt
+    if (trimmed.length === 0) {
+      if (isRequired) {
+        throw new Error('Custom system prompt cannot be empty');
+      }
+      return '';
+    }
+
+    // Check length limit
     if (trimmed.length > this.MAX_SYSTEM_PROMPT_LENGTH) {
       throw new Error(`Custom system prompt exceeds maximum length of ${this.MAX_SYSTEM_PROMPT_LENGTH} characters`);
     }

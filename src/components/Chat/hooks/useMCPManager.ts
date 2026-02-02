@@ -1,25 +1,43 @@
 import { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import { useAsync } from 'react-use';
 import { llm, mcp } from '@grafana/llm';
-import { CallToolResultSchema } from '@modelcontextprotocol/sdk/types';
+import type { Tool, CallToolResult } from '@modelcontextprotocol/sdk/types';
+import { CallToolResultSchema } from '@modelcontextprotocol/sdk/types.js';
 import { backendMCPClient } from '../../../services/backendMCPClient';
 import { builtInMCPClient } from '../../../services/builtInMCPClient';
 import { AggregatedMCPClient } from '../../../services/aggregatedMCPClient';
 import { toolRequestQueue } from '../../../services/queue';
-import { RenderedToolCall } from '../types';
+import { RenderedToolCall, ToolCallResponse } from '../types';
 import { usePluginJsonData } from '../../../hooks/usePluginJsonData';
 
-export const useMCPManager = () => {
+/** Tool call from LLM response */
+interface LLMToolCall {
+  id: string;
+  function: {
+    name: string;
+    arguments: string;
+  };
+}
+
+/** Result of listing available tools */
+interface ToolsData {
+  tools: Tool[];
+}
+
+/** MCP mode based on configuration */
+type MCPMode = 'built-in' | 'backend' | 'combined';
+
+export function useMCPManager() {
   const [toolCalls, setToolCalls] = useState<Map<string, RenderedToolCall>>(new Map());
 
-  const activeToolCallsRef = useRef<Set<Promise<any>>>(new Set());
+  const activeToolCallsRef = useRef<Set<Promise<CallToolResult | null>>>(new Set());
   const isMountedRef = useRef(true);
 
   const pluginSettings = usePluginJsonData();
   const useBuiltInMCP = pluginSettings?.useBuiltInMCP ?? false;
   const hasExternalServers = pluginSettings?.mcpServers?.some((s) => s.enabled) ?? false;
 
-  const mcpMode = useMemo(() => {
+  const mcpMode: MCPMode = useMemo(() => {
     if (useBuiltInMCP && hasExternalServers) {
       return 'combined';
     }
@@ -60,7 +78,7 @@ export const useMCPManager = () => {
     setToolCalls(new Map());
   }, []);
 
-  const getAvailableTools = useCallback(async () => {
+  const getAvailableTools = useCallback(async (): Promise<ToolsData> => {
     try {
       const tools = await mcpClient.listTools();
       return { tools };
@@ -83,7 +101,7 @@ export const useMCPManager = () => {
   );
 
   const handleToolCall = useCallback(
-    async (toolCall: { function: { name: string; arguments: string }; id: string }, messages: llm.Message[]) => {
+    async (toolCall: LLMToolCall, messages: llm.Message[]): Promise<void> => {
       const { function: f, id } = toolCall;
 
       if (isMountedRef.current) {
@@ -110,7 +128,7 @@ export const useMCPManager = () => {
             const finalContent = textContent.trim() || 'No results returned (empty response)';
 
             messages.push({ role: 'tool', tool_call_id: id, content: finalContent });
-            updateToolCallState(id, { running: false, response });
+            updateToolCallState(id, { running: false, response: response as ToolCallResponse });
 
             return response;
           },
@@ -144,27 +162,24 @@ export const useMCPManager = () => {
   );
 
   const handleToolCalls = useCallback(
-    async (
-      toolCalls: Array<{ function: { name: string; arguments: string }; id: string }>,
-      messages: llm.Message[]
-    ) => {
-      const functionCalls = toolCalls.filter((tc) => tc.function);
+    async (toolCallsArray: LLMToolCall[], messages: llm.Message[]): Promise<void> => {
+      const functionCalls = toolCallsArray.filter((tc) => tc.function);
       await Promise.all(functionCalls.map((fc) => handleToolCall(fc, messages)));
     },
     [handleToolCall]
   );
 
-  const getRunningToolCallsCount = useCallback(() => {
+  const getRunningToolCallsCount = useCallback((): number => {
     return Array.from(toolCalls.values()).filter((tc) => tc.running).length;
   }, [toolCalls]);
 
-  const hasRunningToolCalls = useCallback(() => {
+  const hasRunningToolCalls = useCallback((): boolean => {
     return getRunningToolCallsCount() > 0;
   }, [getRunningToolCallsCount]);
 
-  const formatToolsForOpenAI = (tools: any[]) => {
+  function formatToolsForOpenAI(tools: Tool[]): ReturnType<typeof mcp.convertToolsToOpenAI> {
     return mcp.convertToolsToOpenAI(tools);
-  };
+  }
 
   const {
     loading: toolsLoading,

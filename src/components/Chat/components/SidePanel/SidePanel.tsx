@@ -3,6 +3,7 @@ import { useTheme2 } from '@grafana/ui';
 import { GrafanaPageRef } from '../../types';
 import { TabCloseButton } from './TabCloseButton';
 import { useEmbeddingAllowed } from '../../hooks/useEmbeddingAllowed';
+import { getTabLabel, toRelativeUrl } from '../../utils/urlUtils';
 
 export interface SidePanelProps {
   isOpen: boolean;
@@ -11,35 +12,6 @@ export interface SidePanelProps {
   onRemoveTab?: (index: number) => void;
   embedded?: boolean;
   kioskModeEnabled?: boolean;
-}
-
-function getTabLabel(ref: GrafanaPageRef, index: number): string {
-  if (ref.title) {
-    return ref.title.length > 20 ? ref.title.substring(0, 20) + '...' : ref.title;
-  }
-  if (ref.type === 'dashboard' && ref.uid) {
-    return `Dashboard ${ref.uid.substring(0, 8)}`;
-  }
-  return ref.type === 'explore' ? 'Explore' : `Page ${index + 1}`;
-}
-
-function toRelativeUrl(url: string, kioskModeEnabled = true): string {
-  let relativeUrl = url;
-  if (url.startsWith('http://') || url.startsWith('https://')) {
-    const match = url.match(/https?:\/\/[^/]+(\/.*)/);
-    relativeUrl = match ? match[1] : url;
-  }
-
-  if (relativeUrl.includes('kiosk') || relativeUrl.includes('viewPanel')) {
-    return relativeUrl;
-  }
-
-  if (!kioskModeEnabled) {
-    return relativeUrl;
-  }
-
-  const separator = relativeUrl.includes('?') ? '&' : '?';
-  return `${relativeUrl}${separator}kiosk`;
 }
 
 export const SidePanel: React.FC<SidePanelProps> = ({ isOpen, onClose, pageRefs, onRemoveTab, embedded = false, kioskModeEnabled = true }) => {

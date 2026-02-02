@@ -178,7 +178,7 @@ describe('ChatInput', () => {
       expect(document.activeElement).toBe(textarea);
     });
 
-    it('should preserve cursor position when focus is called without moveCursorToEnd', () => {
+    it('should preserve cursor position when focus is called', () => {
       const ref = React.createRef<ChatInputRef>();
       render(<ChatInput {...defaultProps} currentInput="Hello World" ref={ref} />);
 
@@ -188,28 +188,11 @@ describe('ChatInput', () => {
       textarea.setSelectionRange(5, 5);
       expect(textarea.selectionStart).toBe(5);
 
-      // Focus without moving cursor
-      ref.current?.focus(false);
+      // Focus should not move cursor
+      ref.current?.focus();
 
       // Cursor should remain at position 5
       expect(textarea.selectionStart).toBe(5);
-    });
-
-    it('should move cursor to end when focus is called with moveCursorToEnd=true', () => {
-      const ref = React.createRef<ChatInputRef>();
-      render(<ChatInput {...defaultProps} currentInput="Hello World" ref={ref} />);
-
-      const textarea = screen.getByPlaceholderText('Ask me anything about your metrics, logs, or observability...') as HTMLTextAreaElement;
-
-      // Set cursor position to start of text
-      textarea.setSelectionRange(0, 0);
-      expect(textarea.selectionStart).toBe(0);
-
-      // Focus with moving cursor to end
-      ref.current?.focus(true);
-
-      // Cursor should now be at the end
-      expect(textarea.selectionStart).toBe(11); // "Hello World".length = 11
     });
   });
 

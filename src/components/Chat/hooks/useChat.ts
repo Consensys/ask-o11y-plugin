@@ -288,6 +288,7 @@ export const useChat = (pluginSettings: AppPluginSettings, initialSession?: Chat
 
   const clearChat = () => {
     setChatHistory([]);
+    setCurrentInput('');
     clearToolCalls();
     sessionManager.createNewSession();
   };

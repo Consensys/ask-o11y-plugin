@@ -1,79 +1,16 @@
 import React from 'react';
 import { SceneObjectBase, SceneObjectState, SceneComponentProps } from '@grafana/scenes';
 import { useTheme2 } from '@grafana/ui';
-import { ChatMessage as ChatMessageType } from '../types';
+import { ChatInterfaceProps } from '../types';
 import { ChatHeader } from '../components/ChatHeader/ChatHeader';
 import { ChatHistory } from '../components/ChatHistory/ChatHistory';
-import { ChatInput, ChatInputRef } from '../components/ChatInput/ChatInput';
+import { ChatInput } from '../components/ChatInput/ChatInput';
 import { SummarizationIndicator } from '../components/SummarizationIndicator/SummarizationIndicator';
 import { WelcomeMessage } from '../components/WelcomeMessage/WelcomeMessage';
 import { QuickSuggestions } from '../components/QuickSuggestions/QuickSuggestions';
 
-export interface ChatInterfaceState extends SceneObjectState {
-  // Chat history and state
-  chatHistory: ChatMessageType[];
-  currentInput: string;
-  isGenerating: boolean;
-  toolsLoading: boolean;
-
-  // Session info
-  currentSessionTitle?: string;
-  isSummarizing: boolean;
-  hasSummary: boolean;
-
-  // Callbacks
-  setCurrentInput: (value: string) => void;
-  sendMessage: () => void;
-  handleKeyPress: (e: React.KeyboardEvent) => void;
-
-  // Refs
-  chatContainerRef: React.RefObject<HTMLDivElement>;
-  chatInputRef: React.RefObject<ChatInputRef>;
-  bottomSpacerRef: React.RefObject<HTMLDivElement>;
-
-  // Slots for custom buttons
-  leftSlot?: React.ReactNode;
-  rightSlot?: React.ReactNode;
-
-  // Read-only mode flag
-  readOnly?: boolean;
-
-  // Welcome screen props (for when chatHistory is empty)
-  onSuggestionClick?: (message: string) => void;
-}
-
-export interface ChatInterfaceProps {
-  // Chat history and state
-  chatHistory: ChatMessageType[];
-  currentInput: string;
-  isGenerating: boolean;
-  toolsLoading: boolean;
-
-  // Session info
-  currentSessionTitle?: string;
-  isSummarizing: boolean;
-  hasSummary: boolean;
-
-  // Callbacks
-  setCurrentInput: (value: string) => void;
-  sendMessage: () => void;
-  handleKeyPress: (e: React.KeyboardEvent) => void;
-
-  // Refs
-  chatContainerRef: React.RefObject<HTMLDivElement>;
-  chatInputRef: React.RefObject<ChatInputRef>;
-  bottomSpacerRef: React.RefObject<HTMLDivElement>;
-
-  // Slots for custom buttons
-  leftSlot?: React.ReactNode;
-  rightSlot?: React.ReactNode;
-
-  // Read-only mode flag
-  readOnly?: boolean;
-
-  // Welcome screen props (for when chatHistory is empty)
-  onSuggestionClick?: (message: string) => void;
-}
+/** Scene state extends the props with SceneObjectState for Grafana scenes */
+export interface ChatInterfaceState extends SceneObjectState, ChatInterfaceProps {}
 
 function useChatInterface(model: ChatInterfaceScene): ChatInterfaceProps {
   const state = model.useState();

@@ -1,5 +1,16 @@
 import { ChatMessage } from '../../components/Chat/types';
 
+/** Storage format for a chat session (JSON-serializable) */
+export interface ChatSessionStorageData {
+  id: string;
+  title: string;
+  messages: ChatMessage[];
+  createdAt: string;
+  updatedAt: string;
+  messageCount: number;
+  summary?: string;
+}
+
 /**
  * Chat session domain model with validation and factory methods
  */
@@ -28,14 +39,11 @@ export class ChatSession {
   /**
    * Create from storage data (with date parsing)
    */
-  static fromStorage(data: any): ChatSession {
+  static fromStorage(data: ChatSessionStorageData): ChatSession {
     return new ChatSession(
       data.id,
       data.title,
-      data.messages.map((msg: any) => ({
-        ...msg,
-        timestamp: new Date(msg.timestamp),
-      })),
+      data.messages,
       new Date(data.createdAt),
       new Date(data.updatedAt),
       data.messageCount,
@@ -46,13 +54,13 @@ export class ChatSession {
   /**
    * Convert to storage format
    */
-  toStorage(): any {
+  toStorage(): ChatSessionStorageData {
     return {
       id: this.id,
       title: this.title,
       messages: this.messages,
-      createdAt: this.createdAt,
-      updatedAt: this.updatedAt,
+      createdAt: this.createdAt.toISOString(),
+      updatedAt: this.updatedAt.toISOString(),
       messageCount: this.messageCount,
       summary: this.summary,
     };

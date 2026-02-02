@@ -1,4 +1,4 @@
-import { ChatSession } from '../models/ChatSession';
+import { ChatSession, ChatSessionStorageData } from '../models/ChatSession';
 import { ChatMessage } from '../../components/Chat/types';
 
 describe('ChatSession', () => {
@@ -66,11 +66,11 @@ describe('ChatSession', () => {
 
   describe('fromStorage', () => {
     it('should restore session from storage data', () => {
-      const storageData = {
+      const storageData: ChatSessionStorageData = {
         id: 'session-123',
         title: 'Test Session',
         messages: [
-          { role: 'user', content: 'Hello', timestamp: '2024-01-01T00:00:00Z' },
+          { role: 'user', content: 'Hello' },
         ],
         createdAt: '2024-01-01T00:00:00Z',
         updatedAt: '2024-01-02T00:00:00Z',
@@ -88,12 +88,12 @@ describe('ChatSession', () => {
       expect(session.summary).toBe('Test summary');
     });
 
-    it('should parse message timestamps', () => {
-      const storageData = {
+    it('should preserve message data', () => {
+      const storageData: ChatSessionStorageData = {
         id: 'session-123',
         title: 'Test',
         messages: [
-          { role: 'user', content: 'Test', timestamp: '2024-06-15T10:30:00Z' },
+          { role: 'user', content: 'Test' },
         ],
         createdAt: '2024-01-01T00:00:00Z',
         updatedAt: '2024-01-01T00:00:00Z',
@@ -102,7 +102,8 @@ describe('ChatSession', () => {
 
       const session = ChatSession.fromStorage(storageData);
 
-      expect((session.messages[0] as any).timestamp).toBeInstanceOf(Date);
+      expect(session.messages[0].content).toBe('Test');
+      expect(session.messages[0].role).toBe('user');
     });
   });
 

@@ -1,39 +1,11 @@
 import React from 'react';
 import { SceneObjectBase, SceneObjectState, SceneComponentProps } from '@grafana/scenes';
-import { GrafanaPageRef } from '../types';
+import { GrafanaPageProps } from '../types';
 import { SidePanel } from '../components/SidePanel/SidePanel';
 
-export interface GrafanaPageState extends SceneObjectState {
-  // Page references to embed (supports both dashboard and explore)
-  pageRefs: Array<GrafanaPageRef & { messageIndex: number }>;
-
-  // Currently active tab index
+/** Scene state extends the props with activeTabIndex for internal state */
+export interface GrafanaPageState extends SceneObjectState, GrafanaPageProps {
   activeTabIndex: number;
-
-  // Whether to enable kiosk mode for embedded pages
-  kioskModeEnabled?: boolean;
-
-  // Whether the panel is visible (used to hide when side panel is closed)
-  isVisible?: boolean;
-
-  // Callbacks
-  onRemoveTab?: (index: number) => void;
-  onClose?: () => void;
-}
-
-export interface GrafanaPageProps {
-  // Page references to embed (supports both dashboard and explore)
-  pageRefs: Array<GrafanaPageRef & { messageIndex: number }>;
-
-  // Whether to enable kiosk mode for embedded pages
-  kioskModeEnabled?: boolean;
-
-  // Whether the panel is visible (used to hide when side panel is closed)
-  isVisible?: boolean;
-
-  // Callbacks
-  onRemoveTab?: (index: number) => void;
-  onClose?: () => void;
 }
 
 function useGrafanaPage(model: GrafanaPageScene): GrafanaPageProps {
