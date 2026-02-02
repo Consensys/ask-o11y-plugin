@@ -37,11 +37,6 @@ const buildEffectiveSystemPrompt = (
 };
 
 export const useChat = (pluginSettings: AppPluginSettings, initialSession?: ChatSession, readOnly?: boolean) => {
-  console.log('[useChat] Hook initialized', { 
-    readOnly, 
-    hasInitialSession: !!initialSession,
-    initialMessageCount: initialSession?.messages?.length || 0
-  });
 
   // Get organization ID from Grafana config
   const orgId = String(config.bootData.user.orgId || '1');
@@ -75,11 +70,6 @@ export const useChat = (pluginSettings: AppPluginSettings, initialSession?: Chat
       const shouldUpdate = !hasInitializedRef.current || sessionIdChanged || messageCountChanged;
       
       if (shouldUpdate) {
-        console.log('[useChat] Updating chatHistory from initialSession', { 
-          messageCount: initialSession.messages.length,
-          firstMessage: initialSession.messages[0]?.content?.substring(0, 50),
-          currentHistoryLength: chatHistory.length
-        });
         setChatHistory(initialSession.messages);
         hasInitializedRef.current = true;
         initialSessionIdRef.current = initialSession.id;
@@ -105,12 +95,6 @@ export const useChat = (pluginSettings: AppPluginSettings, initialSession?: Chat
     getRunningToolCallsCount,
     formatToolsForOpenAI,
   } = useMCPManager();
-
-  console.log('[useChat] MCP Manager state:', {
-    toolsLoading,
-    toolsError: !!toolsError,
-    toolCount: toolsData?.tools?.length,
-  });
 
   const { handleStreamingChatWithHistory } = useStreamManager(
     setChatHistory,
@@ -146,13 +130,7 @@ export const useChat = (pluginSettings: AppPluginSettings, initialSession?: Chat
   const handleScroll = () => {};
 
   const sendMessage = async () => {
-    console.log('[useChat] sendMessage called', {
-      hasInput: !!currentInput.trim(),
-      isGenerating,
-    });
-
     if (!currentInput.trim() || isGenerating) {
-      console.log('[useChat] sendMessage aborted - conditions not met');
       return;
     }
 
@@ -163,7 +141,6 @@ export const useChat = (pluginSettings: AppPluginSettings, initialSession?: Chat
     let validatedInput: string;
     try {
       validatedInput = ValidationService.validateChatInput(currentInput);
-      console.log('[useChat] Input validation passed');
     } catch (error) {
       console.error('[useChat] Input validation failed:', error);
       setChatHistory((prev) => [
@@ -178,7 +155,6 @@ export const useChat = (pluginSettings: AppPluginSettings, initialSession?: Chat
 
     // Check circuit breaker before attempting
     if (!ReliabilityService.checkCircuitBreaker('llm-stream')) {
-      console.log('[useChat] Circuit breaker is open, showing error message');
       setChatHistory((prev) => [
         ...prev,
         {
@@ -195,7 +171,6 @@ export const useChat = (pluginSettings: AppPluginSettings, initialSession?: Chat
     };
 
     const newChatHistory = [...chatHistory, userMessage];
-    console.log('[useChat] Adding user message to history');
     setChatHistory(newChatHistory);
     // Save immediately after user input
     if (!readOnly) {
@@ -211,21 +186,17 @@ export const useChat = (pluginSettings: AppPluginSettings, initialSession?: Chat
       toolCalls: [],
     };
 
-    console.log('[useChat] Adding empty assistant message to history');
     setChatHistory((prev) => [...prev, assistantMessage]);
 
     // Build context with memory and summarization
-    console.log('[useChat] Building context window');
     const messages: llm.Message[] = ConversationMemoryService.buildContextWindow(
       effectiveSystemPrompt,
       newChatHistory,
       sessionManager.currentSummary,
       15 // Keep last 15 messages in full
     );
-    console.log('[useChat] Context window built, message count:', messages.length);
 
     // Save recovery state
-    console.log('[useChat] Saving recovery state');
     ReliabilityService.saveRecoveryState({
       sessionId: sessionManager.currentSessionId,
       lastMessageIndex: newChatHistory.length,
@@ -236,11 +207,9 @@ export const useChat = (pluginSettings: AppPluginSettings, initialSession?: Chat
       // Call streaming directly - retry logic is complex with RxJS streams
       // The stream manager handles its own error recovery
       const tools = toolsData?.tools || [];
-      console.log('[useChat] Calling handleStreamingChatWithHistory with', tools.length, 'tools');
       await handleStreamingChatWithHistory(messages, tools);
 
       // Success - record for circuit breaker
-      console.log('[useChat] Streaming completed successfully');
       ReliabilityService.recordCircuitBreakerSuccess('llm-stream');
       setRetryCount(0);
 
@@ -274,7 +243,6 @@ export const useChat = (pluginSettings: AppPluginSettings, initialSession?: Chat
       // Track retry count
       setRetryCount((prev) => prev + 1);
     } finally {
-      console.log('[useChat] Resetting isGenerating to false');
       setIsGenerating(false);
     }
   };
@@ -315,7 +283,6 @@ export const useChat = (pluginSettings: AppPluginSettings, initialSession?: Chat
   useEffect(() => {
     // Save when streaming completes (isGenerating goes from true to false)
     if (prevIsGeneratingRef.current && !isGenerating && chatHistory.length > 0 && !readOnly) {
-      console.log('[useChat] Streaming completed, saving immediately');
       sessionManager.saveImmediately(chatHistory);
     }
     prevIsGeneratingRef.current = isGenerating;
@@ -325,7 +292,6 @@ export const useChat = (pluginSettings: AppPluginSettings, initialSession?: Chat
   useEffect(() => {
     const recovery = ReliabilityService.loadRecoveryState();
     if (recovery && recovery.wasGenerating) {
-      console.log('[Chat] Recovery state detected, but streaming cannot be resumed. State cleared.');
       ReliabilityService.clearRecoveryState();
     }
   }, []);

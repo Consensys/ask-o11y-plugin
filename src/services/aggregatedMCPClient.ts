@@ -51,9 +51,7 @@ export class AggregatedMCPClient {
     this.toolRegistry.clear();
 
     builtInTools.forEach((tool) => {
-      if (this.toolRegistry.has(tool.name)) {
-        console.warn(`[AggregatedMCPClient] Duplicate tool name in built-in tools: '${tool.name}' - skipping duplicate.`);
-      } else {
+      if (!this.toolRegistry.has(tool.name)) {
         this.toolRegistry.set(tool.name, 'builtin');
       }
     });
@@ -63,16 +61,14 @@ export class AggregatedMCPClient {
         this.toolRegistry.set(tool.name, 'backend');
         return true;
       }
-      console.warn(
-        `[AggregatedMCPClient] Tool name conflict: '${tool.name}' exists in both built-in and backend. Prioritizing built-in.`
-      );
+      console.warn(`Tool name conflict: '${tool.name}' exists in both built-in and backend. Using built-in version.`);
       return false;
     });
 
     const combinedTools = [...builtInTools, ...filteredBackendTools];
 
-    if (combinedTools.length === 0) {
-      console.error('[AggregatedMCPClient] No tools available from any source');
+    if (combinedTools.length === 0 && (this.useBuiltIn || this.useBackend)) {
+      console.error('No tools available from any MCP source');
     }
 
     this.cachedTools = combinedTools;
@@ -87,7 +83,7 @@ export class AggregatedMCPClient {
     if (result.status === 'fulfilled') {
       return result.value;
     }
-    console.error(`[AggregatedMCPClient] ${sourceName} MCP failed:`, result.reason);
+    console.error(`${sourceName} MCP failed to list tools:`, result.reason);
     return [];
   }
 
@@ -95,7 +91,6 @@ export class AggregatedMCPClient {
     const source = this.toolRegistry.get(params.name);
 
     if (!source) {
-      console.error(`[AggregatedMCPClient] Tool '${params.name}' not found in registry`);
       return {
         content: [
           {
@@ -114,7 +109,6 @@ export class AggregatedMCPClient {
         return await this.backendClient.callTool(params);
       }
     } catch (error) {
-      console.error(`[AggregatedMCPClient] Failed to call tool '${params.name}':`, error);
       return {
         content: [
           {

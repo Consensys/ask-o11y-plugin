@@ -30,12 +30,7 @@ export function SharedSession() {
     const loadSharedSession = async () => {
       try {
         const session = await sessionShareService.getSharedSession(shareId);
-        console.log('[SharedSession] Loaded shared session', { 
-          id: session.id, 
-          title: session.title,
-          messageCount: session.messages?.length || 0 
-        });
-        
+
         // Validate that we have messages
         if (!session.messages || session.messages.length === 0) {
           console.error('[SharedSession] Shared session has no messages');
@@ -137,12 +132,6 @@ export function SharedSession() {
     timestamp: normalizeMessageTimestamp(msg),
   }));
 
-  console.log('[SharedSession] Rendering with messages', {
-    messageCount: messages.length,
-    sessionId: sharedSession.id,
-    firstMessage: messages[0]?.content?.substring(0, 50)
-  });
-
   // Validate we have messages before creating session
   if (messages.length === 0) {
     return (
@@ -168,12 +157,6 @@ export function SharedSession() {
     createdAt: sharedSession.createdAt,
     updatedAt: sharedSession.updatedAt,
     messageCount: messages.length,
-  });
-
-  console.log('[SharedSession] Created session object', {
-    sessionId: session.id,
-    messageCount: session.messages.length,
-    hasInitialSession: true
   });
 
   // Empty plugin settings for read-only mode

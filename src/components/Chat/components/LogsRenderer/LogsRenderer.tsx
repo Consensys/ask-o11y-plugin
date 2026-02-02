@@ -28,8 +28,6 @@ export const LogsRenderer: React.FC<LogsRendererProps> = ({
   const [scene, setScene] = useState<EmbeddedScene | null>(null);
 
   useEffect(() => {
-    console.log('[LogsRenderer] Creating scene for query:', query.query);
-
     // Create a time range
     const timeRange = new SceneTimeRange({
       from: defaultTimeRange.from,
@@ -42,10 +40,9 @@ export const LogsRenderer: React.FC<LogsRendererProps> = ({
       const ds = getDataSourceSrv().getInstanceSettings('loki');
       if (ds) {
         dataSource = { uid: ds.uid, type: 'loki' };
-        console.log('[LogsRenderer] Using Loki data source:', ds.uid);
       }
     } catch (error) {
-      console.warn('[LogsRenderer] Could not get default Loki data source, using fallback');
+      // Using fallback data source
     }
 
     // Create a query runner with Loki data source
@@ -93,15 +90,12 @@ export const LogsRenderer: React.FC<LogsRendererProps> = ({
       controls: [],
     });
 
-    console.log('[LogsRenderer] Scene created successfully');
-
     // Track if this effect instance is still valid (survives React Strict Mode)
     let isCancelled = false;
 
     // Delay activation to survive React Strict Mode's unmount/remount cycle
     const activationTimeout = setTimeout(() => {
       if (!isCancelled) {
-        console.log('[LogsRenderer] Activating scene...');
         embeddedScene.activate();
         setScene(embeddedScene);
       }
@@ -109,7 +103,6 @@ export const LogsRenderer: React.FC<LogsRendererProps> = ({
 
     // Cleanup function
     return () => {
-      console.log('[LogsRenderer] Cleanup running');
       isCancelled = true;
       clearTimeout(activationTimeout);
     };

@@ -59,7 +59,7 @@ export function MCPToolsPage() {
         setToolSettings(defaultSettings);
       }
     } catch (error) {
-      console.error('[MCPToolsPage] Failed to load tools:', error);
+      // Silently handle errors - component will show empty state
     } finally {
       setLoading(false);
     }

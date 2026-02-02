@@ -10,7 +10,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - Frontend: React 18 + TypeScript (strict mode), Grafana UI components, Tailwind CSS
 - Backend: Go 1.21+, Grafana Plugin SDK
 - Integration: Model Context Protocol (MCP) for extensible tool capabilities
-- State: React Context + localStorage (via Grafana UserStorage API)
+- State: React Context + Grafana UserStorage API
 
 **Core Architecture:**
 - Clean Architecture pattern with Repository Pattern (frontend)
@@ -214,7 +214,7 @@ go test ./pkg/plugin -run TestFunctionName
 │  ┌────────────────────────────────────────────────────────┐ │
 │  │  React App (Ask O11y Plugin)                           │ │
 │  │  ├─ Chat Interface (streaming responses)               │ │
-│  │  ├─ Session Management (localStorage via UserStorage)  │ │
+│  │  ├─ Session Management (Grafana UserStorage API)       │ │
 │  │  ├─ Configuration UI                                    │ │
 │  │  └─ Visualization Components                            │ │
 │  └────────────────────────────────────────────────────────┘ │
@@ -583,9 +583,9 @@ docker compose exec grafana curl http://mcp-grafana:8000/mcp
 
 **Session storage issues:**
 ```bash
-# Check browser console for localStorage errors
-# Verify quota (5MB per user)
-# Manual cleanup: localStorage.clear() (dev tools)
+# Check browser console for storage errors
+# Verify quota (5MB per user via Grafana UserStorage API)
+# Sessions are stored via Grafana's UserStorage API
 ```
 
 ## Configuration Files

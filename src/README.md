@@ -431,7 +431,7 @@ go test ./pkg/...        # Backend tests
 1. Go to session sidebar
 2. Delete old or unnecessary sessions
 3. Export important sessions before deleting
-4. Check browser localStorage is not disabled
+4. Check browser storage is not disabled
 
 #### "Grafana LLM plugin not found"
 
@@ -447,7 +447,7 @@ go test ./pkg/...        # Backend tests
 **Solutions:**
 
 1. Check you're in the correct Grafana organization (sessions are org-scoped)
-2. Verify browser localStorage is enabled and not in private/incognito mode
+2. Verify browser storage is enabled and not in private/incognito mode
 3. Check browser console (F12) for errors
 4. Try refreshing the page
 5. Check if session file was accidentally deleted

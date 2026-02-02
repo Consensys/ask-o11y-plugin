@@ -61,7 +61,6 @@ const GraphRendererComponent: React.FC<GraphRendererProps> = ({
   }, []);
 
   useEffect(() => {
-    console.log('[GraphRenderer] Creating scene for query:', query.query, 'viz type:', currentVizType);
     setIsLoading(true);
 
     // Create a time range
@@ -78,11 +77,9 @@ const GraphRendererComponent: React.FC<GraphRendererProps> = ({
       dataSource = dsService.getInstanceSettings('Prometheus');
 
       if (!dataSource) {
-        console.warn('[GraphRenderer] No Prometheus data source found, using default');
         dataSource = { uid: 'prometheus', type: 'prometheus' };
       }
     } catch (error) {
-      console.warn('[GraphRenderer] Error getting data source:', error);
       dataSource = { uid: 'prometheus', type: 'prometheus' };
     }
 
@@ -206,7 +203,6 @@ const GraphRendererComponent: React.FC<GraphRendererProps> = ({
       controls,
     });
 
-    console.log('[GraphRenderer] Scene created successfully');
 
     // Track if this effect instance is still valid (survives React Strict Mode)
     let isCancelled = false;
@@ -214,7 +210,6 @@ const GraphRendererComponent: React.FC<GraphRendererProps> = ({
     // Delay activation to survive React Strict Mode's unmount/remount cycle
     const activationTimeout = setTimeout(() => {
       if (!isCancelled) {
-        console.log('[GraphRenderer] Activating scene...');
         embeddedScene.activate();
         setScene(embeddedScene);
         setIsLoading(false);
@@ -223,7 +218,6 @@ const GraphRendererComponent: React.FC<GraphRendererProps> = ({
 
     // Cleanup function
     return () => {
-      console.log('[GraphRenderer] Cleanup running');
       isCancelled = true;
       clearTimeout(activationTimeout);
     };

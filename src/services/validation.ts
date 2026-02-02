@@ -310,8 +310,7 @@ export class ValidationService {
 
     // LogQL-specific: Check for valid stream selectors
     if (!query.includes('{') && !query.includes('}')) {
-      // LogQL queries should typically have stream selectors
-      console.warn('LogQL query may be missing stream selectors');
+      // LogQL queries should typically have stream selectors (warning silenced)
     }
   }
 

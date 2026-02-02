@@ -3,7 +3,7 @@ import { ChatSession, SessionMetadata } from '../models/ChatSession';
 /**
  * Repository interface for session persistence
  * Following Repository pattern for clean separation of data access logic
- * All methods are async to support both localStorage and Grafana user storage APIs
+ * All methods are async to support Grafana UserStorage API
  */
 export interface SessionRepository {
   /**

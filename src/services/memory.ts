@@ -42,7 +42,6 @@ Summary:`;
 
       return typeof result === 'string' ? result : '';
     } catch (error) {
-      console.error('Failed to generate summary:', error);
       return this.fallbackSummarize(messages);
     }
   }

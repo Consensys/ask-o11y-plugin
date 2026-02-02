@@ -27,7 +27,6 @@ export const TracesRenderer: React.FC<TracesRendererProps> = ({
   const [scene, setScene] = useState<EmbeddedScene | null>(null);
 
   useEffect(() => {
-    console.log('[TracesRenderer] Creating scene for query:', query.query);
 
     // Create a time range
     const timeRange = new SceneTimeRange({
@@ -41,10 +40,8 @@ export const TracesRenderer: React.FC<TracesRendererProps> = ({
       const ds = getDataSourceSrv().getInstanceSettings('tempo');
       if (ds) {
         dataSource = { uid: ds.uid, type: 'tempo' };
-        console.log('[TracesRenderer] Using Tempo data source:', ds.uid);
       }
     } catch (error) {
-      console.warn('[TracesRenderer] Could not get default Tempo data source, using fallback');
     }
 
     // Create a query runner with Tempo data source
@@ -84,7 +81,6 @@ export const TracesRenderer: React.FC<TracesRendererProps> = ({
       controls: [],
     });
 
-    console.log('[TracesRenderer] Scene created successfully');
 
     // Track if this effect instance is still valid (survives React Strict Mode)
     let isCancelled = false;
@@ -92,7 +88,6 @@ export const TracesRenderer: React.FC<TracesRendererProps> = ({
     // Delay activation to survive React Strict Mode's unmount/remount cycle
     const activationTimeout = setTimeout(() => {
       if (!isCancelled) {
-        console.log('[TracesRenderer] Activating scene...');
         embeddedScene.activate();
         setScene(embeddedScene);
       }
@@ -100,7 +95,6 @@ export const TracesRenderer: React.FC<TracesRendererProps> = ({
 
     // Cleanup function
     return () => {
-      console.log('[TracesRenderer] Cleanup running');
       isCancelled = true;
       clearTimeout(activationTimeout);
     };

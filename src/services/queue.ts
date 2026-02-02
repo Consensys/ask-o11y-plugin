@@ -100,8 +100,6 @@ export class RequestQueueService {
         this.queue.splice(insertIndex, 0, queueItem);
       }
 
-      console.log(`[RequestQueue] Added request ${id} to queue. Queue size: ${this.queue.length}`);
-
       // Start processing
       this.processQueue();
     });
@@ -120,7 +118,6 @@ export class RequestQueueService {
     if (!this.checkRateLimit()) {
       // Schedule retry after rate limit window
       const delay = this.getRateLimitDelay();
-      console.log(`[RequestQueue] Rate limit reached, waiting ${delay}ms`);
       setTimeout(() => this.processQueue(), delay);
       return;
     }
@@ -135,8 +132,6 @@ export class RequestQueueService {
     const queueTime = Date.now() - item.timestamp;
     this.metrics.queuedTime.push(queueTime);
     this.metrics.totalRequests++;
-
-    console.log(`[RequestQueue] Processing request ${item.id} after ${queueTime}ms in queue`);
 
     // Execute the request
     this.executeRequest(item);
@@ -179,8 +174,6 @@ export class RequestQueueService {
       this.metrics.executionTime.push(executionTime);
       this.metrics.successfulRequests++;
 
-      console.log(`[RequestQueue] Request ${item.id} completed in ${executionTime}ms`);
-
       item.resolve(result);
 
       // Process next item in queue
@@ -193,11 +186,6 @@ export class RequestQueueService {
       if (item.retryCount < item.maxRetries) {
         const retryDelay = this.config.retryDelays[item.retryCount] || 5000;
         item.retryCount++;
-
-        console.log(
-          `[RequestQueue] Request ${item.id} failed, retrying (${item.retryCount}/${item.maxRetries}) after ${retryDelay}ms`,
-          error
-        );
 
         this.metrics.retriedRequests++;
 
@@ -214,7 +202,6 @@ export class RequestQueueService {
         }, retryDelay);
       } else {
         // Max retries reached, reject the promise
-        console.error(`[RequestQueue] Request ${item.id} failed after ${item.retryCount} retries`, error);
         this.metrics.failedRequests++;
         item.reject(error);
 
@@ -271,8 +258,6 @@ export class RequestQueueService {
       item.reject(new Error('Queue cleared'));
     }
     this.queue = [];
-
-    console.log('[RequestQueue] Queue cleared');
   }
 
   /**
@@ -322,7 +307,6 @@ export class RequestQueueService {
    */
   updateConfig(config: Partial<QueueConfig>) {
     this.config = { ...this.config, ...config };
-    console.log('[RequestQueue] Configuration updated:', this.config);
   }
 
   /**

@@ -40,11 +40,9 @@ export class BackendMCPClient {
       );
 
       this.cachedTools = response?.data.tools || [];
-      console.log('[BackendMCPClient] Listed tools from backend:', this.cachedTools.length);
 
       return this.cachedTools;
     } catch (error) {
-      console.error('[BackendMCPClient] Failed to list tools:', error);
       return [];
     }
   }
@@ -61,8 +59,6 @@ export class BackendMCPClient {
    */
   async callTool(params: CallToolParams): Promise<CallToolResult> {
     try {
-      console.log('[BackendMCPClient] Calling tool via backend:', params.name);
-
       // Get org name from Grafana config for services that need tenant name (e.g., Alertmanager)
       // This must be passed in the body, not headers, as Grafana's proxy doesn't forward custom headers
       const orgName = config.bootData?.user?.orgName || '';
@@ -87,8 +83,6 @@ export class BackendMCPClient {
 
       return response.data;
     } catch (error) {
-      console.error('[BackendMCPClient] Failed to call tool:', error);
-
       return {
         content: [
           {
@@ -141,7 +135,6 @@ export class BackendMCPClient {
 
       return response.data;
     } catch (error) {
-      console.error('[BackendMCPClient] Failed to get health:', error);
       return {
         status: 'error',
         mcpServers: 0,

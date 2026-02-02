@@ -12,7 +12,6 @@ export class ServiceFactory {
    * Note: We create a new instance each time since storage can change
    * (e.g., when user signs in/out, the storage object reference changes)
    * @param storage - UserStorage object from usePluginUserStorage() hook
-   *                  This automatically falls back to localStorage when user is not signed in
    */
   static getSessionService(storage: UserStorage): SessionService {
     const repository = new GrafanaUserStorageRepository(storage);

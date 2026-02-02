@@ -17,28 +17,23 @@ export class ReliabilityService {
 
     for (let attempt = 0; attempt < maxRetries; attempt++) {
       try {
-        console.log(`[Reliability] Attempting ${operationName} (attempt ${attempt + 1}/${maxRetries})`);
         return await operation();
       } catch (error) {
         lastError = error;
-        console.error(`[Reliability] ${operationName} failed (attempt ${attempt + 1}/${maxRetries}):`, error);
 
         // Check if error is retryable
         if (!this.isRetryableError(error)) {
-          console.log(`[Reliability] Error is not retryable, aborting`);
           throw error;
         }
 
         // If not the last attempt, wait before retrying
         if (attempt < maxRetries - 1) {
           const delay = this.RETRY_DELAYS[attempt] || this.RETRY_DELAYS[this.RETRY_DELAYS.length - 1];
-          console.log(`[Reliability] Waiting ${delay}ms before retry...`);
           await this.sleep(delay);
         }
       }
     }
 
-    console.error(`[Reliability] ${operationName} failed after ${maxRetries} attempts`);
     throw lastError;
   }
 
@@ -322,7 +317,6 @@ export class ReliabilityService {
 
     if (breaker.failures >= this.CIRCUIT_BREAKER_THRESHOLD) {
       breaker.state = 'open';
-      console.warn(`[Reliability] Circuit breaker opened for ${key} due to repeated failures`);
     }
   }
 

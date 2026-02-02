@@ -46,7 +46,6 @@ export function useChatScene(
           try {
             deactivateRef.current();
           } catch (cleanupError) {
-            console.warn('[useChatScene] Error during cleanup after failed creation:', cleanupError);
           }
         }
         deactivateRef.current = null;
@@ -60,7 +59,6 @@ export function useChatScene(
         try {
           deactivateRef.current();
         } catch (error) {
-          console.warn('[useChatScene] Error during unmount deactivation:', error);
         }
         deactivateRef.current = null;
       }

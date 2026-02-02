@@ -60,14 +60,11 @@ const trimMessagesToTokenLimit = (messages: llm.Message[], tools: any[], maxToke
     return messages;
   }
 
-  console.warn(`⚠️ Token limit exceeded: ${contextInfo.totalTokens} > ${maxTokens}. Trimming messages...`);
-  console.log(`📊 Token breakdown:`, contextInfo.breakdown);
 
   // First pass: Trim large tool responses in place
   let messagesWithTrimmedTools = messages.map((msg) => {
     const { message, wasTrimmed } = trimMessageContent(msg);
     if (wasTrimmed) {
-      console.log(`✂️ Trimmed large tool response in message`);
     }
     return message;
   });
@@ -77,14 +74,9 @@ const trimMessagesToTokenLimit = (messages: llm.Message[], tools: any[], maxToke
 
   // If still over limit after tool trimming, try aggressive trimming
   if (contextInfo.totalTokens > maxTokens) {
-    console.log(
-      `⚠️ Still over limit after normal trimming (${contextInfo.totalTokens}). Applying aggressive tool response trimming...`
-    );
-
     messagesWithTrimmedTools = messages.map((msg) => {
       const { message, wasTrimmed } = trimMessageContent(msg, true); // aggressive = true
       if (wasTrimmed) {
-        console.log(`✂️ Aggressively trimmed tool response in message`);
       }
       return message;
     });
@@ -94,7 +86,6 @@ const trimMessagesToTokenLimit = (messages: llm.Message[], tools: any[], maxToke
 
   // If resolved after tool trimming, return early
   if (contextInfo.totalTokens <= maxTokens) {
-    console.log(`✂️ Token limit resolved by trimming tool responses. Final tokens: ${contextInfo.totalTokens}`);
     return messagesWithTrimmedTools;
   }
 
@@ -127,29 +118,6 @@ const trimMessagesToTokenLimit = (messages: llm.Message[], tools: any[], maxToke
       : [nonSystemMessages[nonSystemMessages.length - 1]];
   }
 
-  const finalContextInfo = TokenizerService.calculateContextTokens(trimmedMessages, formattedTools);
-
-  // Log detailed trimming summary with accurate token counts
-  const removedMessages = messages.length - trimmedMessages.length;
-  const toolMessagesRemoved =
-    messages.filter((m) => m.role === 'tool').length - trimmedMessages.filter((m) => m.role === 'tool').length;
-  const userMessagesRemoved =
-    messages.filter((m) => m.role === 'user').length - trimmedMessages.filter((m) => m.role === 'user').length;
-  const assistantMessagesRemoved =
-    messages.filter((m) => m.role === 'assistant').length -
-    trimmedMessages.filter((m) => m.role === 'assistant').length;
-
-  console.log(`✂️ Message trimming summary:`, {
-    totalMessages: `${messages.length} → ${trimmedMessages.length} (removed ${removedMessages})`,
-    tokens: `${contextInfo.totalTokens} → ${finalContextInfo.totalTokens}`,
-    accurateBreakdown: finalContextInfo.breakdown,
-    removedByType: {
-      tool: toolMessagesRemoved,
-      user: userMessagesRemoved,
-      assistant: assistantMessagesRemoved,
-    },
-  });
-
   return trimmedMessages;
 };
 
@@ -168,7 +136,6 @@ const simulateStreaming = async (
   while (currentIndex < content.length) {
     // Check if we should abort
     if (abortSignal?.aborted) {
-      console.log('[simulateStreaming] Aborted');
       throw new DOMException('Streaming aborted', 'AbortError');
     }
 
@@ -233,7 +200,6 @@ export const useStreamManager = (
     return () => {
       // Abort any ongoing streaming when component unmounts
       if (abortControllerRef.current) {
-        console.log('[useStreamManager] Cleaning up: aborting streaming');
         abortControllerRef.current.abort();
         abortControllerRef.current = null;
       }
@@ -256,22 +222,6 @@ export const useStreamManager = (
 
       // Trim messages to stay within token limit
       const trimmedMessages = trimMessagesToTokenLimit(messages, formattedTools, effectiveMaxTokens);
-      const contextInfo = TokenizerService.calculateContextTokens(trimmedMessages, formattedTools);
-
-      console.log('🔄 Starting LLM request with context:', {
-        originalMessageCount: messages.length,
-        trimmedMessageCount: trimmedMessages.length,
-        toolCount: formattedTools.length,
-        accurateTokens: {
-          messages: contextInfo.messageTokens,
-          tools: contextInfo.toolTokens,
-          total: contextInfo.totalTokens,
-          breakdown: contextInfo.breakdown,
-        },
-      });
-
-      const requestStartTime = Date.now();
-      console.log('[API] Sending request at', new Date().toISOString());
 
       try {
         // Queue the LLM request to prevent overwhelming the API
@@ -292,32 +242,15 @@ export const useStreamManager = (
           }
         );
 
-        const elapsed = Date.now() - requestStartTime;
-        console.log(`[API] ✅ Response received after ${elapsed}ms`);
-        console.log('[API] Response structure:', {
-          hasChoices: !!response.choices,
-          choicesLength: response.choices?.length,
-          firstChoice: response.choices?.[0],
-        });
-
         const firstChoice = response.choices?.[0];
         if (!firstChoice) {
           throw new Error('No response from LLM');
         }
 
         const message = firstChoice.message;
-        console.log('[API] Message:', {
-          role: message.role,
-          hasContent: !!message.content,
-          contentLength: message.content?.length,
-          hasToolCalls: !!message.tool_calls,
-          toolCallsCount: message.tool_calls?.length || 0,
-        });
 
         // Handle content response with simulated streaming
         if (message.content) {
-          console.log('[Content] Simulating streaming for content');
-
           // Check if we should abort before streaming
           if (abortController.signal.aborted) {
             throw new DOMException('Request aborted', 'AbortError');
@@ -337,7 +270,6 @@ export const useStreamManager = (
             },
             abortController.signal
           );
-          console.log('[Content] Finished displaying content');
 
           const pageRefs = parseGrafanaLinks(message.content);
           setChatHistory((prev) =>
@@ -347,7 +279,6 @@ export const useStreamManager = (
 
         // Handle tool calls
         if (message.tool_calls && message.tool_calls.length > 0) {
-          console.log(`[Tool Calls] Processing ${message.tool_calls.length} tool calls`);
 
           // Check if aborted before processing tool calls
           if (abortController.signal.aborted) {
@@ -359,46 +290,25 @@ export const useStreamManager = (
 
           // Filter for function tool calls
           const functionToolCalls = message.tool_calls.filter((tc: any) => tc.type === 'function');
-          console.log(`[Tool Calls] Filtered to ${functionToolCalls.length} function calls`);
 
           // Execute tool calls
           await handleToolCalls(functionToolCalls as any, messages);
 
           // Make another request with tool results
-          console.log('[Tool Calls] Making follow-up request with tool results');
-          const newTrimmedMessages = trimMessagesToTokenLimit(messages, formattedTools, effectiveMaxTokens);
-          const updatedContextInfo = TokenizerService.calculateContextTokens(newTrimmedMessages, formattedTools);
-
-          console.log('🔄 Continuing after tool calls:', {
-            originalMessageCount: messages.length,
-            trimmedMessageCount: newTrimmedMessages.length,
-            toolCount: formattedTools.length,
-            accurateTokens: {
-              messages: updatedContextInfo.messageTokens,
-              tools: updatedContextInfo.toolTokens,
-              total: updatedContextInfo.totalTokens,
-              breakdown: updatedContextInfo.breakdown,
-            },
-            toolCallsProcessed: functionToolCalls.length,
-          });
+          trimMessagesToTokenLimit(messages, formattedTools, effectiveMaxTokens);
 
           // Recursive call to handle the response after tool execution
           // Note: This maintains the same abort controller through the recursion
           await handleStreamingChatWithHistory(messages, tools);
         }
 
-        console.log('[API] Request completed successfully');
       } catch (error) {
-        const elapsed = Date.now() - requestStartTime;
-
         // Handle abort errors gracefully
         if (error instanceof DOMException && error.name === 'AbortError') {
-          console.log(`[API] Request aborted after ${elapsed}ms`);
           // Don't rethrow abort errors - they're expected during cleanup
           return;
         }
 
-        console.error(`[API] Error after ${elapsed}ms:`, error);
         throw error;
       } finally {
         // Clean up abort controller reference if this is the current one

@@ -53,7 +53,6 @@ export class SessionService {
 
     if (!session) {
       // Session not found, create new one
-      console.warn(`[SessionService] Session ${sessionId} not found, creating new session`);
       await this.createSession(orgId, messages);
       return;
     }

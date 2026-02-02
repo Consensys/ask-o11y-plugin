@@ -39,7 +39,7 @@ type RedisConfig struct {
 
 // getRedisAddr returns the Redis address from environment variables
 func getRedisAddr() string {
-	if addr := os.Getenv("REDIS_ADDR"); addr != "" {
+	if addr := os.Getenv("GF_PLUGIN_ASKO11Y_REDIS_ADDR"); addr != "" {
 		return addr
 	}
 	return "localhost:6379"
@@ -60,14 +60,14 @@ func createRedisClient(logger log.Logger) (*redis.Client, error) {
 
 	// Fall back to individual environment variables
 	addr := getRedisAddr()
-	password := os.Getenv("REDIS_PASSWORD")
+	password := os.Getenv("GF_PLUGIN_ASKO11Y_REDIS_PASSWORD")
 
 	db := 0
-	if dbStr := os.Getenv("REDIS_DB"); dbStr != "" {
+	if dbStr := os.Getenv("GF_PLUGIN_ASKO11Y_REDIS_DB"); dbStr != "" {
 		var err error
 		db, err = strconv.Atoi(dbStr)
 		if err != nil {
-			logger.Warn("Invalid REDIS_DB value, using default 0", "value", dbStr, "error", err)
+			logger.Warn("Invalid GF_PLUGIN_ASKO11Y_REDIS_DB value, using default 0", "value", dbStr, "error", err)
 			db = 0
 		}
 	}

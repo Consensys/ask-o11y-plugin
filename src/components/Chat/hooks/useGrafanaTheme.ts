@@ -75,11 +75,6 @@ export const useGrafanaTheme = () => {
     // Set typography
     root.style.setProperty('--grafana-font-family', theme.typography.fontFamily);
     root.style.setProperty('--grafana-font-family-mono', theme.typography.fontFamilyMonospace);
-
-    console.log('[Theme] Grafana theme synced to CSS custom properties', {
-      isDark: theme.isDark,
-      name: theme.name,
-    });
   }, [theme]);
 
   return theme;
