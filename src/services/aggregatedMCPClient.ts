@@ -61,10 +61,15 @@ export class AggregatedMCPClient {
         this.toolRegistry.set(tool.name, 'backend');
         return true;
       }
+      console.warn(`Tool name conflict: '${tool.name}' exists in both built-in and backend. Using built-in version.`);
       return false;
     });
 
     const combinedTools = [...builtInTools, ...filteredBackendTools];
+
+    if (combinedTools.length === 0 && (this.useBuiltIn || this.useBackend)) {
+      console.error('No tools available from any MCP source');
+    }
 
     this.cachedTools = combinedTools;
 
@@ -78,6 +83,7 @@ export class AggregatedMCPClient {
     if (result.status === 'fulfilled') {
       return result.value;
     }
+    console.error(`${sourceName} MCP failed to list tools:`, result.reason);
     return [];
   }
 
