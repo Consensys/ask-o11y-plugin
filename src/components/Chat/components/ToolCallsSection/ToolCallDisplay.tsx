@@ -1,14 +1,9 @@
 import React, { useState } from 'react';
 import { useTheme2 } from '@grafana/ui';
+import { RenderedToolCall } from '../../types';
 
 interface ToolCallDisplayProps {
-  toolCall: {
-    name: string;
-    arguments: string;
-    running: boolean;
-    error?: string;
-    response?: any;
-  };
+  toolCall: RenderedToolCall;
 }
 
 // Checkmark icon

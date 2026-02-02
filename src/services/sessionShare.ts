@@ -4,18 +4,14 @@ import { ChatSession } from '../core/models/ChatSession';
 import { ChatMessage } from '../components/Chat/types';
 import pluginJson from '../plugin.json';
 
-export interface CreateShareRequest {
-  sessionId: string;
-  sessionData: ChatSession;
-  expiresInDays?: number;
-}
-
+/** Response from creating a share link */
 export interface CreateShareResponse {
   shareId: string;
   shareUrl: string;
   expiresAt: string | null;
 }
 
+/** Session data retrieved from a share link */
 export interface SharedSession {
   id: string;
   title: string;
@@ -24,6 +20,27 @@ export interface SharedSession {
   updatedAt: string;
   isShared: true;
   sharedBy?: string;
+}
+
+/** Raw session data from backend response */
+interface SharedSessionResponse {
+  id?: string;
+  title?: string;
+  messages?: ChatMessage[];
+  createdAt?: string;
+  updatedAt?: string;
+  sharedBy?: string;
+}
+
+/** Error thrown by session share operations */
+export class SessionShareError extends Error {
+  constructor(
+    message: string,
+    public readonly code: 'NETWORK_ERROR' | 'INVALID_RESPONSE' | 'NOT_FOUND' | 'UNKNOWN'
+  ) {
+    super(message);
+    this.name = 'SessionShareError';
+  }
 }
 
 export class SessionShareService {
@@ -38,110 +55,95 @@ export class SessionShareService {
     expiresInDays?: number,
     expiresInHours?: number
   ): Promise<CreateShareResponse> {
-    try {
-      const requestData: any = {
-        sessionId,
-        sessionData: sessionData.toStorage(),
-      };
-      
-      // Send expiresInHours if provided, otherwise expiresInDays
-      if (expiresInHours !== undefined) {
-        requestData.expiresInHours = expiresInHours;
-      } else if (expiresInDays !== undefined) {
-        requestData.expiresInDays = expiresInDays;
-      }
-      
-      const response = await firstValueFrom(
-        getBackendSrv().fetch<CreateShareResponse>({
-          url: `${this.baseUrl}/api/sessions/share`,
-          method: 'POST',
-          data: requestData,
-          showErrorAlert: false,
-        })
-      );
+    const requestData: Record<string, unknown> = {
+      sessionId,
+      sessionData: sessionData.toStorage(),
+    };
 
-      if (!response || !response.data) {
-        throw new Error('No response from backend');
-      }
-
-      return response.data;
-    } catch (error) {
-      console.error('[SessionShareService] Failed to create share:', error);
-      throw error;
+    // Send expiresInHours if provided, otherwise expiresInDays
+    if (expiresInHours !== undefined) {
+      requestData.expiresInHours = expiresInHours;
+    } else if (expiresInDays !== undefined) {
+      requestData.expiresInDays = expiresInDays;
     }
+
+    const response = await firstValueFrom(
+      getBackendSrv().fetch<CreateShareResponse>({
+        url: `${this.baseUrl}/api/sessions/share`,
+        method: 'POST',
+        data: requestData,
+        showErrorAlert: false,
+      })
+    );
+
+    if (!response?.data) {
+      throw new Error('No response from backend');
+    }
+
+    return response.data;
   }
 
   /**
    * Get a shared session by share ID
    */
   async getSharedSession(shareId: string): Promise<SharedSession> {
-    try {
-      const response = await firstValueFrom(
-        getBackendSrv().fetch<any>({
-          url: `${this.baseUrl}/api/sessions/shared/${shareId}`,
-          method: 'GET',
-          showErrorAlert: false,
-        })
-      );
+    const response = await firstValueFrom(
+      getBackendSrv().fetch<SharedSessionResponse>({
+        url: `${this.baseUrl}/api/sessions/shared/${shareId}`,
+        method: 'GET',
+        showErrorAlert: false,
+      })
+    );
 
-      if (!response || !response.data) {
-        throw new Error('No response from backend');
-      }
-
-      const data = response.data;
-      
-      // Ensure messages array exists and is properly formatted
-      if (!data.messages || !Array.isArray(data.messages)) {
-        console.error('[SessionShareService] Invalid session data format:', data);
-        throw new Error('Invalid session data: messages array is missing or invalid');
-      }
-
-      // Convert to SharedSession format, ensuring all required fields are present
-      const sharedSession: SharedSession = {
-        id: data.id || '',
-        title: data.title || 'Shared Session',
-        messages: data.messages || [],
-        createdAt: data.createdAt || new Date().toISOString(),
-        updatedAt: data.updatedAt || new Date().toISOString(),
-        isShared: true,
-        sharedBy: data.sharedBy,
-      };
-
-      console.log('[SessionShareService] Parsed shared session', {
-        id: sharedSession.id,
-        title: sharedSession.title,
-        messageCount: sharedSession.messages.length,
-      });
-
-      return sharedSession;
-    } catch (error: any) {
-      console.error('[SessionShareService] Failed to get shared session:', error);
-      const enhancedError = new Error(error?.message || error?.data?.message || 'Failed to get shared session');
-      (enhancedError as any).status = error?.status || error?.response?.status || error?.data?.status;
-      throw enhancedError;
+    if (!response?.data) {
+      throw new SessionShareError('No response from backend', 'NETWORK_ERROR');
     }
+
+    const data = response.data;
+
+    if (!data.messages || !Array.isArray(data.messages)) {
+      console.error('[SessionShareService] Invalid session data format:', data);
+      throw new SessionShareError(
+        'Invalid session data: messages array is missing or invalid',
+        'INVALID_RESPONSE'
+      );
+    }
+
+    const sharedSession: SharedSession = {
+      id: data.id ?? '',
+      title: data.title ?? 'Shared Session',
+      messages: data.messages,
+      createdAt: data.createdAt ?? new Date().toISOString(),
+      updatedAt: data.updatedAt ?? new Date().toISOString(),
+      isShared: true,
+      sharedBy: data.sharedBy,
+    };
+
+    console.log('[SessionShareService] Parsed shared session', {
+      id: sharedSession.id,
+      title: sharedSession.title,
+      messageCount: sharedSession.messages.length,
+    });
+
+    return sharedSession;
   }
 
   /**
    * Revoke a share link
    */
   async revokeShare(shareId: string): Promise<void> {
-    try {
-      await firstValueFrom(
-        getBackendSrv().fetch({
-          url: `${this.baseUrl}/api/sessions/share/${shareId}`,
-          method: 'DELETE',
-          showErrorAlert: false,
-        })
-      );
-    } catch (error) {
-      console.error('[SessionShareService] Failed to revoke share:', error);
-      throw error;
-    }
+    await firstValueFrom(
+      getBackendSrv().fetch({
+        url: `${this.baseUrl}/api/sessions/share/${shareId}`,
+        method: 'DELETE',
+        showErrorAlert: false,
+      })
+    );
   }
 
   /**
    * Get all shares for a session
+   * Returns empty array on error to allow graceful degradation
    */
   async getSessionShares(sessionId: string): Promise<CreateShareResponse[]> {
     try {
@@ -153,13 +155,8 @@ export class SessionShareService {
         })
       );
 
-      if (!response || !response.data) {
-        return [];
-      }
-
-      return response.data;
-    } catch (error) {
-      console.error('[SessionShareService] Failed to get session shares:', error);
+      return response?.data || [];
+    } catch {
       return [];
     }
   }

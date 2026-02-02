@@ -142,10 +142,7 @@ export class BuiltInMCPClient {
       return false;
     }
 
-    if (!this.cachedTools.some((tool) => tool.name === toolName)) {
-      return false;
-    }
-
+    // Check if tool exists in cache and is accessible to user's role
     const filteredTools = filterToolsByRole(this.cachedTools, getUserRole());
     return filteredTools.some((tool) => tool.name === toolName);
   }

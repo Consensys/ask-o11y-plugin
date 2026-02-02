@@ -5,13 +5,55 @@ import { ToolCallsSection } from '../ToolCallsSection/ToolCallsSection';
 import { GraphRenderer } from '../GraphRenderer/GraphRenderer';
 import { LogsRenderer } from '../LogsRenderer/LogsRenderer';
 import { TracesRenderer } from '../TracesRenderer/TracesRenderer';
-import { ChatMessage as ChatMessageType } from '../../types';
+import { ChatMessage as ChatMessageType, ContentSection } from '../../types';
 import { splitContentByPromQL } from '../../utils/promqlParser';
 
 interface ChatMessageProps {
   message: ChatMessageType;
   isGenerating?: boolean;
   isLastMessage?: boolean;
+}
+
+/**
+ * Helper to build time range prop for query renderers
+ */
+function buildTimeRange(query: ContentSection['query']): { from: string; to: string } | undefined {
+  if (!query?.from) {
+    return undefined;
+  }
+  return { from: query.from, to: query.to || 'now' };
+}
+
+interface QuerySectionProps {
+  section: ContentSection;
+}
+
+/**
+ * Renders a query section (PromQL, LogQL, or TraceQL)
+ */
+function QuerySection({ section }: QuerySectionProps): React.ReactElement | null {
+  if (!section.query) {
+    return null;
+  }
+
+  const timeRange = buildTimeRange(section.query);
+
+  switch (section.type) {
+    case 'promql':
+      return (
+        <GraphRenderer
+          query={section.query}
+          defaultTimeRange={timeRange}
+          visualizationType={section.query.visualization}
+        />
+      );
+    case 'logql':
+      return <LogsRenderer query={section.query} defaultTimeRange={timeRange} />;
+    case 'traceql':
+      return <TracesRenderer query={section.query} defaultTimeRange={timeRange} />;
+    default:
+      return null;
+  }
 }
 
 export const ChatMessage: React.FC<ChatMessageProps> = ({ message, isGenerating = false, isLastMessage = false }) => {
@@ -102,56 +144,17 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({ message, isGenerating 
                     <Streamdown>{section.content}</Streamdown>
                   </div>
                 );
-              } else if (section.type === 'promql' && section.query) {
+              }
+
+              // Render query section (promql, logql, or traceql)
+              if (section.query) {
                 return (
                   <div key={index} className="my-3">
-                    <GraphRenderer
-                      query={section.query}
-                      defaultTimeRange={
-                        section.query.from
-                          ? {
-                              from: section.query.from,
-                              to: section.query.to || 'now',
-                            }
-                          : undefined
-                      }
-                      visualizationType={section.query.visualization}
-                    />
-                  </div>
-                );
-              } else if (section.type === 'logql' && section.query) {
-                return (
-                  <div key={index} className="my-3">
-                    <LogsRenderer
-                      query={section.query}
-                      defaultTimeRange={
-                        section.query.from
-                          ? {
-                              from: section.query.from,
-                              to: section.query.to || 'now',
-                            }
-                          : undefined
-                      }
-                    />
-                  </div>
-                );
-              } else if (section.type === 'traceql' && section.query) {
-                return (
-                  <div key={index} className="my-3">
-                    <TracesRenderer
-                      query={section.query}
-                      defaultTimeRange={
-                        section.query.from
-                          ? {
-                              from: section.query.from,
-                              to: section.query.to || 'now',
-                            }
-                          : undefined
-                      }
-                    />
+                    <QuerySection section={section} />
                   </div>
                 );
               }
+
               return null;
             })}
           </div>
