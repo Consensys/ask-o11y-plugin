@@ -6,7 +6,7 @@
 
 ## Overview
 
-Ask O11y is an AI-powered Grafana plugin that transforms how you interact with your observability data. Through natural language conversations, you can query metrics, analyze logs and traces, create visualizations, and manage dashboards—all without writing a single line of PromQL, LogQL, or TraceQL.
+Ask O11y is an AI-powered Grafana plugin for interacting with your observability data. Through natural language conversations, you can query metrics, analyze logs and traces, create visualizations, and manage dashboards—all without writing a single line of PromQL, LogQL, or TraceQL.
 
 ## Key Features
 
@@ -188,7 +188,7 @@ One-click root cause analysis from alert notifications:
 
    - Navigate to **Apps → Consensys Ask O11y Assistant**
    - Type your first question: "Show me CPU usage in the last hour"
-   - Watch the magic happen! ✨
+   - The assistant will query your data and display visualizations
 
 ### Usage Examples
 

@@ -553,7 +553,7 @@ From `.cursor/rules/playwright-e2e-testing.md`:
 - Test critical user flows (login, chat, session management)
 - Use `data-testid` or semantic selectors (not CSS/XPath)
 - Mock external dependencies with `page.route`
-- Leverage Playwright's auto-waiting
+- Use Playwright's auto-waiting
 - Limit test files to 3-5 focused tests
 
 ## Common Workflows

@@ -732,7 +732,6 @@ func (c *Client) listStandardTools() ([]Tool, error) {
 	return result.Tools, nil
 }
 
-// validateOpenAPIArguments validates arguments against the OpenAPI schema
 func (c *Client) validateOpenAPIArguments(toolName string, arguments map[string]interface{}) error {
 	c.mu.RLock()
 	spec := c.openAPISpec
@@ -861,7 +860,6 @@ func (c *Client) resolveRef(spec map[string]interface{}, ref string) map[string]
 	return current
 }
 
-// getJSONType returns the JSON type of a Go value
 func getJSONType(value interface{}) string {
 	switch value.(type) {
 	case string:

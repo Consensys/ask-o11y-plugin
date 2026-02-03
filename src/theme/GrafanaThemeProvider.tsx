@@ -6,7 +6,6 @@ interface GrafanaThemeProviderProps {
   children: ReactNode;
 }
 
-// Helper function to convert theme values to CSS custom properties
 const setThemeCustomProperties = (theme: GrafanaTheme2) => {
   const root = document.documentElement;
 

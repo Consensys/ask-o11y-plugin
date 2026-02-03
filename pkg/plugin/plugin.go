@@ -37,7 +37,6 @@ type RedisConfig struct {
 	DB       int
 }
 
-// getRedisAddr returns the Redis address from environment variables
 func getRedisAddr() string {
 	if addr := os.Getenv("GF_PLUGIN_ASKO11Y_REDIS_ADDR"); addr != "" {
 		return addr
@@ -45,7 +44,6 @@ func getRedisAddr() string {
 	return "localhost:6379"
 }
 
-// createRedisClient creates a Redis client from environment variables
 func createRedisClient(logger log.Logger) (*redis.Client, error) {
 	// Try GF_PLUGIN_ASKO11Y_REDIS first (full connection string)
 	redisURL := os.Getenv("GF_PLUGIN_ASKO11Y_REDIS")
@@ -267,10 +265,7 @@ func (p *Plugin) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/", p.handleDefault)
 }
 
-// getUserRole extracts the user's role from the Grafana plugin context
 func getUserRole(r *http.Request) string {
-	// Extract PluginContext from the request context
-	// This is provided by the httpadapter and contains user information
 	pluginContext := httpadapter.PluginConfigFromContext(r.Context())
 	if pluginContext.User != nil {
 		role := string(pluginContext.User.Role)
@@ -392,7 +387,6 @@ func filterToolsByRole(tools []mcp.Tool, role string) []mcp.Tool {
 	return filtered
 }
 
-// handleHealth handles health check requests
 func (p *Plugin) handleHealth(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
@@ -406,7 +400,6 @@ func (p *Plugin) handleHealth(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(response)
 }
 
-// handleMCP handles MCP JSON-RPC requests
 func (p *Plugin) handleMCP(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -432,7 +425,6 @@ func (p *Plugin) handleMCP(w http.ResponseWriter, r *http.Request) {
 	w.Write(response)
 }
 
-// handleMCPTools handles MCP tool listing requests (REST-style)
 func (p *Plugin) handleMCPTools(w http.ResponseWriter, r *http.Request) {
 	// Get user role from headers
 	userRole := getUserRole(r)
@@ -458,7 +450,6 @@ func (p *Plugin) handleMCPTools(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(response)
 }
 
-// handleMCPCallTool handles MCP tool call requests (REST-style)
 func (p *Plugin) handleMCPCallTool(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -511,7 +502,6 @@ func (p *Plugin) handleMCPCallTool(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(result)
 }
 
-// handleMCPServers handles MCP server status requests
 func (p *Plugin) handleMCPServers(w http.ResponseWriter, r *http.Request) {
 	p.logger.Info("MCP servers status request", "method", r.Method)
 
@@ -529,7 +519,6 @@ func (p *Plugin) handleMCPServers(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(response)
 }
 
-// handleDefault handles all other requests
 func (p *Plugin) handleDefault(w http.ResponseWriter, r *http.Request) {
 	p.logger.Info("Default handler", "path", r.URL.Path, "method", r.Method)
 
@@ -544,9 +533,6 @@ func (p *Plugin) handleDefault(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(response)
 }
 
-// getUserID extracts the user ID from the Grafana plugin context
-// Note: Grafana SDK User struct may not have ID field directly
-// We use Login as a unique identifier, or fallback to header
 func getUserID(r *http.Request) int64 {
 	pluginContext := httpadapter.PluginConfigFromContext(r.Context())
 	if pluginContext.User != nil {
@@ -577,17 +563,11 @@ func getUserID(r *http.Request) int64 {
 	return 0
 }
 
-// stringPtr returns a pointer to a copy of the string, allocated on the heap
-// This ensures the pointer remains valid after the function returns
-// Go's escape analysis will move the string to the heap automatically
 func stringPtr(s string) *string {
-	// Create a new string allocation to ensure pointer remains valid
-	// The compiler will escape this to the heap
 	sCopy := s
 	return &sCopy
 }
 
-// getOrgID extracts the organization ID from the request header
 func getOrgID(r *http.Request) int64 {
 	orgIDStr := r.Header.Get("X-Grafana-Org-Id")
 	if orgIDStr == "" {
@@ -602,7 +582,6 @@ func getOrgID(r *http.Request) int64 {
 	return orgID
 }
 
-// handleCreateShare handles POST /api/sessions/share
 func (p *Plugin) handleCreateShare(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -692,7 +671,6 @@ func (p *Plugin) handleCreateShare(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(response)
 }
 
-// handleGetSharedSession handles GET /api/sessions/shared/:shareId
 func (p *Plugin) handleGetSharedSession(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -753,7 +731,6 @@ func (p *Plugin) handleGetSharedSession(w http.ResponseWriter, r *http.Request) 
 	json.NewEncoder(w).Encode(sessionData)
 }
 
-// handleDeleteShare handles DELETE /api/sessions/share/:shareId
 func (p *Plugin) handleDeleteShare(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodDelete {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -809,7 +786,6 @@ func (p *Plugin) handleDeleteShare(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(response)
 }
 
-// handleGetSessionShares handles GET /api/sessions/:sessionId/shares
 func (p *Plugin) handleGetSessionShares(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)

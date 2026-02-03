@@ -1,6 +1,6 @@
 # Ask O11y - AI-Powered Observability Assistant for Grafana
 
-**Ask O11y** transforms how you interact with your observability data. Query metrics, analyze logs, create dashboards, and troubleshoot issues through natural language conversations—no need to write PromQL, LogQL, or navigate complex UIs.
+**Ask O11y** lets you query metrics, analyze logs, create dashboards, and troubleshoot issues through natural language conversations—no need to write PromQL, LogQL, or navigate complex UIs.
 
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Grafana](https://img.shields.io/badge/Grafana-%3E%3D12.1.1-orange.svg)](https://grafana.com)
@@ -280,7 +280,7 @@ In Grafana UI:
 
 - Navigate to **Apps → Ask O11y**
 - Type your first question: "Show me CPU usage in the last hour"
-- Watch the magic happen!
+- The assistant will query your data and display visualizations
 
 ---
 

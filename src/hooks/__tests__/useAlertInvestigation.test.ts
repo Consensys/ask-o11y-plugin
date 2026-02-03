@@ -1,7 +1,6 @@
 import { renderHook, waitFor } from '@testing-library/react';
 import { useAlertInvestigation } from '../useAlertInvestigation';
 
-// Helper to set URL search params
 const setSearchParams = (params: Record<string, string>) => {
   const searchParams = new URLSearchParams(params);
   Object.defineProperty(window, 'location', {
@@ -12,7 +11,6 @@ const setSearchParams = (params: Record<string, string>) => {
   });
 };
 
-// Helper to clear URL search params
 const clearSearchParams = () => {
   Object.defineProperty(window, 'location', {
     value: {
