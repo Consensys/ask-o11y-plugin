@@ -19,9 +19,19 @@ interface ChatProps {
   pluginSettings: AppPluginSettings;
   readOnly?: boolean;
   initialSession?: ChatSession;
+  /** Message to auto-send on mount (for alert investigation mode) */
+  initialMessage?: string;
+  /** Override for session title (for alert investigation mode) */
+  sessionTitleOverride?: string;
 }
 
-function ChatComponent({ pluginSettings, readOnly = false, initialSession }: ChatProps): React.ReactElement | null {
+function ChatComponent({
+  pluginSettings,
+  readOnly = false,
+  initialSession,
+  initialMessage,
+  sessionTitleOverride,
+}: ChatProps): React.ReactElement | null {
   useGrafanaTheme();
   const theme = useTheme2();
   const allowEmbedding = useEmbeddingAllowed();
@@ -44,7 +54,7 @@ function ChatComponent({ pluginSettings, readOnly = false, initialSession }: Cha
     sessionManager,
     bottomSpacerRef,
     detectedPageRefs,
-  } = useChat(pluginSettings, readOnly ? initialSession : undefined, readOnly);
+  } = useChat(pluginSettings, readOnly ? initialSession : undefined, readOnly, initialMessage, sessionTitleOverride);
 
   const chatInputRef = useRef<ChatInputRef>(null);
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);

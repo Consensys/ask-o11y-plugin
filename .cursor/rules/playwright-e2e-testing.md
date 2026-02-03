@@ -24,7 +24,7 @@ Use Playwright's page.route for API mocking to create isolated, deterministic te
 **1** **Descriptive Names**: Use test names that explain the behavior being tested
 **2** **Proper Setup**: Include setup in test.beforeEach blocks
 **3** **Selector Usage**: Use data-testid or semantic selectors over CSS or XPath selectors
-**4** **Waiting Strategy**: Leverage Playwright's auto-waiting instead of explicit waits
+**4** **Waiting Strategy**: Use Playwright's auto-waiting instead of explicit waits
 **5** **Mock Dependencies**: Mock external dependencies with page.route
 **6** **Validation Coverage**: Validate both success and error scenarios
 **7** **Test Focus**: Limit test files to 3-5 focused tests

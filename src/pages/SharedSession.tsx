@@ -75,16 +75,11 @@ export function SharedSession() {
         timestamp: normalizeMessageTimestamp(msg),
       }));
 
-      // Create new session with imported data
-      // createSession already sets it as the active session
       await sessionService.createSession(orgId, messages, sharedSession.title);
 
-      // Wait a moment to ensure the session is fully persisted and indexed
+      // Allow session to persist before navigation
       await new Promise((resolve) => setTimeout(resolve, 300));
 
-      // Navigate to home - the session is already set as active
-      // When Home component mounts, useSessionManager will initialize and load the current session
-      // Use window.location to ensure a fresh mount, which will trigger useSessionManager to load the current session
       const currentPath = window.location.pathname;
       const basePath = currentPath.includes('/shared/') 
         ? currentPath.split('/shared/')[0] 

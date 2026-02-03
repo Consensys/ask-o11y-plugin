@@ -1,6 +1,8 @@
 import React from 'react';
+import { Alert, Button, Spinner } from '@grafana/ui';
 import { testIds } from '../components/testIds';
 import { Chat } from '../components/Chat';
+import { useAlertInvestigation } from '../hooks/useAlertInvestigation';
 import type { AppPluginSettings } from '../types/plugin';
 
 interface HomeProps {
@@ -8,10 +10,66 @@ interface HomeProps {
 }
 
 function Home({ pluginSettings }: HomeProps) {
+  const { isLoading, error, initialMessage, sessionTitle, isInvestigationMode } = useAlertInvestigation();
+
+  if (isInvestigationMode && isLoading) {
+    return (
+      <div
+        data-testid={testIds.investigation.loading}
+        className="w-full h-full flex items-center justify-center"
+        style={{ height: '100%', maxHeight: '100vh' }}
+      >
+        <div className="text-center">
+          <Spinner size="lg" />
+          <p className="mt-4 text-secondary">Loading alert investigation...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (isInvestigationMode && error) {
+    return (
+      <div
+        data-testid={testIds.investigation.error}
+        className="w-full flex flex-col overflow-hidden"
+        style={{ height: '100%', maxHeight: '100vh' }}
+      >
+        <div className="p-4">
+          <Alert title="Investigation Error" severity="error">
+            <p>{error}</p>
+          </Alert>
+          <div className="mt-3">
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => {
+                window.history.replaceState({}, '', window.location.pathname);
+                window.location.reload();
+              }}
+            >
+              Start Normal Chat
+            </Button>
+          </div>
+        </div>
+        <div className="flex-1 flex flex-col min-h-0">
+          <Chat pluginSettings={pluginSettings} />
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div data-testid={testIds.home.container} className="w-full flex flex-col overflow-hidden" style={{ height: '100%', maxHeight: '100vh' }}>
+    <div
+      data-testid={testIds.home.container}
+      className="w-full flex flex-col overflow-hidden"
+      style={{ height: '100%', maxHeight: '100vh' }}
+    >
       <div className="flex-1 flex flex-col min-h-0">
-        <Chat pluginSettings={pluginSettings} />
+        <Chat
+          pluginSettings={pluginSettings}
+          initialMessage={initialMessage || undefined}
+          sessionTitleOverride={sessionTitle || undefined}
+        />
       </div>
     </div>
   );
