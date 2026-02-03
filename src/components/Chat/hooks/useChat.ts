@@ -310,34 +310,36 @@ export const useChat = (
 
   // Auto-send initial message (for alert investigation mode)
   // This triggers when an initialMessage is provided via URL params
-  // Uses two-stage approach to avoid race condition with state updates
-  const hasAutoSentRef = useRef(false);
-  const shouldAutoSendRef = useRef(false);
+  const autoSendStateRef = useRef<'idle' | 'creating-session' | 'ready-to-send' | 'sent'>('idle');
 
-  // Stage 1: Set the input when conditions are ready
   useEffect(() => {
-    if (
-      initialMessage &&
-      !hasAutoSentRef.current &&
-      !readOnly &&
-      !isGenerating &&
-      !toolsLoading &&
-      chatHistory.length === 0
-    ) {
-      hasAutoSentRef.current = true;
-      shouldAutoSendRef.current = true;
-      setCurrentInput(initialMessage);
+    if (!initialMessage || readOnly || toolsLoading) {
+      return;
     }
-  }, [initialMessage, toolsLoading, isGenerating, chatHistory.length, readOnly]);
 
-  // Stage 2: Trigger sendMessage when currentInput is set and shouldAutoSend is true
-  useEffect(() => {
-    if (shouldAutoSendRef.current && currentInput && !isGenerating) {
-      shouldAutoSendRef.current = false;
+    const state = autoSendStateRef.current;
+
+    // Stage 1: Create new session
+    if (state === 'idle') {
+      autoSendStateRef.current = 'creating-session';
+      sessionManager.createNewSession();
+      return;
+    }
+
+    // Stage 2: Session cleared, set input and send
+    if (state === 'creating-session' && chatHistory.length === 0 && !isGenerating) {
+      autoSendStateRef.current = 'ready-to-send';
+      setCurrentInput(initialMessage);
+      return;
+    }
+
+    // Stage 3: Input is set, trigger send
+    if (state === 'ready-to-send' && currentInput === initialMessage && !isGenerating) {
+      autoSendStateRef.current = 'sent';
       sendMessage();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentInput, isGenerating]);
+  }, [initialMessage, toolsLoading, readOnly, chatHistory.length, isGenerating, currentInput]);
 
   const detectedPageRefs = useMemo((): Array<GrafanaPageRef & { messageIndex: number }> => {
     for (let i = chatHistory.length - 1; i >= 0; i--) {

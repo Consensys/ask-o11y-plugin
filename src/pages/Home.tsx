@@ -10,7 +10,7 @@ interface HomeProps {
 }
 
 function Home({ pluginSettings }: HomeProps) {
-  const { isLoading, error, initialMessage, sessionTitle, isInvestigationMode, alertDetails } = useAlertInvestigation();
+  const { isLoading, error, initialMessage, sessionTitle, isInvestigationMode } = useAlertInvestigation();
 
   // Show loading state while fetching alert for investigation
   if (isInvestigationMode && isLoading) {
@@ -67,27 +67,6 @@ function Home({ pluginSettings }: HomeProps) {
       className="w-full flex flex-col overflow-hidden"
       style={{ height: '100%', maxHeight: '100vh' }}
     >
-      {/* Investigation mode banner */}
-      {isInvestigationMode && alertDetails && (
-        <div
-          data-testid={testIds.investigation.banner}
-          className="bg-info/10 border-b border-info/20 px-3 py-2 flex-shrink-0"
-        >
-          <div className="flex items-center gap-2">
-            <span className="text-lg">🔍</span>
-            <div className="flex-1 min-w-0">
-              <h2 className="text-sm font-semibold text-primary truncate">Alert Investigation</h2>
-              <p className="text-xs text-secondary mt-0.5 truncate">
-                Analyzing: <span className="font-medium">{alertDetails.title}</span>
-                {alertDetails.state && (
-                  <span className="ml-2 text-warning">({alertDetails.state})</span>
-                )}
-              </p>
-            </div>
-          </div>
-        </div>
-      )}
-
       <div className="flex-1 flex flex-col min-h-0">
         <Chat
           pluginSettings={pluginSettings}

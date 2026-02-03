@@ -1,13 +1,5 @@
 import { renderHook, waitFor } from '@testing-library/react';
 import { useAlertInvestigation } from '../useAlertInvestigation';
-import { backendMCPClient } from '../../services/backendMCPClient';
-
-// Mock the backendMCPClient
-jest.mock('../../services/backendMCPClient', () => ({
-  backendMCPClient: {
-    callTool: jest.fn(),
-  },
-}));
 
 // Helper to set URL search params
 const setSearchParams = (params: Record<string, string>) => {
@@ -32,13 +24,12 @@ const clearSearchParams = () => {
 
 describe('useAlertInvestigation', () => {
   beforeEach(() => {
-    jest.clearAllMocks();
     clearSearchParams();
   });
 
   describe('when not in investigation mode', () => {
     it('should return isInvestigationMode false when type param is missing', async () => {
-      setSearchParams({ alertId: 'test-alert-123' });
+      setSearchParams({ alertName: 'TestAlert' });
 
       const { result } = renderHook(() => useAlertInvestigation());
 
@@ -51,7 +42,7 @@ describe('useAlertInvestigation', () => {
       expect(result.current.error).toBeNull();
     });
 
-    it('should return isInvestigationMode false when alertId param is missing', async () => {
+    it('should return isInvestigationMode false when alertName param is missing', async () => {
       setSearchParams({ type: 'investigation' });
 
       const { result } = renderHook(() => useAlertInvestigation());
@@ -78,53 +69,25 @@ describe('useAlertInvestigation', () => {
   });
 
   describe('when in investigation mode', () => {
-    const mockAlertData = {
-      uid: 'test-alert-123',
-      title: 'High CPU Usage',
-      state: 'alerting',
-      labels: { severity: 'critical', service: 'api' },
-      annotations: { description: 'CPU usage is above 80%' },
-    };
-
-    it('should load alert details and build investigation prompt', async () => {
-      setSearchParams({ type: 'investigation', alertId: 'test-alert-123' });
-
-      (backendMCPClient.callTool as jest.Mock).mockResolvedValue({
-        content: [{ type: 'text', text: JSON.stringify(mockAlertData) }],
-        isError: false,
-      });
+    it('should build investigation prompt with alert name', async () => {
+      setSearchParams({ type: 'investigation', alertName: 'HighCPUUsage' });
 
       const { result } = renderHook(() => useAlertInvestigation());
 
-      // Initially loading
-      expect(result.current.isLoading).toBe(true);
+      await waitFor(() => {
+        expect(result.current.isLoading).toBe(false);
+      });
+
       expect(result.current.isInvestigationMode).toBe(true);
-
-      await waitFor(() => {
-        expect(result.current.isLoading).toBe(false);
-      });
-
       expect(result.current.error).toBeNull();
-      expect(result.current.alertDetails).toEqual(expect.objectContaining({
-        uid: 'test-alert-123',
-        title: 'High CPU Usage',
-        state: 'alerting',
-      }));
-      expect(result.current.initialMessage).toContain('Investigate this alert');
-      expect(result.current.initialMessage).toContain('High CPU Usage');
-      expect(result.current.sessionTitle).toBe('Alert Investigation: High CPU Usage');
+      expect(result.current.alertName).toBe('HighCPUUsage');
+      expect(result.current.initialMessage).toContain('Investigate the alert "HighCPUUsage"');
+      expect(result.current.initialMessage).toContain('list_alert_rules');
+      expect(result.current.sessionTitle).toBe('Alert Investigation: HighCPUUsage');
     });
 
-    it('should try prefixed tool name first, then unprefixed', async () => {
-      setSearchParams({ type: 'investigation', alertId: 'test-alert-123' });
-
-      // First call (prefixed) fails, second call (unprefixed) succeeds
-      (backendMCPClient.callTool as jest.Mock)
-        .mockResolvedValueOnce({ content: [], isError: true })
-        .mockResolvedValueOnce({
-          content: [{ type: 'text', text: JSON.stringify(mockAlertData) }],
-          isError: false,
-        });
+    it('should handle alert names with spaces', async () => {
+      setSearchParams({ type: 'investigation', alertName: 'High CPU Usage Alert' });
 
       const { result } = renderHook(() => useAlertInvestigation());
 
@@ -132,26 +95,14 @@ describe('useAlertInvestigation', () => {
         expect(result.current.isLoading).toBe(false);
       });
 
-      expect(backendMCPClient.callTool).toHaveBeenCalledTimes(2);
-      expect(backendMCPClient.callTool).toHaveBeenNthCalledWith(1, {
-        name: 'mcp-grafana_get_alert_rule_by_uid',
-        arguments: { uid: 'test-alert-123' },
-      });
-      expect(backendMCPClient.callTool).toHaveBeenNthCalledWith(2, {
-        name: 'get_alert_rule_by_uid',
-        arguments: { uid: 'test-alert-123' },
-      });
       expect(result.current.error).toBeNull();
-      expect(result.current.alertDetails).toBeDefined();
+      expect(result.current.alertName).toBe('High CPU Usage Alert');
+      expect(result.current.initialMessage).toContain('High CPU Usage Alert');
+      expect(result.current.sessionTitle).toBe('Alert Investigation: High CPU Usage Alert');
     });
 
-    it('should handle alert not found error', async () => {
-      setSearchParams({ type: 'investigation', alertId: 'nonexistent-alert' });
-
-      (backendMCPClient.callTool as jest.Mock).mockResolvedValue({
-        content: [{ type: 'text', text: 'Alert not found' }],
-        isError: true,
-      });
+    it('should include RCA workflow instructions in prompt', async () => {
+      setSearchParams({ type: 'investigation', alertName: 'TestAlert' });
 
       const { result } = renderHook(() => useAlertInvestigation());
 
@@ -159,19 +110,30 @@ describe('useAlertInvestigation', () => {
         expect(result.current.isLoading).toBe(false);
       });
 
-      expect(result.current.error).toContain('nonexistent-alert');
-      expect(result.current.error).toContain('not found');
-      expect(result.current.alertDetails).toBeNull();
+      const prompt = result.current.initialMessage;
+      expect(prompt).toContain('root cause analysis');
+      expect(prompt).toContain('list_datasources');
+      expect(prompt).toContain('Grafana-managed alerts');
+      expect(prompt).toContain('Query related metrics');
+      expect(prompt).toContain('Search for relevant error logs');
+      expect(prompt).toContain('remediation steps');
+    });
+
+    it('should validate alertName and reject script injection', async () => {
+      setSearchParams({ type: 'investigation', alertName: '<script>alert("xss")</script>' });
+
+      const { result } = renderHook(() => useAlertInvestigation());
+
+      await waitFor(() => {
+        expect(result.current.isLoading).toBe(false);
+      });
+
+      expect(result.current.error).toBe('Invalid alert name format');
       expect(result.current.initialMessage).toBeNull();
     });
 
-    it('should handle permission denied error', async () => {
-      setSearchParams({ type: 'investigation', alertId: 'restricted-alert' });
-
-      (backendMCPClient.callTool as jest.Mock).mockResolvedValue({
-        content: [{ type: 'text', text: 'Permission denied' }],
-        isError: true,
-      });
+    it('should validate alertName and reject javascript: protocol', async () => {
+      setSearchParams({ type: 'investigation', alertName: 'javascript:alert(1)' });
 
       const { result } = renderHook(() => useAlertInvestigation());
 
@@ -179,13 +141,12 @@ describe('useAlertInvestigation', () => {
         expect(result.current.isLoading).toBe(false);
       });
 
-      expect(result.current.error).toContain('permission');
-      expect(result.current.alertDetails).toBeNull();
+      expect(result.current.error).toBe('Invalid alert name format');
     });
 
-    it('should validate alertId format', async () => {
-      // Invalid alertId with special characters
-      setSearchParams({ type: 'investigation', alertId: 'invalid<script>alert</script>' });
+    it('should reject excessively long alert names', async () => {
+      const longName = 'A'.repeat(300);
+      setSearchParams({ type: 'investigation', alertName: longName });
 
       const { result } = renderHook(() => useAlertInvestigation());
 
@@ -193,17 +154,11 @@ describe('useAlertInvestigation', () => {
         expect(result.current.isLoading).toBe(false);
       });
 
-      expect(result.current.error).toBe('Invalid alert ID format');
-      expect(backendMCPClient.callTool).not.toHaveBeenCalled();
+      expect(result.current.error).toBe('Invalid alert name format');
     });
 
-    it('should handle malformed API response', async () => {
-      setSearchParams({ type: 'investigation', alertId: 'test-alert-123' });
-
-      (backendMCPClient.callTool as jest.Mock).mockResolvedValue({
-        content: [{ type: 'text', text: 'not valid json' }],
-        isError: false,
-      });
+    it('should allow valid special characters in alert names', async () => {
+      setSearchParams({ type: 'investigation', alertName: 'CPU_usage-high (prod)' });
 
       const { result } = renderHook(() => useAlertInvestigation());
 
@@ -211,26 +166,8 @@ describe('useAlertInvestigation', () => {
         expect(result.current.isLoading).toBe(false);
       });
 
-      expect(result.current.error).toContain('Failed to parse alert details');
-    });
-
-    it('should include alert labels and annotations in prompt', async () => {
-      setSearchParams({ type: 'investigation', alertId: 'test-alert-123' });
-
-      (backendMCPClient.callTool as jest.Mock).mockResolvedValue({
-        content: [{ type: 'text', text: JSON.stringify(mockAlertData) }],
-        isError: false,
-      });
-
-      const { result } = renderHook(() => useAlertInvestigation());
-
-      await waitFor(() => {
-        expect(result.current.isLoading).toBe(false);
-      });
-
-      expect(result.current.initialMessage).toContain('severity: critical');
-      expect(result.current.initialMessage).toContain('service: api');
-      expect(result.current.initialMessage).toContain('CPU usage is above 80%');
+      expect(result.current.error).toBeNull();
+      expect(result.current.alertName).toBe('CPU_usage-high (prod)');
     });
   });
 });
