@@ -1,48 +1,21 @@
-/**
- * useAlertInvestigation Hook
- *
- * Handles alert investigation mode initialization:
- * - Parses URL query params (type=investigation, alertName)
- * - Builds RCA investigation prompt with alert name
- * - Lets AI find and investigate the alert using available tools
- */
-
 import { useState, useEffect } from 'react';
 
-/** Return type for the hook */
 export interface UseAlertInvestigationResult {
-  /** Whether investigation is currently loading */
   isLoading: boolean;
-  /** Error message if investigation failed to load */
   error: string | null;
-  /** Initial message to send (investigation prompt) */
   initialMessage: string | null;
-  /** Suggested session title */
   sessionTitle: string | null;
-  /** Whether this is an investigation mode request */
   isInvestigationMode: boolean;
-  /** Alert name from URL params */
   alertName: string | null;
 }
 
-/**
- * Validate alert name to prevent injection.
- * More permissive than UID validation since names can have spaces and special chars.
- */
 function validateAlertName(alertName: string): boolean {
   if (alertName.length > 256) {
     return false;
   }
-  if (/<script|javascript:|data:/i.test(alertName)) {
-    return false;
-  }
-  return true;
+  return !/<script|javascript:|data:/i.test(alertName);
 }
 
-/**
- * Build the RCA investigation prompt with alert name.
- * Instructs AI to find the alert using available tools.
- */
 function buildInvestigationPrompt(alertName: string): string {
   return `Investigate the alert "${alertName}" and perform a full root cause analysis.
 
@@ -62,7 +35,6 @@ Once you find the alert, proceed with:
 Please use the available MCP tools to gather real data and provide actionable insights.`;
 }
 
-/** Internal state for the hook */
 interface InvestigationState {
   isLoading: boolean;
   error: string | null;
@@ -81,16 +53,7 @@ const INITIAL_STATE: InvestigationState = {
   alertName: null,
 };
 
-/**
- * Hook for alert investigation mode.
- *
- * Parses URL query params and prepares an initial investigation prompt
- * for auto-sending. The AI will find the alert using available tools.
- *
- * @example
- * // URL: /a/consensys-asko11y-app?type=investigation&alertName=HighCPUUsage
- * const { isLoading, error, initialMessage, sessionTitle, isInvestigationMode } = useAlertInvestigation();
- */
+/** Parses ?type=investigation&alertName=... and prepares auto-send prompt */
 export function useAlertInvestigation(): UseAlertInvestigationResult {
   const [state, setState] = useState<InvestigationState>(INITIAL_STATE);
 
@@ -99,13 +62,11 @@ export function useAlertInvestigation(): UseAlertInvestigationResult {
     const type = searchParams.get('type');
     const alertNameParam = searchParams.get('alertName');
 
-    // Not an investigation request
     if (type !== 'investigation' || !alertNameParam) {
       setState({ ...INITIAL_STATE, isLoading: false });
       return;
     }
 
-    // Invalid alert name
     if (!validateAlertName(alertNameParam)) {
       setState({
         ...INITIAL_STATE,
@@ -116,7 +77,6 @@ export function useAlertInvestigation(): UseAlertInvestigationResult {
       return;
     }
 
-    // Valid investigation request
     setState({
       isLoading: false,
       error: null,

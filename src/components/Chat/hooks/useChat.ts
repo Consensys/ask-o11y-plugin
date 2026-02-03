@@ -308,8 +308,7 @@ export const useChat = (
     }
   }, []);
 
-  // Auto-send initial message (for alert investigation mode)
-  // This triggers when an initialMessage is provided via URL params
+  // Auto-send initialMessage (investigation mode): idle -> creating-session -> ready-to-send -> sent
   const autoSendStateRef = useRef<'idle' | 'creating-session' | 'ready-to-send' | 'sent'>('idle');
 
   useEffect(() => {
@@ -319,21 +318,18 @@ export const useChat = (
 
     const state = autoSendStateRef.current;
 
-    // Stage 1: Create new session
     if (state === 'idle') {
       autoSendStateRef.current = 'creating-session';
       sessionManager.createNewSession();
       return;
     }
 
-    // Stage 2: Session cleared, set input and send
     if (state === 'creating-session' && chatHistory.length === 0 && !isGenerating) {
       autoSendStateRef.current = 'ready-to-send';
       setCurrentInput(initialMessage);
       return;
     }
 
-    // Stage 3: Input is set, trigger send
     if (state === 'ready-to-send' && currentInput === initialMessage && !isGenerating) {
       autoSendStateRef.current = 'sent';
       sendMessage();
