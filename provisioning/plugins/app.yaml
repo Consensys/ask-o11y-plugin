@@ -17,3 +17,18 @@ apps:
     org_id: 1
     jsonData:
         useBuiltInMCP: true
+        # Example MCP server with secure headers:
+        # mcpServers:
+        #   - id: 'my-server'
+        #     name: 'My MCP Server'
+        #     url: 'https://api.example.com/mcp'
+        #     enabled: true
+        #     type: 'streamable-http'
+        #     headerKeys:
+        #       - Authorization
+        #       - X-API-Key
+    # Secure header values (encrypted in database)
+    # Key format: mcp_{serverId}_header_{headerKey}
+    # secureJsonData:
+    #   mcp_my-server_header_Authorization: Bearer $MY_API_TOKEN
+    #   mcp_my-server_header_X-API-Key: $MY_API_KEY

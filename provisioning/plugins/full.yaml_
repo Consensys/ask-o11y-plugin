@@ -38,6 +38,15 @@ apps:
           url: 'http://mcp-grafana:8000/mcp'
           enabled: true
           type: 'streamable-http'
+          # Example: header keys are defined here, values are in secureJsonData
+          # headerKeys:
+          #   - Authorization
+          #   - X-Custom-Header
+    # Secure header values (encrypted in database)
+    # Key format: mcp_{serverId}_header_{headerKey}
+    # secureJsonData:
+    #   mcp_mcp-grafana_header_Authorization: $MCP_GRAFANA_AUTH_TOKEN
+    #   mcp_mcp-grafana_header_X-Custom-Header: some-value
   - type: grafana-llm-app
     org_id: 2
     jsonData:

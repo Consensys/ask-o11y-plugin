@@ -64,5 +64,13 @@ type ServerConfig struct {
 	URL     string            `json:"url"`
 	Type    string            `json:"type"` // "openapi", "standard", "sse", "streamable-http"
 	Enabled bool              `json:"enabled"`
-	Headers map[string]string `json:"headers,omitempty"`
+	Headers map[string]string `json:"headers,omitempty"` // Deprecated: use HeaderKeys instead
+	// HeaderKeys contains the names of headers. Actual values are stored in secureJsonData.
+	HeaderKeys []string `json:"headerKeys,omitempty"`
+}
+
+// GetSecureHeaderKey generates the secureJsonData key for a server header value.
+// Format: mcp_{serverId}_header_{headerKey}
+func GetSecureHeaderKey(serverID, headerKey string) string {
+	return "mcp_" + serverID + "_header_" + headerKey
 }

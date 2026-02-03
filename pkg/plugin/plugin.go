@@ -116,6 +116,35 @@ func NewPlugin(ctx context.Context, settings backend.AppInstanceSettings) (insta
 		}
 	}
 
+	// Populate MCP server headers from secureJsonData
+	// This supports both the new headerKeys format and the legacy headers format
+	for i := range pluginSettings.MCPServers {
+		server := &pluginSettings.MCPServers[i]
+
+		// Initialize Headers map if nil
+		if server.Headers == nil {
+			server.Headers = make(map[string]string)
+		}
+
+		// If server has headerKeys, populate Headers from DecryptedSecureJSONData
+		if len(server.HeaderKeys) > 0 {
+			for _, headerKey := range server.HeaderKeys {
+				secureKey := mcp.GetSecureHeaderKey(server.ID, headerKey)
+				if value, ok := settings.DecryptedSecureJSONData[secureKey]; ok && value != "" {
+					server.Headers[headerKey] = value
+					logger.Debug("Loaded secure header", "serverId", server.ID, "headerKey", headerKey)
+				}
+			}
+		}
+
+		// Log header count (without exposing values)
+		if len(server.Headers) > 0 {
+			logger.Info("MCP server configured with headers",
+				"serverId", server.ID,
+				"headerCount", len(server.Headers))
+		}
+	}
+
 	// Create MCP proxy
 	mcpProxy := mcp.NewProxy(logger)
 	mcpProxy.UpdateConfig(pluginSettings.MCPServers)
