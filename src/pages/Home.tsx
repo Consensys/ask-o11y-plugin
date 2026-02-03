@@ -12,7 +12,6 @@ interface HomeProps {
 function Home({ pluginSettings }: HomeProps) {
   const { isLoading, error, initialMessage, sessionTitle, isInvestigationMode } = useAlertInvestigation();
 
-  // Show loading state while fetching alert for investigation
   if (isInvestigationMode && isLoading) {
     return (
       <div
@@ -28,7 +27,6 @@ function Home({ pluginSettings }: HomeProps) {
     );
   }
 
-  // Show error state if alert investigation failed
   if (isInvestigationMode && error) {
     return (
       <div
@@ -45,7 +43,6 @@ function Home({ pluginSettings }: HomeProps) {
               variant="secondary"
               size="sm"
               onClick={() => {
-                // Remove query params and reload
                 window.history.replaceState({}, '', window.location.pathname);
                 window.location.reload();
               }}

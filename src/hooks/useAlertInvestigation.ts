@@ -44,7 +44,6 @@ const INITIAL_STATE: UseAlertInvestigationResult = {
   alertName: null,
 };
 
-/** Parses ?type=investigation&alertName=... and prepares auto-send prompt */
 export function useAlertInvestigation(): UseAlertInvestigationResult {
   const [state, setState] = useState<UseAlertInvestigationResult>(INITIAL_STATE);
 

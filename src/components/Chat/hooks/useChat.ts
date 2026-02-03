@@ -12,12 +12,6 @@ import { ValidationService } from '../../../services/validation';
 import { ChatSession } from '../../../core/models/ChatSession';
 import type { AppPluginSettings } from '../../../types/plugin';
 
-/**
- * Builds the effective system prompt based on the configured mode and custom prompt.
- * - 'default': Uses the built-in SYSTEM_PROMPT
- * - 'replace': Uses only the custom prompt
- * - 'append': Concatenates SYSTEM_PROMPT with the custom prompt
- */
 const buildEffectiveSystemPrompt = (
   mode: AppPluginSettings['systemPromptMode'] = 'default',
   customPrompt = ''
@@ -44,32 +38,22 @@ export const useChat = (
   sessionTitleOverride?: string
 ) => {
 
-  // Get organization ID from Grafana config
   const orgId = String(config.bootData.user.orgId || '1');
-
-  // Destructure specific settings to avoid unnecessary re-computations
   const { systemPromptMode, customSystemPrompt } = pluginSettings;
 
-  // Compute effective system prompt based on plugin settings
   const effectiveSystemPrompt = useMemo(
     () => buildEffectiveSystemPrompt(systemPromptMode, customSystemPrompt),
     [systemPromptMode, customSystemPrompt]
   );
 
-  // Initialize chat history with initial session messages if provided
-  // Ensure messages array exists and is not empty
   const initialMessages = initialSession?.messages || [];
   const [chatHistory, setChatHistory] = useState<ChatMessage[]>(initialMessages);
-  
-  // Update chatHistory when initialSession changes (e.g., when SharedSession loads)
-  // Use a ref to track if we've already initialized to avoid unnecessary updates
+
   const hasInitializedRef = useRef(false);
   const initialSessionIdRef = useRef<string | undefined>(initialSession?.id);
   const initialMessageCountRef = useRef<number>(initialSession?.messages?.length || 0);
   
   useEffect(() => {
-    // Only update if we have an initialSession with messages and haven't initialized yet
-    // or if the session ID or message count changed (session was updated)
     if (initialSession?.messages && initialSession.messages.length > 0) {
       const sessionIdChanged = initialSessionIdRef.current !== initialSession.id;
       const messageCountChanged = initialMessageCountRef.current !== initialSession.messages.length;
@@ -91,8 +75,6 @@ export const useChat = (
   const [isAutoScroll, setIsAutoScroll] = useState(true);
   const [retryCount, setRetryCount] = useState(0);
 
-  // Store session title override for investigation mode (used once when creating session)
-  // Update ref when prop changes (needed because useAlertInvestigation sets title async)
   const sessionTitleOverrideRef = useRef<string | undefined>(sessionTitleOverride);
   useEffect(() => {
     if (sessionTitleOverride) {
@@ -118,10 +100,8 @@ export const useChat = (
     pluginSettings
   );
 
-  // Session management with persistence
   const sessionManager = useSessionManager(orgId, chatHistory, setChatHistory, readOnly);
 
-  // Auto-scroll when chat history changes (only if auto-scroll is enabled)
   useEffect(() => {
     if (isAutoScroll && bottomSpacerRef.current) {
       bottomSpacerRef.current.scrollIntoView({ block: 'end', behavior: 'auto' });
@@ -129,10 +109,9 @@ export const useChat = (
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [chatHistory]);
 
-  // Handle scroll: pause auto-scroll when user scrolls up; resume when at bottom
   useEffect(() => {
     const handleScroll = () => {
-      const threshold = 50; // px tolerance from the bottom
+      const threshold = 50;
       const atBottom = window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - threshold;
       setIsAutoScroll(atBottom);
     };
@@ -141,7 +120,6 @@ export const useChat = (
     return () => window.removeEventListener('scroll', handleScroll);
   }, []);
 
-  // Legacy handleScroll kept for compatibility but not used
   const handleScroll = () => {};
 
   const sendMessage = async () => {
@@ -149,10 +127,8 @@ export const useChat = (
       return;
     }
 
-    // Force auto-scroll to bottom when sending a message
     setIsAutoScroll(true);
 
-    // Validate input before processing
     let validatedInput: string;
     try {
       validatedInput = ValidationService.validateChatInput(currentInput);
@@ -168,7 +144,6 @@ export const useChat = (
       return;
     }
 
-    // Check circuit breaker before attempting
     if (!ReliabilityService.checkCircuitBreaker('llm-stream')) {
       setChatHistory((prev) => [
         ...prev,
@@ -187,11 +162,8 @@ export const useChat = (
 
     const newChatHistory = [...chatHistory, userMessage];
     setChatHistory(newChatHistory);
-    // Save immediately after user input
-    // Pass sessionTitleOverride for investigation mode (only used when creating new session)
     if (!readOnly) {
       sessionManager.saveImmediately(newChatHistory, sessionTitleOverrideRef.current);
-      // Clear the override after first use (title is only set on session creation)
       sessionTitleOverrideRef.current = undefined;
     }
     setCurrentInput('');
@@ -206,15 +178,13 @@ export const useChat = (
 
     setChatHistory((prev) => [...prev, assistantMessage]);
 
-    // Build context with memory and summarization
     const messages: llm.Message[] = ConversationMemoryService.buildContextWindow(
       effectiveSystemPrompt,
       newChatHistory,
       sessionManager.currentSummary,
-      15 // Keep last 15 messages in full
+      15
     );
 
-    // Save recovery state
     ReliabilityService.saveRecoveryState({
       sessionId: sessionManager.currentSessionId,
       lastMessageIndex: newChatHistory.length,
@@ -222,43 +192,31 @@ export const useChat = (
     });
 
     try {
-      // Call streaming directly - retry logic is complex with RxJS streams
-      // The stream manager handles its own error recovery
       const tools = toolsData?.tools || [];
       await handleStreamingChatWithHistory(messages, tools);
 
-      // Success - record for circuit breaker
       ReliabilityService.recordCircuitBreakerSuccess('llm-stream');
       setRetryCount(0);
-
-      // Clear recovery state on success
       ReliabilityService.clearRecoveryState();
     } catch (error) {
       console.error('[useChat] Error in chat completion:', error);
-
-      // Record failure for circuit breaker
       ReliabilityService.recordCircuitBreakerFailure('llm-stream');
-
-      // Get user-friendly error message
       const errorMessage = ReliabilityService.getUserFriendlyErrorMessage(error);
 
-      // Update chat history with error message and save immediately
       setChatHistory((prev) => {
         const updated = prev.map((msg, idx) =>
           idx === prev.length - 1 && msg.role === 'assistant' ? { ...msg, content: errorMessage } : msg
         );
-        
-        // Save immediately after error (use setTimeout to ensure state has updated)
+
         if (!readOnly) {
           setTimeout(() => {
             sessionManager.saveImmediately(updated);
           }, 0);
         }
-        
+
         return updated;
       });
 
-      // Track retry count
       setRetryCount((prev) => prev + 1);
     } finally {
       setIsGenerating(false);
@@ -279,7 +237,6 @@ export const useChat = (
     sessionManager.createNewSession();
   };
 
-  // Update chat history with tool calls
   const updateToolCallsInChatHistory = (toolCallsMap: Map<string, any>) => {
     const toolCallsArray = Array.from(toolCallsMap.values());
     setChatHistory((prev) =>
@@ -289,24 +246,20 @@ export const useChat = (
     );
   };
 
-  // Watch for tool calls changes and update chat history
   useEffect(() => {
     if (toolCalls.size > 0) {
       updateToolCallsInChatHistory(toolCalls);
     }
   }, [toolCalls]);
 
-  // Save immediately when streaming completes (isGenerating changes from true to false)
   const prevIsGeneratingRef = useRef(isGenerating);
   useEffect(() => {
-    // Save when streaming completes (isGenerating goes from true to false)
     if (prevIsGeneratingRef.current && !isGenerating && chatHistory.length > 0 && !readOnly) {
       sessionManager.saveImmediately(chatHistory);
     }
     prevIsGeneratingRef.current = isGenerating;
   }, [isGenerating, chatHistory, sessionManager, readOnly]);
 
-  // Recovery on mount
   useEffect(() => {
     const recovery = ReliabilityService.loadRecoveryState();
     if (recovery && recovery.wasGenerating) {
@@ -316,7 +269,6 @@ export const useChat = (
 
   // Auto-send initialMessage (investigation mode): idle -> creating-session -> ready-to-send -> sent
   const autoSendStateRef = useRef<'idle' | 'creating-session' | 'ready-to-send' | 'sent'>('idle');
-  // Counter to force effect re-evaluation when state transitions (fixes stuck state when chatHistory.length is already 0)
   const [autoSendTrigger, setAutoSendTrigger] = useState(0);
 
   useEffect(() => {
@@ -329,7 +281,6 @@ export const useChat = (
     if (state === 'idle') {
       autoSendStateRef.current = 'creating-session';
       sessionManager.createNewSession();
-      // Force effect to re-run even if chatHistory.length doesn't change
       setAutoSendTrigger((prev) => prev + 1);
       return;
     }
@@ -350,11 +301,9 @@ export const useChat = (
   const detectedPageRefs = useMemo((): Array<GrafanaPageRef & { messageIndex: number }> => {
     for (let i = chatHistory.length - 1; i >= 0; i--) {
       const msg = chatHistory[i];
-      // Only return when we find an assistant message WITH pageRefs
       if (msg.role === 'assistant' && msg.pageRefs && msg.pageRefs.length > 0) {
         return msg.pageRefs.map((ref) => ({ ...ref, messageIndex: i }));
       }
-      // Continue searching if assistant message has no pageRefs
     }
     return [];
   }, [chatHistory]);
@@ -376,7 +325,6 @@ export const useChat = (
     isAutoScroll,
     setIsAutoScroll,
     handleScroll,
-    // Session management
     sessionManager,
     retryCount,
     bottomSpacerRef: bottomSpacerRef as React.RefObject<HTMLDivElement>,
