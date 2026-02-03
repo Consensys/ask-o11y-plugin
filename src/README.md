@@ -84,6 +84,24 @@ Share your conversations with team members through secure, shareable links:
 - **Organization Scoped**: Shares are isolated to the organization where they were created
 - **Secure**: Cryptographically secure share IDs (32-byte random tokens)
 
+### 🔔 **Alert Investigation Mode**
+
+One-click root cause analysis from alert notifications:
+
+- **URL-Based Trigger**: Add investigation links to Slack/OpsGenie/email notifications
+- **Auto-Send RCA Prompt**: Opens plugin and automatically starts AI-powered investigation
+- **Custom Session Titles**: Sessions titled "Alert Investigation: {alert name}"
+- **Input Validation**: Validates alert name format (max 256 chars, XSS prevention)
+
+**URL Format:** `/a/consensys-asko11y-app?type=investigation&alertName={alertName}`
+
+**Slack/Alertmanager Template:**
+```go
+{{ range .Alerts }}
+<{{ $.ExternalURL }}/a/consensys-asko11y-app?type=investigation&alertName={{ .Labels.alertname }}|🔍 Investigate>
+{{ end }}
+```
+
 ### ⚙️ **Customizable Configuration**
 
 - **System Prompts**: Customize the AI behavior with three modes:

@@ -476,6 +476,30 @@ mcpServers:
 - `DELETE /api/sessions/share/:shareId` - Revoke share
 - `GET /api/sessions/:sessionId/shares` - List shares for session
 
+### Alert Investigation Mode
+
+One-click RCA from alert notifications. URL params trigger auto-send of investigation prompt.
+
+**URL Format:** `/a/consensys-asko11y-app?type=investigation&alertName={alertName}`
+
+**Implementation:**
+- `src/hooks/useAlertInvestigation.ts` - Parses URL, validates alert name, builds RCA prompt
+- `src/pages/Home.tsx` - Renders loading/error states, passes initialMessage to Chat
+- `src/components/Chat/hooks/useChat.ts` - Auto-send state machine (idle → creating-session → ready-to-send → sent)
+
+**Flow:**
+1. User clicks investigation link from alert notification
+2. `useAlertInvestigation` parses `alertName` from URL, validates format
+3. Creates new session titled "Alert Investigation: {alertName}"
+4. Auto-sends RCA prompt to AI
+
+**Slack/Alertmanager Template:**
+```go
+{{ range .Alerts }}
+<{{ $.ExternalURL }}/a/consensys-asko11y-app?type=investigation&alertName={{ .Labels.alertname }}|🔍 Investigate>
+{{ end }}
+```
+
 ## Code Style & Conventions
 
 **Formatting:**
