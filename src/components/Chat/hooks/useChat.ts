@@ -36,7 +36,13 @@ const buildEffectiveSystemPrompt = (
   }
 };
 
-export const useChat = (pluginSettings: AppPluginSettings, initialSession?: ChatSession, readOnly?: boolean) => {
+export const useChat = (
+  pluginSettings: AppPluginSettings,
+  initialSession?: ChatSession,
+  readOnly?: boolean,
+  initialMessage?: string,
+  sessionTitleOverride?: string
+) => {
 
   // Get organization ID from Grafana config
   const orgId = String(config.bootData.user.orgId || '1');
@@ -84,6 +90,9 @@ export const useChat = (pluginSettings: AppPluginSettings, initialSession?: Chat
   const bottomSpacerRef = useRef<HTMLDivElement>(null);
   const [isAutoScroll, setIsAutoScroll] = useState(true);
   const [retryCount, setRetryCount] = useState(0);
+
+  // Store session title override for investigation mode (used once when creating session)
+  const sessionTitleOverrideRef = useRef<string | undefined>(sessionTitleOverride);
 
   const {
     toolCalls,
@@ -173,8 +182,11 @@ export const useChat = (pluginSettings: AppPluginSettings, initialSession?: Chat
     const newChatHistory = [...chatHistory, userMessage];
     setChatHistory(newChatHistory);
     // Save immediately after user input
+    // Pass sessionTitleOverride for investigation mode (only used when creating new session)
     if (!readOnly) {
-      sessionManager.saveImmediately(newChatHistory);
+      sessionManager.saveImmediately(newChatHistory, sessionTitleOverrideRef.current);
+      // Clear the override after first use (title is only set on session creation)
+      sessionTitleOverrideRef.current = undefined;
     }
     setCurrentInput('');
     setIsGenerating(true);
@@ -295,6 +307,37 @@ export const useChat = (pluginSettings: AppPluginSettings, initialSession?: Chat
       ReliabilityService.clearRecoveryState();
     }
   }, []);
+
+  // Auto-send initial message (for alert investigation mode)
+  // This triggers when an initialMessage is provided via URL params
+  // Uses two-stage approach to avoid race condition with state updates
+  const hasAutoSentRef = useRef(false);
+  const shouldAutoSendRef = useRef(false);
+
+  // Stage 1: Set the input when conditions are ready
+  useEffect(() => {
+    if (
+      initialMessage &&
+      !hasAutoSentRef.current &&
+      !readOnly &&
+      !isGenerating &&
+      !toolsLoading &&
+      chatHistory.length === 0
+    ) {
+      hasAutoSentRef.current = true;
+      shouldAutoSendRef.current = true;
+      setCurrentInput(initialMessage);
+    }
+  }, [initialMessage, toolsLoading, isGenerating, chatHistory.length, readOnly]);
+
+  // Stage 2: Trigger sendMessage when currentInput is set and shouldAutoSend is true
+  useEffect(() => {
+    if (shouldAutoSendRef.current && currentInput && !isGenerating) {
+      shouldAutoSendRef.current = false;
+      sendMessage();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentInput, isGenerating]);
 
   const detectedPageRefs = useMemo((): Array<GrafanaPageRef & { messageIndex: number }> => {
     for (let i = chatHistory.length - 1; i >= 0; i--) {

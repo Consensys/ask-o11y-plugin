@@ -106,7 +106,8 @@ describe('useSessionManager - Read-only mode', () => {
     });
 
     // Verify that createSession WAS called (save creates new session when currentSessionId is null)
-    expect(mockSessionService.createSession).toHaveBeenCalledWith('test-org', mockMessages);
+    // Third argument is optional titleOverride (undefined when not provided)
+    expect(mockSessionService.createSession).toHaveBeenCalledWith('test-org', mockMessages, undefined);
   });
 
   it('should NOT skip save when readOnly is undefined', async () => {
@@ -125,7 +126,8 @@ describe('useSessionManager - Read-only mode', () => {
     });
 
     // Verify that createSession WAS called (readOnly undefined is falsy, so save should run)
-    expect(mockSessionService.createSession).toHaveBeenCalledWith('test-org', mockMessages);
+    // Third argument is optional titleOverride (undefined when not provided)
+    expect(mockSessionService.createSession).toHaveBeenCalledWith('test-org', mockMessages, undefined);
   });
 
   it('should skip loading current session when chatHistory has messages and readOnly is true', async () => {

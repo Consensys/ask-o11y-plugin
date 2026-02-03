@@ -17,8 +17,8 @@ export interface UseSessionManagerReturn {
   deleteSession: (sessionId: string) => Promise<void>;
   deleteAllSessions: () => Promise<void>;
 
-  // Immediate save
-  saveImmediately: (messages: ChatMessage[]) => Promise<void>;
+  // Immediate save (with optional title override for investigation mode)
+  saveImmediately: (messages: ChatMessage[], titleOverride?: string) => Promise<void>;
 
   // Refresh sessions list
   refreshSessions: () => Promise<void>;
@@ -254,9 +254,11 @@ export const useSessionManager = (
    * Save messages immediately without debouncing
    * Prevents concurrent saves with isSavingRef flag
    * Skips save in read-only mode
+   * @param messages - Chat messages to save
+   * @param titleOverride - Optional title override (for investigation mode)
    */
   const saveImmediately = useCallback(
-    async (messages: ChatMessage[]) => {
+    async (messages: ChatMessage[], titleOverride?: string) => {
       if (readOnly) {
         return;
       }
@@ -275,11 +277,12 @@ export const useSessionManager = (
       try {
         // Capture currentSessionId at the time the callback executes
         const sessionIdAtStart = currentSessionId;
-        
+
         if (sessionIdAtStart) {
           await sessionService.updateSession(orgId, sessionIdAtStart, messages, currentSummary);
         } else if (messages.length > 0) {
-          const newSession = await sessionService.createSession(orgId, messages);
+          // Pass titleOverride when creating a new session (e.g., for investigation mode)
+          const newSession = await sessionService.createSession(orgId, messages, titleOverride);
           // Only update if currentSessionId is still null (no session was loaded in the meantime)
           setCurrentSessionId((prevId) => {
             if (prevId === null) {

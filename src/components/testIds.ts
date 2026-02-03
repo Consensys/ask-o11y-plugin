@@ -46,4 +46,9 @@ export const testIds = {
   home: {
     container: 'data-testid home-container',
   },
+  investigation: {
+    loading: 'data-testid investigation-loading',
+    error: 'data-testid investigation-error',
+    banner: 'data-testid investigation-banner',
+  },
 };
