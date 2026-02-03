@@ -35,16 +35,7 @@ Once you find the alert, proceed with:
 Please use the available MCP tools to gather real data and provide actionable insights.`;
 }
 
-interface InvestigationState {
-  isLoading: boolean;
-  error: string | null;
-  initialMessage: string | null;
-  sessionTitle: string | null;
-  isInvestigationMode: boolean;
-  alertName: string | null;
-}
-
-const INITIAL_STATE: InvestigationState = {
+const INITIAL_STATE: UseAlertInvestigationResult = {
   isLoading: true,
   error: null,
   initialMessage: null,
@@ -55,7 +46,7 @@ const INITIAL_STATE: InvestigationState = {
 
 /** Parses ?type=investigation&alertName=... and prepares auto-send prompt */
 export function useAlertInvestigation(): UseAlertInvestigationResult {
-  const [state, setState] = useState<InvestigationState>(INITIAL_STATE);
+  const [state, setState] = useState<UseAlertInvestigationResult>(INITIAL_STATE);
 
   useEffect(() => {
     const searchParams = new URLSearchParams(window.location.search);
@@ -89,5 +80,3 @@ export function useAlertInvestigation(): UseAlertInvestigationResult {
 
   return state;
 }
-
-export default useAlertInvestigation;

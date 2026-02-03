@@ -49,6 +49,5 @@ export const testIds = {
   investigation: {
     loading: 'data-testid investigation-loading',
     error: 'data-testid investigation-error',
-    banner: 'data-testid investigation-banner',
   },
 };

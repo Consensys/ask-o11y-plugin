@@ -92,7 +92,13 @@ export const useChat = (
   const [retryCount, setRetryCount] = useState(0);
 
   // Store session title override for investigation mode (used once when creating session)
+  // Update ref when prop changes (needed because useAlertInvestigation sets title async)
   const sessionTitleOverrideRef = useRef<string | undefined>(sessionTitleOverride);
+  useEffect(() => {
+    if (sessionTitleOverride) {
+      sessionTitleOverrideRef.current = sessionTitleOverride;
+    }
+  }, [sessionTitleOverride]);
 
   const {
     toolCalls,
