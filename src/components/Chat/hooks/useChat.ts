@@ -316,6 +316,8 @@ export const useChat = (
 
   // Auto-send initialMessage (investigation mode): idle -> creating-session -> ready-to-send -> sent
   const autoSendStateRef = useRef<'idle' | 'creating-session' | 'ready-to-send' | 'sent'>('idle');
+  // Counter to force effect re-evaluation when state transitions (fixes stuck state when chatHistory.length is already 0)
+  const [autoSendTrigger, setAutoSendTrigger] = useState(0);
 
   useEffect(() => {
     if (!initialMessage || readOnly || toolsLoading) {
@@ -327,6 +329,8 @@ export const useChat = (
     if (state === 'idle') {
       autoSendStateRef.current = 'creating-session';
       sessionManager.createNewSession();
+      // Force effect to re-run even if chatHistory.length doesn't change
+      setAutoSendTrigger((prev) => prev + 1);
       return;
     }
 
@@ -341,7 +345,7 @@ export const useChat = (
       sendMessage();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [initialMessage, toolsLoading, readOnly, chatHistory.length, isGenerating, currentInput]);
+  }, [initialMessage, toolsLoading, readOnly, chatHistory.length, isGenerating, currentInput, autoSendTrigger]);
 
   const detectedPageRefs = useMemo((): Array<GrafanaPageRef & { messageIndex: number }> => {
     for (let i = chatHistory.length - 1; i >= 0; i--) {
