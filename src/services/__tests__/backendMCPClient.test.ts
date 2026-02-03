@@ -18,7 +18,6 @@ jest.mock('@grafana/runtime', () => ({
   },
 }));
 
-// Helper to set up successful responses
 const setupSuccessMocks = () => {
   mockFetch.mockImplementation(({ url, method }) => {
     if (url.includes('/api/mcp/tools') && method === 'GET') {

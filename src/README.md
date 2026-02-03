@@ -6,7 +6,7 @@
 
 ## Overview
 
-Ask O11y is an AI-powered Grafana plugin that transforms how you interact with your observability data. Through natural language conversations, you can query metrics, analyze logs and traces, create visualizations, and manage dashboards—all without writing a single line of PromQL, LogQL, or TraceQL.
+Ask O11y is an AI-powered Grafana plugin for interacting with your observability data. Through natural language conversations, you can query metrics, analyze logs and traces, create visualizations, and manage dashboards—all without writing a single line of PromQL, LogQL, or TraceQL.
 
 ## Key Features
 
@@ -83,6 +83,24 @@ Share your conversations with team members through secure, shareable links:
 - **Rate Limiting**: 50 shares per hour per user to prevent abuse
 - **Organization Scoped**: Shares are isolated to the organization where they were created
 - **Secure**: Cryptographically secure share IDs (32-byte random tokens)
+
+### 🔔 **Alert Investigation Mode**
+
+One-click root cause analysis from alert notifications:
+
+- **URL-Based Trigger**: Add investigation links to Slack/OpsGenie/email notifications
+- **Auto-Send RCA Prompt**: Opens plugin and automatically starts AI-powered investigation
+- **Custom Session Titles**: Sessions titled "Alert Investigation: {alert name}"
+- **Input Validation**: Validates alert name format (max 256 chars, XSS prevention)
+
+**URL Format:** `/a/consensys-asko11y-app?type=investigation&alertName={alertName}`
+
+**Slack/Alertmanager Template:**
+```go
+{{ range .Alerts }}
+<{{ $.ExternalURL }}/a/consensys-asko11y-app?type=investigation&alertName={{ .Labels.alertname }}|🔍 Investigate>
+{{ end }}
+```
 
 ### ⚙️ **Customizable Configuration**
 
@@ -170,7 +188,7 @@ Share your conversations with team members through secure, shareable links:
 
    - Navigate to **Apps → Consensys Ask O11y Assistant**
    - Type your first question: "Show me CPU usage in the last hour"
-   - Watch the magic happen! ✨
+   - The assistant will query your data and display visualizations
 
 ### Usage Examples
 

@@ -108,8 +108,6 @@ func (r *RedisRateLimiter) CheckLimit(userID int64) bool {
 	return true
 }
 
-// getContextWithTimeout is a helper for creating contexts with timeouts
-// Note: This is a package-level helper used by both rate limiters and share stores
 func getContextWithTimeout(timeout time.Duration) (context.Context, context.CancelFunc) {
 	return context.WithTimeout(context.Background(), timeout)
 }

@@ -1,6 +1,6 @@
 # Ask O11y - AI-Powered Observability Assistant for Grafana
 
-**Ask O11y** transforms how you interact with your observability data. Query metrics, analyze logs, create dashboards, and troubleshoot issues through natural language conversations—no need to write PromQL, LogQL, or navigate complex UIs.
+**Ask O11y** lets you query metrics, analyze logs, create dashboards, and troubleshoot issues through natural language conversations—no need to write PromQL, LogQL, or navigate complex UIs.
 
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Grafana](https://img.shields.io/badge/Grafana-%3E%3D12.1.1-orange.svg)](https://grafana.com)
@@ -164,6 +164,26 @@ See [Grafana documentation on allow_embedding](https://grafana.com/docs/grafana/
 4. Share the link with team members
 5. Recipients can view the session or import it to continue the conversation
 
+### 🔔 Alert Investigation Mode
+
+**One-Click RCA from Alert Notifications:**
+
+Add investigation links to your alert notifications (Slack, OpsGenie, email) for instant root cause analysis.
+
+**URL Format:**
+```
+/a/consensys-asko11y-app?type=investigation&alertName={alertName}
+```
+
+**Slack/Alertmanager Template:**
+```go
+{{ range .Alerts }}
+<{{ $.ExternalURL }}/a/consensys-asko11y-app?type=investigation&alertName={{ .Labels.alertname }}|🔍 Investigate>
+{{ end }}
+```
+
+When clicked, the plugin automatically creates a new session and starts an AI-powered investigation with the alert context.
+
 ### ⚙️ Customizable Configuration
 
 - **System Prompts**: Customize AI behavior (default, replace, or append mode)
@@ -260,7 +280,7 @@ In Grafana UI:
 
 - Navigate to **Apps → Ask O11y**
 - Type your first question: "Show me CPU usage in the last hour"
-- Watch the magic happen!
+- The assistant will query your data and display visualizations
 
 ---
 

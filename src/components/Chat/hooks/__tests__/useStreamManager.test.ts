@@ -1,8 +1,3 @@
-/**
- * Unit tests for useStreamManager hook and helper functions
- * Tests streaming logic, token management, and message trimming
- */
-
 import { llm } from '@grafana/llm';
 import { TokenizerService, truncateToTokenLimit } from '../../../../services/tokenizer';
 import { MAX_TOOL_RESPONSE_TOKENS, AGGRESSIVE_TOOL_RESPONSE_TOKENS } from '../../../../constants';
@@ -142,7 +137,6 @@ const simulateStreaming = async (
   }
 };
 
-// Helper to create timeout wrapper
 const withTimeout = <T>(promise: Promise<T>, timeoutMs: number, operationName: string): Promise<T> => {
   return Promise.race([
     promise,

@@ -9,11 +9,7 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-// createTestRedisClient creates a Redis client for testing
-// In real tests, this would use testcontainers or a mock
 func createTestRedisClient(t *testing.T) *redis.Client {
-	// For unit tests, we'll use a mock or skip if Redis is not available
-	// In integration tests, we'd use testcontainers
 	client := redis.NewClient(&redis.Options{
 		Addr: "localhost:6379",
 		DB:   15, // Use DB 15 for testing to avoid conflicts

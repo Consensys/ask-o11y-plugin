@@ -76,7 +76,7 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({ message, isGenerating 
             aria-live="polite"
           >
             <span className="sr-only">User message</span>
-            <div className="text-sm leading-relaxed whitespace-normal break-words">{message.content}</div>
+            <div className="text-sm leading-relaxed whitespace-pre-wrap break-words">{message.content}</div>
           </div>
         </div>
       </div>

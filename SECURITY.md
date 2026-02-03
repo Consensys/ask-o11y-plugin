@@ -135,7 +135,7 @@ Ask O11y includes the following security features:
 - **Role-Based Access Control (RBAC)**: Tools are restricted based on Grafana user roles
 - **Input Validation**: User inputs are validated and sanitized
 - **Secure Communication**: MCP servers support HTTPS/TLS
-- **Session Management**: Leverages Grafana's session management
+- **Session Management**: Uses Grafana's session management
 - **Audit Logging**: Actions are logged through Grafana's audit system
 
 ## Acknowledgments

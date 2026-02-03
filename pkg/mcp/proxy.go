@@ -180,7 +180,6 @@ func (p *Proxy) HandleMCPRequest(reqData []byte) ([]byte, error) {
 	}
 }
 
-// handleInitialize handles the initialize request
 func (p *Proxy) handleInitialize(req MCPRequest) ([]byte, error) {
 	result := map[string]interface{}{
 		"protocolVersion": "2024-11-05",
@@ -196,7 +195,6 @@ func (p *Proxy) handleInitialize(req MCPRequest) ([]byte, error) {
 	return p.successResponse(req.ID, result)
 }
 
-// handleListTools handles the tools/list request
 func (p *Proxy) handleListTools(req MCPRequest) ([]byte, error) {
 	tools, err := p.ListTools()
 	if err != nil {
@@ -210,7 +208,6 @@ func (p *Proxy) handleListTools(req MCPRequest) ([]byte, error) {
 	return p.successResponse(req.ID, result)
 }
 
-// handleCallTool handles the tools/call request
 func (p *Proxy) handleCallTool(req MCPRequest) ([]byte, error) {
 	var params CallToolParams
 	if err := json.Unmarshal(req.Params, &params); err != nil {
@@ -225,7 +222,6 @@ func (p *Proxy) handleCallTool(req MCPRequest) ([]byte, error) {
 	return p.successResponse(req.ID, result)
 }
 
-// successResponse creates a successful JSON-RPC response
 func (p *Proxy) successResponse(id interface{}, result interface{}) ([]byte, error) {
 	resp := MCPResponse{
 		JSONRPC: "2.0",
@@ -236,7 +232,6 @@ func (p *Proxy) successResponse(id interface{}, result interface{}) ([]byte, err
 	return json.Marshal(resp)
 }
 
-// errorResponse creates an error JSON-RPC response
 func (p *Proxy) errorResponse(id interface{}, code int, message string, data interface{}) ([]byte, error) {
 	resp := MCPResponse{
 		JSONRPC: "2.0",
