@@ -7,8 +7,33 @@ on:
   pull_request:
 
 jobs:
+  # Detect if code changed (for fast-pass on release-please PRs)
+  check-changes:
+    runs-on: ubuntu-latest
+    outputs:
+      code: ${{ steps.filter.outputs.code }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            code:
+              - 'src/**'
+              - 'pkg/**'
+              - '*.config.*'
+              - 'Magefile.go'
+              - 'go.mod'
+              - 'go.sum'
+              - 'package.json'
+              - 'tsconfig.json'
+
   build:
     name: Build, lint and unit tests
+    needs: check-changes
+    if: needs.check-changes.outputs.code == 'true' || github.event_name == 'push'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -65,12 +90,12 @@ jobs:
         id: metadata
         run: |
           sudo apt-get update && sudo apt-get install -y jq
-          
+
           export GRAFANA_PLUGIN_ID=$(cat dist/plugin.json | jq -r .id)
           export GRAFANA_PLUGIN_VERSION=$(cat dist/plugin.json | jq -r .info.version)
           export GRAFANA_PLUGIN_TYPE=$(cat dist/plugin.json | jq -r .type)
           export GRAFANA_PLUGIN_ARTIFACT=${GRAFANA_PLUGIN_ID}-${GRAFANA_PLUGIN_VERSION}.zip
-          
+
           echo "plugin-id=${GRAFANA_PLUGIN_ID}" >> $GITHUB_OUTPUT
           echo "plugin-version=${GRAFANA_PLUGIN_VERSION}" >> $GITHUB_OUTPUT
           echo "plugin-type=${GRAFANA_PLUGIN_TYPE}" >> $GITHUB_OUTPUT
@@ -90,3 +115,12 @@ jobs:
           npx -y @grafana/plugin-validator@latest -sourceCodeUri file://./ $PLUGIN_ARCHIVE
         env:
           PLUGIN_ARCHIVE: ${{ steps.metadata.outputs.archive }}
+
+  # Fast pass for release-please PRs (no code changes)
+  skip-build:
+    name: Build, lint and unit tests
+    needs: check-changes
+    if: needs.check-changes.outputs.code == 'false' && github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "No code changes detected, skipping build (release-please PR)"
