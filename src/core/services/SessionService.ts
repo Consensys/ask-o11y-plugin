@@ -71,7 +71,7 @@ export class SessionService {
     await this.repository.clearCurrentSessionId(orgId);
   }
 
-  async getStorageStats(orgId: string) {
+  async getStorageStats(orgId: string): Promise<{ used: number; total: number; sessionCount: number }> {
     return this.repository.getStorageStats(orgId);
   }
 

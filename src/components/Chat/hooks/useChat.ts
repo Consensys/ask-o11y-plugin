@@ -16,16 +16,19 @@ function buildEffectiveSystemPrompt(
   mode: AppPluginSettings['systemPromptMode'] = 'default',
   customPrompt = ''
 ): string {
-  if (mode === 'replace') {
-    return customPrompt || SYSTEM_PROMPT;
+  switch (mode) {
+    case 'replace':
+      return customPrompt || SYSTEM_PROMPT;
+    case 'append':
+      return customPrompt.trim()
+        ? `${SYSTEM_PROMPT}\n\n## Additional Instructions\n\n${customPrompt}`
+        : SYSTEM_PROMPT;
+    default:
+      return SYSTEM_PROMPT;
   }
-  if (mode === 'append' && customPrompt.trim()) {
-    return `${SYSTEM_PROMPT}\n\n## Additional Instructions\n\n${customPrompt}`;
-  }
-  return SYSTEM_PROMPT;
 }
 
-export const useChat = (
+export function useChat(
   pluginSettings: AppPluginSettings,
   sessionIdFromUrl: string | null,
   onSessionIdChange: (sessionId: string | null) => void,
@@ -33,8 +36,7 @@ export const useChat = (
   readOnly?: boolean,
   initialMessage?: string,
   sessionTitleOverride?: string
-) => {
-
+) {
   const orgId = String(config.bootData.user.orgId || '1');
   const { systemPromptMode, customSystemPrompt } = pluginSettings;
 
@@ -48,22 +50,24 @@ export const useChat = (
 
   const hasInitializedRef = useRef(false);
   const initialSessionIdRef = useRef<string | undefined>(initialSession?.id);
-  const initialMessageCountRef = useRef<number>(initialSession?.messages?.length || 0);
-  
+  const initialMessageCountRef = useRef<number>(initialSession?.messages?.length ?? 0);
+
   useEffect(() => {
-    if (initialSession?.messages && initialSession.messages.length > 0) {
-      const sessionIdChanged = initialSessionIdRef.current !== initialSession.id;
-      const messageCountChanged = initialMessageCountRef.current !== initialSession.messages.length;
-      const shouldUpdate = !hasInitializedRef.current || sessionIdChanged || messageCountChanged;
-      
-      if (shouldUpdate) {
-        setChatHistory(initialSession.messages);
-        hasInitializedRef.current = true;
-        initialSessionIdRef.current = initialSession.id;
-        initialMessageCountRef.current = initialSession.messages.length;
-      }
+    if (!initialSession?.messages || initialSession.messages.length === 0) {
+      return;
     }
-      // eslint-disable-next-line react-hooks/exhaustive-deps
+
+    const sessionIdChanged = initialSessionIdRef.current !== initialSession.id;
+    const messageCountChanged = initialMessageCountRef.current !== initialSession.messages.length;
+    const shouldUpdate = !hasInitializedRef.current || sessionIdChanged || messageCountChanged;
+
+    if (shouldUpdate) {
+      setChatHistory(initialSession.messages);
+      hasInitializedRef.current = true;
+      initialSessionIdRef.current = initialSession.id;
+      initialMessageCountRef.current = initialSession.messages.length;
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialSession?.id, initialSession?.messages?.length]);
 
   const [currentInput, setCurrentInput] = useState('');
@@ -109,8 +113,7 @@ export const useChat = (
 
   const hasLoadedFromUrlRef = useRef(false);
   useEffect(() => {
-    // Skip loading from URL in investigation mode - session doesn't exist yet
-    // and will be created when the auto-send saves the first message
+    // Skip in investigation mode - session will be created on first save
     if (sessionIdFromUrl && !readOnly && !hasLoadedFromUrlRef.current && chatHistory.length === 0 && !initialMessage) {
       hasLoadedFromUrlRef.current = true;
       sessionManager.loadSessionFromUrl(sessionIdFromUrl).catch((error) => {
@@ -128,17 +131,22 @@ export const useChat = (
   }, [chatHistory]);
 
   useEffect(() => {
-    const handleScroll = () => {
-      const threshold = 50;
-      const atBottom = window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - threshold;
+    const SCROLL_THRESHOLD = 50;
+
+    function handleScroll(): void {
+      const atBottom = window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - SCROLL_THRESHOLD;
       setIsAutoScroll(atBottom);
-    };
+    }
 
     window.addEventListener('scroll', handleScroll, { passive: true });
     return () => window.removeEventListener('scroll', handleScroll);
   }, []);
 
-  const sendMessage = async () => {
+  const appendErrorMessage = (content: string): void => {
+    setChatHistory((prev) => [...prev, { role: 'assistant', content }]);
+  };
+
+  const sendMessage = async (): Promise<void> => {
     if (!currentInput.trim() || isGenerating) {
       return;
     }
@@ -150,24 +158,13 @@ export const useChat = (
       validatedInput = ValidationService.validateChatInput(currentInput);
     } catch (error) {
       console.error('[useChat] Input validation failed:', error);
-      setChatHistory((prev) => [
-        ...prev,
-        {
-          role: 'assistant',
-          content: `⚠️ Input validation error: ${error instanceof Error ? error.message : 'Invalid input'}`,
-        },
-      ]);
+      const errorText = error instanceof Error ? error.message : 'Invalid input';
+      appendErrorMessage(`Input validation error: ${errorText}`);
       return;
     }
 
     if (!ReliabilityService.checkCircuitBreaker('llm-stream')) {
-      setChatHistory((prev) => [
-        ...prev,
-        {
-          role: 'assistant',
-          content: '⚠️ The service is temporarily unavailable due to repeated errors. Please try again in a moment.',
-        },
-      ]);
+      appendErrorMessage('The service is temporarily unavailable due to repeated errors. Please try again in a moment.');
       return;
     }
 
@@ -257,14 +254,14 @@ export const useChat = (
     }
   };
 
-  const handleKeyPress = (e: React.KeyboardEvent) => {
+  const handleKeyPress = (e: React.KeyboardEvent): void => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       sendMessage();
     }
   };
 
-  const clearChat = () => {
+  const clearChat = (): void => {
     setChatHistory([]);
     setCurrentInput('');
     clearToolCalls();
@@ -301,7 +298,7 @@ export const useChat = (
 
   useEffect(() => {
     const recovery = ReliabilityService.loadRecoveryState();
-    if (recovery && recovery.wasGenerating) {
+    if (recovery?.wasGenerating) {
       ReliabilityService.clearRecoveryState();
     }
   }, []);
@@ -318,8 +315,7 @@ export const useChat = (
 
     if (state === 'idle') {
       autoSendStateRef.current = 'creating-session';
-      // In investigation mode (when sessionIdFromUrl is set), skip createNewSession
-      // as it would clear the URL. The session will be created on first save.
+      // Skip in investigation mode - would clear URL
       if (!sessionIdFromUrl) {
         sessionManager.createNewSession();
       }

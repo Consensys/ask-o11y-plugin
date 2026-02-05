@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Alert, Button } from '@grafana/ui';
 import { sessionShareService, SharedSession as SharedSessionType } from '../services/sessionShare';
@@ -10,7 +10,41 @@ import { ChatMessage } from '../components/Chat/types';
 import type { AppPluginSettings } from '../types/plugin';
 import { normalizeMessageTimestamp } from '../utils/shareUtils';
 
-export function SharedSession() {
+const EMPTY_PLUGIN_SETTINGS: AppPluginSettings = {};
+const NAVIGATION_DELAY_MS = 300;
+
+function convertToMessages(sharedMessages: SharedSessionType['messages']): ChatMessage[] {
+  return sharedMessages.map((msg) => ({
+    ...msg,
+    timestamp: normalizeMessageTimestamp(msg),
+  }));
+}
+
+function getErrorMessage(err: unknown): string {
+  const error = err as { status?: number; response?: { status?: number }; data?: { status?: number; message?: string }; message?: string; statusText?: string };
+  const status = error?.status ?? error?.response?.status ?? error?.data?.status;
+  const message = (error?.message ?? error?.data?.message ?? error?.statusText ?? '').toLowerCase();
+
+  if (status === 404 || message.includes('not found') || message.includes('expired')) {
+    return 'This share link is not found or has expired.';
+  }
+  if (status === 403 || message.includes('access') || message.includes('permission')) {
+    return "You don't have access to this shared session. It may be from a different organization.";
+  }
+  return 'Failed to load shared session. Please try again later.';
+}
+
+function getBasePath(): string {
+  const currentPath = window.location.pathname;
+  if (currentPath.includes('/shared/')) {
+    return currentPath.split('/shared/')[0];
+  }
+  return currentPath.replace(/\/shared\/.*$/, '');
+}
+
+function noop(): void {}
+
+export function SharedSession(): React.ReactElement {
   const { shareId } = useParams<{ shareId: string }>();
   const navigate = useNavigate();
   const storage = usePluginUserStorage();
@@ -27,40 +61,29 @@ export function SharedSession() {
       return;
     }
 
-    const loadSharedSession = async () => {
+    async function loadSharedSession(): Promise<void> {
       try {
-        const session = await sessionShareService.getSharedSession(shareId);
+        const session = await sessionShareService.getSharedSession(shareId!);
 
-        // Validate that we have messages
         if (!session.messages || session.messages.length === 0) {
           console.error('[SharedSession] Shared session has no messages');
           setError('This shared session has no messages.');
-          setLoading(false);
           return;
         }
-        
+
         setSharedSession(session);
-      } catch (err: any) {
+      } catch (err) {
         console.error('[SharedSession] Failed to load shared session:', err);
-        const status = err?.status || err?.response?.status || err?.data?.status;
-        const message = (err?.message || err?.data?.message || err?.statusText || '').toLowerCase();
-        
-        if (status === 404 || message.includes('not found') || message.includes('expired')) {
-          setError('This share link is not found or has expired.');
-        } else if (status === 403 || message.includes('access') || message.includes('permission')) {
-          setError("You don't have access to this shared session. It may be from a different organization.");
-        } else {
-          setError('Failed to load shared session. Please try again later.');
-        }
+        setError(getErrorMessage(err));
       } finally {
         setLoading(false);
       }
-    };
+    }
 
     loadSharedSession();
   }, [shareId]);
 
-  const handleImport = async () => {
+  const handleImport = async (): Promise<void> => {
     if (!sharedSession) {
       return;
     }
@@ -68,24 +91,13 @@ export function SharedSession() {
     setImporting(true);
     try {
       const sessionService = ServiceFactory.getSessionService(storage);
-
-      // Convert shared session to ChatSession format
-      const messages: ChatMessage[] = sharedSession.messages.map((msg: any) => ({
-        ...msg,
-        timestamp: normalizeMessageTimestamp(msg),
-      }));
-
+      const messages = convertToMessages(sharedSession.messages);
       const newSession = await sessionService.createSession(orgId, messages, sharedSession.title);
 
-      // Allow session to persist before navigation
-      await new Promise((resolve) => setTimeout(resolve, 300));
+      await new Promise((resolve) => setTimeout(resolve, NAVIGATION_DELAY_MS));
 
-      const currentPath = window.location.pathname;
-      const basePath = currentPath.includes('/shared/')
-        ? currentPath.split('/shared/')[0]
-        : currentPath.replace(/\/shared\/.*$/, '');
-      // Include sessionId in URL so the imported session opens directly
-      window.location.href = window.location.origin + (basePath || '/') + `?sessionId=${newSession.id}`;
+      const basePath = getBasePath();
+      window.location.href = `${window.location.origin}${basePath || '/'}?sessionId=${newSession.id}`;
     } catch (err) {
       console.error('[SharedSession] Failed to import session:', err);
       alert('Failed to import session. Please try again.');
@@ -93,6 +105,21 @@ export function SharedSession() {
       setImporting(false);
     }
   };
+
+  const session = useMemo(() => {
+    if (!sharedSession) {
+      return null;
+    }
+    const messages = convertToMessages(sharedSession.messages);
+    return ChatSession.fromStorage({
+      id: sharedSession.id,
+      title: sharedSession.title || 'Shared Session',
+      messages,
+      createdAt: sharedSession.createdAt,
+      updatedAt: sharedSession.updatedAt,
+      messageCount: messages.length,
+    });
+  }, [sharedSession]);
 
   if (loading) {
     return (
@@ -104,7 +131,7 @@ export function SharedSession() {
     );
   }
 
-  if (error || !sharedSession) {
+  if (error || !session) {
     return (
       <div className="min-h-full w-full flex items-center justify-center p-4">
         <div className="max-w-md w-full">
@@ -120,24 +147,6 @@ export function SharedSession() {
       </div>
     );
   }
-
-  // Convert shared session messages to ChatSession format
-  const messages: ChatMessage[] = sharedSession.messages.map((msg: any) => ({
-    ...msg,
-    timestamp: normalizeMessageTimestamp(msg),
-  }));
-
-  const session = ChatSession.fromStorage({
-    id: sharedSession.id,
-    title: sharedSession.title || 'Shared Session',
-    messages,
-    createdAt: sharedSession.createdAt,
-    updatedAt: sharedSession.updatedAt,
-    messageCount: messages.length,
-  });
-
-  // Empty plugin settings for read-only mode
-  const emptyPluginSettings: AppPluginSettings = {};
 
   return (
     <div className="min-h-full w-full flex flex-col">
@@ -158,11 +167,11 @@ export function SharedSession() {
       </div>
       <div className="flex-1 flex flex-col min-h-0">
         <Chat
-          pluginSettings={emptyPluginSettings}
+          pluginSettings={EMPTY_PLUGIN_SETTINGS}
           readOnly={true}
           initialSession={session}
           sessionIdFromUrl={null}
-          onSessionIdChange={() => {}}
+          onSessionIdChange={noop}
         />
       </div>
     </div>

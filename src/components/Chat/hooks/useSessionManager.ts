@@ -22,31 +22,33 @@ export interface UseSessionManagerReturn {
   storageStats: { used: number; total: number; sessionCount: number };
 }
 
-export const useSessionManager = (
+const INITIAL_STORAGE_STATS = { used: 0, total: 0, sessionCount: 0 };
+
+export function useSessionManager(
   orgId: string,
   chatHistory: ChatMessage[],
   setChatHistory: React.Dispatch<React.SetStateAction<ChatMessage[]>>,
   sessionIdFromUrl: string | null,
   onSessionIdChange: (sessionId: string | null) => void,
   readOnly?: boolean
-): UseSessionManagerReturn => {
+): UseSessionManagerReturn {
   const storage = usePluginUserStorage();
   const sessionService = useMemo(() => ServiceFactory.getSessionService(storage), [storage]);
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(sessionIdFromUrl);
   const [sessions, setSessions] = useState<SessionMetadata[]>([]);
   const [currentSummary, setCurrentSummary] = useState<string | undefined>(undefined);
   const [isSummarizing, setIsSummarizing] = useState(false);
-  const [storageStats, setStorageStats] = useState({ used: 0, total: 0, sessionCount: 0 });
+  const [storageStats, setStorageStats] = useState(INITIAL_STORAGE_STATS);
 
   const isSavingRef = useRef(false);
   const lastInitializedOrgIdRef = useRef<string | null>(null);
   const initialChatHistoryLengthRef = useRef<number>(chatHistory.length);
 
   useEffect(() => {
-    if (initialChatHistoryLengthRef.current === 0 && chatHistory.length > 0) {
-      initialChatHistoryLengthRef.current = chatHistory.length;
-    } else if (chatHistory.length === 0) {
+    if (chatHistory.length === 0) {
       initialChatHistoryLengthRef.current = 0;
+    } else if (initialChatHistoryLengthRef.current === 0) {
+      initialChatHistoryLengthRef.current = chatHistory.length;
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [orgId]);
@@ -168,17 +170,9 @@ export const useSessionManager = (
     async (sessionId: string) => {
       try {
         const session = await sessionService.getSession(orgId, sessionId);
-        if (session) {
-          setCurrentSessionId(session.id);
-          setChatHistory(session.messages);
-          setCurrentSummary(session.summary);
-        } else {
-          // Session doesn't exist yet but sessionId is valid (e.g., investigation mode)
-          // Keep the sessionId - session will be created on first message save
-          setCurrentSessionId(sessionId);
-          setChatHistory([]);
-          setCurrentSummary(undefined);
-        }
+        setCurrentSessionId(session?.id ?? sessionId);
+        setChatHistory(session?.messages ?? []);
+        setCurrentSummary(session?.summary);
       } catch (error) {
         console.error(`[SessionManager] Error loading URL session:`, error);
       }
@@ -215,11 +209,7 @@ export const useSessionManager = (
 
   const saveImmediately = useCallback(
     async (messages: ChatMessage[], titleOverride?: string): Promise<string | null> => {
-      if (readOnly) {
-        return null;
-      }
-
-      if (messages.length === 0 || isSavingRef.current) {
+      if (readOnly || messages.length === 0 || isSavingRef.current) {
         return null;
       }
 
@@ -227,11 +217,9 @@ export const useSessionManager = (
       let createdSessionId: string | null = null;
 
       try {
-        const sessionIdAtStart = currentSessionId;
-
-        if (sessionIdAtStart) {
-          await sessionService.updateSession(orgId, sessionIdAtStart, messages, currentSummary);
-        } else if (messages.length > 0) {
+        if (currentSessionId) {
+          await sessionService.updateSession(orgId, currentSessionId, messages, currentSummary);
+        } else {
           const newSession = await sessionService.createSession(orgId, messages, titleOverride);
           createdSessionId = newSession.id;
           setCurrentSessionId((prevId) => prevId ?? newSession.id);

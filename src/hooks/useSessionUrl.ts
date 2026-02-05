@@ -11,6 +11,16 @@ export interface UseSessionUrlReturn {
 
 const SESSION_ID_PATTERN = /^[a-zA-Z0-9\-_]{1,128}$/;
 
+function isValidSessionId(sessionId: string): boolean {
+  return SESSION_ID_PATTERN.test(sessionId);
+}
+
+function removeSessionFromUrl(): void {
+  const url = new URL(window.location.href);
+  url.searchParams.delete('sessionId');
+  window.history.replaceState({}, '', url.toString());
+}
+
 export function useSessionUrl(): UseSessionUrlReturn {
   const storage = usePluginUserStorage();
   const orgId = String(config.bootData.user.orgId || '1');
@@ -26,17 +36,16 @@ export function useSessionUrl(): UseSessionUrlReturn {
     }
     hasValidatedRef.current = true;
 
-    const searchParams = new URLSearchParams(window.location.search);
-    const urlSessionId = searchParams.get('sessionId');
+    const urlSessionId = new URLSearchParams(window.location.search).get('sessionId');
 
     if (!urlSessionId) {
       setIsValidated(true);
       return;
     }
 
-    if (!SESSION_ID_PATTERN.test(urlSessionId)) {
+    if (!isValidSessionId(urlSessionId)) {
       console.warn('[useSessionUrl] Invalid sessionId format, cleaning URL');
-      cleanSessionFromUrl();
+      removeSessionFromUrl();
       setIsValidated(true);
       return;
     }
@@ -48,19 +57,19 @@ export function useSessionUrl(): UseSessionUrlReturn {
           setSessionIdFromUrl(urlSessionId);
         } else {
           console.warn(`[useSessionUrl] Session ${urlSessionId} not found, cleaning URL`);
-          cleanSessionFromUrl();
+          removeSessionFromUrl();
         }
         setIsValidated(true);
       })
       .catch((error) => {
         console.error('[useSessionUrl] Validation error:', error);
-        cleanSessionFromUrl();
+        removeSessionFromUrl();
         setIsValidated(true);
       });
   }, [sessionService, orgId]);
 
   const updateUrlWithSession = useCallback((sessionId: string) => {
-    if (!SESSION_ID_PATTERN.test(sessionId)) {
+    if (!isValidSessionId(sessionId)) {
       console.error('[useSessionUrl] Attempted to set invalid sessionId:', sessionId);
       return;
     }
@@ -71,7 +80,7 @@ export function useSessionUrl(): UseSessionUrlReturn {
   }, []);
 
   const clearUrlSession = useCallback(() => {
-    cleanSessionFromUrl();
+    removeSessionFromUrl();
     setSessionIdFromUrl(null);
   }, []);
 
@@ -81,10 +90,4 @@ export function useSessionUrl(): UseSessionUrlReturn {
     clearUrlSession,
     isValidated,
   };
-}
-
-function cleanSessionFromUrl() {
-  const url = new URL(window.location.href);
-  url.searchParams.delete('sessionId');
-  window.history.replaceState({}, '', url.toString());
 }

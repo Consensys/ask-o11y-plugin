@@ -10,7 +10,73 @@ interface HomeProps {
   pluginSettings: AppPluginSettings;
 }
 
-function Home({ pluginSettings }: HomeProps) {
+const CONTAINER_STYLE = { height: '100%', maxHeight: '100vh' };
+
+function handleStartNormalChat(): void {
+  window.history.replaceState({}, '', window.location.pathname);
+  window.location.reload();
+}
+
+function LoadingSpinner(): React.ReactElement {
+  return (
+    <div className="w-full h-full flex items-center justify-center">
+      <Spinner size="sm" />
+    </div>
+  );
+}
+
+interface InvestigationLoadingProps {
+  testId: string;
+}
+
+function InvestigationLoading({ testId }: InvestigationLoadingProps): React.ReactElement {
+  return (
+    <div
+      data-testid={testId}
+      className="w-full h-full flex items-center justify-center"
+      style={CONTAINER_STYLE}
+    >
+      <div className="text-center">
+        <Spinner size="lg" />
+        <p className="mt-4 text-secondary">Loading alert investigation...</p>
+      </div>
+    </div>
+  );
+}
+
+interface InvestigationErrorProps {
+  testId: string;
+  error: string;
+  pluginSettings: AppPluginSettings;
+  onSessionIdChange: (sessionId: string | null) => void;
+}
+
+function InvestigationError({
+  testId,
+  error,
+  pluginSettings,
+  onSessionIdChange,
+}: InvestigationErrorProps): React.ReactElement {
+  return (
+    <div data-testid={testId} className="w-full flex flex-col overflow-hidden" style={CONTAINER_STYLE}>
+      <div className="p-4">
+        <Alert title="Investigation Error" severity="error">
+          <p>{error}</p>
+        </Alert>
+        <div className="mt-3">
+          <Button variant="secondary" size="sm" onClick={handleStartNormalChat}>
+            Start Normal Chat
+          </Button>
+        </div>
+      </div>
+      <div className="flex-1 flex flex-col min-h-0">
+        <Chat pluginSettings={pluginSettings} sessionIdFromUrl={null} onSessionIdChange={onSessionIdChange} />
+      </div>
+    </div>
+  );
+}
+
+function Home({ pluginSettings }: HomeProps): React.ReactElement {
   const investigation = useAlertInvestigation();
   const { sessionIdFromUrl, updateUrlWithSession, clearUrlSession, isValidated } = useSessionUrl();
   const hasSetInvestigationSessionRef = useRef(false);
@@ -19,16 +85,15 @@ function Home({ pluginSettings }: HomeProps) {
     investigation.isInvestigationMode && investigation.sessionId ? investigation.sessionId : sessionIdFromUrl;
 
   useEffect(() => {
-    if (
-      investigation.isInvestigationMode &&
-      investigation.sessionId &&
-      !sessionIdFromUrl &&
-      !hasSetInvestigationSessionRef.current
-    ) {
+    const { isInvestigationMode, sessionId } = investigation;
+    const shouldSetInvestigationSession =
+      isInvestigationMode && sessionId && !sessionIdFromUrl && !hasSetInvestigationSessionRef.current;
+
+    if (shouldSetInvestigationSession) {
       hasSetInvestigationSessionRef.current = true;
-      updateUrlWithSession(investigation.sessionId);
+      updateUrlWithSession(sessionId);
     }
-  }, [investigation.isInvestigationMode, investigation.sessionId, sessionIdFromUrl, updateUrlWithSession]);
+  }, [investigation, sessionIdFromUrl, updateUrlWithSession]);
 
   const handleSessionIdChange = useCallback(
     (newSessionId: string | null) => {
@@ -42,74 +107,31 @@ function Home({ pluginSettings }: HomeProps) {
   );
 
   if (!isValidated) {
-    return (
-      <div className="w-full h-full flex items-center justify-center">
-        <Spinner size="sm" />
-      </div>
-    );
+    return <LoadingSpinner />;
   }
 
   if (investigation.isInvestigationMode && investigation.isLoading) {
-    return (
-      <div
-        data-testid={testIds.investigation.loading}
-        className="w-full h-full flex items-center justify-center"
-        style={{ height: '100%', maxHeight: '100vh' }}
-      >
-        <div className="text-center">
-          <Spinner size="lg" />
-          <p className="mt-4 text-secondary">Loading alert investigation...</p>
-        </div>
-      </div>
-    );
+    return <InvestigationLoading testId={testIds.investigation.loading} />;
   }
 
   if (investigation.isInvestigationMode && investigation.error) {
     return (
-      <div
-        data-testid={testIds.investigation.error}
-        className="w-full flex flex-col overflow-hidden"
-        style={{ height: '100%', maxHeight: '100vh' }}
-      >
-        <div className="p-4">
-          <Alert title="Investigation Error" severity="error">
-            <p>{investigation.error}</p>
-          </Alert>
-          <div className="mt-3">
-            <Button
-              variant="secondary"
-              size="sm"
-              onClick={() => {
-                window.history.replaceState({}, '', window.location.pathname);
-                window.location.reload();
-              }}
-            >
-              Start Normal Chat
-            </Button>
-          </div>
-        </div>
-        <div className="flex-1 flex flex-col min-h-0">
-          <Chat
-            pluginSettings={pluginSettings}
-            sessionIdFromUrl={null}
-            onSessionIdChange={handleSessionIdChange}
-          />
-        </div>
-      </div>
+      <InvestigationError
+        testId={testIds.investigation.error}
+        error={investigation.error}
+        pluginSettings={pluginSettings}
+        onSessionIdChange={handleSessionIdChange}
+      />
     );
   }
 
   return (
-    <div
-      data-testid={testIds.home.container}
-      className="w-full flex flex-col overflow-hidden"
-      style={{ height: '100%', maxHeight: '100vh' }}
-    >
+    <div data-testid={testIds.home.container} className="w-full flex flex-col overflow-hidden" style={CONTAINER_STYLE}>
       <div className="flex-1 flex flex-col min-h-0">
         <Chat
           pluginSettings={pluginSettings}
-          initialMessage={investigation.initialMessage || undefined}
-          sessionTitleOverride={investigation.sessionTitle || undefined}
+          initialMessage={investigation.initialMessage ?? undefined}
+          sessionTitleOverride={investigation.sessionTitle ?? undefined}
           sessionIdFromUrl={effectiveSessionId}
           onSessionIdChange={handleSessionIdChange}
         />

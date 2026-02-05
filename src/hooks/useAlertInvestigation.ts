@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 
 export interface UseAlertInvestigationResult {
   isLoading: boolean;
@@ -11,17 +11,21 @@ export interface UseAlertInvestigationResult {
 }
 
 const SESSION_ID_PATTERN = /^[a-zA-Z0-9\-_]{1,128}$/;
+const ALERT_NAME_MAX_LENGTH = 256;
+const XSS_PATTERN = /<script|javascript:|data:/i;
 
-function validateAlertName(alertName: string): boolean {
-  return alertName.length <= 256 && !/<script|javascript:|data:/i.test(alertName);
+function isValidAlertName(alertName: string): boolean {
+  return alertName.length <= ALERT_NAME_MAX_LENGTH && !XSS_PATTERN.test(alertName);
 }
 
-function validateSessionId(sessionId: string | null): boolean {
+function isValidSessionId(sessionId: string | null): boolean {
   return sessionId !== null && SESSION_ID_PATTERN.test(sessionId);
 }
 
 function generateInvestigationSessionId(): string {
-  return `investigation-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+  const timestamp = Date.now();
+  const randomSuffix = Math.random().toString(36).substring(2, 9);
+  return `investigation-${timestamp}-${randomSuffix}`;
 }
 
 function buildInvestigationPrompt(alertName: string): string {
@@ -43,54 +47,66 @@ Once you find the alert, proceed with:
 Please use the available MCP tools to gather real data and provide actionable insights.`;
 }
 
-const INITIAL_STATE: UseAlertInvestigationResult = {
-  isLoading: true,
-  error: null,
-  initialMessage: null,
-  sessionTitle: null,
-  isInvestigationMode: false,
-  alertName: null,
-  sessionId: null,
-};
+interface ParsedUrlParams {
+  type: string | null;
+  alertName: string | null;
+  existingSessionId: string | null;
+}
+
+function parseUrlParams(): ParsedUrlParams {
+  const searchParams = new URLSearchParams(window.location.search);
+  return {
+    type: searchParams.get('type'),
+    alertName: searchParams.get('alertName'),
+    existingSessionId: searchParams.get('sessionId'),
+  };
+}
 
 export function useAlertInvestigation(): UseAlertInvestigationResult {
-  const [state, setState] = useState<UseAlertInvestigationResult>(INITIAL_STATE);
+  const urlParams = useMemo(parseUrlParams, []);
+
+  const [state, setState] = useState<UseAlertInvestigationResult>({
+    isLoading: true,
+    error: null,
+    initialMessage: null,
+    sessionTitle: null,
+    isInvestigationMode: false,
+    alertName: null,
+    sessionId: null,
+  });
 
   useEffect(() => {
-    const searchParams = new URLSearchParams(window.location.search);
-    const type = searchParams.get('type');
-    const alertNameParam = searchParams.get('alertName');
-    const existingSessionId = searchParams.get('sessionId');
+    const { type, alertName, existingSessionId } = urlParams;
 
-    if (type !== 'investigation' || !alertNameParam) {
-      setState({ ...INITIAL_STATE, isLoading: false });
+    if (type !== 'investigation' || !alertName) {
+      setState((prev) => ({ ...prev, isLoading: false }));
       return;
     }
 
-    if (!validateAlertName(alertNameParam)) {
-      setState({
-        ...INITIAL_STATE,
+    if (!isValidAlertName(alertName)) {
+      setState((prev) => ({
+        ...prev,
         isLoading: false,
         isInvestigationMode: true,
         error: 'Invalid alert name format',
-      });
+      }));
       return;
     }
 
-    const sessionId = validateSessionId(existingSessionId)
+    const sessionId = isValidSessionId(existingSessionId)
       ? existingSessionId
       : generateInvestigationSessionId();
 
     setState({
       isLoading: false,
       error: null,
-      initialMessage: buildInvestigationPrompt(alertNameParam),
-      sessionTitle: `Alert Investigation: ${alertNameParam}`,
+      initialMessage: buildInvestigationPrompt(alertName),
+      sessionTitle: `Alert Investigation: ${alertName}`,
       isInvestigationMode: true,
-      alertName: alertNameParam,
+      alertName,
       sessionId,
     });
-  }, []);
+  }, [urlParams]);
 
   return state;
 }
