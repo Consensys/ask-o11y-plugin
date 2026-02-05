@@ -54,7 +54,7 @@ export class BuiltInMCPClient {
     try {
       this.mcpClient = new mcp.Client({
         name: 'ask-o11y-plugin',
-        version: '0.2.3', // x-release-please-version
+        version: '0.2.4', // x-release-please-version
       });
 
       const transport = new mcp.StreamableHTTPClientTransport(mcp.streamableHTTPURL());
