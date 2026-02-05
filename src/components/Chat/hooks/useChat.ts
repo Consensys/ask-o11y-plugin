@@ -109,14 +109,16 @@ export const useChat = (
 
   const hasLoadedFromUrlRef = useRef(false);
   useEffect(() => {
-    if (sessionIdFromUrl && !readOnly && !hasLoadedFromUrlRef.current && chatHistory.length === 0) {
+    // Skip loading from URL in investigation mode - session doesn't exist yet
+    // and will be created when the auto-send saves the first message
+    if (sessionIdFromUrl && !readOnly && !hasLoadedFromUrlRef.current && chatHistory.length === 0 && !initialMessage) {
       hasLoadedFromUrlRef.current = true;
       sessionManager.loadSessionFromUrl(sessionIdFromUrl).catch((error) => {
         console.error('[useChat] Failed to load session from URL:', error);
       });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sessionIdFromUrl, readOnly]);
+  }, [sessionIdFromUrl, readOnly, initialMessage]);
 
   useEffect(() => {
     if (isAutoScroll && bottomSpacerRef.current) {
