@@ -36,6 +36,21 @@ export const WelcomeMessage: React.FC = () => {
         </span>{' '}
         for Grafana that helps you query data, investigate issues, manage dashboards, and more through natural language.
       </p>
+
+      {/* Keyboard shortcut hint */}
+      <p className="text-sm mt-6" style={{ color: theme.colors.text.disabled }}>
+        Press{' '}
+        <kbd
+          className="px-1.5 py-0.5 rounded text-xs font-mono"
+          style={{
+            backgroundColor: theme.colors.background.secondary,
+            border: `1px solid ${theme.colors.border.weak}`,
+          }}
+        >
+          /
+        </kbd>{' '}
+        to focus the input
+      </p>
     </div>
   );
 };
