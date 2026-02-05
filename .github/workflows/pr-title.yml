@@ -38,6 +38,7 @@ jobs:
             ui
             deps
             release
+            main
           requireScope: false
           subjectPattern: ^.+$
           subjectPatternError: |
