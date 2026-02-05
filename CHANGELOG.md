@@ -5,6 +5,13 @@ All notable changes to the Ask O11y Grafana plugin will be documented in this fi
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.5](https://github.com/Consensys/ask-o11y-plugin/compare/ask-o11y-plugin-v0.2.4...ask-o11y-plugin-v0.2.5) (2026-02-05)
+
+
+### Bug Fixes
+
+* **ci:** add workflow_dispatch trigger ([75c59b4](https://github.com/Consensys/ask-o11y-plugin/commit/75c59b4a5a6dbe5c6bf30d117354a3357615bb07))
+
 ## [0.2.4](https://github.com/Consensys/ask-o11y-plugin/compare/ask-o11y-plugin-v0.2.3...ask-o11y-plugin-v0.2.4) (2026-02-05)
 
 
