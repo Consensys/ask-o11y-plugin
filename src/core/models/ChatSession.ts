@@ -26,11 +26,22 @@ export class ChatSession {
   ) {}
 
   /**
-   * Factory method to create a new session
+   * Factory method to create a new session with auto-generated ID
    */
   static create(messages: ChatMessage[], title?: string): ChatSession {
     const now = new Date();
     const sessionId = ChatSession.generateId();
+    const sessionTitle = title || ChatSession.generateTitle(messages);
+
+    return new ChatSession(sessionId, sessionTitle, messages, now, now, messages.length);
+  }
+
+  /**
+   * Factory method to create a session with a pre-generated ID
+   * Used for investigation mode where sessionId is generated before session creation
+   */
+  static createWithId(sessionId: string, messages: ChatMessage[], title?: string): ChatSession {
+    const now = new Date();
     const sessionTitle = title || ChatSession.generateTitle(messages);
 
     return new ChatSession(sessionId, sessionTitle, messages, now, now, messages.length);

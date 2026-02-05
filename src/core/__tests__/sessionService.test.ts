@@ -18,6 +18,19 @@ jest.mock('../models/ChatSession', () => ({
         messages,
       })),
     })),
+    createWithId: jest.fn((sessionId, messages, title) => ({
+      id: sessionId,
+      title: title || 'New Session',
+      messages,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      updateMessages: jest.fn(),
+      toStorage: jest.fn(() => ({
+        id: sessionId,
+        title: title || 'New Session',
+        messages,
+      })),
+    })),
   },
 }));
 
@@ -117,7 +130,7 @@ describe('SessionService', () => {
   });
 
   describe('createSession', () => {
-    it('should create and save a new session', async () => {
+    it('should create and save a new session without setting current (URL is source of truth)', async () => {
       const messages = [{ role: 'user', content: 'Hello' }];
 
       const result = await sessionService.createSession(testOrgId, messages as any, 'Test Title');
@@ -125,7 +138,7 @@ describe('SessionService', () => {
       expect(result).toBeDefined();
       expect(result.id).toBe('mock-session-id');
       expect(mockRepository.save).toHaveBeenCalled();
-      expect(mockRepository.setCurrentSessionId).toHaveBeenCalledWith(testOrgId, 'mock-session-id');
+      expect(mockRepository.setCurrentSessionId).not.toHaveBeenCalled();
     });
 
     it('should use default title when not provided', async () => {
@@ -152,14 +165,47 @@ describe('SessionService', () => {
       expect(mockRepository.save).toHaveBeenCalledWith(testOrgId, mockSession);
     });
 
-    it('should create new session if not found', async () => {
+    it('should create new session with provided ID if not found (without setting current)', async () => {
       mockRepository.findById.mockResolvedValue(null);
 
       const messages = [{ role: 'user', content: 'New message' }];
-      await sessionService.updateSession(testOrgId, 'non-existent', messages as any);
+      await sessionService.updateSession(testOrgId, 'provided-session-id', messages as any);
 
       expect(mockRepository.save).toHaveBeenCalled();
-      expect(mockRepository.setCurrentSessionId).toHaveBeenCalled();
+      expect(mockRepository.setCurrentSessionId).not.toHaveBeenCalled();
+      // Verify the session was created with the provided ID, not a new auto-generated one
+      const savedSession = mockRepository.save.mock.calls[0][1];
+      expect(savedSession.id).toBe('provided-session-id');
+    });
+
+    it('should pass titleOverride to createSessionWithId when session not found', async () => {
+      mockRepository.findById.mockResolvedValue(null);
+
+      const messages = [{ role: 'user', content: 'Investigation message' }];
+      const titleOverride = 'Alert Investigation: TestAlert';
+      await sessionService.updateSession(testOrgId, 'investigation-session-id', messages as any, undefined, titleOverride);
+
+      expect(ChatSession.createWithId).toHaveBeenCalledWith('investigation-session-id', messages, titleOverride);
+      expect(mockRepository.save).toHaveBeenCalled();
+      const savedSession = mockRepository.save.mock.calls[0][1];
+      expect(savedSession.title).toBe(titleOverride);
+    });
+
+    it('should NOT update title for existing sessions even if titleOverride is provided', async () => {
+      const mockSession = {
+        id: 'session-1',
+        title: 'Original Title',
+        updateMessages: jest.fn(),
+      };
+      mockRepository.findById.mockResolvedValue(mockSession as any);
+
+      const newMessages = [{ role: 'user', content: 'Updated' }];
+      await sessionService.updateSession(testOrgId, 'session-1', newMessages as any, 'Summary', 'New Title Should Be Ignored');
+
+      // Verify title was NOT changed - existing session keeps original title
+      expect(mockSession.title).toBe('Original Title');
+      expect(mockSession.updateMessages).toHaveBeenCalledWith(newMessages, 'Summary');
+      expect(mockRepository.save).toHaveBeenCalledWith(testOrgId, mockSession);
     });
   });
 
@@ -237,12 +283,12 @@ describe('SessionService', () => {
       expect(mockRepository.save).toHaveBeenCalled();
     });
 
-    it('should create new session when no session id', async () => {
+    it('should create new session when no session id (without setting current)', async () => {
       const messages = [{ role: 'user', content: 'New auto save' }];
       await sessionService.autoSave(testOrgId, null, messages as any);
 
       expect(mockRepository.save).toHaveBeenCalled();
-      expect(mockRepository.setCurrentSessionId).toHaveBeenCalled();
+      expect(mockRepository.setCurrentSessionId).not.toHaveBeenCalled();
     });
   });
 });

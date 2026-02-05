@@ -23,6 +23,10 @@ interface ChatProps {
   initialMessage?: string;
   /** Override for session title (for alert investigation mode) */
   sessionTitleOverride?: string;
+  /** Session ID from URL (for multi-tab isolation) */
+  sessionIdFromUrl: string | null;
+  /** Callback to update session ID in URL */
+  onSessionIdChange: (sessionId: string | null) => void;
 }
 
 function ChatComponent({
@@ -31,6 +35,8 @@ function ChatComponent({
   initialSession,
   initialMessage,
   sessionTitleOverride,
+  sessionIdFromUrl,
+  onSessionIdChange,
 }: ChatProps): React.ReactElement | null {
   useGrafanaTheme();
   const theme = useTheme2();
@@ -54,7 +60,15 @@ function ChatComponent({
     sessionManager,
     bottomSpacerRef,
     detectedPageRefs,
-  } = useChat(pluginSettings, readOnly ? initialSession : undefined, readOnly, initialMessage, sessionTitleOverride);
+  } = useChat(
+    pluginSettings,
+    sessionIdFromUrl,
+    onSessionIdChange,
+    readOnly ? initialSession : undefined,
+    readOnly,
+    initialMessage,
+    sessionTitleOverride
+  );
 
   const chatInputRef = useRef<ChatInputRef>(null);
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);

@@ -6,60 +6,58 @@ import { ServiceFactory } from '../../../core/services/ServiceFactory';
 import { ConversationMemoryService } from '../../../services/memory';
 
 export interface UseSessionManagerReturn {
-  // Current session state
   currentSessionId: string | null;
   sessions: SessionMetadata[];
   currentSummary: string | undefined;
-
-  // Session operations
   createNewSession: () => Promise<void>;
   loadSession: (sessionId: string) => Promise<void>;
+  loadSessionFromUrl: (sessionId: string) => Promise<void>;
   deleteSession: (sessionId: string) => Promise<void>;
   deleteAllSessions: () => Promise<void>;
-
-  // Immediate save (with optional title override for investigation mode)
-  saveImmediately: (messages: ChatMessage[], titleOverride?: string) => Promise<void>;
-
-  // Refresh sessions list
+  saveImmediately: (messages: ChatMessage[], titleOverride?: string) => Promise<string | null>;
   refreshSessions: () => Promise<void>;
-  // Load current session if chatHistory is empty
   loadCurrentSessionIfNeeded: () => Promise<void>;
-
-  // Summarization
   triggerSummarization: (messages: ChatMessage[]) => Promise<void>;
   isSummarizing: boolean;
-
-  // Storage stats
   storageStats: { used: number; total: number; sessionCount: number };
 }
 
-export const useSessionManager = (
+const INITIAL_STORAGE_STATS = { used: 0, total: 0, sessionCount: 0 };
+
+export function useSessionManager(
   orgId: string,
   chatHistory: ChatMessage[],
   setChatHistory: React.Dispatch<React.SetStateAction<ChatMessage[]>>,
+  sessionIdFromUrl: string | null,
+  onSessionIdChange: (sessionId: string | null) => void,
   readOnly?: boolean
-): UseSessionManagerReturn => {
+): UseSessionManagerReturn {
   const storage = usePluginUserStorage();
   const sessionService = useMemo(() => ServiceFactory.getSessionService(storage), [storage]);
-
-  const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
+  const [currentSessionId, setCurrentSessionId] = useState<string | null>(sessionIdFromUrl);
   const [sessions, setSessions] = useState<SessionMetadata[]>([]);
   const [currentSummary, setCurrentSummary] = useState<string | undefined>(undefined);
   const [isSummarizing, setIsSummarizing] = useState(false);
-  const [storageStats, setStorageStats] = useState({ used: 0, total: 0, sessionCount: 0 });
+  const [storageStats, setStorageStats] = useState(INITIAL_STORAGE_STATS);
 
   const isSavingRef = useRef(false);
   const lastInitializedOrgIdRef = useRef<string | null>(null);
   const initialChatHistoryLengthRef = useRef<number>(chatHistory.length);
 
   useEffect(() => {
-    if (initialChatHistoryLengthRef.current === 0 && chatHistory.length > 0) {
-      initialChatHistoryLengthRef.current = chatHistory.length;
-    } else if (chatHistory.length === 0) {
+    if (chatHistory.length === 0) {
       initialChatHistoryLengthRef.current = 0;
+    } else if (initialChatHistoryLengthRef.current === 0) {
+      initialChatHistoryLengthRef.current = chatHistory.length;
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [orgId]);
+
+  useEffect(() => {
+    if (sessionIdFromUrl !== null && sessionIdFromUrl !== currentSessionId) {
+      setCurrentSessionId(sessionIdFromUrl);
+    }
+  }, [sessionIdFromUrl, currentSessionId]);
 
   const refreshSessions = useCallback(async () => {
     try {
@@ -72,9 +70,6 @@ export const useSessionManager = (
     }
   }, [sessionService, orgId]);
 
-  /**
-   * Load current session if chatHistory is empty (e.g., on page refresh)
-   */
   const loadCurrentSessionIfNeeded = useCallback(async () => {
     if (readOnly || chatHistory.length > 0 || currentSessionId !== null) {
       return;
@@ -106,7 +101,6 @@ export const useSessionManager = (
         const loadedSessions = await sessionService.getAllSessions(orgId);
         if (!cancelled) {
           setSessions(loadedSessions);
-        } else {
         }
         
         const stats = await sessionService.getStorageStats(orgId);
@@ -114,14 +108,13 @@ export const useSessionManager = (
           setStorageStats(stats);
         }
 
-        if (initialChatHistoryLengthRef.current === 0) {
+        if (initialChatHistoryLengthRef.current === 0 && !sessionIdFromUrl) {
           const session = await sessionService.getCurrentSession(orgId);
           if (!cancelled && session) {
             setCurrentSessionId(session.id);
             setChatHistory(session.messages);
             setCurrentSummary(session.summary);
           }
-        } else {
         }
       } catch (error) {
         if (!cancelled) {
@@ -139,18 +132,19 @@ export const useSessionManager = (
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [orgId, sessionService]);
+  }, [orgId, sessionService, sessionIdFromUrl]);
 
   const createNewSession = useCallback(async () => {
     setChatHistory([]);
     setCurrentSessionId(null);
     setCurrentSummary(undefined);
+    onSessionIdChange(null);
     try {
       await sessionService.clearActiveSession(orgId);
     } catch (error) {
       console.error('[SessionManager] Failed to clear active session:', error);
     }
-  }, [sessionService, orgId, setChatHistory]);
+  }, [sessionService, orgId, setChatHistory, onSessionIdChange]);
 
   const loadSession = useCallback(
     async (sessionId: string) => {
@@ -160,12 +154,27 @@ export const useSessionManager = (
           setCurrentSessionId(session.id);
           setChatHistory(session.messages);
           setCurrentSummary(session.summary);
+          onSessionIdChange(session.id);
           await sessionService.setActiveSession(orgId, session.id);
         } else {
           console.error(`[SessionManager] Session ${sessionId} not found`);
         }
       } catch (error) {
         console.error(`[SessionManager] Error loading session:`, error);
+      }
+    },
+    [sessionService, orgId, setChatHistory, onSessionIdChange]
+  );
+
+  const loadSessionFromUrl = useCallback(
+    async (sessionId: string) => {
+      try {
+        const session = await sessionService.getSession(orgId, sessionId);
+        setCurrentSessionId(session?.id ?? sessionId);
+        setChatHistory(session?.messages ?? []);
+        setCurrentSummary(session?.summary);
+      } catch (error) {
+        console.error(`[SessionManager] Error loading URL session:`, error);
       }
     },
     [sessionService, orgId, setChatHistory]
@@ -198,36 +207,22 @@ export const useSessionManager = (
     }
   }, [sessionService, orgId, createNewSession, refreshSessions]);
 
-
   const saveImmediately = useCallback(
-    async (messages: ChatMessage[], titleOverride?: string) => {
-      if (readOnly) {
-        return;
-      }
-
-      if (messages.length === 0) {
-        return;
-      }
-
-      if (isSavingRef.current) {
-        return;
+    async (messages: ChatMessage[], titleOverride?: string): Promise<string | null> => {
+      if (readOnly || messages.length === 0 || isSavingRef.current) {
+        return null;
       }
 
       isSavingRef.current = true;
+      let createdSessionId: string | null = null;
 
       try {
-        const sessionIdAtStart = currentSessionId;
-
-        if (sessionIdAtStart) {
-          await sessionService.updateSession(orgId, sessionIdAtStart, messages, currentSummary);
-        } else if (messages.length > 0) {
+        if (currentSessionId) {
+          await sessionService.updateSession(orgId, currentSessionId, messages, currentSummary, titleOverride);
+        } else {
           const newSession = await sessionService.createSession(orgId, messages, titleOverride);
-          setCurrentSessionId((prevId) => {
-            if (prevId === null) {
-              return newSession.id;
-            }
-            return prevId;
-          });
+          createdSessionId = newSession.id;
+          setCurrentSessionId((prevId) => prevId ?? newSession.id);
         }
         await refreshSessions();
       } catch (error) {
@@ -235,6 +230,8 @@ export const useSessionManager = (
       } finally {
         isSavingRef.current = false;
       }
+
+      return createdSessionId;
     },
     [sessionService, orgId, currentSessionId, currentSummary, refreshSessions, readOnly]
   );
@@ -268,14 +265,12 @@ export const useSessionManager = (
   );
 
   useEffect(() => {
-    if (readOnly) {
+    if (readOnly || chatHistory.length === 0) {
       return;
     }
 
-    if (chatHistory.length > 0) {
-      if (ConversationMemoryService.shouldSummarize(chatHistory.length)) {
-        triggerSummarization(chatHistory);
-      }
+    if (ConversationMemoryService.shouldSummarize(chatHistory.length)) {
+      triggerSummarization(chatHistory);
     }
   }, [chatHistory, triggerSummarization, readOnly]);
 
@@ -285,6 +280,7 @@ export const useSessionManager = (
     currentSummary,
     createNewSession,
     loadSession,
+    loadSessionFromUrl,
     deleteSession,
     deleteAllSessions,
     saveImmediately,

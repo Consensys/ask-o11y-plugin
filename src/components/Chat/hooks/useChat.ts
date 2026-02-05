@@ -12,32 +12,31 @@ import { ValidationService } from '../../../services/validation';
 import { ChatSession } from '../../../core/models/ChatSession';
 import type { AppPluginSettings } from '../../../types/plugin';
 
-const buildEffectiveSystemPrompt = (
+function buildEffectiveSystemPrompt(
   mode: AppPluginSettings['systemPromptMode'] = 'default',
   customPrompt = ''
-): string => {
+): string {
   switch (mode) {
     case 'replace':
-      return customPrompt || SYSTEM_PROMPT; // Fallback to default if custom is empty
+      return customPrompt || SYSTEM_PROMPT;
     case 'append':
-      if (customPrompt.trim()) {
-        return `${SYSTEM_PROMPT}\n\n## Additional Instructions\n\n${customPrompt}`;
-      }
-      return SYSTEM_PROMPT;
-    case 'default':
+      return customPrompt.trim()
+        ? `${SYSTEM_PROMPT}\n\n## Additional Instructions\n\n${customPrompt}`
+        : SYSTEM_PROMPT;
     default:
       return SYSTEM_PROMPT;
   }
-};
+}
 
-export const useChat = (
+export function useChat(
   pluginSettings: AppPluginSettings,
+  sessionIdFromUrl: string | null,
+  onSessionIdChange: (sessionId: string | null) => void,
   initialSession?: ChatSession,
   readOnly?: boolean,
   initialMessage?: string,
   sessionTitleOverride?: string
-) => {
-
+) {
   const orgId = String(config.bootData.user.orgId || '1');
   const { systemPromptMode, customSystemPrompt } = pluginSettings;
 
@@ -51,23 +50,26 @@ export const useChat = (
 
   const hasInitializedRef = useRef(false);
   const initialSessionIdRef = useRef<string | undefined>(initialSession?.id);
-  const initialMessageCountRef = useRef<number>(initialSession?.messages?.length || 0);
-  
+  const initialMessageCountRef = useRef<number>(initialSession?.messages?.length ?? 0);
+
   useEffect(() => {
-    if (initialSession?.messages && initialSession.messages.length > 0) {
-      const sessionIdChanged = initialSessionIdRef.current !== initialSession.id;
-      const messageCountChanged = initialMessageCountRef.current !== initialSession.messages.length;
-      const shouldUpdate = !hasInitializedRef.current || sessionIdChanged || messageCountChanged;
-      
-      if (shouldUpdate) {
-        setChatHistory(initialSession.messages);
-        hasInitializedRef.current = true;
-        initialSessionIdRef.current = initialSession.id;
-        initialMessageCountRef.current = initialSession.messages.length;
-      }
+    if (!initialSession?.messages || initialSession.messages.length === 0) {
+      return;
+    }
+
+    const sessionIdChanged = initialSessionIdRef.current !== initialSession.id;
+    const messageCountChanged = initialMessageCountRef.current !== initialSession.messages.length;
+    const shouldUpdate = !hasInitializedRef.current || sessionIdChanged || messageCountChanged;
+
+    if (shouldUpdate) {
+      setChatHistory(initialSession.messages);
+      hasInitializedRef.current = true;
+      initialSessionIdRef.current = initialSession.id;
+      initialMessageCountRef.current = initialSession.messages.length;
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [initialSession?.id, initialSession?.messages?.length]); // Only depend on id and length, not the whole object or chatHistory
+  }, [initialSession?.id, initialSession?.messages?.length]);
+
   const [currentInput, setCurrentInput] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
   const chatContainerRef = useRef<HTMLDivElement>(null);
@@ -100,7 +102,26 @@ export const useChat = (
     pluginSettings
   );
 
-  const sessionManager = useSessionManager(orgId, chatHistory, setChatHistory, readOnly);
+  const sessionManager = useSessionManager(
+    orgId,
+    chatHistory,
+    setChatHistory,
+    sessionIdFromUrl,
+    onSessionIdChange,
+    readOnly
+  );
+
+  const hasLoadedFromUrlRef = useRef(false);
+  useEffect(() => {
+    // Skip in investigation mode - session will be created on first save
+    if (sessionIdFromUrl && !readOnly && !hasLoadedFromUrlRef.current && chatHistory.length === 0 && !initialMessage) {
+      hasLoadedFromUrlRef.current = true;
+      sessionManager.loadSessionFromUrl(sessionIdFromUrl).catch((error) => {
+        console.error('[useChat] Failed to load session from URL:', error);
+      });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessionIdFromUrl, readOnly, initialMessage]);
 
   useEffect(() => {
     if (isAutoScroll && bottomSpacerRef.current) {
@@ -110,19 +131,22 @@ export const useChat = (
   }, [chatHistory]);
 
   useEffect(() => {
-    const handleScroll = () => {
-      const threshold = 50;
-      const atBottom = window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - threshold;
+    const SCROLL_THRESHOLD = 50;
+
+    function handleScroll(): void {
+      const atBottom = window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - SCROLL_THRESHOLD;
       setIsAutoScroll(atBottom);
-    };
+    }
 
     window.addEventListener('scroll', handleScroll, { passive: true });
     return () => window.removeEventListener('scroll', handleScroll);
   }, []);
 
-  const handleScroll = () => {};
+  const appendErrorMessage = (content: string): void => {
+    setChatHistory((prev) => [...prev, { role: 'assistant', content }]);
+  };
 
-  const sendMessage = async () => {
+  const sendMessage = async (): Promise<void> => {
     if (!currentInput.trim() || isGenerating) {
       return;
     }
@@ -134,24 +158,13 @@ export const useChat = (
       validatedInput = ValidationService.validateChatInput(currentInput);
     } catch (error) {
       console.error('[useChat] Input validation failed:', error);
-      setChatHistory((prev) => [
-        ...prev,
-        {
-          role: 'assistant',
-          content: `⚠️ Input validation error: ${error instanceof Error ? error.message : 'Invalid input'}`,
-        },
-      ]);
+      const errorText = error instanceof Error ? error.message : 'Invalid input';
+      appendErrorMessage(`Input validation error: ${errorText}`);
       return;
     }
 
     if (!ReliabilityService.checkCircuitBreaker('llm-stream')) {
-      setChatHistory((prev) => [
-        ...prev,
-        {
-          role: 'assistant',
-          content: '⚠️ The service is temporarily unavailable due to repeated errors. Please try again in a moment.',
-        },
-      ]);
+      appendErrorMessage('The service is temporarily unavailable due to repeated errors. Please try again in a moment.');
       return;
     }
 
@@ -163,7 +176,16 @@ export const useChat = (
     const newChatHistory = [...chatHistory, userMessage];
     setChatHistory(newChatHistory);
     if (!readOnly) {
-      sessionManager.saveImmediately(newChatHistory, sessionTitleOverrideRef.current);
+      sessionManager
+        .saveImmediately(newChatHistory, sessionTitleOverrideRef.current)
+        .then((createdSessionId) => {
+          if (createdSessionId) {
+            onSessionIdChange(createdSessionId);
+          }
+        })
+        .catch((error) => {
+          console.error('[useChat] Failed to save session:', error);
+        });
       sessionTitleOverrideRef.current = undefined;
     }
     setCurrentInput('');
@@ -210,7 +232,16 @@ export const useChat = (
 
         if (!readOnly) {
           setTimeout(() => {
-            sessionManager.saveImmediately(updated);
+            sessionManager
+              .saveImmediately(updated)
+              .then((createdSessionId) => {
+                if (createdSessionId) {
+                  onSessionIdChange(createdSessionId);
+                }
+              })
+              .catch((err) => {
+                console.error('[useChat] Failed to save session after error:', err);
+              });
           }, 0);
         }
 
@@ -223,51 +254,55 @@ export const useChat = (
     }
   };
 
-  const handleKeyPress = (e: React.KeyboardEvent) => {
+  const handleKeyPress = (e: React.KeyboardEvent): void => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       sendMessage();
     }
   };
 
-  const clearChat = () => {
+  const clearChat = (): void => {
     setChatHistory([]);
     setCurrentInput('');
     clearToolCalls();
     sessionManager.createNewSession();
   };
 
-  const updateToolCallsInChatHistory = (toolCallsMap: Map<string, any>) => {
-    const toolCallsArray = Array.from(toolCallsMap.values());
-    setChatHistory((prev) =>
-      prev.map((msg, idx) =>
-        idx === prev.length - 1 && msg.role === 'assistant' ? { ...msg, toolCalls: toolCallsArray } : msg
-      )
-    );
-  };
-
   useEffect(() => {
     if (toolCalls.size > 0) {
-      updateToolCallsInChatHistory(toolCalls);
+      const toolCallsArray = Array.from(toolCalls.values());
+      setChatHistory((prev) =>
+        prev.map((msg, idx) =>
+          idx === prev.length - 1 && msg.role === 'assistant' ? { ...msg, toolCalls: toolCallsArray } : msg
+        )
+      );
     }
   }, [toolCalls]);
 
   const prevIsGeneratingRef = useRef(isGenerating);
   useEffect(() => {
     if (prevIsGeneratingRef.current && !isGenerating && chatHistory.length > 0 && !readOnly) {
-      sessionManager.saveImmediately(chatHistory);
+      sessionManager
+        .saveImmediately(chatHistory)
+        .then((createdSessionId) => {
+          if (createdSessionId) {
+            onSessionIdChange(createdSessionId);
+          }
+        })
+        .catch((error) => {
+          console.error('[useChat] Failed to save session after generation:', error);
+        });
     }
     prevIsGeneratingRef.current = isGenerating;
-  }, [isGenerating, chatHistory, sessionManager, readOnly]);
+  }, [isGenerating, chatHistory, sessionManager, readOnly, onSessionIdChange]);
 
   useEffect(() => {
     const recovery = ReliabilityService.loadRecoveryState();
-    if (recovery && recovery.wasGenerating) {
+    if (recovery?.wasGenerating) {
       ReliabilityService.clearRecoveryState();
     }
   }, []);
 
-  // Auto-send initialMessage (investigation mode): idle -> creating-session -> ready-to-send -> sent
   const autoSendStateRef = useRef<'idle' | 'creating-session' | 'ready-to-send' | 'sent'>('idle');
   const [autoSendTrigger, setAutoSendTrigger] = useState(0);
 
@@ -280,7 +315,10 @@ export const useChat = (
 
     if (state === 'idle') {
       autoSendStateRef.current = 'creating-session';
-      sessionManager.createNewSession();
+      // Skip in investigation mode - would clear URL
+      if (!sessionIdFromUrl) {
+        sessionManager.createNewSession();
+      }
       setAutoSendTrigger((prev) => prev + 1);
       return;
     }
@@ -324,7 +362,6 @@ export const useChat = (
     getRunningToolCallsCount,
     isAutoScroll,
     setIsAutoScroll,
-    handleScroll,
     sessionManager,
     retryCount,
     bottomSpacerRef: bottomSpacerRef as React.RefObject<HTMLDivElement>,
