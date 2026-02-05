@@ -34,9 +34,10 @@ describe('WelcomeMessage', () => {
     expect(screen.getByText('BETA')).toBeInTheDocument();
   });
 
-  it('should render the version number', () => {
+  it('should render a version number', () => {
     render(<WelcomeMessage />);
-    expect(screen.getByText('v0.2.3')).toBeInTheDocument();
+    // Match any semantic version pattern (vX.Y.Z)
+    expect(screen.getByText(/v\d+\.\d+\.\d+/)).toBeInTheDocument();
   });
 
   it('should render the description', () => {

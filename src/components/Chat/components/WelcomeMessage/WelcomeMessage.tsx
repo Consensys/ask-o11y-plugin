@@ -24,7 +24,7 @@ export const WelcomeMessage: React.FC = () => {
       <div className="flex items-center gap-3 mb-8">
         <span className="status-badge">BETA</span>
         <span className="text-base" style={{ color: theme.colors.text.secondary }}>
-          v0.2.3
+          v0.2.3 {/* x-release-please-version */}
         </span>
       </div>
 
