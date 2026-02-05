@@ -47,8 +47,6 @@ func TestGetSecureHeaderKey(t *testing.T) {
 }
 
 func TestGetSecureHeaderKey_ConsistentWithFrontend(t *testing.T) {
-	// These test cases ensure the Go implementation matches the TypeScript implementation
-	// The frontend generates keys like: mcp_${serverId}_header_${headerKey}
 	testCases := []struct {
 		serverID  string
 		headerKey string
@@ -60,8 +58,6 @@ func TestGetSecureHeaderKey_ConsistentWithFrontend(t *testing.T) {
 
 	for _, tc := range testCases {
 		key := GetSecureHeaderKey(tc.serverID, tc.headerKey)
-
-		// Verify the key follows the expected format
 		expectedPrefix := "mcp_" + tc.serverID + "_header_"
 		if len(key) <= len(expectedPrefix) {
 			t.Errorf("Key %q is too short", key)

@@ -46,10 +46,7 @@ type State = {
   // Display settings
   kioskModeEnabled: boolean;
   chatPanelPosition: 'left' | 'right';
-  // Track modified header values (secureJsonData key -> value)
-  // Only headers that have been modified by the user are stored here
   modifiedHeaderValues: Record<string, string>;
-  // Track headers that should be cleared from secureJsonData
   clearedHeaders: Set<string>;
 };
 
@@ -61,30 +58,23 @@ type ValidationErrors = {
 
 export interface AppConfigProps extends PluginConfigPageProps<AppPluginMeta<AppPluginSettings>> {}
 
-/**
- * Normalizes MCP server configs to handle both old `headers` format and new `headerKeys` format.
- * Converts headerKeys back to a headers Record for UI display (values are empty placeholders).
- */
 function normalizeMCPServers(servers: MCPServerConfig[] | undefined): MCPServerConfig[] {
   if (!servers) {
     return [];
   }
 
   return servers.map((server) => {
-    // If server has headerKeys but no headers, create headers from headerKeys
     if (server.headerKeys && server.headerKeys.length > 0 && !server.headers) {
       const headers: Record<string, string> = {};
       for (const key of server.headerKeys) {
-        headers[key] = ''; // Empty value, actual values are in secureJsonData
+        headers[key] = '';
       }
       return { ...server, headers };
     }
 
-    // If server has both (migration scenario), prefer headerKeys
     if (server.headerKeys && server.headerKeys.length > 0 && server.headers) {
       const headers: Record<string, string> = {};
       for (const key of server.headerKeys) {
-        // Try to get value from existing headers, otherwise empty
         headers[key] = server.headers[key] || '';
       }
       return { ...server, headers };
@@ -110,31 +100,24 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
     clearedHeaders: new Set<string>(),
   });
 
-  // Helper to check if a header value is configured in secureJsonData
   const isHeaderConfigured = (serverId: string, headerKey: string): boolean => {
     const secureKey = getSecureHeaderKey(serverId, headerKey);
-    // Check if it's in secureJsonFields and not marked for clearing
     return Boolean(secureJsonFields?.[secureKey]) && !state.clearedHeaders.has(secureKey);
   };
 
-  // Helper to check if a header value has been modified (user entered a new value)
   const isHeaderModified = (serverId: string, headerKey: string): boolean => {
     const secureKey = getSecureHeaderKey(serverId, headerKey);
     return secureKey in state.modifiedHeaderValues;
   };
 
-  // Get the display value for a header (empty if configured but not modified)
   const getHeaderDisplayValue = (serverId: string, headerKey: string, originalValue: string): string => {
     const secureKey = getSecureHeaderKey(serverId, headerKey);
-    // If modified, show the modified value
     if (secureKey in state.modifiedHeaderValues) {
       return state.modifiedHeaderValues[secureKey];
     }
-    // If configured in secureJsonData, show empty (placeholder will show "Configured")
     if (isHeaderConfigured(serverId, headerKey)) {
       return '';
     }
-    // Otherwise show the original value (for backwards compatibility with old headers)
     return originalValue;
   };
   const [validationErrors, setValidationErrors] = useState<ValidationErrors>({
@@ -315,7 +298,6 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
       }
     }
 
-    // Track the header value modification for secureJsonData
     const normalizedFinalKey = normalizeHeaderKey(finalKey);
     if (normalizedFinalKey && !normalizedFinalKey.startsWith('__new_header_')) {
       const secureKey = getSecureHeaderKey(serverId, normalizedFinalKey);
@@ -325,19 +307,15 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
         const newModifiedValues = { ...prev.modifiedHeaderValues };
         const newClearedHeaders = new Set(prev.clearedHeaders);
 
-        // If key changed, remove old key from modified values and mark for clearing
         if (oldSecureKey && oldSecureKey !== secureKey) {
           delete newModifiedValues[oldSecureKey];
-          // Mark old key for clearing if it was configured
           if (secureJsonFields?.[oldSecureKey]) {
             newClearedHeaders.add(oldSecureKey);
           }
         }
 
-        // Track the new value
         if (value !== '') {
           newModifiedValues[secureKey] = value;
-          // If we're setting a new value, remove from cleared set
           newClearedHeaders.delete(secureKey);
         }
 
@@ -393,7 +371,6 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
     const currentHeaders = { ...(server.headers || {}) };
     delete currentHeaders[key];
 
-    // Mark the header for clearing from secureJsonData
     const normalizedKey = normalizeHeaderKey(key);
     if (normalizedKey && !normalizedKey.startsWith('__new_header_')) {
       const secureKey = getSecureHeaderKey(serverId, normalizedKey);
@@ -402,10 +379,8 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
         const newModifiedValues = { ...prev.modifiedHeaderValues };
         const newClearedHeaders = new Set(prev.clearedHeaders);
 
-        // Remove from modified values
         delete newModifiedValues[secureKey];
 
-        // Mark for clearing if it was configured in secureJsonData
         if (secureJsonFields?.[secureKey]) {
           newClearedHeaders.add(secureKey);
         }
@@ -564,28 +539,23 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
       return;
     }
 
-    // Build secureJsonData for header values
     const secureJsonData: Record<string, string> = {};
 
-    // Process servers to extract header keys and values
     const cleanedServers = state.mcpServers.map((server) => {
       const headerKeys: string[] = [];
 
       if (server.headers) {
         for (const [key] of Object.entries(server.headers)) {
           let cleanKey = key.trim();
-          // Skip empty keys and temp placeholder keys
           if (!cleanKey || cleanKey.startsWith('__new_header_')) {
             continue;
           }
-          // Strip collision markers (shouldn't happen if validation above works)
           if (cleanKey.includes('__collision_')) {
             cleanKey = cleanKey.split('__collision_')[0].trim();
           }
 
           headerKeys.push(cleanKey);
 
-          // Add header value to secureJsonData if modified
           const secureKey = getSecureHeaderKey(server.id, cleanKey);
           if (secureKey in state.modifiedHeaderValues) {
             secureJsonData[secureKey] = state.modifiedHeaderValues[secureKey];
@@ -593,8 +563,6 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
         }
       }
 
-      // Return server config with headerKeys (not headers with values)
-      // Keep headers temporarily for display purposes, but values will be in secureJsonData
       const { headers: _, ...serverWithoutHeaders } = server;
       return {
         ...serverWithoutHeaders,
@@ -602,7 +570,6 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
       };
     });
 
-    // Mark cleared headers by setting them to empty string (Grafana convention for clearing secureJsonData)
     for (const secureKey of state.clearedHeaders) {
       secureJsonData[secureKey] = '';
     }
@@ -614,7 +581,6 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
         ...jsonData,
         mcpServers: cleanedServers,
       },
-      // Only send secureJsonData if there are values to update or clear
       ...(Object.keys(secureJsonData).length > 0 ? { secureJsonData } : {}),
     });
   };
@@ -849,9 +815,7 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
                   are stored securely and encrypted.
                 </p>
 
-                {/* Header List */}
                 {Object.entries(server.headers || {}).map(([key, value], index) => {
-                  // Display empty for temp keys, strip collision markers for display
                   let displayKey = key;
                   if (key.startsWith('__new_header_')) {
                     displayKey = '';
@@ -861,7 +825,6 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
                   const hasCollision = key.includes('__collision_');
                   const normalizedDisplayKey = normalizeHeaderKey(displayKey);
 
-                  // Check if this header value is configured in secureJsonData
                   const isSecureConfigured =
                     normalizedDisplayKey && !normalizedDisplayKey.startsWith('__new_header_')
                       ? isHeaderConfigured(server.id, normalizedDisplayKey)
@@ -871,14 +834,11 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
                       ? isHeaderModified(server.id, normalizedDisplayKey)
                       : false;
 
-                  // Get the display value - empty if configured but not modified (shows placeholder)
                   const displayValue =
                     normalizedDisplayKey && !normalizedDisplayKey.startsWith('__new_header_')
                       ? getHeaderDisplayValue(server.id, normalizedDisplayKey, value)
                       : value;
 
-                  // Use index as key since we preserve order when updating headers
-                  // This maintains focus when editing keys
                   return (
                     <div key={`${server.id}-header-${index}`} className="mb-2">
                       <div className="flex items-center gap-2">

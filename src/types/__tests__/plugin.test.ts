@@ -47,10 +47,7 @@ describe('plugin types', () => {
     });
 
     it('should handle server ID containing underscores (greedy match)', () => {
-      // Note: This test documents current behavior - underscores in server ID
-      // may cause unexpected parsing. Server IDs should use hyphens.
       const result = parseSecureHeaderKey('mcp_server_name_header_key');
-      // The regex is greedy, so it will match 'server_name' as serverId
       expect(result).toEqual({ serverId: 'server_name', headerKey: 'key' });
     });
 
