@@ -159,4 +159,55 @@ describe('useSessionManager - Read-only mode', () => {
     // Verify that getCurrentSession WAS called (because chatHistory is empty)
     expect(mockSessionService.getCurrentSession).toHaveBeenCalledWith('test-org');
   });
+
+  it('should pass titleOverride to updateSession when currentSessionId is set', async () => {
+    // This tests the investigation mode fix: when a session ID is pre-generated
+    // (e.g., from URL in investigation mode), the titleOverride should be forwarded
+    // to updateSession so it can be used when creating the session
+    const existingSessionId = 'investigation-session-123';
+
+    const { result } = renderHook(() =>
+      useSessionManager('test-org', mockMessages, mockSetChatHistory, existingSessionId, mockOnSessionIdChange, false)
+    );
+
+    // Wait for initialization
+    await waitFor(() => {
+      expect(mockSessionService.getAllSessions).toHaveBeenCalled();
+    });
+
+    // Save with title override (simulating investigation mode)
+    const titleOverride = 'Alert Investigation: TestAlert';
+    await act(async () => {
+      await result.current.saveImmediately(mockMessages, titleOverride);
+    });
+
+    // Verify that updateSession was called with the titleOverride parameter
+    expect(mockSessionService.updateSession).toHaveBeenCalledWith(
+      'test-org',
+      existingSessionId,
+      mockMessages,
+      undefined, // currentSummary is undefined initially
+      titleOverride
+    );
+  });
+
+  it('should pass titleOverride to createSession when no currentSessionId', async () => {
+    const { result } = renderHook(() =>
+      useSessionManager('test-org', mockMessages, mockSetChatHistory, null, mockOnSessionIdChange, false)
+    );
+
+    // Wait for initialization
+    await waitFor(() => {
+      expect(mockSessionService.getAllSessions).toHaveBeenCalled();
+    });
+
+    // Save with title override
+    const titleOverride = 'Custom Title';
+    await act(async () => {
+      await result.current.saveImmediately(mockMessages, titleOverride);
+    });
+
+    // Verify that createSession was called with the titleOverride parameter
+    expect(mockSessionService.createSession).toHaveBeenCalledWith('test-org', mockMessages, titleOverride);
+  });
 });

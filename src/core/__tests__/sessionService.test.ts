@@ -177,6 +177,36 @@ describe('SessionService', () => {
       const savedSession = mockRepository.save.mock.calls[0][1];
       expect(savedSession.id).toBe('provided-session-id');
     });
+
+    it('should pass titleOverride to createSessionWithId when session not found', async () => {
+      mockRepository.findById.mockResolvedValue(null);
+
+      const messages = [{ role: 'user', content: 'Investigation message' }];
+      const titleOverride = 'Alert Investigation: TestAlert';
+      await sessionService.updateSession(testOrgId, 'investigation-session-id', messages as any, undefined, titleOverride);
+
+      expect(ChatSession.createWithId).toHaveBeenCalledWith('investigation-session-id', messages, titleOverride);
+      expect(mockRepository.save).toHaveBeenCalled();
+      const savedSession = mockRepository.save.mock.calls[0][1];
+      expect(savedSession.title).toBe(titleOverride);
+    });
+
+    it('should NOT update title for existing sessions even if titleOverride is provided', async () => {
+      const mockSession = {
+        id: 'session-1',
+        title: 'Original Title',
+        updateMessages: jest.fn(),
+      };
+      mockRepository.findById.mockResolvedValue(mockSession as any);
+
+      const newMessages = [{ role: 'user', content: 'Updated' }];
+      await sessionService.updateSession(testOrgId, 'session-1', newMessages as any, 'Summary', 'New Title Should Be Ignored');
+
+      // Verify title was NOT changed - existing session keeps original title
+      expect(mockSession.title).toBe('Original Title');
+      expect(mockSession.updateMessages).toHaveBeenCalledWith(newMessages, 'Summary');
+      expect(mockRepository.save).toHaveBeenCalledWith(testOrgId, mockSession);
+    });
   });
 
   describe('deleteSession', () => {

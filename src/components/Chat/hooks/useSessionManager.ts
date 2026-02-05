@@ -218,7 +218,7 @@ export function useSessionManager(
 
       try {
         if (currentSessionId) {
-          await sessionService.updateSession(orgId, currentSessionId, messages, currentSummary);
+          await sessionService.updateSession(orgId, currentSessionId, messages, currentSummary, titleOverride);
         } else {
           const newSession = await sessionService.createSession(orgId, messages, titleOverride);
           createdSessionId = newSession.id;

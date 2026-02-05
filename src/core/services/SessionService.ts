@@ -39,14 +39,22 @@ export class SessionService {
     return session;
   }
 
-  async updateSession(orgId: string, sessionId: string, messages: ChatMessage[], summary?: string): Promise<void> {
+  async updateSession(
+    orgId: string,
+    sessionId: string,
+    messages: ChatMessage[],
+    summary?: string,
+    titleOverride?: string
+  ): Promise<void> {
     const session = await this.repository.findById(orgId, sessionId);
 
     if (!session) {
-      await this.createSessionWithId(orgId, sessionId, messages);
+      // Pass titleOverride when creating new session with provided ID
+      await this.createSessionWithId(orgId, sessionId, messages, titleOverride);
       return;
     }
 
+    // Existing sessions keep their original title (immutable after creation)
     session.updateMessages(messages, summary);
     await this.repository.save(orgId, session);
   }
