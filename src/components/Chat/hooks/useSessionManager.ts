@@ -173,17 +173,17 @@ export const useSessionManager = (
           setChatHistory(session.messages);
           setCurrentSummary(session.summary);
         } else {
-          console.warn(`[SessionManager] URL session ${sessionId} not found, starting fresh`);
-          setCurrentSessionId(null);
+          // Session doesn't exist yet but sessionId is valid (e.g., investigation mode)
+          // Keep the sessionId - session will be created on first message save
+          setCurrentSessionId(sessionId);
           setChatHistory([]);
           setCurrentSummary(undefined);
-          onSessionIdChange(null);
         }
       } catch (error) {
         console.error(`[SessionManager] Error loading URL session:`, error);
       }
     },
-    [sessionService, orgId, setChatHistory, onSessionIdChange]
+    [sessionService, orgId, setChatHistory]
   );
 
   const deleteSession = useCallback(

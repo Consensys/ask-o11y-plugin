@@ -233,7 +233,16 @@ export const useChat = (
 
         if (!readOnly) {
           setTimeout(() => {
-            sessionManager.saveImmediately(updated);
+            sessionManager
+              .saveImmediately(updated)
+              .then((createdSessionId) => {
+                if (createdSessionId) {
+                  onSessionIdChange(createdSessionId);
+                }
+              })
+              .catch((err) => {
+                console.error('[useChat] Failed to save session after error:', err);
+              });
           }, 0);
         }
 
@@ -274,10 +283,19 @@ export const useChat = (
   const prevIsGeneratingRef = useRef(isGenerating);
   useEffect(() => {
     if (prevIsGeneratingRef.current && !isGenerating && chatHistory.length > 0 && !readOnly) {
-      sessionManager.saveImmediately(chatHistory);
+      sessionManager
+        .saveImmediately(chatHistory)
+        .then((createdSessionId) => {
+          if (createdSessionId) {
+            onSessionIdChange(createdSessionId);
+          }
+        })
+        .catch((error) => {
+          console.error('[useChat] Failed to save session after generation:', error);
+        });
     }
     prevIsGeneratingRef.current = isGenerating;
-  }, [isGenerating, chatHistory, sessionManager, readOnly]);
+  }, [isGenerating, chatHistory, sessionManager, readOnly, onSessionIdChange]);
 
   useEffect(() => {
     const recovery = ReliabilityService.loadRecoveryState();
