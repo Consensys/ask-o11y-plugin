@@ -22,6 +22,7 @@ jest.mock('@grafana/runtime', () => ({
 describe('useSessionManager - Read-only mode', () => {
   let mockSessionService: any;
   let mockSetChatHistory: jest.Mock;
+  let mockOnSessionIdChange: jest.Mock;
 
   const mockMessages: ChatMessage[] = [
     { role: 'user', content: 'Hello' },
@@ -32,6 +33,7 @@ describe('useSessionManager - Read-only mode', () => {
     jest.clearAllMocks();
 
     mockSetChatHistory = jest.fn();
+    mockOnSessionIdChange = jest.fn();
 
     // Setup mock session service
     mockSessionService = {
@@ -54,7 +56,7 @@ describe('useSessionManager - Read-only mode', () => {
 
   it('should skip save when readOnly is true', async () => {
     const { result } = renderHook(() =>
-      useSessionManager('test-org', mockMessages, mockSetChatHistory, true)
+      useSessionManager('test-org', mockMessages, mockSetChatHistory, null, mockOnSessionIdChange, true)
     );
 
     // Wait for initialization
@@ -78,7 +80,7 @@ describe('useSessionManager - Read-only mode', () => {
     (ConversationMemoryService.shouldSummarize as jest.Mock).mockReturnValue(true);
 
     renderHook(() =>
-      useSessionManager('test-org', mockMessages, mockSetChatHistory, true)
+      useSessionManager('test-org', mockMessages, mockSetChatHistory, null, mockOnSessionIdChange, true)
     );
 
     // Wait for initialization
@@ -92,7 +94,7 @@ describe('useSessionManager - Read-only mode', () => {
 
   it('should NOT skip save when readOnly is false', async () => {
     const { result } = renderHook(() =>
-      useSessionManager('test-org', mockMessages, mockSetChatHistory, false)
+      useSessionManager('test-org', mockMessages, mockSetChatHistory, null, mockOnSessionIdChange, false)
     );
 
     // Wait for initialization
@@ -112,7 +114,7 @@ describe('useSessionManager - Read-only mode', () => {
 
   it('should NOT skip save when readOnly is undefined', async () => {
     const { result } = renderHook(() =>
-      useSessionManager('test-org', mockMessages, mockSetChatHistory, undefined)
+      useSessionManager('test-org', mockMessages, mockSetChatHistory, null, mockOnSessionIdChange, undefined)
     );
 
     // Wait for initialization
@@ -132,7 +134,7 @@ describe('useSessionManager - Read-only mode', () => {
 
   it('should skip loading current session when chatHistory has messages and readOnly is true', async () => {
     renderHook(() =>
-      useSessionManager('test-org', mockMessages, mockSetChatHistory, true)
+      useSessionManager('test-org', mockMessages, mockSetChatHistory, null, mockOnSessionIdChange, true)
     );
 
     // Wait for initialization
@@ -146,7 +148,7 @@ describe('useSessionManager - Read-only mode', () => {
 
   it('should load current session when chatHistory is empty even if readOnly is true', async () => {
     renderHook(() =>
-      useSessionManager('test-org', [], mockSetChatHistory, true)
+      useSessionManager('test-org', [], mockSetChatHistory, null, mockOnSessionIdChange, true)
     );
 
     // Wait for initialization

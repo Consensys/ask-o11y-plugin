@@ -120,35 +120,16 @@ export function SharedSession() {
     );
   }
 
-  // Convert shared session to ChatSession for display
-  // Ensure messages are properly formatted
-  const messages: ChatMessage[] = (sharedSession.messages || []).map((msg: any) => ({
+  // Convert shared session messages to ChatSession format
+  const messages: ChatMessage[] = sharedSession.messages.map((msg: any) => ({
     ...msg,
     timestamp: normalizeMessageTimestamp(msg),
   }));
 
-  // Validate we have messages before creating session
-  if (messages.length === 0) {
-    return (
-      <div className="min-h-full w-full flex items-center justify-center p-4">
-        <div className="max-w-md w-full">
-          <Alert title="Error" severity="error">
-            This shared session has no messages.
-          </Alert>
-          <div className="mt-4">
-            <Button variant="primary" onClick={() => navigate('/')}>
-              Go to Home
-            </Button>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
   const session = ChatSession.fromStorage({
     id: sharedSession.id,
     title: sharedSession.title || 'Shared Session',
-    messages: messages,
+    messages,
     createdAt: sharedSession.createdAt,
     updatedAt: sharedSession.updatedAt,
     messageCount: messages.length,
@@ -175,7 +156,13 @@ export function SharedSession() {
         </div>
       </div>
       <div className="flex-1 flex flex-col min-h-0">
-        <Chat pluginSettings={emptyPluginSettings} readOnly={true} initialSession={session} />
+        <Chat
+          pluginSettings={emptyPluginSettings}
+          readOnly={true}
+          initialSession={session}
+          sessionIdFromUrl={null}
+          onSessionIdChange={() => {}}
+        />
       </div>
     </div>
   );

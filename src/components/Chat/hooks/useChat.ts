@@ -12,26 +12,23 @@ import { ValidationService } from '../../../services/validation';
 import { ChatSession } from '../../../core/models/ChatSession';
 import type { AppPluginSettings } from '../../../types/plugin';
 
-const buildEffectiveSystemPrompt = (
+function buildEffectiveSystemPrompt(
   mode: AppPluginSettings['systemPromptMode'] = 'default',
   customPrompt = ''
-): string => {
-  switch (mode) {
-    case 'replace':
-      return customPrompt || SYSTEM_PROMPT; // Fallback to default if custom is empty
-    case 'append':
-      if (customPrompt.trim()) {
-        return `${SYSTEM_PROMPT}\n\n## Additional Instructions\n\n${customPrompt}`;
-      }
-      return SYSTEM_PROMPT;
-    case 'default':
-    default:
-      return SYSTEM_PROMPT;
+): string {
+  if (mode === 'replace') {
+    return customPrompt || SYSTEM_PROMPT;
   }
-};
+  if (mode === 'append' && customPrompt.trim()) {
+    return `${SYSTEM_PROMPT}\n\n## Additional Instructions\n\n${customPrompt}`;
+  }
+  return SYSTEM_PROMPT;
+}
 
 export const useChat = (
   pluginSettings: AppPluginSettings,
+  sessionIdFromUrl: string | null,
+  onSessionIdChange: (sessionId: string | null) => void,
   initialSession?: ChatSession,
   readOnly?: boolean,
   initialMessage?: string,
@@ -66,8 +63,9 @@ export const useChat = (
         initialMessageCountRef.current = initialSession.messages.length;
       }
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [initialSession?.id, initialSession?.messages?.length]); // Only depend on id and length, not the whole object or chatHistory
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialSession?.id, initialSession?.messages?.length]);
+
   const [currentInput, setCurrentInput] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
   const chatContainerRef = useRef<HTMLDivElement>(null);
@@ -100,7 +98,25 @@ export const useChat = (
     pluginSettings
   );
 
-  const sessionManager = useSessionManager(orgId, chatHistory, setChatHistory, readOnly);
+  const sessionManager = useSessionManager(
+    orgId,
+    chatHistory,
+    setChatHistory,
+    sessionIdFromUrl,
+    onSessionIdChange,
+    readOnly
+  );
+
+  const hasLoadedFromUrlRef = useRef(false);
+  useEffect(() => {
+    if (sessionIdFromUrl && !readOnly && !hasLoadedFromUrlRef.current && chatHistory.length === 0) {
+      hasLoadedFromUrlRef.current = true;
+      sessionManager.loadSessionFromUrl(sessionIdFromUrl).catch((error) => {
+        console.error('[useChat] Failed to load session from URL:', error);
+      });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessionIdFromUrl, readOnly]);
 
   useEffect(() => {
     if (isAutoScroll && bottomSpacerRef.current) {
@@ -119,8 +135,6 @@ export const useChat = (
     window.addEventListener('scroll', handleScroll, { passive: true });
     return () => window.removeEventListener('scroll', handleScroll);
   }, []);
-
-  const handleScroll = () => {};
 
   const sendMessage = async () => {
     if (!currentInput.trim() || isGenerating) {
@@ -163,7 +177,16 @@ export const useChat = (
     const newChatHistory = [...chatHistory, userMessage];
     setChatHistory(newChatHistory);
     if (!readOnly) {
-      sessionManager.saveImmediately(newChatHistory, sessionTitleOverrideRef.current);
+      sessionManager
+        .saveImmediately(newChatHistory, sessionTitleOverrideRef.current)
+        .then((createdSessionId) => {
+          if (createdSessionId) {
+            onSessionIdChange(createdSessionId);
+          }
+        })
+        .catch((error) => {
+          console.error('[useChat] Failed to save session:', error);
+        });
       sessionTitleOverrideRef.current = undefined;
     }
     setCurrentInput('');
@@ -237,18 +260,14 @@ export const useChat = (
     sessionManager.createNewSession();
   };
 
-  const updateToolCallsInChatHistory = (toolCallsMap: Map<string, any>) => {
-    const toolCallsArray = Array.from(toolCallsMap.values());
-    setChatHistory((prev) =>
-      prev.map((msg, idx) =>
-        idx === prev.length - 1 && msg.role === 'assistant' ? { ...msg, toolCalls: toolCallsArray } : msg
-      )
-    );
-  };
-
   useEffect(() => {
     if (toolCalls.size > 0) {
-      updateToolCallsInChatHistory(toolCalls);
+      const toolCallsArray = Array.from(toolCalls.values());
+      setChatHistory((prev) =>
+        prev.map((msg, idx) =>
+          idx === prev.length - 1 && msg.role === 'assistant' ? { ...msg, toolCalls: toolCallsArray } : msg
+        )
+      );
     }
   }, [toolCalls]);
 
@@ -267,7 +286,6 @@ export const useChat = (
     }
   }, []);
 
-  // Auto-send initialMessage (investigation mode): idle -> creating-session -> ready-to-send -> sent
   const autoSendStateRef = useRef<'idle' | 'creating-session' | 'ready-to-send' | 'sent'>('idle');
   const [autoSendTrigger, setAutoSendTrigger] = useState(0);
 
@@ -324,7 +342,6 @@ export const useChat = (
     getRunningToolCallsCount,
     isAutoScroll,
     setIsAutoScroll,
-    handleScroll,
     sessionManager,
     retryCount,
     bottomSpacerRef: bottomSpacerRef as React.RefObject<HTMLDivElement>,

@@ -7,13 +7,21 @@ export interface UseAlertInvestigationResult {
   sessionTitle: string | null;
   isInvestigationMode: boolean;
   alertName: string | null;
+  sessionId: string | null;
 }
 
+const SESSION_ID_PATTERN = /^[a-zA-Z0-9\-_]{1,128}$/;
+
 function validateAlertName(alertName: string): boolean {
-  if (alertName.length > 256) {
-    return false;
-  }
-  return !/<script|javascript:|data:/i.test(alertName);
+  return alertName.length <= 256 && !/<script|javascript:|data:/i.test(alertName);
+}
+
+function validateSessionId(sessionId: string | null): boolean {
+  return sessionId !== null && SESSION_ID_PATTERN.test(sessionId);
+}
+
+function generateInvestigationSessionId(): string {
+  return `investigation-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
 }
 
 function buildInvestigationPrompt(alertName: string): string {
@@ -42,6 +50,7 @@ const INITIAL_STATE: UseAlertInvestigationResult = {
   sessionTitle: null,
   isInvestigationMode: false,
   alertName: null,
+  sessionId: null,
 };
 
 export function useAlertInvestigation(): UseAlertInvestigationResult {
@@ -51,6 +60,7 @@ export function useAlertInvestigation(): UseAlertInvestigationResult {
     const searchParams = new URLSearchParams(window.location.search);
     const type = searchParams.get('type');
     const alertNameParam = searchParams.get('alertName');
+    const existingSessionId = searchParams.get('sessionId');
 
     if (type !== 'investigation' || !alertNameParam) {
       setState({ ...INITIAL_STATE, isLoading: false });
@@ -67,6 +77,10 @@ export function useAlertInvestigation(): UseAlertInvestigationResult {
       return;
     }
 
+    const sessionId = validateSessionId(existingSessionId)
+      ? existingSessionId
+      : generateInvestigationSessionId();
+
     setState({
       isLoading: false,
       error: null,
@@ -74,6 +88,7 @@ export function useAlertInvestigation(): UseAlertInvestigationResult {
       sessionTitle: `Alert Investigation: ${alertNameParam}`,
       isInvestigationMode: true,
       alertName: alertNameParam,
+      sessionId,
     });
   }, []);
 
