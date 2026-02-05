@@ -75,16 +75,17 @@ export function SharedSession() {
         timestamp: normalizeMessageTimestamp(msg),
       }));
 
-      await sessionService.createSession(orgId, messages, sharedSession.title);
+      const newSession = await sessionService.createSession(orgId, messages, sharedSession.title);
 
       // Allow session to persist before navigation
       await new Promise((resolve) => setTimeout(resolve, 300));
 
       const currentPath = window.location.pathname;
-      const basePath = currentPath.includes('/shared/') 
-        ? currentPath.split('/shared/')[0] 
+      const basePath = currentPath.includes('/shared/')
+        ? currentPath.split('/shared/')[0]
         : currentPath.replace(/\/shared\/.*$/, '');
-      window.location.href = window.location.origin + (basePath || '/');
+      // Include sessionId in URL so the imported session opens directly
+      window.location.href = window.location.origin + (basePath || '/') + `?sessionId=${newSession.id}`;
     } catch (err) {
       console.error('[SharedSession] Failed to import session:', err);
       alert('Failed to import session. Please try again.');

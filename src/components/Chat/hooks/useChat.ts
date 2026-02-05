@@ -318,7 +318,11 @@ export const useChat = (
 
     if (state === 'idle') {
       autoSendStateRef.current = 'creating-session';
-      sessionManager.createNewSession();
+      // In investigation mode (when sessionIdFromUrl is set), skip createNewSession
+      // as it would clear the URL. The session will be created on first save.
+      if (!sessionIdFromUrl) {
+        sessionManager.createNewSession();
+      }
       setAutoSendTrigger((prev) => prev + 1);
       return;
     }
