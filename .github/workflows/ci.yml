@@ -28,7 +28,6 @@ jobs:
               - 'Magefile.go'
               - 'go.mod'
               - 'go.sum'
-              - 'package.json'
               - 'tsconfig.json'
 
   build:
