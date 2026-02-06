@@ -24,6 +24,7 @@ jobs:
             code:
               - 'src/**'
               - 'pkg/**'
+              - 'tests/**'
               - '*.config.*'
               - 'Magefile.go'
               - 'go.mod'
@@ -33,7 +34,7 @@ jobs:
   build:
     name: Build, lint and unit tests
     needs: check-changes
-    if: needs.check-changes.outputs.code == 'true' || github.event_name == 'push'
+    if: needs.check-changes.outputs.code == 'true' || github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     permissions:
       contents: read
