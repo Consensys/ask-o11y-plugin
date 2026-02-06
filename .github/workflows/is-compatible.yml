@@ -2,7 +2,32 @@ name: Latest Grafana API compatibility check
 on: [pull_request]
 
 jobs:
+  # Detect if code changed (for fast-pass on release-please PRs)
+  check-changes:
+    runs-on: ubuntu-latest
+    outputs:
+      code: ${{ steps.filter.outputs.code }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            code:
+              - 'src/**'
+              - 'pkg/**'
+              - 'tests/**'
+              - '*.config.*'
+              - 'Magefile.go'
+              - 'go.mod'
+              - 'go.sum'
+              - 'tsconfig.json'
+
   compatibilitycheck:
+    needs: check-changes
+    if: needs.check-changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -49,3 +74,12 @@ jobs:
           module: ${{ steps.find-module-ts.outputs.modulets }}
           comment-pr: 'no'
           fail-if-incompatible: 'yes'
+
+  # Fast pass for release-please PRs (no code changes)
+  skip-compatibilitycheck:
+    name: compatibilitycheck
+    needs: check-changes
+    if: needs.check-changes.outputs.code == 'false'
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "No code changes detected, skipping compatibility check (release-please PR)"

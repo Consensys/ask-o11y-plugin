@@ -188,21 +188,6 @@
   animation: sparkle 2s ease-in-out infinite;
 }
 
-/* Status badge styling */
-.status-badge {
-  display: inline-flex;
-  align-items: center;
-  padding: 6px 14px;
-  border-radius: 4px;
-  font-size: 12px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  border: 1px solid var(--grafana-color-warning);
-  color: var(--grafana-color-warning);
-  background: transparent;
-}
-
 /* Suggestion pill styling */
 .suggestion-pill {
   display: inline-flex;

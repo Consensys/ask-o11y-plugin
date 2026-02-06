@@ -29,17 +29,6 @@ describe('WelcomeMessage', () => {
     expect(screen.getByText('Ask O11y Assistant')).toBeInTheDocument();
   });
 
-  it('should render the BETA badge', () => {
-    render(<WelcomeMessage />);
-    expect(screen.getByText('BETA')).toBeInTheDocument();
-  });
-
-  it('should render a version number', () => {
-    render(<WelcomeMessage />);
-    // Match any semantic version pattern (vX.Y.Z)
-    expect(screen.getByText(/v\d+\.\d+\.\d+/)).toBeInTheDocument();
-  });
-
   it('should render the description', () => {
     render(<WelcomeMessage />);
     expect(screen.getByText(/agentic LLM assistant/i)).toBeInTheDocument();

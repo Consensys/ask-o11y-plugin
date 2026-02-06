@@ -160,9 +160,6 @@ test.describe('Chat UI States', () => {
       // Welcome heading
       await expect(page.getByRole('heading', { name: 'Ask O11y Assistant' })).toBeVisible();
 
-      // Version badge
-      await expect(page.getByText('BETA')).toBeVisible();
-
       // Description
       await expect(page.getByText('agentic LLM assistant')).toBeVisible();
 

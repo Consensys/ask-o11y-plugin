@@ -7,17 +7,7 @@
       "component": "ask-o11y-plugin",
       "changelog-path": "CHANGELOG.md",
       "bump-minor-pre-major": true,
-      "bump-patch-for-minor-pre-major": true,
-      "extra-files": [
-        {
-          "type": "generic",
-          "path": "src/components/Chat/components/WelcomeMessage/WelcomeMessage.tsx"
-        },
-        {
-          "type": "generic",
-          "path": "src/services/builtInMCPClient.ts"
-        }
-      ]
+      "bump-patch-for-minor-pre-major": true
     }
   },
   "changelog-sections": [
