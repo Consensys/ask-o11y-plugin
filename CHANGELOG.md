@@ -5,6 +5,34 @@ All notable changes to the Ask O11y Grafana plugin will be documented in this fi
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.6](https://github.com/Consensys/ask-o11y-plugin/compare/v0.2.5...v0.2.6) (2026-02-06)
+
+
+### Features
+
+* add attestation to artifact ([#2](https://github.com/Consensys/ask-o11y-plugin/issues/2)) ([99b0a07](https://github.com/Consensys/ask-o11y-plugin/commit/99b0a07cbec82a506b5cd619e2018c58dc226585))
+* add custom loader with style ([#17](https://github.com/Consensys/ask-o11y-plugin/issues/17)) ([5b4abcc](https://github.com/Consensys/ask-o11y-plugin/commit/5b4abcc810b64632ba2dc0f1df83b4b3d8343999))
+* add Right Side Panel ([#3](https://github.com/Consensys/ask-o11y-plugin/issues/3)) ([9bbf7c7](https://github.com/Consensys/ask-o11y-plugin/commit/9bbf7c7851c06611af84321d95abb98916adf498))
+* **chat:** add alert investigation mode for one-click RCA ([#29](https://github.com/Consensys/ask-o11y-plugin/issues/29)) ([a0f129e](https://github.com/Consensys/ask-o11y-plugin/commit/a0f129e594e14e8cb5a8594f94681a5a47e8e2d0))
+* get ready for first release ([#1](https://github.com/Consensys/ask-o11y-plugin/issues/1)) ([bdd4c98](https://github.com/Consensys/ask-o11y-plugin/commit/bdd4c984bcbb7a732c783b1cdf1f5c80801dd22a))
+* store sessions in the backend ([#6](https://github.com/Consensys/ask-o11y-plugin/issues/6)) ([4825a8e](https://github.com/Consensys/ask-o11y-plugin/commit/4825a8e4b35aa4f11464f19be33a24e738dedcaf))
+* use scene for split view ([#15](https://github.com/Consensys/ask-o11y-plugin/issues/15)) ([62a8f4b](https://github.com/Consensys/ask-o11y-plugin/commit/62a8f4b23c306f7c7bb18f10b4f885b774e75bd8))
+
+
+### Bug Fixes
+
+* add orgID to share urls ([#18](https://github.com/Consensys/ask-o11y-plugin/issues/18)) ([b08a530](https://github.com/Consensys/ask-o11y-plugin/commit/b08a5304eb1c992ab7bf03db1beaeda49ba4dac2))
+* **ci:** add fast-pass for release-please PRs ([49de748](https://github.com/Consensys/ask-o11y-plugin/commit/49de748180bf36106b6db55c8aacdca7e96c2827))
+* **ci:** add workflow_dispatch trigger ([75c59b4](https://github.com/Consensys/ask-o11y-plugin/commit/75c59b4a5a6dbe5c6bf30d117354a3357615bb07))
+* **ci:** allow 'main' scope for release-please PRs ([7aa127b](https://github.com/Consensys/ask-o11y-plugin/commit/7aa127bdd9169bf1d04285b0df476bdea69014a6))
+* **ci:** make release-please PRs mergeable by skipping CI for non-code changes ([#35](https://github.com/Consensys/ask-o11y-plugin/issues/35)) ([73b1bea](https://github.com/Consensys/ask-o11y-plugin/commit/73b1bea8ef97753ba0c94d895742e03ba17b5ab5))
+* **ci:** remove package.json from paths filter ([05ab8b4](https://github.com/Consensys/ask-o11y-plugin/commit/05ab8b421b744eed0da765ece0f3d8a2505b2d22))
+* **release:** use PAT for release-please and skip GitHub Release creation ([#37](https://github.com/Consensys/ask-o11y-plugin/issues/37)) ([fc6014a](https://github.com/Consensys/ask-o11y-plugin/commit/fc6014ae1b566c496c9dd977310b5808ce190656))
+* **release:** use simple tag format (v0.2.5 not ask-o11y-plugin-v0.2.5) ([e84de65](https://github.com/Consensys/ask-o11y-plugin/commit/e84de653f788fcb4cc23b87d893d135107abf7d2))
+* share banner and limit tabs ([#19](https://github.com/Consensys/ask-o11y-plugin/issues/19)) ([51b491d](https://github.com/Consensys/ask-o11y-plugin/commit/51b491de35707265d26ebdefcc414ccb6386323c))
+* side panel disappearing after each new question ([#16](https://github.com/Consensys/ask-o11y-plugin/issues/16)) ([527287d](https://github.com/Consensys/ask-o11y-plugin/commit/527287d73a8f55dbc79cb33284188b20059d8594))
+* version ([#28](https://github.com/Consensys/ask-o11y-plugin/issues/28)) ([0f9b584](https://github.com/Consensys/ask-o11y-plugin/commit/0f9b584ad65b44d3f36c8d8704a0b5736880e3d2))
+
 ## [0.2.5](https://github.com/Consensys/ask-o11y-plugin/compare/v0.2.4...v0.2.5) (2026-02-06)
 
 
