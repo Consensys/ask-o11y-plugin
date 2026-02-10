@@ -17,6 +17,20 @@ services:
       redis:
         condition: service_healthy
 
+  mcp-grafana:
+    image: grafana/mcp-grafana
+    ports:
+      - 127.0.0.1:8001:8000/tcp
+    environment:
+      GRAFANA_URL: http://grafana:3000
+      GRAFANA_USERNAME: admin
+      GRAFANA_PASSWORD: admin
+      PORT: 8000
+    command: >
+      -t streamable-http --log-level debug --disable-incident	--disable-oncall	--disable-sift	--disable-admin	--disable-asserts	--disable-annotations
+    depends_on:
+      - grafana
+
   redis:
     image: redis:7-alpine
     ports:
@@ -39,8 +53,7 @@ services:
     command: >
       --config /mcpo/config.json
     depends_on:
-      - grafana
+      - mcp-grafana
 
 volumes:
   redis-data:
-
