@@ -126,8 +126,17 @@ nvm use 22 && npm install
 # Start full development environment (Docker: Grafana + Redis + MCP servers)
 nvm use 22 && npm run server
 
+# Start multi-org development environment (uses docker-compose-full.yaml + full.yaml_)
+nvm use 22 && npm run server:full
+
 # Access: http://localhost:3000 (admin/admin)
 ```
+
+**Multi-org testing (`server:full`):**
+- Swaps `app.yaml` ↔ `full.yaml_` provisioning (with bash trap for cleanup)
+- Uses `docker-compose-full.yaml` with external `mcp-grafana` sidecar + Redis + mcpo
+- Provisions two orgs with separate MCP server configs
+- Create Org 2 manually in Grafana UI after startup
 
 ### Building
 ```bash
@@ -258,7 +267,8 @@ go test ./pkg/plugin -run TestFunctionName
 │                           ↕ HTTP                             │
 │  ┌────────────────────────────────────────────────────────┐ │
 │  │  Go Backend Plugin                                      │ │
-│  │  ├─ HTTP Routes (/api/mcp/*, /health)                  │ │
+│  │  ├─ HTTP Routes (/api/mcp/*, /api/agent/*, /health)    │ │
+│  │  ├─ Agentic Loop (LLM ↔ MCP tool-call cycle)          │ │
 │  │  ├─ RBAC Enforcement (Admin/Editor/Viewer)             │ │
 │  │  ├─ Session Sharing (in-memory or Redis)               │ │
 │  │  ├─ OAuth Flow Management (PKCE)                       │ │
@@ -303,18 +313,23 @@ src/
 ```
 pkg/
 ├── main.go             # Backend entry point
+├── agent/              # Agentic loop (LLM ↔ MCP tool-call cycle)
+│   ├── loop.go         # Core agent loop: LLM call → tool calls → repeat
+│   ├── llm_client.go   # HTTP client for grafana-llm-app OpenAI endpoint
+│   ├── tools.go        # MCP tool ↔ OpenAI function conversion + execution
+│   ├── context_window.go # Token-aware message truncation
+│   └── types.go        # SSE event types, request/response models
 ├── plugin/             # Plugin implementation
 │   ├── plugin.go       # Main plugin logic, HTTP routes, RBAC
-│   │                   # - Lines 140-191: isReadOnlyTool() (RBAC config)
-│   │                   # - Lines 192-233: filterToolsByRole() + canAccessTool()
-│   │                   # - Lines 600-850: Session sharing API endpoints
 │   ├── shares.go       # In-memory share store
 │   ├── shares_redis.go # Redis-backed share store
 │   ├── ratelimit.go    # Rate limiting (50 shares/hour/user)
 │   └── config.go       # Plugin configuration
+├── rbac/               # Role-based access control
+│   └── rbac.go         # isReadOnlyTool(), filterToolsByRole(), canAccessTool()
 └── mcp/                # MCP client & proxy
     ├── client.go       # MCP client implementation
-    │                   # - Lines 49-75: Multi-tenant header injection
+    │                   # - customRoundTripper: Multi-tenant header injection
     ├── proxy.go        # MCP proxy (aggregates servers)
     ├── health.go       # Health monitoring
     ├── oauth_*.go      # OAuth PKCE flow implementation
@@ -368,11 +383,34 @@ pkg/
 2. Tool execution (permission check before execution)
 
 **Implementation:**
-- `pkg/plugin/plugin.go:140-191`: `isReadOnlyTool()` - defines read-only tools
-- `pkg/plugin/plugin.go:192-233`: `filterToolsByRole()` + `canAccessTool()`
+- `pkg/rbac/rbac.go`: `IsReadOnlyTool()`, `FilterToolsByRole()`, `CanAccessTool()`
 - Double-check pattern (list AND execute)
 
-### OAuth Integration (New in Current Branch)
+### Agentic Backend Loop
+
+The AI conversation loop runs server-side in Go (not in the browser). The frontend sends the full message history and receives SSE events back.
+
+**Flow:**
+1. Frontend POSTs to `/api/agent/run` with messages + systemPrompt
+2. Backend streams SSE events: `content`, `tool_call_start`, `tool_call_result`, `done`, `error`
+3. Agent loop: LLM call → parse tool calls → execute via MCP proxy → feed results back → repeat
+4. Max 25 iterations per request (configurable via `AgentMaxIterations`)
+
+**Key Components:**
+- `pkg/agent/loop.go` — Core loop orchestration
+- `pkg/agent/llm_client.go` — Calls `grafana-llm-app` OpenAI-compatible endpoint using SA token
+- `pkg/agent/tools.go` — Converts MCP tools to OpenAI function format, executes tool calls via MCP proxy
+- `pkg/agent/context_window.go` — Token-aware message truncation to stay within model limits
+- `pkg/plugin/plugin.go:handleAgentRun()` — HTTP handler, SSE streaming, request validation
+
+**Authentication for LLM calls:**
+- Uses Grafana service account (SA) token from `backend.GrafanaConfigFromContext()`
+- SA token is passed to `grafana-llm-app` via `Authorization: Bearer` header
+- `X-Grafana-Org-Id` header forwarded for org context
+
+### OAuth Integration
+
+The plugin supports OAuth 2.0 authentication flows for MCP servers that require OAuth:
 
 The plugin supports OAuth 2.0 authentication flows for MCP servers that require OAuth:
 
@@ -399,6 +437,7 @@ Ask O11y supports three MCP modes for flexible tool integration:
 - Provides 56+ native Grafana observability tools
 - Automatically configured when grafana-llm-app is installed
 - Enabled via `useBuiltInMCP: true` in plugin settings
+- **LIMITATION: Only works for Org 1** (see Multi-Org Constraints below)
 
 **2. External Only**: Use user-configured external MCP servers
 - Supports OpenAPI, SSE, Standard MCP, and Streamable HTTP protocols
@@ -420,6 +459,24 @@ Ask O11y supports three MCP modes for flexible tool integration:
 - Tool routing: Registry-based lookup routes calls to correct client
 - Error isolation: If one source fails, the other continues to work
 - RBAC: Filtering applied by each underlying client independently
+
+### Multi-Org Constraints (CRITICAL)
+
+**`externalServiceAccounts` creates a service account scoped to Org 1 only.** This is a known Grafana limitation:
+- [grafana/grafana#91844](https://github.com/grafana/grafana/issues/91844): SA token from `backend.GrafanaConfigFromContext()` is always Org 1
+- [grafana-llm-app#829](https://github.com/grafana/grafana-llm-app/issues/829): Built-in MCP not compatible with multi-org
+
+**Impact on this plugin:**
+- `useBuiltInMCP: true` injects grafana-llm-app's MCP endpoint using the SA token → **only works for Org 1**
+- The LLM client (`pkg/agent/llm_client.go`) uses the same SA token for `grafana-llm-app` calls → passes `X-Grafana-Org-Id` header but **auth is still Org-1-scoped**
+
+**Multi-org workaround (used in `docker-compose-full.yaml`):**
+- Run `mcp-grafana` as an external sidecar container with basic auth (`GRAFANA_USERNAME`/`GRAFANA_PASSWORD` = admin/admin)
+- Basic auth credentials have cross-org access (unlike SA tokens)
+- The MCP proxy's `customRoundTripper` in `pkg/mcp/client.go` forwards `X-Grafana-Org-Id` and `X-Scope-OrgID` headers
+- Configure via external MCP server entries in provisioning (NOT `useBuiltInMCP`)
+
+**NEVER set `useBuiltInMCP: true` in multi-org provisioning files (`full.yaml_`).** Always use external `mcp-grafana` sidecar for multi-org deployments.
 
 ## Critical Implementation Details
 
@@ -446,7 +503,7 @@ Ask O11y supports three MCP modes for flexible tool integration:
 ### Adding a New MCP Tool
 
 1. **Backend RBAC Configuration:**
-   - If read-only: Add tool name to `isReadOnlyTool()` in `pkg/plugin/plugin.go:140-191`
+   - If read-only: Add tool name to `IsReadOnlyTool()` in `pkg/rbac/rbac.go`
    - If write operation: No changes needed (auto-restricted to Admin/Editor)
    - Viewers automatically get: `get*`, `list*`, `query*`, `search*`, `find*`, `generate*`
 
@@ -601,9 +658,10 @@ All routes under: `/api/plugins/consensys-asko11y-app/resources/`
 
 ```go
 // In pkg/plugin/plugin.go
-func (p *App) registerRoutes(mux *http.ServeMux) {
+func (p *Plugin) registerRoutes(mux *http.ServeMux) {
     mux.HandleFunc("/api/mcp/tools", p.handleMCPTools)
     mux.HandleFunc("/api/mcp/call-tool", p.handleMCPCallTool)
+    mux.HandleFunc("/api/agent/run", p.handleAgentRun)  // SSE streaming agentic loop
     // etc.
 }
 ```
@@ -651,9 +709,11 @@ docker compose exec grafana curl http://mcp-grafana:8000/mcp
 
 ## Configuration Files
 
-- `provisioning/plugins/apps.yaml` - Plugin & MCP server config
+- `provisioning/plugins/app.yaml` - Plugin & MCP server config (single-org, default)
+- `provisioning/plugins/full.yaml_` - Multi-org provisioning (trailing `_` prevents Grafana from loading; `server:full` swaps it in)
 - `.env` - Environment variables (not committed, see `.env.example`)
-- `docker-compose.yaml` - Local development environment
+- `docker-compose.yaml` - Local development environment (single-org)
+- `docker-compose-full.yaml` - Multi-org development environment (external mcp-grafana + Redis + mcpo)
 - `webpack.config.ts` - Frontend build config
 - `.config/` - DO NOT EDIT (scaffolded by `@grafana/create-plugin`)
 
