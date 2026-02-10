@@ -16,6 +16,7 @@ apps:
   - type: consensys-asko11y-app
     org_id: 1
     jsonData:
+      useBuiltInMCP: true
       maxTotalTokens: 100000
       mcpServers:
         - id: 'time'
@@ -33,11 +34,6 @@ apps:
           url: 'http://mcpo:8000/fetch'
           enabled: true
           type: 'openapi'
-        - id: 'mcp-grafana'
-          name: 'grafana'
-          url: 'http://mcp-grafana:8000/mcp'
-          enabled: true
-          type: 'streamable-http'
   - type: grafana-llm-app
     org_id: 2
     jsonData:
@@ -53,6 +49,7 @@ apps:
   - type: consensys-asko11y-app
     org_id: 2
     jsonData:
+      useBuiltInMCP: true
       maxTotalTokens: 50000
       mcpServers:
         - id: 'time'
@@ -70,9 +67,4 @@ apps:
           url: 'http://mcpo:8000/fetch'
           enabled: true
           type: 'openapi'
-        - id: 'mcp-grafana'
-          name: 'grafana'
-          url: 'http://mcp-grafana:8000/mcp'
-          enabled: true
-          type: 'streamable-http'
 
