@@ -2,6 +2,63 @@
 
 This file provides context and instructions to help AI agents work effectively on this project.
 
+## Mandatory Agent Workflow
+
+**CRITICAL: The following agent workflow is REQUIRED for every code change.**
+
+After writing or modifying code, agents MUST execute these steps in order:
+
+### 1. LSP Diagnostics (gopls-lsp + typescript-lsp)
+
+- For Go changes (`pkg/`): Check gopls-lsp diagnostics and fix all errors/warnings
+- For TypeScript changes (`src/`): Check typescript-lsp diagnostics and fix all errors/warnings
+- **Fix ALL critical, major, and medium issues before proceeding**
+
+### 2. Code Review (code-review / pr-review-toolkit:code-reviewer)
+
+- Run code-reviewer on all modified files
+- Review output for bugs, logic errors, security vulnerabilities, code quality issues
+- **Fix ALL critical, major, and medium severity issues**
+- Low/info severity: fix if trivial, otherwise note for future
+
+### 3. Code Simplification (code-simplifier / pr-review-toolkit:code-simplifier)
+
+- Run code-simplifier on recently modified code
+- Apply simplifications that improve clarity without changing behavior
+- Preserve all existing functionality and project patterns
+
+### 4. Tests & Lint
+
+```bash
+nvm use 22 && npm run test:ci    # Frontend unit tests
+go test ./pkg/...                 # Backend tests
+nvm use 22 && npm run lint        # Linting
+nvm use 22 && npm run typecheck   # Type checking
+```
+
+- **Fix any failures** - iterate until all pass
+
+### 5. Pre-PR Review (pr-review-toolkit agents)
+
+Before commit or PR creation, run the full review toolkit:
+- **code-reviewer**: Style, conventions, bugs
+- **silent-failure-hunter**: Error handling gaps, swallowed errors
+- **type-design-analyzer**: Type quality for new types/interfaces
+- **pr-test-analyzer**: Test coverage completeness
+
+**Fix ALL critical, major, and medium issues from every agent.**
+
+### Issue Severity Policy
+
+| Severity | Action | Examples |
+|----------|--------|----------|
+| **Critical** | MUST fix immediately | Security vulnerabilities, data loss, crashes |
+| **Major** | MUST fix before commit | Logic errors, missing error handling, RBAC violations |
+| **Medium** | MUST fix before PR | Code smells, unnecessary complexity, missing validation |
+| **Low/Info** | Fix if easy | Style preferences, minor improvements |
+
+---
+
 ## Project Overview
 
 **Consensys Ask O11y Assistant** is a Grafana plugin providing AI-powered observability through natural language conversations. It uses Model Context Protocol (MCP) to integrate with observability tools for querying metrics, logs, and managing Grafana resources.
@@ -26,18 +83,15 @@ This file provides context and instructions to help AI agents work effectively o
 ### Setup & Development
 
 ```bash
-# Initial setup
-npm install
+# Initial setup (ALWAYS use Node.js 22)
+nvm use 22 && npm install
 
-# Frontend development (hot reload)
-npm run dev
+# Start full development environment (Docker: Grafana + Redis + MCP servers)
+nvm use 22 && npm run server
 
 # Backend development
 mage build                    # Current platform
-npm run build:backend:all     # All platforms
-
-# Start environment
-npm run server                # Docker: Grafana + MCP servers + Alertmanager
+nvm use 22 && npm run build:backend:all     # All platforms
 
 # After backend changes
 docker compose restart grafana
@@ -48,11 +102,11 @@ docker compose logs -f grafana
 
 ```bash
 # Full build (frontend + backend, all platforms)
-npm run build
+nvm use 22 && npm run build
 
 # Component builds
-npm run build:frontend        # Frontend only
-npm run build:backend         # Backend (current platform)
+nvm use 22 && npm run build:frontend        # Frontend only
+nvm use 22 && npm run build:backend         # Backend (current platform)
 mage buildAll                 # Backend (all platforms)
 
 # Backend binary naming: gpx_consensys-asko11y-app_{os}_{arch}
@@ -62,17 +116,17 @@ mage buildAll                 # Backend (all platforms)
 ### Testing & Quality Checks
 
 ```bash
-# Tests
-npm test                      # Unit tests (watch mode)
-npm run test:ci              # Unit tests (CI mode)
-npm run e2e                  # E2E tests (requires running server)
+# Tests (ALWAYS prefix npm commands with nvm use 22 &&)
+nvm use 22 && npm test                      # Unit tests (watch mode)
+nvm use 22 && npm run test:ci              # Unit tests (CI mode)
+nvm use 22 && npm run e2e                  # E2E tests (requires running server)
 go test ./pkg/...            # Go tests
 mage test                    # Go tests via Mage
 
 # Code quality
-npm run lint                 # Check linting
-npm run lint:fix             # Auto-fix linting issues
-npm run typecheck            # TypeScript type checking
+nvm use 22 && npm run lint                 # Check linting
+nvm use 22 && npm run lint:fix             # Auto-fix linting issues
+nvm use 22 && npm run typecheck            # TypeScript type checking
 ```
 
 **Testing guidelines:**

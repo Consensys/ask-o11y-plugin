@@ -1,0 +1,25 @@
+{
+  "enabledPlugins": {
+    "gopls-lsp@claude-plugins-official": true,
+    "typescript-lsp@claude-plugins-official": true,
+    "code-simplifier@claude-plugins-official": true,
+    "code-review@claude-plugins-official": true,
+    "pr-review-toolkit@claude-plugins-official": true,
+    "context7@claude-plugins-official": true,
+    "playwright@claude-plugins-official": true,
+    "feature-dev@claude-plugins-official": true,
+    "claude-md-management@claude-plugins-official": true
+  },
+  "permissions": {
+    "allow": [
+      "Bash(nvm use 22 && npm run lint*)",
+      "Bash(nvm use 22 && npm run test*)",
+      "Bash(nvm use 22 && npm run typecheck*)",
+      "Bash(nvm use 22 && npm run build*)",
+      "Bash(go test*)",
+      "Bash(mage test*)",
+      "Bash(nvm use 22 && npx jest*)",
+      "Bash(nvm use 22 && npm run e2e*)"
+    ]
+  }
+}

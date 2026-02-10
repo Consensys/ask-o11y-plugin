@@ -18,28 +18,65 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - Multi-tenant organization isolation with per-user session storage
 - RBAC enforcement at tool listing AND execution
 
-## Available MCP Tools for Development
+## Claude Code Plugins & Workflow
 
-**Context7 Plugin (Documentation Lookup):**
+This project uses the following Claude Code plugins. They are configured in `.claude/settings.json` and **must** be used as described below.
 
-When working on this codebase, you have access to the Context7 MCP server for retrieving up-to-date library documentation:
+### Active Plugins
 
-- **Use case**: Query documentation for libraries used in this project (React, Grafana SDK, Go packages, etc.)
-- **Tools available**:
-  - `resolve-library-id`: Resolve package names to Context7-compatible library IDs
-  - `query-docs`: Retrieve documentation and code examples for any library
-- **Example workflow**:
-  1. If you need to understand how a Grafana UI component works, use Context7 to query the latest documentation
-  2. If implementing a new feature with an unfamiliar library, use Context7 to get examples
-  3. When debugging issues, check library docs via Context7 for API changes or best practices
+| Plugin | Purpose |
+|--------|---------|
+| **gopls-lsp** | Go language server - provides real-time diagnostics, type info, and refactoring for `pkg/` code |
+| **typescript-lsp** | TypeScript language server - provides real-time diagnostics, type info, and refactoring for `src/` code |
+| **code-review** | Reviews code changes for bugs, style violations, and adherence to project conventions |
+| **code-simplifier** | Simplifies and refines code for clarity and maintainability while preserving functionality |
+| **pr-review-toolkit** | Comprehensive PR review suite (code-reviewer, silent-failure-hunter, type-design-analyzer, comment-analyzer, pr-test-analyzer) |
+| **context7** | Retrieves up-to-date library documentation (Grafana SDK, React, Go packages) |
+| **playwright** | Browser automation for E2E testing |
+| **feature-dev** | Guided feature development with architecture analysis |
 
-**Important**: Always use Context7 when you need documentation for:
-- `@grafana/ui` components
-- `@grafana/data` types and utilities
-- `@grafana/runtime` APIs
-- React patterns and hooks
-- Go Grafana Plugin SDK
-- Any other library dependencies in `package.json` or `go.mod`
+### Mandatory Quality Workflow
+
+**CRITICAL: After every code change (feature, bug fix, refactor), you MUST run the following quality gates before considering work done:**
+
+#### Step 1: LSP Diagnostics
+- Check `gopls-lsp` diagnostics for any Go files you modified in `pkg/`
+- Check `typescript-lsp` diagnostics for any TypeScript files you modified in `src/`
+- **Fix ALL critical, major, and medium severity issues** before proceeding
+
+#### Step 2: Code Review
+- Run the `code-review` agent (via Task tool with `subagent_type: "pr-review-toolkit:code-reviewer"`) on your changes
+- **Fix ALL critical, major, and medium severity issues** reported by the reviewer
+- Only low/info severity issues may be left as-is with justification
+
+#### Step 3: Code Simplification
+- Run the `code-simplifier` agent (via Task tool with `subagent_type: "pr-review-toolkit:code-simplifier"`) on modified code
+- Apply simplifications that improve clarity without changing behavior
+
+#### Step 4: Tests & Lint
+- Run `nvm use 22 && npm run test:ci` (frontend unit tests)
+- Run `go test ./pkg/...` (backend tests)
+- Run `nvm use 22 && npm run lint` (linting)
+- Run `nvm use 22 && npm run typecheck` (type checking)
+- **Fix any failures** - iterate until all pass
+
+#### Step 5: PR Review (before commit/PR)
+- Run the full `pr-review-toolkit:review-pr` skill for comprehensive analysis
+- Fix critical/major/medium issues from: code-reviewer, silent-failure-hunter, type-design-analyzer
+
+**Issue Severity Policy:**
+- **Critical**: MUST fix immediately - security vulnerabilities, data loss risks, crashes
+- **Major**: MUST fix before commit - logic errors, missing error handling, RBAC violations
+- **Medium**: MUST fix before PR - code smells, unnecessary complexity, missing validation
+- **Low/Info**: Fix if easy, otherwise document as tech debt
+
+### Context7 (Documentation Lookup)
+
+When working on this codebase, use the Context7 MCP server for up-to-date library documentation:
+
+- **Tools**: `resolve-library-id` then `query-docs`
+- **When to use**: Understanding Grafana UI components, implementing features with unfamiliar APIs, checking for API changes
+- **Required for**: `@grafana/ui`, `@grafana/data`, `@grafana/runtime`, React hooks, Go Grafana Plugin SDK, any dependency in `package.json` or `go.mod`
 
 ## Definition of Done
 
