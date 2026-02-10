@@ -111,6 +111,9 @@ func (c *Client) connectMCP() error {
 		Version: "1.0.0",
 	}, nil)
 
+	// Use custom HTTP client with configured headers (e.g., Authorization for built-in MCP)
+	httpClient := c.httpClientWithHeaders()
+
 	var transport mcpsdk.Transport
 	var err error
 
@@ -118,12 +121,12 @@ func (c *Client) connectMCP() error {
 	case "sse":
 		transport = &mcpsdk.SSEClientTransport{
 			Endpoint:   c.config.URL,
-			HTTPClient: http.DefaultClient,
+			HTTPClient: httpClient,
 		}
 	case "streamable-http", "http+streamable":
 		transport = &mcpsdk.StreamableClientTransport{
 			Endpoint:   c.config.URL,
-			HTTPClient: http.DefaultClient,
+			HTTPClient: httpClient,
 			MaxRetries: 3,
 		}
 	case "standard":
@@ -149,6 +152,35 @@ func (c *Client) connectMCP() error {
 
 	c.logger.Debug("Connected to MCP server", "type", c.config.Type, "url", c.config.URL)
 	return nil
+}
+
+// httpClientWithHeaders returns an HTTP client that injects the server's configured headers
+// into every request. This is used for servers that require static auth headers (e.g., the
+// built-in grafana-llm-app MCP server which needs a service account Bearer token).
+func (c *Client) httpClientWithHeaders() *http.Client {
+	if len(c.config.Headers) == 0 {
+		return http.DefaultClient
+	}
+	return &http.Client{
+		Transport: &configHeaderRoundTripper{
+			base:    http.DefaultTransport,
+			headers: c.config.Headers,
+		},
+	}
+}
+
+// configHeaderRoundTripper injects static headers from ServerConfig into every request.
+type configHeaderRoundTripper struct {
+	base    http.RoundTripper
+	headers map[string]string
+}
+
+func (t *configHeaderRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	req = req.Clone(req.Context())
+	for key, value := range t.headers {
+		req.Header.Set(key, value)
+	}
+	return t.base.RoundTrip(req)
 }
 
 // connectMCPWithOrgContext establishes a connection to an MCP server with a custom HTTP client that includes org headers.

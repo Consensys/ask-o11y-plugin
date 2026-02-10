@@ -1,16 +1,14 @@
-import { useState, useRef, useEffect, useMemo } from 'react';
-import { llm } from '@grafana/llm';
+import { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import { config } from '@grafana/runtime';
-import { ChatMessage, GrafanaPageRef } from '../types';
-import { useMCPManager } from './useMCPManager';
-import { useStreamManager } from './useStreamManager';
+import { ChatMessage, GrafanaPageRef, RenderedToolCall } from '../types';
 import { useSessionManager } from './useSessionManager';
 import { SYSTEM_PROMPT } from '../constants';
-import { ConversationMemoryService } from '../../../services/memory';
-import { ReliabilityService } from '../../../services/reliability';
 import { ValidationService } from '../../../services/validation';
 import { ChatSession } from '../../../core/models/ChatSession';
+import { parseGrafanaLinks } from '../utils/grafanaLinkParser';
+import { runAgent, ContentEvent, ToolCallStartEvent, ToolCallResultEvent } from '../../../services/agentClient';
 import type { AppPluginSettings } from '../../../types/plugin';
+import { MAX_TOTAL_TOKENS } from '../../../constants';
 
 function buildEffectiveSystemPrompt(
   mode: AppPluginSettings['systemPromptMode'] = 'default',
@@ -76,6 +74,9 @@ export function useChat(
   const bottomSpacerRef = useRef<HTMLDivElement>(null);
   const [isAutoScroll, setIsAutoScroll] = useState(true);
   const [retryCount, setRetryCount] = useState(0);
+  const [toolCalls, setToolCalls] = useState<Map<string, RenderedToolCall>>(new Map());
+
+  const abortControllerRef = useRef<AbortController | null>(null);
 
   const sessionTitleOverrideRef = useRef<string | undefined>(sessionTitleOverride);
   useEffect(() => {
@@ -83,24 +84,6 @@ export function useChat(
       sessionTitleOverrideRef.current = sessionTitleOverride;
     }
   }, [sessionTitleOverride]);
-
-  const {
-    toolCalls,
-    toolsLoading,
-    toolsError,
-    toolsData,
-    clearToolCalls,
-    handleToolCalls,
-    getRunningToolCallsCount,
-    formatToolsForOpenAI,
-  } = useMCPManager();
-
-  const { handleStreamingChatWithHistory } = useStreamManager(
-    setChatHistory,
-    handleToolCalls,
-    formatToolsForOpenAI,
-    pluginSettings
-  );
 
   const sessionManager = useSessionManager(
     orgId,
@@ -113,7 +96,6 @@ export function useChat(
 
   const hasLoadedFromUrlRef = useRef(false);
   useEffect(() => {
-    // Skip in investigation mode - session will be created on first save
     if (sessionIdFromUrl && !readOnly && !hasLoadedFromUrlRef.current && chatHistory.length === 0 && !initialMessage) {
       hasLoadedFromUrlRef.current = true;
       sessionManager.loadSessionFromUrl(sessionIdFromUrl).catch((error) => {
@@ -132,19 +114,29 @@ export function useChat(
 
   useEffect(() => {
     const SCROLL_THRESHOLD = 50;
-
     function handleScroll(): void {
       const atBottom = window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - SCROLL_THRESHOLD;
       setIsAutoScroll(atBottom);
     }
-
     window.addEventListener('scroll', handleScroll, { passive: true });
     return () => window.removeEventListener('scroll', handleScroll);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+    };
   }, []);
 
   const appendErrorMessage = (content: string): void => {
     setChatHistory((prev) => [...prev, { role: 'assistant', content }]);
   };
+
+  const getRunningToolCallsCount = useCallback((): number => {
+    return Array.from(toolCalls.values()).filter((tc) => tc.running).length;
+  }, [toolCalls]);
 
   const sendMessage = async (): Promise<void> => {
     if (!currentInput.trim() || isGenerating) {
@@ -163,18 +155,10 @@ export function useChat(
       return;
     }
 
-    if (!ReliabilityService.checkCircuitBreaker('llm-stream')) {
-      appendErrorMessage('The service is temporarily unavailable due to repeated errors. Please try again in a moment.');
-      return;
-    }
-
-    const userMessage: ChatMessage = {
-      role: 'user',
-      content: validatedInput,
-    };
-
+    const userMessage: ChatMessage = { role: 'user', content: validatedInput };
     const newChatHistory = [...chatHistory, userMessage];
     setChatHistory(newChatHistory);
+
     if (!readOnly) {
       sessionManager
         .saveImmediately(newChatHistory, sessionTitleOverrideRef.current)
@@ -188,84 +172,105 @@ export function useChat(
         });
       sessionTitleOverrideRef.current = undefined;
     }
+
     setCurrentInput('');
     setIsGenerating(true);
-    clearToolCalls();
+    setToolCalls(new Map());
 
-    const assistantMessage: ChatMessage = {
-      role: 'assistant',
-      content: '',
-      toolCalls: [],
-    };
+    setChatHistory((prev) => [...prev, { role: 'assistant', content: '', toolCalls: [] }]);
+    const messagesForBackend = newChatHistory.map((m) => ({ role: m.role, content: m.content }));
 
-    setChatHistory((prev) => [...prev, assistantMessage]);
-
-    const messages: llm.Message[] = ConversationMemoryService.buildContextWindow(
-      effectiveSystemPrompt,
-      newChatHistory,
-      sessionManager.currentSummary,
-      15
-    );
-
-    ReliabilityService.saveRecoveryState({
-      sessionId: sessionManager.currentSessionId,
-      lastMessageIndex: newChatHistory.length,
-      wasGenerating: true,
-    });
+    const abortController = new AbortController();
+    abortControllerRef.current = abortController;
+    let hadError = false;
 
     try {
-      const tools = toolsData?.tools || [];
-      await handleStreamingChatWithHistory(messages, tools);
-
-      ReliabilityService.recordCircuitBreakerSuccess('llm-stream');
-      setRetryCount(0);
-      ReliabilityService.clearRecoveryState();
-    } catch (error) {
-      console.error('[useChat] Error in chat completion:', error);
-      ReliabilityService.recordCircuitBreakerFailure('llm-stream');
-      const errorMessage = ReliabilityService.getUserFriendlyErrorMessage(error);
-
-      setChatHistory((prev) => {
-        const updated = prev.map((msg, idx) =>
-          idx === prev.length - 1 && msg.role === 'assistant' ? { ...msg, content: errorMessage } : msg
-        );
-
-        if (!readOnly) {
-          setTimeout(() => {
-            sessionManager
-              .saveImmediately(updated)
-              .then((createdSessionId) => {
-                if (createdSessionId) {
-                  onSessionIdChange(createdSessionId);
-                }
-              })
-              .catch((err) => {
-                console.error('[useChat] Failed to save session after error:', err);
+      await runAgent(
+        {
+          messages: messagesForBackend,
+          systemPrompt: effectiveSystemPrompt,
+          summary: sessionManager.currentSummary || '',
+          maxTotalTokens: pluginSettings.maxTotalTokens || MAX_TOTAL_TOKENS,
+          recentMessageCount: 15,
+          orgName: config.bootData.user.orgName || '',
+        },
+        {
+          onContent: (event: ContentEvent) => {
+            if (abortController.signal.aborted) {
+              return;
+            }
+            const pageRefs = parseGrafanaLinks(event.content);
+            setChatHistory((prev) =>
+              prev.map((msg, idx) =>
+                idx === prev.length - 1 && msg.role === 'assistant'
+                  ? { ...msg, content: event.content, pageRefs }
+                  : msg
+              )
+            );
+          },
+          onToolCallStart: (event: ToolCallStartEvent) => {
+            if (abortController.signal.aborted) {
+              return;
+            }
+            setToolCalls((prev) => {
+              const next = new Map(prev);
+              next.set(event.id, { name: event.name, arguments: event.arguments, running: true });
+              return next;
+            });
+          },
+          onToolCallResult: (event: ToolCallResultEvent) => {
+            if (abortController.signal.aborted) {
+              return;
+            }
+            setToolCalls((prev) => {
+              const next = new Map(prev);
+              const existing = next.get(event.id);
+              next.set(event.id, {
+                name: event.name,
+                arguments: existing?.arguments || '',
+                running: false,
+                error: event.isError ? event.content : undefined,
+                response: event.isError ? undefined : { content: [{ type: 'text', text: event.content }] },
               });
-          }, 0);
-        }
-
-        return updated;
-      });
-
+              return next;
+            });
+          },
+          onDone: () => {},
+          onError: (message: string) => {
+            hadError = true;
+            console.error('[useChat] Agent error:', message);
+            setChatHistory((prev) =>
+              prev.map((msg, idx) =>
+                idx === prev.length - 1 && msg.role === 'assistant' ? { ...msg, content: message } : msg
+              )
+            );
+          },
+        },
+        abortController.signal
+      );
+      if (hadError) {
+        setRetryCount((prev) => prev + 1);
+      } else {
+        setRetryCount(0);
+      }
+    } catch (error) {
+      if (error instanceof DOMException && error.name === 'AbortError') {
+        return;
+      }
+      console.error('[useChat] Error in agent run:', error);
+      const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
+      setChatHistory((prev) =>
+        prev.map((msg, idx) =>
+          idx === prev.length - 1 && msg.role === 'assistant' ? { ...msg, content: errorMessage } : msg
+        )
+      );
       setRetryCount((prev) => prev + 1);
     } finally {
       setIsGenerating(false);
+      if (abortControllerRef.current === abortController) {
+        abortControllerRef.current = null;
+      }
     }
-  };
-
-  const handleKeyPress = (e: React.KeyboardEvent): void => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      sendMessage();
-    }
-  };
-
-  const clearChat = (): void => {
-    setChatHistory([]);
-    setCurrentInput('');
-    clearToolCalls();
-    sessionManager.createNewSession();
   };
 
   useEffect(() => {
@@ -296,18 +301,25 @@ export function useChat(
     prevIsGeneratingRef.current = isGenerating;
   }, [isGenerating, chatHistory, sessionManager, readOnly, onSessionIdChange]);
 
-  useEffect(() => {
-    const recovery = ReliabilityService.loadRecoveryState();
-    if (recovery?.wasGenerating) {
-      ReliabilityService.clearRecoveryState();
+  const handleKeyPress = (e: React.KeyboardEvent): void => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      sendMessage();
     }
-  }, []);
+  };
+
+  const clearChat = (): void => {
+    setChatHistory([]);
+    setCurrentInput('');
+    setToolCalls(new Map());
+    sessionManager.createNewSession();
+  };
 
   const autoSendStateRef = useRef<'idle' | 'creating-session' | 'ready-to-send' | 'sent'>('idle');
   const [autoSendTrigger, setAutoSendTrigger] = useState(0);
 
   useEffect(() => {
-    if (!initialMessage || readOnly || toolsLoading) {
+    if (!initialMessage || readOnly) {
       return;
     }
 
@@ -315,7 +327,6 @@ export function useChat(
 
     if (state === 'idle') {
       autoSendStateRef.current = 'creating-session';
-      // Skip in investigation mode - would clear URL
       if (!sessionIdFromUrl) {
         sessionManager.createNewSession();
       }
@@ -334,7 +345,7 @@ export function useChat(
       sendMessage();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [initialMessage, toolsLoading, readOnly, chatHistory.length, isGenerating, currentInput, autoSendTrigger]);
+  }, [initialMessage, readOnly, chatHistory.length, isGenerating, currentInput, autoSendTrigger]);
 
   const detectedPageRefs = useMemo((): Array<GrafanaPageRef & { messageIndex: number }> => {
     for (let i = chatHistory.length - 1; i >= 0; i--) {
@@ -352,9 +363,8 @@ export function useChat(
     isGenerating,
     chatContainerRef,
     toolCalls,
-    toolsLoading,
-    toolsError,
-    toolsData,
+    toolsLoading: false,
+    toolsError: undefined as Error | undefined,
     setCurrentInput,
     sendMessage,
     handleKeyPress,
@@ -367,4 +377,4 @@ export function useChat(
     bottomSpacerRef: bottomSpacerRef as React.RefObject<HTMLDivElement>,
     detectedPageRefs,
   };
-};
+}
