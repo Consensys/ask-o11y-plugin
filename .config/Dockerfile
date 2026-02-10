@@ -28,11 +28,6 @@ WORKDIR $GF_PATHS_HOME
 
 USER root
 
-# Ensure CA certificates are up-to-date (required for plugin marketplace TLS)
-RUN if grep -i -q alpine /etc/issue; then \
-    apk add --no-cache ca-certificates && update-ca-certificates; \
-    fi
-
 # Installing supervisor and inotify-tools
 RUN if [ "${development}" = "true" ]; then \
     if grep -i -q alpine /etc/issue; then \
