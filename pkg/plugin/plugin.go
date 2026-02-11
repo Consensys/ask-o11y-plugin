@@ -351,8 +351,14 @@ func (p *Plugin) handleMCPCallTool(w http.ResponseWriter, r *http.Request) {
 
 	tool, found := p.mcpProxy.FindToolByName(req.Name)
 	if !found {
-		http.Error(w, fmt.Sprintf("Unknown tool: %s", req.Name), http.StatusNotFound)
-		return
+		// Tool cache may be empty if ListTools hasn't been called yet; populate it.
+		if _, err := p.mcpProxy.ListTools(); err == nil {
+			tool, found = p.mcpProxy.FindToolByName(req.Name)
+		}
+		if !found {
+			http.Error(w, fmt.Sprintf("Unknown tool: %s", req.Name), http.StatusNotFound)
+			return
+		}
 	}
 	if !rbac.CanAccessTool(userRole, tool) {
 		p.logger.Warn("Access denied to tool", "tool", req.Name, "role", userRole)
@@ -423,6 +429,11 @@ func (p *Plugin) handleAgentRun(w http.ResponseWriter, r *http.Request) {
 	}
 
 	cfg := backend.GrafanaConfigFromContext(r.Context())
+	if cfg == nil {
+		p.logger.Error("Grafana configuration not available in request context")
+		http.Error(w, "Grafana configuration not available", http.StatusInternalServerError)
+		return
+	}
 	grafanaURL, err := cfg.AppURL()
 	if err != nil {
 		p.logger.Error("Failed to get Grafana app URL from context", "error", err)
