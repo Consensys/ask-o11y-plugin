@@ -70,6 +70,16 @@ type ContentBlock struct {
 
 func boolPtr(b bool) *bool { return &b }
 
+// boolPtrTrueOnly returns *true when b is true and nil when b is false.
+// Use when converting SDK bool fields (e.g. ReadOnlyHint, IdempotentHint) so that
+// "unspecified" (nil) is preserved for RBAC instead of *bool(false).
+func boolPtrTrueOnly(b bool) *bool {
+	if !b {
+		return nil
+	}
+	return boolPtr(true)
+}
+
 // ServerConfig represents configuration for an MCP server
 type ServerConfig struct {
 	ID      string            `json:"id"`
