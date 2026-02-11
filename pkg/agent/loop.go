@@ -153,6 +153,14 @@ func (a *AgentLoop) Run(ctx context.Context, req LoopRequest, eventCh chan<- SSE
 }
 
 func (a *AgentLoop) executeTool(tc ToolCall, req LoopRequest) (content string, isError bool) {
+	tool, found := a.mcpProxy.FindToolByName(tc.Function.Name)
+	if !found {
+		return fmt.Sprintf("Unknown tool: %s", tc.Function.Name), true
+	}
+	if !rbac.CanAccessTool(req.UserRole, tool) {
+		return fmt.Sprintf("Access denied: %s role cannot access tool %s", req.UserRole, tc.Function.Name), true
+	}
+
 	var args map[string]interface{}
 	if err := json.Unmarshal([]byte(tc.Function.Arguments), &args); err != nil {
 		return fmt.Sprintf("Invalid tool arguments: %v", err), true

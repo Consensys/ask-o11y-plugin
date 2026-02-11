@@ -326,7 +326,7 @@ pkg/
 │   ├── ratelimit.go    # Rate limiting (50 shares/hour/user)
 │   └── config.go       # Plugin configuration
 ├── rbac/               # Role-based access control
-│   └── rbac.go         # isReadOnlyTool(), filterToolsByRole(), canAccessTool()
+│   └── rbac.go         # Annotation-based RBAC using MCP ToolAnnotations
 └── mcp/                # MCP client & proxy
     ├── client.go       # MCP client implementation
     │                   # - customRoundTripper: Multi-tenant header injection
@@ -375,15 +375,21 @@ pkg/
 ### RBAC System
 
 **Role Hierarchy:**
-- Admin/Editor: Full access (56 tools: read + write)
-- Viewer: Read-only access (45 tools: get*, list*, query*, search*, find*, generate*)
+- Admin/Editor: Full access to all tools
+- Viewer: Read-only access (tools with `readOnlyHint: true` annotation)
+
+**Annotation-Based Enforcement:**
+RBAC uses MCP protocol `ToolAnnotations` (specifically `ReadOnlyHint`) advertised by MCP servers. No hardcoded tool lists — the server is the source of truth. Tools without annotations are treated as not read-only (denied to Viewers).
 
 **Enforcement Points:**
-1. Tool listing (filtered by role)
-2. Tool execution (permission check before execution)
+1. Tool listing — `rbac.FilterToolsByRole()` filters by annotations
+2. Tool execution — `rbac.CanAccessTool()` double-checks via `proxy.FindToolByName()` annotation lookup
+3. Agent loop — execution-time RBAC check in `executeTool()` before calling MCP server
 
 **Implementation:**
-- `pkg/rbac/rbac.go`: `IsReadOnlyTool()`, `FilterToolsByRole()`, `CanAccessTool()`
+- `pkg/rbac/rbac.go`: `IsReadOnlyTool()`, `FilterToolsByRole()`, `CanAccessTool()` — all annotation-based
+- `pkg/mcp/types.go`: `ToolAnnotations` struct with `ReadOnlyHint`, `DestructiveHint`, etc.
+- `pkg/mcp/proxy.go`: `FindToolByName()` for execution-time annotation lookup
 - Double-check pattern (list AND execute)
 
 ### Agentic Backend Loop
@@ -502,17 +508,17 @@ Ask O11y supports three MCP modes for flexible tool integration:
 
 ### Adding a New MCP Tool
 
-1. **Backend RBAC Configuration:**
-   - If read-only: Add tool name to `IsReadOnlyTool()` in `pkg/rbac/rbac.go`
-   - If write operation: No changes needed (auto-restricted to Admin/Editor)
-   - Viewers automatically get: `get*`, `list*`, `query*`, `search*`, `find*`, `generate*`
+1. **RBAC — No plugin changes needed:**
+   - RBAC is driven by MCP `ToolAnnotations` from the server
+   - The MCP server must set `readOnlyHint: true` on read-only tools
+   - Tools without annotations are restricted to Admin/Editor only
 
 2. **Frontend Tool Implementation:**
    - Follow existing patterns in `src/tools/` directory
    - Include schema validation, error handling, TypeScript types
 
 3. **Testing:**
-   - Verify RBAC: Viewer cannot access write operations
+   - Verify RBAC: Viewer cannot access tools without `readOnlyHint: true`
    - Test with different org contexts
    - Validate error handling
 

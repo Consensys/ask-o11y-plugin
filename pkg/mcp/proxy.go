@@ -246,6 +246,24 @@ func (p *Proxy) errorResponse(id interface{}, code int, message string, data int
 	return json.Marshal(resp)
 }
 
+// FindToolByName looks up a tool by name across all cached client tool lists.
+// Lock ordering: proxy.mu -> client.mu (must never be reversed).
+func (p *Proxy) FindToolByName(name string) (Tool, bool) {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	for _, client := range p.clients {
+		client.mu.RLock()
+		for _, t := range client.tools {
+			if t.Name == name {
+				client.mu.RUnlock()
+				return t, true
+			}
+		}
+		client.mu.RUnlock()
+	}
+	return Tool{}, false
+}
+
 // GetServerCount returns the number of configured servers
 func (p *Proxy) GetServerCount() int {
 	p.mu.RLock()
