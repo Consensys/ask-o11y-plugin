@@ -199,13 +199,15 @@ export function useChat(
             if (abortController.signal.aborted) {
               return;
             }
-            const pageRefs = parseGrafanaLinks(event.content);
             setChatHistory((prev) =>
-              prev.map((msg, idx) =>
-                idx === prev.length - 1 && msg.role === 'assistant'
-                  ? { ...msg, content: event.content, pageRefs }
-                  : msg
-              )
+              prev.map((msg, idx) => {
+                if (idx !== prev.length - 1 || msg.role !== 'assistant') {
+                  return msg;
+                }
+                const accumulated = msg.content + event.content;
+                const pageRefs = parseGrafanaLinks(accumulated);
+                return { ...msg, content: accumulated, pageRefs };
+              })
             );
           },
           onToolCallStart: (event: ToolCallStartEvent) => {

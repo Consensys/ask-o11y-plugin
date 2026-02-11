@@ -13,6 +13,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/grafana/grafana-plugin-sdk-go/backend"
@@ -90,15 +91,16 @@ type PluginSettings struct {
 
 type Plugin struct {
 	backend.CallResourceHandler
-	logger         log.Logger
-	mcpProxy       *mcp.Proxy
-	agentLoop      *agent.AgentLoop
-	shareStore     ShareStoreInterface
-	redisClient    *redis.Client
-	usingRedis     bool
-	useBuiltInMCP  bool
-	ctx            context.Context
-	cancel         context.CancelFunc
+	logger          log.Logger
+	mcpProxy        *mcp.Proxy
+	agentLoop       *agent.AgentLoop
+	shareStore      ShareStoreInterface
+	redisClient     *redis.Client
+	usingRedis      bool
+	useBuiltInMCP   bool
+	builtInMCPOnce  sync.Once
+	ctx             context.Context
+	cancel          context.CancelFunc
 }
 
 func NewPlugin(ctx context.Context, settings backend.AppInstanceSettings) (instancemgmt.Instance, error) {
@@ -351,8 +353,14 @@ func (p *Plugin) handleMCPCallTool(w http.ResponseWriter, r *http.Request) {
 
 	tool, found := p.mcpProxy.FindToolByName(req.Name)
 	if !found {
-		http.Error(w, fmt.Sprintf("Unknown tool: %s", req.Name), http.StatusNotFound)
-		return
+		// Tool cache may be empty if ListTools hasn't been called yet; populate it.
+		if _, err := p.mcpProxy.ListTools(); err == nil {
+			tool, found = p.mcpProxy.FindToolByName(req.Name)
+		}
+		if !found {
+			http.Error(w, fmt.Sprintf("Unknown tool: %s", req.Name), http.StatusNotFound)
+			return
+		}
 	}
 	if !rbac.CanAccessTool(userRole, tool) {
 		p.logger.Warn("Access denied to tool", "tool", req.Name, "role", userRole)
@@ -423,6 +431,11 @@ func (p *Plugin) handleAgentRun(w http.ResponseWriter, r *http.Request) {
 	}
 
 	cfg := backend.GrafanaConfigFromContext(r.Context())
+	if cfg == nil {
+		p.logger.Error("Grafana configuration not available in request context")
+		http.Error(w, "Grafana configuration not available", http.StatusInternalServerError)
+		return
+	}
 	grafanaURL, err := cfg.AppURL()
 	if err != nil {
 		p.logger.Error("Failed to get Grafana app URL from context", "error", err)
@@ -438,15 +451,17 @@ func (p *Plugin) handleAgentRun(w http.ResponseWriter, r *http.Request) {
 
 	if p.useBuiltInMCP {
 		builtInURL := strings.TrimRight(grafanaURL, "/") + "/api/plugins/grafana-llm-app/resources/mcp/grafana"
-		p.mcpProxy.EnsureServer(mcp.ServerConfig{
-			ID:      "mcp-grafana",
-			Name:    "Grafana Built-in MCP",
-			URL:     builtInURL,
-			Type:    "streamable-http",
-			Enabled: true,
-			Headers: map[string]string{
-				"Authorization": "Bearer " + saToken,
-			},
+		p.builtInMCPOnce.Do(func() {
+			p.mcpProxy.EnsureServer(mcp.ServerConfig{
+				ID:      "mcp-grafana",
+				Name:    "Grafana Built-in MCP",
+				URL:     builtInURL,
+				Type:    "streamable-http",
+				Enabled: true,
+				Headers: map[string]string{
+					"Authorization": "Bearer " + saToken,
+				},
+			})
 		})
 	}
 

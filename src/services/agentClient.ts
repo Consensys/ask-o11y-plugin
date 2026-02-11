@@ -76,6 +76,7 @@ export async function runAgent(
   const reader = resp.body.getReader();
   const decoder = new TextDecoder();
   let buffer = '';
+  let receivedTerminalEvent = false;
 
   try {
     while (true) {
@@ -102,11 +103,18 @@ export async function runAgent(
 
         try {
           const event: SSEEvent = JSON.parse(jsonStr);
+          if (event.type === 'done' || event.type === 'error') {
+            receivedTerminalEvent = true;
+          }
           dispatchEvent(event, callbacks);
         } catch {
           console.warn('[agentClient] Failed to parse SSE event:', jsonStr);
         }
       }
+    }
+
+    if (!receivedTerminalEvent && !abortSignal?.aborted) {
+      callbacks.onError('Agent stream ended unexpectedly without a completion event');
     }
   } catch (err) {
     if (err instanceof DOMException && err.name === 'AbortError') {
