@@ -13,7 +13,6 @@ import (
 	"os"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/grafana/grafana-plugin-sdk-go/backend"
@@ -98,7 +97,6 @@ type Plugin struct {
 	redisClient     *redis.Client
 	usingRedis      bool
 	useBuiltInMCP   bool
-	builtInMCPOnce  sync.Once
 	ctx             context.Context
 	cancel          context.CancelFunc
 }
@@ -451,17 +449,15 @@ func (p *Plugin) handleAgentRun(w http.ResponseWriter, r *http.Request) {
 
 	if p.useBuiltInMCP {
 		builtInURL := strings.TrimRight(grafanaURL, "/") + "/api/plugins/grafana-llm-app/resources/mcp/grafana"
-		p.builtInMCPOnce.Do(func() {
-			p.mcpProxy.EnsureServer(mcp.ServerConfig{
-				ID:      "mcp-grafana",
-				Name:    "Grafana Built-in MCP",
-				URL:     builtInURL,
-				Type:    "streamable-http",
-				Enabled: true,
-				Headers: map[string]string{
-					"Authorization": "Bearer " + saToken,
-				},
-			})
+		p.mcpProxy.EnsureServer(mcp.ServerConfig{
+			ID:      "mcp-grafana",
+			Name:    "Grafana Built-in MCP",
+			URL:     builtInURL,
+			Type:    "streamable-http",
+			Enabled: true,
+			Headers: map[string]string{
+				"Authorization": "Bearer " + saToken,
+			},
 		})
 	}
 
