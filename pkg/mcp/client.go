@@ -372,9 +372,9 @@ func (c *Client) listMCPTools() ([]Tool, error) {
 		var annotations *ToolAnnotations
 		if sdkTool.Annotations != nil {
 			annotations = &ToolAnnotations{
-				ReadOnlyHint:    sdkTool.Annotations.ReadOnlyHint,
+				ReadOnlyHint:    boolPtr(sdkTool.Annotations.ReadOnlyHint),
 				DestructiveHint: sdkTool.Annotations.DestructiveHint,
-				IdempotentHint:  sdkTool.Annotations.IdempotentHint,
+				IdempotentHint:  boolPtr(sdkTool.Annotations.IdempotentHint),
 				OpenWorldHint:   sdkTool.Annotations.OpenWorldHint,
 			}
 		}

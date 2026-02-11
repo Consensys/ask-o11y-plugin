@@ -28,10 +28,12 @@ type MCPError struct {
 }
 
 // ToolAnnotations contains MCP protocol tool annotation hints.
+// All fields are pointers so that omitempty correctly distinguishes
+// "explicitly false" from "not set" during JSON serialization.
 type ToolAnnotations struct {
-	ReadOnlyHint    bool  `json:"readOnlyHint,omitempty"`
+	ReadOnlyHint    *bool `json:"readOnlyHint,omitempty"`
 	DestructiveHint *bool `json:"destructiveHint,omitempty"`
-	IdempotentHint  bool  `json:"idempotentHint,omitempty"`
+	IdempotentHint  *bool `json:"idempotentHint,omitempty"`
 	OpenWorldHint   *bool `json:"openWorldHint,omitempty"`
 }
 
@@ -65,6 +67,8 @@ type ContentBlock struct {
 	Type string `json:"type"`
 	Text string `json:"text,omitempty"`
 }
+
+func boolPtr(b bool) *bool { return &b }
 
 // ServerConfig represents configuration for an MCP server
 type ServerConfig struct {

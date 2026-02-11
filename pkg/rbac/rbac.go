@@ -4,10 +4,10 @@ import "consensys-asko11y-app/pkg/mcp"
 
 // IsReadOnlyTool returns true if the tool's annotations mark it as read-only.
 func IsReadOnlyTool(tool mcp.Tool) bool {
-	if tool.Annotations == nil {
+	if tool.Annotations == nil || tool.Annotations.ReadOnlyHint == nil {
 		return false
 	}
-	return tool.Annotations.ReadOnlyHint
+	return *tool.Annotations.ReadOnlyHint
 }
 
 // CanAccessTool checks if a role can access a tool based on its annotations.

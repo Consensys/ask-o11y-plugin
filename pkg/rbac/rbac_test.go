@@ -5,17 +5,19 @@ import (
 	"testing"
 )
 
+func boolPtr(b bool) *bool { return &b }
+
 func readOnlyTool(name string) mcp.Tool {
 	return mcp.Tool{
 		Name:        name,
-		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true},
+		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: boolPtr(true)},
 	}
 }
 
 func writeTool(name string) mcp.Tool {
 	return mcp.Tool{
 		Name:        name,
-		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: false},
+		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: boolPtr(false)},
 	}
 }
 

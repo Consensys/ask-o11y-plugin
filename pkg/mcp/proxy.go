@@ -247,6 +247,7 @@ func (p *Proxy) errorResponse(id interface{}, code int, message string, data int
 }
 
 // FindToolByName looks up a tool by name across all cached client tool lists.
+// Lock ordering: proxy.mu -> client.mu (must never be reversed).
 func (p *Proxy) FindToolByName(name string) (Tool, bool) {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
