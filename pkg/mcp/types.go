@@ -27,11 +27,20 @@ type MCPError struct {
 	Data    interface{} `json:"data,omitempty"`
 }
 
+// ToolAnnotations contains MCP protocol tool annotation hints.
+type ToolAnnotations struct {
+	ReadOnlyHint    bool  `json:"readOnlyHint,omitempty"`
+	DestructiveHint *bool `json:"destructiveHint,omitempty"`
+	IdempotentHint  bool  `json:"idempotentHint,omitempty"`
+	OpenWorldHint   *bool `json:"openWorldHint,omitempty"`
+}
+
 // Tool represents an MCP tool definition
 type Tool struct {
 	Name        string                 `json:"name"`
 	Description string                 `json:"description,omitempty"`
 	InputSchema map[string]interface{} `json:"inputSchema"`
+	Annotations *ToolAnnotations       `json:"annotations,omitempty"`
 }
 
 // ListToolsResult represents the result of listing tools

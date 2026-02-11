@@ -369,10 +369,21 @@ func (c *Client) listMCPTools() ([]Tool, error) {
 		// LiteLLM expects at least a "properties" field as an object, not null
 		inputSchema = normalizeJSONSchema(inputSchema)
 
+		var annotations *ToolAnnotations
+		if sdkTool.Annotations != nil {
+			annotations = &ToolAnnotations{
+				ReadOnlyHint:    sdkTool.Annotations.ReadOnlyHint,
+				DestructiveHint: sdkTool.Annotations.DestructiveHint,
+				IdempotentHint:  sdkTool.Annotations.IdempotentHint,
+				OpenWorldHint:   sdkTool.Annotations.OpenWorldHint,
+			}
+		}
+
 		tools[i] = Tool{
 			Name:        sdkTool.Name,
 			Description: sdkTool.Description,
 			InputSchema: inputSchema,
+			Annotations: annotations,
 		}
 	}
 

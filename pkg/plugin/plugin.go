@@ -349,7 +349,12 @@ func (p *Plugin) handleMCPCallTool(w http.ResponseWriter, r *http.Request) {
 
 	p.logger.Info("MCP call tool request", "tool", req.Name, "role", userRole)
 
-	if !rbac.CanAccessTool(userRole, req.Name) {
+	tool, found := p.mcpProxy.FindToolByName(req.Name)
+	if !found {
+		http.Error(w, fmt.Sprintf("Unknown tool: %s", req.Name), http.StatusNotFound)
+		return
+	}
+	if !rbac.CanAccessTool(userRole, tool) {
 		p.logger.Warn("Access denied to tool", "tool", req.Name, "role", userRole)
 		http.Error(w, fmt.Sprintf("Access denied: %s role cannot access tool %s", userRole, req.Name), http.StatusForbidden)
 		return
