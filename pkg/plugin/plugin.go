@@ -13,6 +13,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/grafana/grafana-plugin-sdk-go/backend"
@@ -90,15 +91,16 @@ type PluginSettings struct {
 
 type Plugin struct {
 	backend.CallResourceHandler
-	logger         log.Logger
-	mcpProxy       *mcp.Proxy
-	agentLoop      *agent.AgentLoop
-	shareStore     ShareStoreInterface
-	redisClient    *redis.Client
-	usingRedis     bool
-	useBuiltInMCP  bool
-	ctx            context.Context
-	cancel         context.CancelFunc
+	logger          log.Logger
+	mcpProxy        *mcp.Proxy
+	agentLoop       *agent.AgentLoop
+	shareStore      ShareStoreInterface
+	redisClient     *redis.Client
+	usingRedis      bool
+	useBuiltInMCP   bool
+	builtInMCPOnce  sync.Once
+	ctx             context.Context
+	cancel          context.CancelFunc
 }
 
 func NewPlugin(ctx context.Context, settings backend.AppInstanceSettings) (instancemgmt.Instance, error) {
@@ -449,15 +451,17 @@ func (p *Plugin) handleAgentRun(w http.ResponseWriter, r *http.Request) {
 
 	if p.useBuiltInMCP {
 		builtInURL := strings.TrimRight(grafanaURL, "/") + "/api/plugins/grafana-llm-app/resources/mcp/grafana"
-		p.mcpProxy.EnsureServer(mcp.ServerConfig{
-			ID:      "mcp-grafana",
-			Name:    "Grafana Built-in MCP",
-			URL:     builtInURL,
-			Type:    "streamable-http",
-			Enabled: true,
-			Headers: map[string]string{
-				"Authorization": "Bearer " + saToken,
-			},
+		p.builtInMCPOnce.Do(func() {
+			p.mcpProxy.EnsureServer(mcp.ServerConfig{
+				ID:      "mcp-grafana",
+				Name:    "Grafana Built-in MCP",
+				URL:     builtInURL,
+				Type:    "streamable-http",
+				Enabled: true,
+				Headers: map[string]string{
+					"Authorization": "Bearer " + saToken,
+				},
+			})
 		})
 	}
 
