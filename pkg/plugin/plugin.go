@@ -777,17 +777,32 @@ func (p *Plugin) handleAgentRunEvents(w http.ResponseWriter, r *http.Request, ru
 		return
 	}
 
-	for event := range subscriberCh {
-		data, err := agent.MarshalSSE(event)
-		if err != nil {
-			p.logger.Error("Failed to marshal SSE event", "error", err, "runId", runID, "eventType", event.Type)
-			continue
-		}
-		if _, err := w.Write(data); err != nil {
-			p.logger.Debug("Client disconnected during SSE reconnect stream", "error", err)
+	// SSE keepalive: send comment lines to prevent proxy idle timeouts.
+	// Also select on r.Context().Done() since httpadapter's Write never
+	// returns an error, so we can't detect client disconnection via writes.
+	keepalive := time.NewTicker(15 * time.Second)
+	defer keepalive.Stop()
+
+	for {
+		select {
+		case event, ok := <-subscriberCh:
+			if !ok {
+				return
+			}
+			data, err := agent.MarshalSSE(event)
+			if err != nil {
+				p.logger.Error("Failed to marshal SSE event", "error", err, "runId", runID, "eventType", event.Type)
+				continue
+			}
+			w.Write(data)
+			flusher.Flush()
+		case <-keepalive.C:
+			w.Write([]byte(": keepalive\n\n"))
+			flusher.Flush()
+		case <-r.Context().Done():
+			p.logger.Debug("Client disconnected during SSE reconnect stream", "runId", runID)
 			return
 		}
-		flusher.Flush()
 	}
 }
 
