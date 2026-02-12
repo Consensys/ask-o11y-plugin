@@ -741,25 +741,17 @@ func (p *Plugin) handleCancelRun(w http.ResponseWriter, r *http.Request, runID s
 }
 
 func (p *Plugin) handleAgentRunEvents(w http.ResponseWriter, r *http.Request, runID string) {
-	run, ok := p.getAuthorizedRun(w, r, runID)
-	if !ok {
+	if _, ok := p.getAuthorizedRun(w, r, runID); !ok {
 		return
 	}
 
-	broadcaster := p.runStore.GetBroadcaster(runID)
-	var subscriberCh <-chan agent.SSEEvent
-	var unsub func()
-	if broadcaster != nil && run.Status == RunStatusRunning {
-		subscriberCh, unsub = broadcaster.Subscribe()
-		defer unsub()
-	}
-
-	// Re-fetch after subscribing so no events are lost between the
-	// auth-check GetRun and the Subscribe call above.
-	run, err := p.runStore.GetRun(runID)
+	run, subscriberCh, unsub, err := p.runStore.SubscribeAndSnapshot(runID)
 	if err != nil {
 		http.Error(w, "Run not found", http.StatusNotFound)
 		return
+	}
+	if unsub != nil {
+		defer unsub()
 	}
 
 	flusher, ok := initSSEWriter(w)

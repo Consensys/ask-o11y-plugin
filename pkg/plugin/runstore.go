@@ -35,6 +35,7 @@ type RunStoreInterface interface {
 	FinishRun(runID string, status RunStatus, errMsg string)
 	GetRun(runID string) (*AgentRun, error)
 	GetBroadcaster(runID string) *RunBroadcaster
+	SubscribeAndSnapshot(runID string) (*AgentRun, <-chan agent.SSEEvent, func(), error)
 	CleanupOld()
 }
 
@@ -200,6 +201,31 @@ func (s *RunStore) GetBroadcaster(runID string) *RunBroadcaster {
 	defer s.mu.RUnlock()
 
 	return s.broadcasters[runID]
+}
+
+// SubscribeAndSnapshot atomically subscribes to live events and returns a
+// snapshot of already-persisted events.  This prevents the duplicate-event
+// window that exists when Subscribe and GetRun are called separately.
+func (s *RunStore) SubscribeAndSnapshot(runID string) (*AgentRun, <-chan agent.SSEEvent, func(), error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	run, exists := s.runs[runID]
+	if !exists {
+		return nil, nil, nil, fmt.Errorf("run not found")
+	}
+
+	copied := *run
+	copied.Events = make([]agent.SSEEvent, len(run.Events))
+	copy(copied.Events, run.Events)
+
+	b := s.broadcasters[runID]
+	if b == nil || run.Status != RunStatusRunning {
+		return &copied, nil, nil, nil
+	}
+
+	ch, unsub := b.Subscribe()
+	return &copied, ch, unsub, nil
 }
 
 func (s *RunStore) CleanupOld() {

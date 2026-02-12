@@ -180,6 +180,35 @@ func (s *RedisRunStore) GetBroadcaster(runID string) *RunBroadcaster {
 	return s.broadcasters[runID]
 }
 
+func (s *RedisRunStore) SubscribeAndSnapshot(runID string) (*AgentRun, <-chan agent.SSEEvent, func(), error) {
+	s.mu.RLock()
+	b := s.broadcasters[runID]
+	s.mu.RUnlock()
+
+	var ch <-chan agent.SSEEvent
+	var unsub func()
+	if b != nil {
+		ch, unsub = b.Subscribe()
+	}
+
+	run, err := s.GetRun(runID)
+	if err != nil {
+		if unsub != nil {
+			unsub()
+		}
+		return nil, nil, nil, err
+	}
+
+	if run.Status != RunStatusRunning {
+		if unsub != nil {
+			unsub()
+		}
+		return run, nil, nil, nil
+	}
+
+	return run, ch, unsub, nil
+}
+
 func (s *RedisRunStore) CleanupOld() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
