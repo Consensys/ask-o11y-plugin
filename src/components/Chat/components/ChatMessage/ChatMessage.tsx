@@ -112,7 +112,7 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({ message, isGenerating 
           </div>
         )}
 
-        {!showThinking && contentSections.length > 0 && (
+        {!showThinking && !showReasoning && contentSections.length > 0 && (
           <div
             className="text-sm leading-relaxed whitespace-normal break-words"
             style={{ color: theme.colors.text.primary }}
@@ -139,7 +139,7 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({ message, isGenerating 
           </div>
         )}
 
-        {!showThinking && contentSections.length === 0 && (
+        {!showThinking && !showReasoning && contentSections.length === 0 && (
           <div
             className="text-sm leading-relaxed whitespace-normal break-words prose prose-sm max-w-none"
             style={{ color: theme.colors.text.primary }}
