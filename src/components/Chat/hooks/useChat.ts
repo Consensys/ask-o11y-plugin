@@ -8,10 +8,10 @@ import { ChatSession } from '../../../core/models/ChatSession';
 import { parseGrafanaLinks } from '../utils/grafanaLinkParser';
 import {
   runAgent,
-  ContentEvent,
-  ReasoningEvent,
-  ToolCallStartEvent,
-  ToolCallResultEvent,
+  type ReasoningEvent,
+  type ContentEvent,
+  type ToolCallStartEvent,
+  type ToolCallResultEvent,
 } from '../../../services/agentClient';
 import type { AppPluginSettings } from '../../../types/plugin';
 import { MAX_TOTAL_TOKENS } from '../../../constants';
@@ -26,29 +26,20 @@ function updateLastAssistantMessage(
 }
 
 function stripReasoningFromHistory(history: ChatMessage[]): ChatMessage[] {
-  return history.map((msg) => {
-    if (msg.reasoning === undefined) {
-      return msg;
-    }
-    const { reasoning: _, ...rest } = msg;
-    return rest;
-  });
+  return history.map(({ reasoning: _, ...rest }) => rest);
 }
 
 function buildEffectiveSystemPrompt(
   mode: AppPluginSettings['systemPromptMode'] = 'default',
   customPrompt = ''
 ): string {
-  switch (mode) {
-    case 'replace':
-      return customPrompt || SYSTEM_PROMPT;
-    case 'append':
-      return customPrompt.trim()
-        ? `${SYSTEM_PROMPT}\n\n## Additional Instructions\n\n${customPrompt}`
-        : SYSTEM_PROMPT;
-    default:
-      return SYSTEM_PROMPT;
+  if (mode === 'replace') {
+    return customPrompt || SYSTEM_PROMPT;
   }
+  if (mode === 'append' && customPrompt.trim()) {
+    return `${SYSTEM_PROMPT}\n\n## Additional Instructions\n\n${customPrompt}`;
+  }
+  return SYSTEM_PROMPT;
 }
 
 export function useChat(
@@ -177,8 +168,7 @@ export function useChat(
       validatedInput = ValidationService.validateChatInput(inputToSend);
     } catch (error) {
       console.error('[useChat] Input validation failed:', error);
-      const errorText = error instanceof Error ? error.message : 'Invalid input';
-      appendErrorMessage(`Input validation error: ${errorText}`);
+      appendErrorMessage(`Input validation error: ${error instanceof Error ? error.message : 'Invalid input'}`);
       return;
     }
 
@@ -313,9 +303,11 @@ export function useChat(
         return;
       }
       console.error('[useChat] Error in agent run:', error);
-      const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
       setChatHistory((prev) =>
-        updateLastAssistantMessage(prev, (msg) => ({ ...msg, content: errorMessage }))
+        updateLastAssistantMessage(prev, (msg) => ({
+          ...msg,
+          content: error instanceof Error ? error.message : 'An unexpected error occurred',
+        }))
       );
       setRetryCount((prev) => prev + 1);
     } finally {

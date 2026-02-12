@@ -15,9 +15,6 @@ interface ChatMessageProps {
   isLastMessage?: boolean;
 }
 
-/**
- * Helper to build time range prop for query renderers
- */
 function buildTimeRange(query: ContentSection['query']): { from: string; to: string } | undefined {
   if (!query?.from) {
     return undefined;
@@ -29,32 +26,24 @@ interface QuerySectionProps {
   section: ContentSection;
 }
 
-/**
- * Renders a query section (PromQL, LogQL, or TraceQL)
- */
 function QuerySection({ section }: QuerySectionProps): React.ReactElement | null {
-  if (!section.query) {
+  const { query, type } = section;
+  if (!query) {
     return null;
   }
 
-  const timeRange = buildTimeRange(section.query);
+  const timeRange = buildTimeRange(query);
 
-  switch (section.type) {
-    case 'promql':
-      return (
-        <GraphRenderer
-          query={section.query}
-          defaultTimeRange={timeRange}
-          visualizationType={section.query.visualization}
-        />
-      );
-    case 'logql':
-      return <LogsRenderer query={section.query} defaultTimeRange={timeRange} />;
-    case 'traceql':
-      return <TracesRenderer query={section.query} defaultTimeRange={timeRange} />;
-    default:
-      return null;
+  if (type === 'promql') {
+    return <GraphRenderer query={query} defaultTimeRange={timeRange} visualizationType={query.visualization} />;
   }
+  if (type === 'logql') {
+    return <LogsRenderer query={query} defaultTimeRange={timeRange} />;
+  }
+  if (type === 'traceql') {
+    return <TracesRenderer query={query} defaultTimeRange={timeRange} />;
+  }
+  return null;
 }
 
 export const ChatMessage: React.FC<ChatMessageProps> = ({ message, isGenerating = false, isLastMessage = false }) => {
@@ -65,7 +54,6 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({ message, isGenerating 
   const isUser = message.role === 'user';
 
   if (isUser) {
-    // User messages: Sober colored bubble
     return (
       <div className="flex w-full justify-end mb-5 animate-slideIn" role="article" aria-label="User message">
         <div className="max-w-[75%]">
@@ -86,26 +74,21 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({ message, isGenerating 
     );
   }
 
-  // Split content by PromQL queries for assistant messages
   const contentSections = message.content ? splitContentByPromQL(message.content) : [];
 
-  // Assistant messages: Plain text with modern styling and embedded graphs
   return (
     <div className="flex w-full mb-6 animate-fadeIn" role="article" aria-label="Assistant message">
       <div className="w-full max-w-none" tabIndex={0}>
         <span className="sr-only">Assistant message</span>
-        {/* Tool Calls Section */}
         {message.toolCalls && message.toolCalls.length > 0 && (
           <div className="mb-4">
             <ToolCallsSection toolCalls={message.toolCalls} />
           </div>
         )}
 
-        {/* Reasoning Indicator */}
         {showReasoning && <ReasoningIndicator reasoning={message.reasoning!} />}
 
-        {/* Message Content */}
-        {showThinking ? (
+        {showThinking && (
           <div
             className="flex items-center gap-3 px-4 py-3 rounded-lg animate-pulse"
             style={{
@@ -114,31 +97,22 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({ message, isGenerating 
             }}
           >
             <div className="flex gap-1.5">
-              <div
-                className="w-2 h-2 rounded-full animate-pulse"
-                style={{
-                  backgroundColor: theme.colors.primary.main,
-                  animationDelay: '0ms',
-                }}
-              ></div>
-              <div
-                className="w-2 h-2 rounded-full animate-pulse"
-                style={{
-                  backgroundColor: theme.colors.primary.main,
-                  animationDelay: '150ms',
-                }}
-              ></div>
-              <div
-                className="w-2 h-2 rounded-full animate-pulse"
-                style={{
-                  backgroundColor: theme.colors.primary.main,
-                  animationDelay: '300ms',
-                }}
-              ></div>
+              {[0, 150, 300].map((delay) => (
+                <div
+                  key={delay}
+                  className="w-2 h-2 rounded-full animate-pulse"
+                  style={{
+                    backgroundColor: theme.colors.primary.main,
+                    animationDelay: `${delay}ms`,
+                  }}
+                />
+              ))}
             </div>
             <span className="text-sm font-medium">Thinking...</span>
           </div>
-        ) : contentSections.length > 0 ? (
+        )}
+
+        {!showThinking && contentSections.length > 0 && (
           <div
             className="text-sm leading-relaxed whitespace-normal break-words"
             style={{ color: theme.colors.text.primary }}
@@ -152,7 +126,6 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({ message, isGenerating 
                 );
               }
 
-              // Render query section (promql, logql, or traceql)
               if (section.query) {
                 return (
                   <div key={index} className="my-3">
@@ -164,7 +137,9 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({ message, isGenerating 
               return null;
             })}
           </div>
-        ) : (
+        )}
+
+        {!showThinking && contentSections.length === 0 && (
           <div
             className="text-sm leading-relaxed whitespace-normal break-words prose prose-sm max-w-none"
             style={{ color: theme.colors.text.primary }}
