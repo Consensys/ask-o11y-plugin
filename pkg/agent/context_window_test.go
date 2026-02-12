@@ -95,59 +95,58 @@ func TestTrimToolResponses(t *testing.T) {
 	}
 }
 
-func TestSanitizeMessages_RemovesEmptyAssistant(t *testing.T) {
-	messages := []Message{
-		{Role: "user", Content: "hello"},
-		{Role: "assistant", Content: ""},
-		{Role: "user", Content: "world"},
+func TestSanitizeMessages(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    []Message
+		expected int
+	}{
+		{
+			name: "removes empty assistant",
+			input: []Message{
+				{Role: "user", Content: "hello"},
+				{Role: "assistant", Content: ""},
+				{Role: "user", Content: "world"},
+			},
+			expected: 2,
+		},
+		{
+			name: "keeps assistant with content",
+			input: []Message{
+				{Role: "user", Content: "hello"},
+				{Role: "assistant", Content: "I can help"},
+				{Role: "user", Content: "thanks"},
+			},
+			expected: 3,
+		},
+		{
+			name: "keeps assistant with tool calls",
+			input: []Message{
+				{Role: "user", Content: "query metrics"},
+				{Role: "assistant", Content: "", ToolCalls: []ToolCall{
+					{ID: "1", Type: "function", Function: FunctionCall{Name: "query_prometheus", Arguments: "{}"}},
+				}},
+			},
+			expected: 2,
+		},
+		{
+			name: "removes whitespace-only assistant",
+			input: []Message{
+				{Role: "user", Content: "hello"},
+				{Role: "assistant", Content: "   \n\t  "},
+				{Role: "user", Content: "world"},
+			},
+			expected: 2,
+		},
 	}
 
-	result := sanitizeMessages(messages)
-	if len(result) != 2 {
-		t.Fatalf("expected 2 messages, got %d", len(result))
-	}
-	if result[0].Content != "hello" || result[1].Content != "world" {
-		t.Errorf("unexpected messages: %+v", result)
-	}
-}
-
-func TestSanitizeMessages_KeepsAssistantWithContent(t *testing.T) {
-	messages := []Message{
-		{Role: "user", Content: "hello"},
-		{Role: "assistant", Content: "I can help"},
-		{Role: "user", Content: "thanks"},
-	}
-
-	result := sanitizeMessages(messages)
-	if len(result) != 3 {
-		t.Fatalf("expected 3 messages, got %d", len(result))
-	}
-}
-
-func TestSanitizeMessages_KeepsAssistantWithToolCalls(t *testing.T) {
-	messages := []Message{
-		{Role: "user", Content: "query metrics"},
-		{Role: "assistant", Content: "", ToolCalls: []ToolCall{
-			{ID: "1", Type: "function", Function: FunctionCall{Name: "query_prometheus", Arguments: "{}"}},
-		}},
-	}
-
-	result := sanitizeMessages(messages)
-	if len(result) != 2 {
-		t.Fatalf("expected 2 messages, got %d", len(result))
-	}
-}
-
-func TestSanitizeMessages_RemovesWhitespaceOnlyAssistant(t *testing.T) {
-	messages := []Message{
-		{Role: "user", Content: "hello"},
-		{Role: "assistant", Content: "   \n\t  "},
-		{Role: "user", Content: "world"},
-	}
-
-	result := sanitizeMessages(messages)
-	if len(result) != 2 {
-		t.Fatalf("expected 2 messages, got %d", len(result))
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := sanitizeMessages(tt.input)
+			if len(result) != tt.expected {
+				t.Fatalf("expected %d messages, got %d", tt.expected, len(result))
+			}
+		})
 	}
 }
 
@@ -159,7 +158,6 @@ func TestBuildContextWindow_FiltersEmptyAssistant(t *testing.T) {
 	}
 
 	result := BuildContextWindow("sys", messages, "", 10)
-	// system + user + user (empty assistant filtered out)
 	if len(result) != 3 {
 		t.Fatalf("expected 3 messages, got %d", len(result))
 	}

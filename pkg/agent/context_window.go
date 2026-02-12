@@ -57,9 +57,8 @@ func BuildContextWindow(systemPrompt string, allMessages []Message, summary stri
 	return sanitizeMessages(ctx)
 }
 
-// sanitizeMessages removes assistant messages that have no content and no tool_calls,
-// which would be rejected by the OpenAI API with a 400 error.
-// This happens when a user stops generation before any content streams back.
+// sanitizeMessages drops empty assistant messages that appear when a user stops
+// generation before any content streams back (OpenAI rejects these with 400).
 func sanitizeMessages(messages []Message) []Message {
 	out := make([]Message, 0, len(messages))
 	for _, m := range messages {
