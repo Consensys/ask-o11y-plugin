@@ -7,7 +7,11 @@ import { ValidationService } from '../../../services/validation';
 import { ChatSession } from '../../../core/models/ChatSession';
 import { parseGrafanaLinks } from '../utils/grafanaLinkParser';
 import {
-  runAgent,
+  runAgentDetached,
+  reconnectToAgentRun,
+  getAgentRunStatus,
+  cancelAgentRun,
+  type AgentCallbacks,
   type ReasoningEvent,
   type ContentEvent,
   type ToolCallStartEvent,
@@ -15,6 +19,7 @@ import {
 } from '../../../services/agentClient';
 import type { AppPluginSettings } from '../../../types/plugin';
 import { MAX_TOTAL_TOKENS } from '../../../constants';
+import { getActiveRunId, setActiveRunId, clearActiveRunId } from '../../../utils/activeRunStore';
 
 function updateLastAssistantMessage(
   history: ChatMessage[],
@@ -86,6 +91,7 @@ export function useChat(
 
   const [currentInput, setCurrentInput] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
+  const [isReconnecting, setIsReconnecting] = useState(false);
   const chatContainerRef = useRef<HTMLDivElement>(null);
   const bottomSpacerRef = useRef<HTMLDivElement>(null);
   const [isAutoScroll, setIsAutoScroll] = useState(true);
@@ -94,6 +100,8 @@ export function useChat(
   const [messageQueue, setMessageQueue] = useState<string[]>([]);
 
   const abortControllerRef = useRef<AbortController | null>(null);
+  const activeRunIdRef = useRef<string | null>(null);
+  const pendingRunIdRef = useRef<string | null>(null);
 
   const sessionTitleOverrideRef = useRef<string | undefined>(sessionTitleOverride);
   useEffect(() => {
@@ -155,6 +163,85 @@ export function useChat(
     return Array.from(toolCalls.values()).filter((tc) => tc.running).length;
   }, [toolCalls]);
 
+  const makeCallbacks = useCallback(
+    (abortController: AbortController, hadErrorRef: { current: boolean }): AgentCallbacks => ({
+      onReasoning: (event: ReasoningEvent) => {
+        if (abortController.signal.aborted) {
+          return;
+        }
+        setChatHistory((prev) =>
+          updateLastAssistantMessage(prev, (msg) => ({
+            ...msg,
+            reasoning: event.content,
+          }))
+        );
+      },
+      onContent: (event: ContentEvent) => {
+        if (abortController.signal.aborted) {
+          return;
+        }
+        setChatHistory((prev) =>
+          updateLastAssistantMessage(prev, (msg) => {
+            const accumulated = msg.content + event.content;
+            return {
+              ...msg,
+              content: accumulated,
+              reasoning: undefined,
+              pageRefs: parseGrafanaLinks(accumulated),
+            };
+          })
+        );
+      },
+      onToolCallStart: (event: ToolCallStartEvent) => {
+        if (abortController.signal.aborted) {
+          return;
+        }
+        setToolCalls((prev) => {
+          const next = new Map(prev);
+          next.set(event.id, { name: event.name, arguments: event.arguments, running: true });
+          return next;
+        });
+      },
+      onToolCallResult: (event: ToolCallResultEvent) => {
+        if (abortController.signal.aborted) {
+          return;
+        }
+        setToolCalls((prev) => {
+          const next = new Map(prev);
+          const existing = next.get(event.id);
+          next.set(event.id, {
+            name: event.name,
+            arguments: existing?.arguments || '',
+            running: false,
+            error: event.isError ? event.content : undefined,
+            response: event.isError ? undefined : { content: [{ type: 'text', text: event.content }] },
+          });
+          return next;
+        });
+      },
+      onDone: () => {},
+      onError: (message: string) => {
+        hadErrorRef.current = true;
+        console.error('[useChat] Agent error:', message);
+        setChatHistory((prev) =>
+          updateLastAssistantMessage(prev, (msg) => ({
+            ...msg,
+            content: msg.content ? msg.content + '\n\n**Error:** ' + message : message,
+          }))
+        );
+      },
+    }),
+    []
+  );
+
+  const cleanupRun = useCallback((sessionId: string | null) => {
+    if (sessionId) {
+      clearActiveRunId(sessionId);
+    }
+    activeRunIdRef.current = null;
+    pendingRunIdRef.current = null;
+  }, []);
+
   const sendMessage = async (explicitInput?: string): Promise<void> => {
     const inputToSend = explicitInput ?? currentInput;
     if (!inputToSend.trim()) {
@@ -188,6 +275,10 @@ export function useChat(
         .then((createdSessionId) => {
           if (createdSessionId) {
             onSessionIdChange(createdSessionId);
+            if (pendingRunIdRef.current) {
+              setActiveRunId(createdSessionId, pendingRunIdRef.current);
+              pendingRunIdRef.current = null;
+            }
           }
         })
         .catch((error) => {
@@ -207,94 +298,41 @@ export function useChat(
 
     const abortController = new AbortController();
     abortControllerRef.current = abortController;
-    let hadError = false;
+    const hadErrorRef = { current: false };
 
     try {
-      await runAgent(
-        {
-          messages: messagesForBackend,
-          systemPrompt: effectiveSystemPrompt,
-          summary: sessionManager.currentSummary || '',
-          maxTotalTokens: pluginSettings.maxTotalTokens || MAX_TOTAL_TOKENS,
-          recentMessageCount: 15,
-          orgId: orgId,
-          orgName: config.bootData.user.orgName || '',
-        },
-        {
-          onReasoning: (event: ReasoningEvent) => {
-            if (abortController.signal.aborted) {
-              return;
-            }
-            setChatHistory((prev) =>
-              updateLastAssistantMessage(prev, (msg) => ({
-                ...msg,
-                reasoning: event.content,
-              }))
-            );
-          },
-          onContent: (event: ContentEvent) => {
-            if (abortController.signal.aborted) {
-              return;
-            }
-            setChatHistory((prev) =>
-              updateLastAssistantMessage(prev, (msg) => {
-                const accumulated = msg.content + event.content;
-                return {
-                  ...msg,
-                  content: accumulated,
-                  reasoning: undefined,
-                  pageRefs: parseGrafanaLinks(accumulated),
-                };
-              })
-            );
-          },
-          onToolCallStart: (event: ToolCallStartEvent) => {
-            if (abortController.signal.aborted) {
-              return;
-            }
-            setToolCalls((prev) => {
-              const next = new Map(prev);
-              next.set(event.id, { name: event.name, arguments: event.arguments, running: true });
-              return next;
-            });
-          },
-          onToolCallResult: (event: ToolCallResultEvent) => {
-            if (abortController.signal.aborted) {
-              return;
-            }
-            setToolCalls((prev) => {
-              const next = new Map(prev);
-              const existing = next.get(event.id);
-              next.set(event.id, {
-                name: event.name,
-                arguments: existing?.arguments || '',
-                running: false,
-                error: event.isError ? event.content : undefined,
-                response: event.isError ? undefined : { content: [{ type: 'text', text: event.content }] },
-              });
-              return next;
-            });
-          },
-          onDone: () => {},
-          onError: (message: string) => {
-            hadError = true;
-            console.error('[useChat] Agent error:', message);
-            setChatHistory((prev) =>
-              updateLastAssistantMessage(prev, (msg) => ({
-                ...msg,
-                content: msg.content ? msg.content + '\n\n**Error:** ' + message : message,
-              }))
-            );
-          },
-        },
-        abortController.signal
-      );
-      if (hadError) {
+      const { runId } = await runAgentDetached({
+        messages: messagesForBackend,
+        systemPrompt: effectiveSystemPrompt,
+        summary: sessionManager.currentSummary || '',
+        maxTotalTokens: pluginSettings.maxTotalTokens || MAX_TOTAL_TOKENS,
+        recentMessageCount: 15,
+        orgId,
+        orgName: config.bootData.user.orgName || '',
+        mode: 'detached',
+      });
+
+      activeRunIdRef.current = runId;
+      const sessionId = sessionManager.currentSessionId;
+      if (sessionId) {
+        setActiveRunId(sessionId, runId);
+      } else {
+        pendingRunIdRef.current = runId;
+      }
+
+      const callbacks = makeCallbacks(abortController, hadErrorRef);
+      await reconnectToAgentRun(runId, callbacks, orgId, abortController.signal);
+
+      cleanupRun(sessionManager.currentSessionId);
+
+      if (hadErrorRef.current) {
         setRetryCount((prev) => prev + 1);
       } else {
         setRetryCount(0);
       }
     } catch (error) {
+      cleanupRun(sessionManager.currentSessionId);
+
       if (error instanceof DOMException && error.name === 'AbortError') {
         setChatHistory((prev) =>
           updateLastAssistantMessage(prev, (msg) => ({
@@ -350,8 +388,99 @@ export function useChat(
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
     }
+    const runId = activeRunIdRef.current;
+    if (runId) {
+      cancelAgentRun(runId, orgId).catch((err) => {
+        console.error('[useChat] Failed to cancel agent run:', err);
+      });
+      cleanupRun(sessionManager.currentSessionId);
+    }
     setMessageQueue([]);
-  }, []);
+  }, [orgId, sessionManager.currentSessionId, cleanupRun]);
+
+  // Reconnect to an active run on mount / session change
+  const hasAttemptedReconnectRef = useRef<string | null>(null);
+  useEffect(() => {
+    const sessionId = sessionManager.currentSessionId;
+    if (!sessionId || readOnly || isGenerating) {
+      return;
+    }
+
+    if (hasAttemptedReconnectRef.current === sessionId) {
+      return;
+    }
+
+    const storedRunId = getActiveRunId(sessionId);
+    if (!storedRunId) {
+      return;
+    }
+
+    hasAttemptedReconnectRef.current = sessionId;
+
+    let cancelled = false;
+    const abortController = new AbortController();
+
+    const reconnect = async () => {
+      try {
+        const runStatus = await getAgentRunStatus(storedRunId, orgId);
+
+        if (cancelled) {
+          return;
+        }
+
+        if (runStatus.status !== 'running') {
+          clearActiveRunId(sessionId);
+          return;
+        }
+
+        setIsReconnecting(true);
+        setIsGenerating(true);
+        setToolCalls(new Map());
+
+        setChatHistory((prev) => {
+          const lastMsg = prev[prev.length - 1];
+          if (lastMsg?.role === 'assistant' && lastMsg.content === '') {
+            return prev;
+          }
+          return [...prev, { role: 'assistant', content: '', toolCalls: [] }];
+        });
+
+        abortControllerRef.current = abortController;
+        activeRunIdRef.current = storedRunId;
+
+        const hadErrorRef = { current: false };
+        const callbacks = makeCallbacks(abortController, hadErrorRef);
+        await reconnectToAgentRun(storedRunId, callbacks, orgId, abortController.signal);
+      } catch (err) {
+        if (!cancelled) {
+          console.error('[useChat] Reconnection failed:', err);
+          setChatHistory((prev) =>
+            updateLastAssistantMessage(prev, (msg) => ({
+              ...msg,
+              content: msg.content || 'Failed to reconnect to the previous response. Please try sending your message again.',
+            }))
+          );
+        }
+      } finally {
+        if (!cancelled) {
+          cleanupRun(sessionId);
+          setIsReconnecting(false);
+          setIsGenerating(false);
+          if (abortControllerRef.current === abortController) {
+            abortControllerRef.current = null;
+          }
+        }
+      }
+    };
+
+    reconnect();
+
+    return () => {
+      cancelled = true;
+      abortController.abort();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessionManager.currentSessionId, readOnly]);
 
   // Drain queued messages after generation completes.
   useEffect(() => {
@@ -424,6 +553,7 @@ export function useChat(
     chatHistory,
     currentInput,
     isGenerating,
+    isReconnecting,
     chatContainerRef,
     toolCalls,
     setCurrentInput,

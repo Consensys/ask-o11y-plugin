@@ -216,6 +216,42 @@ function dispatchEvent(event: SSEEvent, callbacks: AgentCallbacks): void {
   }
 }
 
+export interface DetachedRunResult {
+  runId: string;
+  status: string;
+}
+
+export async function runAgentDetached(request: AgentRunRequest): Promise<DetachedRunResult> {
+  const { orgId, ...body } = request;
+  const resp = await fetch(AGENT_RUN_URL, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...orgIdHeaders(orgId),
+    },
+    body: JSON.stringify({ ...body, mode: 'detached' }),
+  });
+
+  if (!resp.ok) {
+    const text = await resp.text();
+    throw new Error(`Agent detached request failed (${resp.status}): ${text}`);
+  }
+
+  return resp.json();
+}
+
+export async function cancelAgentRun(runId: string, orgId?: string): Promise<void> {
+  const resp = await fetch(`${AGENT_RUNS_URL}/${runId}/cancel`, {
+    method: 'POST',
+    headers: orgIdHeaders(orgId),
+  });
+
+  if (!resp.ok) {
+    const text = await resp.text();
+    throw new Error(`Failed to cancel run (${resp.status}): ${text}`);
+  }
+}
+
 export async function getAgentRunStatus(runId: string, orgId?: string): Promise<AgentRunStatus> {
   const resp = await fetch(`${AGENT_RUNS_URL}/${runId}`, {
     headers: orgIdHeaders(orgId),
@@ -251,5 +287,9 @@ export async function reconnectToAgentRun(
     return;
   }
 
-  await readSSEStream(resp.body, callbacks);
+  await readSSEStream(resp.body, callbacks, {
+    warnOnMalformedJSON: true,
+    expectTerminalEvent: true,
+    abortSignal,
+  });
 }

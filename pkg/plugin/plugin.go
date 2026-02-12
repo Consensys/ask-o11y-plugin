@@ -13,6 +13,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/grafana/grafana-plugin-sdk-go/backend"
@@ -114,6 +115,8 @@ type Plugin struct {
 	useBuiltInMCP bool
 	ctx           context.Context
 	cancel        context.CancelFunc
+	runCancelsMu  sync.Mutex
+	runCancels    map[string]context.CancelFunc
 }
 
 func NewPlugin(ctx context.Context, settings backend.AppInstanceSettings) (instancemgmt.Instance, error) {
@@ -180,6 +183,7 @@ func NewPlugin(ctx context.Context, settings backend.AppInstanceSettings) (insta
 		useBuiltInMCP: pluginSettings.UseBuiltInMCP,
 		ctx:           pluginCtx,
 		cancel:        cancel,
+		runCancels:    make(map[string]context.CancelFunc),
 	}
 
 	if !usingRedis {
@@ -222,6 +226,13 @@ func NewPlugin(ctx context.Context, settings backend.AppInstanceSettings) (insta
 }
 
 func (p *Plugin) Dispose() {
+	p.runCancelsMu.Lock()
+	for _, cancel := range p.runCancels {
+		cancel()
+	}
+	p.runCancels = nil
+	p.runCancelsMu.Unlock()
+
 	if p.cancel != nil {
 		p.cancel()
 	}
@@ -526,8 +537,20 @@ func (p *Plugin) handleAgentRun(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if req.Mode == "detached" {
-		go p.agentLoop.Run(p.ctx, loopReq, eventCh)
-		go p.consumeAgentEvents(runID, eventCh)
+		runCtx, runCancel := context.WithCancel(p.ctx)
+
+		p.runCancelsMu.Lock()
+		p.runCancels[runID] = runCancel
+		p.runCancelsMu.Unlock()
+
+		go p.agentLoop.Run(runCtx, loopReq, eventCh)
+		go func() {
+			p.consumeAgentEvents(runID, eventCh)
+			runCancel()
+			p.runCancelsMu.Lock()
+			delete(p.runCancels, runID)
+			p.runCancelsMu.Unlock()
+		}()
 
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]interface{}{
@@ -621,12 +644,22 @@ func (p *Plugin) streamRunSSE(w http.ResponseWriter, runID string, ch <-chan age
 	}
 }
 
-func (p *Plugin) handleAgentRuns(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
+func (p *Plugin) getAuthorizedRun(w http.ResponseWriter, r *http.Request, runID string) (*AgentRun, bool) {
+	run, err := p.runStore.GetRun(runID)
+	if err != nil {
+		http.Error(w, "Run not found", http.StatusNotFound)
+		return nil, false
 	}
 
+	if run.OrgID != getOrgID(r) || run.UserID != getUserID(r) {
+		http.Error(w, "Access denied", http.StatusForbidden)
+		return nil, false
+	}
+
+	return run, true
+}
+
+func (p *Plugin) handleAgentRuns(w http.ResponseWriter, r *http.Request) {
 	path := r.URL.Path
 	prefix := "/api/agent/runs/"
 	if !strings.HasPrefix(path, prefix) {
@@ -640,6 +673,24 @@ func (p *Plugin) handleAgentRuns(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if runID, isCancel := strings.CutSuffix(remainder, "/cancel"); isCancel {
+		if r.Method != http.MethodPost {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if !isValidSecureID(runID) {
+			http.Error(w, "Invalid run ID format", http.StatusBadRequest)
+			return
+		}
+		p.handleCancelRun(w, r, runID)
+		return
+	}
+
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
 	runID, isEvents := strings.CutSuffix(remainder, "/events")
 	if !isValidSecureID(runID) {
 		http.Error(w, "Invalid run ID format", http.StatusBadRequest)
@@ -650,17 +701,9 @@ func (p *Plugin) handleAgentRuns(w http.ResponseWriter, r *http.Request) {
 		p.handleAgentRunEvents(w, r, runID)
 		return
 	}
-	orgID := getOrgID(r)
-	userID := getUserID(r)
 
-	run, err := p.runStore.GetRun(runID)
-	if err != nil {
-		http.Error(w, "Run not found", http.StatusNotFound)
-		return
-	}
-
-	if run.OrgID != orgID || run.UserID != userID {
-		http.Error(w, "Access denied", http.StatusForbidden)
+	run, ok := p.getAuthorizedRun(w, r, runID)
+	if !ok {
 		return
 	}
 
@@ -668,18 +711,32 @@ func (p *Plugin) handleAgentRuns(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(run)
 }
 
-func (p *Plugin) handleAgentRunEvents(w http.ResponseWriter, r *http.Request, runID string) {
-	orgID := getOrgID(r)
-	userID := getUserID(r)
-
-	run, err := p.runStore.GetRun(runID)
-	if err != nil {
-		http.Error(w, "Run not found", http.StatusNotFound)
+func (p *Plugin) handleCancelRun(w http.ResponseWriter, r *http.Request, runID string) {
+	run, ok := p.getAuthorizedRun(w, r, runID)
+	if !ok {
 		return
 	}
 
-	if run.OrgID != orgID || run.UserID != userID {
-		http.Error(w, "Access denied", http.StatusForbidden)
+	if run.Status != RunStatusRunning {
+		http.Error(w, "Run is not running", http.StatusConflict)
+		return
+	}
+
+	p.runCancelsMu.Lock()
+	cancelFn, exists := p.runCancels[runID]
+	p.runCancelsMu.Unlock()
+
+	if exists {
+		cancelFn()
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"status": "cancelled"})
+}
+
+func (p *Plugin) handleAgentRunEvents(w http.ResponseWriter, r *http.Request, runID string) {
+	run, ok := p.getAuthorizedRun(w, r, runID)
+	if !ok {
 		return
 	}
 
@@ -691,9 +748,9 @@ func (p *Plugin) handleAgentRunEvents(w http.ResponseWriter, r *http.Request, ru
 		defer unsub()
 	}
 
-	// Re-fetch events after subscribing so no events are lost between the
-	// initial auth-check GetRun and the Subscribe call above.
-	run, err = p.runStore.GetRun(runID)
+	// Re-fetch after subscribing so no events are lost between the
+	// auth-check GetRun and the Subscribe call above.
+	run, err := p.runStore.GetRun(runID)
 	if err != nil {
 		http.Error(w, "Run not found", http.StatusNotFound)
 		return
@@ -719,7 +776,6 @@ func (p *Plugin) handleAgentRunEvents(w http.ResponseWriter, r *http.Request, ru
 		return
 	}
 
-	// May receive duplicates of events from the catch-up snapshot; harmless.
 	for event := range subscriberCh {
 		data, err := agent.MarshalSSE(event)
 		if err != nil {
