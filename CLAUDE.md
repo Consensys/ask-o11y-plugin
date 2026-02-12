@@ -482,12 +482,14 @@ Ask O11y supports three MCP modes for flexible tool integration:
 
 **Impact on this plugin:**
 - `useBuiltInMCP: true` injects grafana-llm-app's MCP endpoint using the SA token → **only works for Org 1**
-- The LLM client (`pkg/agent/llm_client.go`) uses the same SA token for `grafana-llm-app` calls → passes `X-Grafana-Org-Id` header but **auth is still Org-1-scoped**
+- The LLM client (`pkg/agent/llm_client.go`) uses the SA token for `grafana-llm-app` calls. It intentionally **does NOT send `X-Grafana-Org-Id`** when using SA token auth — sending a non-Org-1 header with the Org-1-scoped SA token causes a 401 from grafana-llm-app. This means **all orgs share Org 1's LLM configuration** (API key, model settings). Org isolation is enforced at the MCP tool-call layer, not the LLM layer.
+- Grafana 12 strips `Cookie` headers from backend plugin requests, so user session cookies cannot be forwarded to grafana-llm-app as an alternative auth mechanism
 
-**Multi-org workaround (used in `docker-compose-full.yaml`):**
+**Multi-org workaround for MCP tools (used in `docker-compose-full.yaml`):**
 - Run `mcp-grafana` as an external sidecar container with basic auth (`GRAFANA_USERNAME`/`GRAFANA_PASSWORD` = admin/admin)
 - Basic auth credentials have cross-org access (unlike SA tokens)
 - The MCP proxy's `customRoundTripper` in `pkg/mcp/client.go` forwards `X-Grafana-Org-Id` and `X-Scope-OrgID` headers
+- The frontend sends `X-Grafana-Org-Id` on the `/api/agent/run` request, which flows through to MCP tool calls
 - Configure via external MCP server entries in provisioning (NOT `useBuiltInMCP`)
 
 **NEVER set `useBuiltInMCP: true` in multi-org provisioning files (`full.yaml_`).** Always use external `mcp-grafana` sidecar for multi-org deployments.

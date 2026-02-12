@@ -209,6 +209,7 @@ export function useChat(
           summary: sessionManager.currentSummary || '',
           maxTotalTokens: pluginSettings.maxTotalTokens || MAX_TOTAL_TOKENS,
           recentMessageCount: 15,
+          orgId: orgId,
           orgName: config.bootData.user.orgName || '',
         },
         {

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"strings"
 	"sync"
@@ -139,12 +140,10 @@ func (c *Client) connectMCP() error {
 		return fmt.Errorf("unsupported MCP transport type: %s", c.config.Type)
 	}
 
-	// Use a fresh background context for connection to prevent issues with
-	// reconnection when the parent context is canceled
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
+	connectCtx, connectCancel := context.WithTimeout(c.ctx, connectDialTimeout)
+	defer connectCancel()
 
-	c.session, err = c.mcpClient.Connect(ctx, transport, nil)
+	c.session, err = c.mcpClient.Connect(connectCtx, transport, nil)
 	if err != nil {
 		return fmt.Errorf("failed to connect to MCP server: %w", err)
 	}
@@ -153,13 +152,21 @@ func (c *Client) connectMCP() error {
 	return nil
 }
 
+const connectDialTimeout = 10 * time.Second
+
+func baseTransport() *http.Transport {
+	t := http.DefaultTransport.(*http.Transport).Clone()
+	t.DialContext = (&net.Dialer{Timeout: connectDialTimeout}).DialContext
+	return t
+}
+
 func (c *Client) httpClientWithHeaders() *http.Client {
 	if len(c.config.Headers) == 0 {
-		return http.DefaultClient
+		return &http.Client{Transport: baseTransport()}
 	}
 	return &http.Client{
 		Transport: &configHeaderRoundTripper{
-			base:    http.DefaultTransport,
+			base:    baseTransport(),
 			headers: c.config.Headers,
 		},
 	}
@@ -204,7 +211,7 @@ func (c *Client) connectMCPWithOrgContext(orgID string, orgName string, scopeOrg
 	// Create custom HTTP client with customRoundTripper
 	customHTTPClient := &http.Client{
 		Transport: &customRoundTripper{
-			base:       http.DefaultTransport,
+			base:       baseTransport(),
 			orgID:      orgID,
 			orgName:    orgName,
 			scopeOrgId: scopeOrgId,
@@ -235,11 +242,10 @@ func (c *Client) connectMCPWithOrgContext(orgID string, orgName string, scopeOrg
 		return fmt.Errorf("unsupported MCP transport type: %s", c.config.Type)
 	}
 
-	// Use a fresh background context for connection
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
+	connectCtx, connectCancel := context.WithTimeout(c.ctx, connectDialTimeout)
+	defer connectCancel()
 
-	c.session, err = c.mcpClient.Connect(ctx, transport, nil)
+	c.session, err = c.mcpClient.Connect(connectCtx, transport, nil)
 	if err != nil {
 		return fmt.Errorf("failed to connect to MCP server with org context: %w", err)
 	}

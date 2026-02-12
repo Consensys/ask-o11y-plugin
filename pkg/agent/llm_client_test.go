@@ -26,15 +26,16 @@ func TestLLMClient_ChatCompletion(t *testing.T) {
 	}
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Verify request
 		if r.Method != http.MethodPost {
 			t.Errorf("expected POST, got %s", r.Method)
 		}
 		if r.Header.Get("Authorization") != "Bearer test-token" {
 			t.Errorf("expected auth header, got %q", r.Header.Get("Authorization"))
 		}
-		if r.Header.Get("X-Grafana-Org-Id") != "42" {
-			t.Errorf("expected org header '42', got %q", r.Header.Get("X-Grafana-Org-Id"))
+		// SA token auth must NOT set X-Grafana-Org-Id — the SA token is
+		// Org-1-scoped, so pairing it with another org causes a 401.
+		if r.Header.Get("X-Grafana-Org-Id") != "" {
+			t.Errorf("expected no org header with SA token auth, got %q", r.Header.Get("X-Grafana-Org-Id"))
 		}
 		if r.Header.Get("Content-Type") != "application/json" {
 			t.Errorf("expected content-type json, got %q", r.Header.Get("Content-Type"))
@@ -124,6 +125,9 @@ func TestLLMClient_ChatCompletion_FallbackToToken(t *testing.T) {
 		}
 		if r.Header.Get("Authorization") != "Bearer sa-token" {
 			t.Errorf("expected SA token auth, got %q", r.Header.Get("Authorization"))
+		}
+		if r.Header.Get("X-Grafana-Org-Id") != "" {
+			t.Errorf("expected no org header with SA token fallback, got %q", r.Header.Get("X-Grafana-Org-Id"))
 		}
 
 		w.Header().Set("Content-Type", "application/json")

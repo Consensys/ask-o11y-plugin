@@ -190,4 +190,30 @@ describe('agentClient', () => {
       })
     );
   });
+
+  it('should set X-Grafana-Org-Id header when orgId is provided', async () => {
+    const callbacks = createMockCallbacks();
+    const mockFetch = jest.fn().mockResolvedValue({
+      ok: true,
+      body: createMockBody(['data: {"type":"done","data":{"totalIterations":0}}', '']),
+    });
+    global.fetch = mockFetch;
+
+    const request: AgentRunRequest = {
+      messages: [{ role: 'user', content: 'test' }],
+      systemPrompt: 'system',
+      orgId: '42',
+    };
+
+    await runAgent(request, callbacks);
+
+    const [, fetchOptions] = mockFetch.mock.calls[0];
+    expect(fetchOptions.headers).toEqual({
+      'Content-Type': 'application/json',
+      'X-Grafana-Org-Id': '42',
+    });
+    // orgId should NOT be in the body — the header is the authoritative source
+    const body = JSON.parse(fetchOptions.body);
+    expect(body.orgId).toBeUndefined();
+  });
 });

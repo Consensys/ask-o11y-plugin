@@ -62,7 +62,11 @@ func (c *LLMClient) ChatCompletion(ctx context.Context, req ChatCompletionReques
 	} else {
 		c.logger.Warn("No authentication available for LLM call; request will likely fail", "url", url, "orgID", orgID)
 	}
-	if orgID != "" {
+	// Only set X-Grafana-Org-Id with cookie auth. SA token is Org-1-scoped
+	// (grafana/grafana#91844), so pairing it with another org triggers a
+	// 401 from grafana-llm-app. Org isolation is enforced at the MCP
+	// tool-call layer, not here.
+	if authMethod == "cookie" && orgID != "" {
 		httpReq.Header.Set("X-Grafana-Org-Id", orgID)
 	}
 

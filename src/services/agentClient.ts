@@ -4,6 +4,7 @@ export interface AgentRunRequest {
   summary?: string;
   maxTotalTokens?: number;
   recentMessageCount?: number;
+  orgId?: string;
   orgName?: string;
   scopeOrgId?: string;
 }
@@ -55,10 +56,16 @@ export async function runAgent(
   callbacks: AgentCallbacks,
   abortSignal?: AbortSignal
 ): Promise<void> {
+  const { orgId, ...body } = request;
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (orgId) {
+    headers['X-Grafana-Org-Id'] = orgId;
+  }
+
   const resp = await fetch(AGENT_RUN_URL, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(request),
+    headers,
+    body: JSON.stringify(body),
     signal: abortSignal,
   });
 
