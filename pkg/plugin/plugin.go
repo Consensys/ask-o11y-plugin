@@ -527,6 +527,13 @@ func (p *Plugin) handleAgentRun(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "Session not found", http.StatusNotFound)
 			return
 		}
+		// Append the latest user message so it's persisted on the session.
+		if last := req.Messages[len(req.Messages)-1]; last.Role == "user" {
+			userMsg := SessionMessage{Role: last.Role, Content: last.Content}
+			if err := p.sessionStore.AppendMessages(sessionID, userID, numericOrgID, []SessionMessage{userMsg}); err != nil {
+				p.logger.Warn("Failed to append user message to session", "error", err, "sessionId", sessionID)
+			}
+		}
 	} else {
 		// Create a new session from the user messages.
 		sessionMsgs := agentMessagesToSessionMessages(req.Messages)
