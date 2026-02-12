@@ -597,6 +597,8 @@ func (p *Plugin) consumeAgentEvents(runID string, eventCh <-chan agent.SSEEvent)
 			errMsg = ee.Message
 		}
 		p.runStore.FinishRun(runID, RunStatusFailed, errMsg)
+	case "":
+		p.runStore.FinishRun(runID, RunStatusFailed, "agent terminated without producing events")
 	default:
 		p.runStore.FinishRun(runID, RunStatusCancelled, "")
 	}
@@ -762,6 +764,7 @@ func (p *Plugin) handleAgentRunEvents(w http.ResponseWriter, r *http.Request, ru
 	for _, event := range run.Events {
 		data, err := agent.MarshalSSE(event)
 		if err != nil {
+			p.logger.Error("Failed to marshal SSE event during replay", "error", err, "runId", runID, "eventType", event.Type)
 			continue
 		}
 		if _, err := w.Write(data); err != nil {
@@ -777,6 +780,7 @@ func (p *Plugin) handleAgentRunEvents(w http.ResponseWriter, r *http.Request, ru
 	for event := range subscriberCh {
 		data, err := agent.MarshalSSE(event)
 		if err != nil {
+			p.logger.Error("Failed to marshal SSE event", "error", err, "runId", runID, "eventType", event.Type)
 			continue
 		}
 		if _, err := w.Write(data); err != nil {
