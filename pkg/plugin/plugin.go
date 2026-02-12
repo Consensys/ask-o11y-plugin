@@ -184,22 +184,31 @@ func NewPlugin(ctx context.Context, settings backend.AppInstanceSettings) (insta
 
 	if !usingRedis {
 		go func() {
-			shareTicker := time.NewTicker(ShareCleanupInterval)
-			runTicker := time.NewTicker(RunCleanupInterval)
-			defer shareTicker.Stop()
-			defer runTicker.Stop()
+			ticker := time.NewTicker(ShareCleanupInterval)
+			defer ticker.Stop()
 			for {
 				select {
-				case <-shareTicker.C:
+				case <-ticker.C:
 					shareStore.CleanupExpired()
-				case <-runTicker.C:
-					runStore.CleanupOld()
 				case <-pluginCtx.Done():
 					return
 				}
 			}
 		}()
 	}
+
+	go func() {
+		ticker := time.NewTicker(RunCleanupInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				runStore.CleanupOld()
+			case <-pluginCtx.Done():
+				return
+			}
+		}
+	}()
 
 	mux := http.NewServeMux()
 	p.registerRoutes(mux)
@@ -481,6 +490,11 @@ func (p *Plugin) handleAgentRun(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
+	if req.Mode != "" && req.Mode != "stream" && req.Mode != "detached" {
+		http.Error(w, "Invalid mode: must be 'stream' or 'detached'", http.StatusBadRequest)
+		return
+	}
+
 	runID, err := generateShareID()
 	if err != nil {
 		p.logger.Error("Failed to generate run ID", "error", err)
@@ -512,7 +526,6 @@ func (p *Plugin) handleAgentRun(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if req.Mode == "detached" {
-		// Detached: plugin-scoped context so loop survives client disconnect.
 		go p.agentLoop.Run(p.ctx, loopReq, eventCh)
 		go p.consumeAgentEvents(runID, eventCh)
 
@@ -532,8 +545,8 @@ func (p *Plugin) handleAgentRun(w http.ResponseWriter, r *http.Request) {
 	}
 	subscriberCh, unsub := broadcaster.Subscribe()
 
-	// Use a combined context: cancelled if client disconnects OR plugin shuts down.
 	loopCtx, loopCancel := context.WithCancel(p.ctx)
+	defer loopCancel()
 	go func() {
 		<-r.Context().Done()
 		loopCancel()
@@ -624,15 +637,16 @@ func (p *Plugin) handleAgentRuns(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// /api/agent/runs/{runId}/events → SSE stream
-	if strings.HasSuffix(remainder, "/events") {
-		runID := strings.TrimSuffix(remainder, "/events")
-		p.handleAgentRunEvents(w, r, runID)
+	runID, isEvents := strings.CutSuffix(remainder, "/events")
+	if !isValidSecureID(runID) {
+		http.Error(w, "Invalid run ID format", http.StatusBadRequest)
 		return
 	}
 
-	// /api/agent/runs/{runId} → JSON status
-	runID := remainder
+	if isEvents {
+		p.handleAgentRunEvents(w, r, runID)
+		return
+	}
 	orgID := getOrgID(r)
 	userID := getUserID(r)
 
@@ -666,8 +680,6 @@ func (p *Plugin) handleAgentRunEvents(w http.ResponseWriter, r *http.Request, ru
 		return
 	}
 
-	// Subscribe BEFORE reading catch-up events so no events are lost in between.
-	// If the run is already finished, the broadcaster may be closed/nil.
 	broadcaster := p.runStore.GetBroadcaster(runID)
 	var subscriberCh <-chan agent.SSEEvent
 	var unsub func()
@@ -676,12 +688,19 @@ func (p *Plugin) handleAgentRunEvents(w http.ResponseWriter, r *http.Request, ru
 		defer unsub()
 	}
 
+	// Re-fetch events after subscribing so no events are lost between the
+	// initial auth-check GetRun and the Subscribe call above.
+	run, err = p.runStore.GetRun(runID)
+	if err != nil {
+		http.Error(w, "Run not found", http.StatusNotFound)
+		return
+	}
+
 	flusher, ok := initSSEWriter(w)
 	if !ok {
 		return
 	}
 
-	// Replay stored events (catch-up).
 	for _, event := range run.Events {
 		data, err := agent.MarshalSSE(event)
 		if err != nil {
@@ -697,9 +716,7 @@ func (p *Plugin) handleAgentRunEvents(w http.ResponseWriter, r *http.Request, ru
 		return
 	}
 
-	// Stream live events. The subscriber may receive duplicates of events
-	// that were already in the catch-up snapshot, but this is harmless —
-	// the client can deduplicate by event type/ID.
+	// May receive duplicates of events from the catch-up snapshot; harmless.
 	for event := range subscriberCh {
 		data, err := agent.MarshalSSE(event)
 		if err != nil {

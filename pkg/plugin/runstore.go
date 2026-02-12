@@ -98,6 +98,12 @@ func (b *RunBroadcaster) Close() {
 	b.subscribers = nil
 }
 
+func (b *RunBroadcaster) IsClosed() bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.closed
+}
+
 type RunStore struct {
 	mu           sync.RWMutex
 	runs         map[string]*AgentRun
@@ -144,11 +150,11 @@ func (s *RunStore) AppendEvent(runID string, event agent.SSEEvent) {
 		run.Events = append(run.Events, event)
 	}
 	run.UpdatedAt = time.Now()
-	broadcaster := s.broadcasters[runID]
+	b := s.broadcasters[runID]
 	s.mu.Unlock()
 
-	if broadcaster != nil {
-		broadcaster.Broadcast(event)
+	if b != nil {
+		b.Broadcast(event)
 	}
 }
 
@@ -162,11 +168,11 @@ func (s *RunStore) FinishRun(runID string, status RunStatus, errMsg string) {
 	run.Status = status
 	run.Error = errMsg
 	run.UpdatedAt = time.Now()
-	broadcaster := s.broadcasters[runID]
+	b := s.broadcasters[runID]
 	s.mu.Unlock()
 
-	if broadcaster != nil {
-		broadcaster.Close()
+	if b != nil {
+		b.Close()
 	}
 
 	s.logger.Info("Agent run finished", "runId", runID, "status", status)
@@ -181,7 +187,10 @@ func (s *RunStore) GetRun(runID string) (*AgentRun, error) {
 		return nil, fmt.Errorf("run not found")
 	}
 
-	return run, nil
+	copied := *run
+	copied.Events = make([]agent.SSEEvent, len(run.Events))
+	copy(copied.Events, run.Events)
+	return &copied, nil
 }
 
 func (s *RunStore) GetBroadcaster(runID string) *RunBroadcaster {
@@ -196,17 +205,18 @@ func (s *RunStore) CleanupOld() {
 	defer s.mu.Unlock()
 
 	cutoff := time.Now().Add(-RunMaxAge)
-	count := 0
+	var count int
 
 	for runID, run := range s.runs {
-		if run.Status != RunStatusRunning && run.UpdatedAt.Before(cutoff) {
-			if b, ok := s.broadcasters[runID]; ok {
-				b.Close()
-				delete(s.broadcasters, runID)
-			}
-			delete(s.runs, runID)
-			count++
+		if run.Status == RunStatusRunning || run.UpdatedAt.After(cutoff) {
+			continue
 		}
+		if b, ok := s.broadcasters[runID]; ok {
+			b.Close()
+		}
+		delete(s.broadcasters, runID)
+		delete(s.runs, runID)
+		count++
 	}
 
 	if count > 0 {

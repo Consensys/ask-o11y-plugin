@@ -205,6 +205,22 @@ func TestRunBroadcaster_SubscribeAfterClose(t *testing.T) {
 	}
 }
 
+func TestIsValidSecureID(t *testing.T) {
+	validID, err := generateShareID()
+	if err != nil {
+		t.Fatalf("failed to generate ID: %v", err)
+	}
+	if !isValidSecureID(validID) {
+		t.Errorf("generated ID should be valid: %q", validID)
+	}
+
+	for _, invalid := range []string{"", "short", "has spaces in it", "../../etc/passwd", "run:injection"} {
+		if isValidSecureID(invalid) {
+			t.Errorf("expected invalid for %q", invalid)
+		}
+	}
+}
+
 func TestRunBroadcaster_ConcurrentAccess(t *testing.T) {
 	b := newRunBroadcaster()
 	var wg sync.WaitGroup

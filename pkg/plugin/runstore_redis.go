@@ -66,25 +66,23 @@ func (s *RedisRunStore) AppendEvent(runID string, event agent.SSEEvent) {
 	}
 
 	eventsKey := fmt.Sprintf("run:%s:events", runID)
-	ctx, cancel := getContextWithTimeout(RedisOpTimeout)
-	defer cancel()
+	pushCtx, pushCancel := getContextWithTimeout(RedisOpTimeout)
+	defer pushCancel()
 
-	listLen, err := s.client.RPush(ctx, eventsKey, eventJSON).Result()
+	listLen, err := s.client.RPush(pushCtx, eventsKey, eventJSON).Result()
 	if err != nil {
 		s.logger.Error("Failed to append event to Redis", "error", err, "runId", runID)
 		return
 	}
 
 	if listLen == 1 {
-		ctx2, cancel2 := getContextWithTimeout(RedisOpTimeout)
-		defer cancel2()
-		s.client.Expire(ctx2, eventsKey, RunMaxAge)
-	}
-
-	if listLen > int64(RunMaxEventsPerRun) {
-		ctx2, cancel2 := getContextWithTimeout(RedisOpTimeout)
-		defer cancel2()
-		s.client.LTrim(ctx2, eventsKey, -int64(RunMaxEventsPerRun), -1)
+		ctx, cancel := getContextWithTimeout(RedisOpTimeout)
+		defer cancel()
+		s.client.Expire(ctx, eventsKey, RunMaxAge)
+	} else if listLen > int64(RunMaxEventsPerRun) {
+		ctx, cancel := getContextWithTimeout(RedisOpTimeout)
+		defer cancel()
+		s.client.LTrim(ctx, eventsKey, -int64(RunMaxEventsPerRun), -1)
 	}
 
 	s.touchRun(runID)
@@ -157,7 +155,6 @@ func (s *RedisRunStore) GetRun(runID string) (*AgentRun, error) {
 		return nil, fmt.Errorf("failed to unmarshal run: %w", err)
 	}
 
-	// Load events from the list
 	eventsKey := fmt.Sprintf("run:%s:events", runID)
 	ctx2, cancel2 := getContextWithTimeout(RedisBulkOpTimeout)
 	defer cancel2()
@@ -165,16 +162,17 @@ func (s *RedisRunStore) GetRun(runID string) (*AgentRun, error) {
 	eventStrings, err := s.client.LRange(ctx2, eventsKey, 0, -1).Result()
 	if err != nil && err != redis.Nil {
 		s.logger.Warn("Failed to load events from Redis", "error", err, "runId", runID)
-	} else {
-		run.Events = make([]agent.SSEEvent, 0, len(eventStrings))
-		for _, es := range eventStrings {
-			var event agent.SSEEvent
-			if err := json.Unmarshal([]byte(es), &event); err != nil {
-				s.logger.Warn("Failed to unmarshal event", "error", err, "runId", runID)
-				continue
-			}
-			run.Events = append(run.Events, event)
+		return &run, nil
+	}
+
+	run.Events = make([]agent.SSEEvent, 0, len(eventStrings))
+	for _, es := range eventStrings {
+		var event agent.SSEEvent
+		if err := json.Unmarshal([]byte(es), &event); err != nil {
+			s.logger.Warn("Failed to unmarshal event", "error", err, "runId", runID)
+			continue
 		}
+		run.Events = append(run.Events, event)
 	}
 
 	return &run, nil
@@ -187,13 +185,11 @@ func (s *RedisRunStore) GetBroadcaster(runID string) *RunBroadcaster {
 }
 
 func (s *RedisRunStore) CleanupOld() {
-	// Redis TTL handles expiration automatically.
-	// Clean up in-memory broadcasters for completed runs.
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	for runID, b := range s.broadcasters {
-		if b.closed {
+		if b.IsClosed() {
 			delete(s.broadcasters, runID)
 		}
 	}
