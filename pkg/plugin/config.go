@@ -22,5 +22,8 @@ const (
 )
 
 const (
-	AgentMaxIterations = 25
+	AgentMaxIterations  = 25
+	RunMaxAge           = 1 * time.Hour
+	RunCleanupInterval  = 5 * time.Minute
+	RunMaxEventsPerRun  = 500
 )

@@ -104,15 +104,16 @@ type PluginSettings struct {
 
 type Plugin struct {
 	backend.CallResourceHandler
-	logger          log.Logger
-	mcpProxy        *mcp.Proxy
-	agentLoop       *agent.AgentLoop
-	shareStore      ShareStoreInterface
-	redisClient     *redis.Client
-	usingRedis      bool
-	useBuiltInMCP   bool
-	ctx             context.Context
-	cancel          context.CancelFunc
+	logger        log.Logger
+	mcpProxy      *mcp.Proxy
+	agentLoop     *agent.AgentLoop
+	shareStore    ShareStoreInterface
+	runStore      RunStoreInterface
+	redisClient   *redis.Client
+	usingRedis    bool
+	useBuiltInMCP bool
+	ctx           context.Context
+	cancel        context.CancelFunc
 }
 
 func NewPlugin(ctx context.Context, settings backend.AppInstanceSettings) (instancemgmt.Instance, error) {
@@ -153,10 +154,14 @@ func NewPlugin(ctx context.Context, settings backend.AppInstanceSettings) (insta
 		logger.Warn("Failed to create Redis client, falling back to in-memory storage", "error", err)
 	}
 
+	var runStore RunStoreInterface
 	if !usingRedis {
 		rateLimiter := NewInMemoryRateLimiter(logger)
 		shareStore = NewShareStore(logger, rateLimiter)
+		runStore = NewRunStore(logger)
 		logger.Info("Using in-memory storage for session sharing (not suitable for multi-replica deployments)")
+	} else {
+		runStore = NewRedisRunStore(redisClient, logger)
 	}
 
 	pluginCtx, cancel := context.WithCancel(context.Background())
@@ -169,6 +174,7 @@ func NewPlugin(ctx context.Context, settings backend.AppInstanceSettings) (insta
 		mcpProxy:      mcpProxy,
 		agentLoop:     agentLoop,
 		shareStore:    shareStore,
+		runStore:      runStore,
 		redisClient:   redisClient,
 		usingRedis:    usingRedis,
 		useBuiltInMCP: pluginSettings.UseBuiltInMCP,
@@ -190,6 +196,19 @@ func NewPlugin(ctx context.Context, settings backend.AppInstanceSettings) (insta
 			}
 		}()
 	}
+
+	go func() {
+		ticker := time.NewTicker(RunCleanupInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				runStore.CleanupOld()
+			case <-pluginCtx.Done():
+				return
+			}
+		}
+	}()
 
 	mux := http.NewServeMux()
 	p.registerRoutes(mux)
@@ -248,6 +267,7 @@ func (p *Plugin) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/mcp/call-tool", p.handleMCPCallTool)
 	mux.HandleFunc("/api/mcp/servers", p.handleMCPServers)
 	mux.HandleFunc("/api/agent/run", p.handleAgentRun)
+	mux.HandleFunc("/api/agent/runs/", p.handleAgentRuns)
 	mux.HandleFunc("/api/sessions/share", p.handleCreateShare)
 	mux.HandleFunc("/api/sessions/shared/", p.handleGetSharedSession)
 	mux.HandleFunc("/api/sessions/share/", p.handleDeleteShare)
@@ -422,6 +442,7 @@ func (p *Plugin) handleAgentRun(w http.ResponseWriter, r *http.Request) {
 	}
 
 	userRole := getUserRole(r)
+	userID := getUserID(r)
 	orgID := r.Header.Get("X-Grafana-Org-Id")
 	if orgID == "" {
 		orgID = "1"
@@ -469,22 +490,22 @@ func (p *Plugin) handleAgentRun(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	p.logger.Info("Agent run request", "role", userRole, "orgID", orgID, "messageCount", len(req.Messages))
-
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("Connection", "keep-alive")
-	w.Header().Set("X-Accel-Buffering", "no")
-
-	flusher, ok := w.(http.Flusher)
-	if !ok {
-		http.Error(w, "Streaming not supported", http.StatusInternalServerError)
+	if req.Mode != "" && req.Mode != "stream" && req.Mode != "detached" {
+		http.Error(w, "Invalid mode: must be 'stream' or 'detached'", http.StatusBadRequest)
 		return
 	}
 
-	flusher.Flush()
+	runID, err := generateShareID()
+	if err != nil {
+		p.logger.Error("Failed to generate run ID", "error", err)
+		http.Error(w, "Failed to generate run ID", http.StatusInternalServerError)
+		return
+	}
 
-	ctx := r.Context()
+	numericOrgID := getOrgID(r)
+	p.runStore.CreateRun(runID, userID, numericOrgID)
+
+	p.logger.Info("Agent run request", "role", userRole, "orgID", orgID, "runId", runID, "mode", req.Mode, "messageCount", len(req.Messages))
 
 	eventCh := make(chan agent.SSEEvent, 16)
 
@@ -504,9 +525,89 @@ func (p *Plugin) handleAgentRun(w http.ResponseWriter, r *http.Request) {
 		ScopeOrgID:         req.ScopeOrgID,
 	}
 
-	go p.agentLoop.Run(ctx, loopReq, eventCh)
+	if req.Mode == "detached" {
+		go p.agentLoop.Run(p.ctx, loopReq, eventCh)
+		go p.consumeAgentEvents(runID, eventCh)
 
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"runId":  runID,
+			"status": RunStatusRunning,
+		})
+		return
+	}
+
+	// Stream mode: subscribe BEFORE launching consumer to avoid losing early events.
+	broadcaster := p.runStore.GetBroadcaster(runID)
+	if broadcaster == nil {
+		http.Error(w, "Internal error: no broadcaster for run", http.StatusInternalServerError)
+		return
+	}
+	subscriberCh, unsub := broadcaster.Subscribe()
+
+	loopCtx, loopCancel := context.WithCancel(p.ctx)
+	defer loopCancel()
+	go func() {
+		<-r.Context().Done()
+		loopCancel()
+	}()
+
+	go p.agentLoop.Run(loopCtx, loopReq, eventCh)
+	go p.consumeAgentEvents(runID, eventCh)
+
+	p.streamRunSSE(w, runID, subscriberCh, unsub)
+}
+
+func (p *Plugin) consumeAgentEvents(runID string, eventCh <-chan agent.SSEEvent) {
+	var lastEventType string
 	for event := range eventCh {
+		p.runStore.AppendEvent(runID, event)
+		lastEventType = event.Type
+	}
+
+	switch lastEventType {
+	case "done":
+		p.runStore.FinishRun(runID, RunStatusCompleted, "")
+	case "error":
+		p.runStore.FinishRun(runID, RunStatusFailed, "")
+	default:
+		p.runStore.FinishRun(runID, RunStatusCancelled, "")
+	}
+}
+
+func initSSEWriter(w http.ResponseWriter) (http.Flusher, bool) {
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("X-Accel-Buffering", "no")
+
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "Streaming not supported", http.StatusInternalServerError)
+	}
+	return flusher, ok
+}
+
+func (p *Plugin) streamRunSSE(w http.ResponseWriter, runID string, ch <-chan agent.SSEEvent, unsub func()) {
+	defer unsub()
+
+	flusher, ok := initSSEWriter(w)
+	if !ok {
+		return
+	}
+
+	startEvent := agent.SSEEvent{
+		Type: "run_started",
+		Data: agent.RunStartedEvent{RunID: runID},
+	}
+	if data, err := agent.MarshalSSE(startEvent); err == nil {
+		if _, err := w.Write(data); err != nil {
+			return
+		}
+		flusher.Flush()
+	}
+
+	for event := range ch {
 		data, err := agent.MarshalSSE(event)
 		if err != nil {
 			p.logger.Error("Failed to marshal SSE event", "error", err)
@@ -514,6 +615,118 @@ func (p *Plugin) handleAgentRun(w http.ResponseWriter, r *http.Request) {
 		}
 		if _, err := w.Write(data); err != nil {
 			p.logger.Debug("Client disconnected during SSE stream", "error", err)
+			return
+		}
+		flusher.Flush()
+	}
+}
+
+func (p *Plugin) handleAgentRuns(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	path := r.URL.Path
+	prefix := "/api/agent/runs/"
+	if !strings.HasPrefix(path, prefix) {
+		http.Error(w, "Invalid path format", http.StatusBadRequest)
+		return
+	}
+
+	remainder := strings.TrimPrefix(path, prefix)
+	if remainder == "" {
+		http.Error(w, "Run ID required", http.StatusBadRequest)
+		return
+	}
+
+	runID, isEvents := strings.CutSuffix(remainder, "/events")
+	if !isValidSecureID(runID) {
+		http.Error(w, "Invalid run ID format", http.StatusBadRequest)
+		return
+	}
+
+	if isEvents {
+		p.handleAgentRunEvents(w, r, runID)
+		return
+	}
+	orgID := getOrgID(r)
+	userID := getUserID(r)
+
+	run, err := p.runStore.GetRun(runID)
+	if err != nil {
+		http.Error(w, "Run not found", http.StatusNotFound)
+		return
+	}
+
+	if run.OrgID != orgID || run.UserID != userID {
+		http.Error(w, "Access denied", http.StatusForbidden)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(run)
+}
+
+func (p *Plugin) handleAgentRunEvents(w http.ResponseWriter, r *http.Request, runID string) {
+	orgID := getOrgID(r)
+	userID := getUserID(r)
+
+	run, err := p.runStore.GetRun(runID)
+	if err != nil {
+		http.Error(w, "Run not found", http.StatusNotFound)
+		return
+	}
+
+	if run.OrgID != orgID || run.UserID != userID {
+		http.Error(w, "Access denied", http.StatusForbidden)
+		return
+	}
+
+	broadcaster := p.runStore.GetBroadcaster(runID)
+	var subscriberCh <-chan agent.SSEEvent
+	var unsub func()
+	if broadcaster != nil && run.Status == RunStatusRunning {
+		subscriberCh, unsub = broadcaster.Subscribe()
+		defer unsub()
+	}
+
+	// Re-fetch events after subscribing so no events are lost between the
+	// initial auth-check GetRun and the Subscribe call above.
+	run, err = p.runStore.GetRun(runID)
+	if err != nil {
+		http.Error(w, "Run not found", http.StatusNotFound)
+		return
+	}
+
+	flusher, ok := initSSEWriter(w)
+	if !ok {
+		return
+	}
+
+	for _, event := range run.Events {
+		data, err := agent.MarshalSSE(event)
+		if err != nil {
+			continue
+		}
+		if _, err := w.Write(data); err != nil {
+			return
+		}
+	}
+	flusher.Flush()
+
+	if subscriberCh == nil {
+		return
+	}
+
+	// May receive duplicates of events from the catch-up snapshot; harmless.
+	for event := range subscriberCh {
+		data, err := agent.MarshalSSE(event)
+		if err != nil {
+			continue
+		}
+		if _, err := w.Write(data); err != nil {
+			p.logger.Debug("Client disconnected during SSE reconnect stream", "error", err)
 			return
 		}
 		flusher.Flush()
@@ -536,22 +749,14 @@ func (p *Plugin) handleDefault(w http.ResponseWriter, r *http.Request) {
 
 func getUserID(r *http.Request) int64 {
 	pluginContext := httpadapter.PluginConfigFromContext(r.Context())
-	if pluginContext.User != nil {
-		login := pluginContext.User.Login
-		if login != "" {
-			h := fnv.New64a()
-			h.Write([]byte(login))
-			hash := h.Sum64()
-			return int64(hash & 0x7FFFFFFFFFFFFFFF)
-		}
+	if pluginContext.User != nil && pluginContext.User.Login != "" {
+		h := fnv.New64a()
+		h.Write([]byte(pluginContext.User.Login))
+		return int64(h.Sum64() & 0x7FFFFFFFFFFFFFFF)
 	}
 
-	userIDHeader := r.Header.Get("X-Grafana-User-Id")
-	if userIDHeader != "" {
-		var userID int64
-		if _, err := fmt.Sscanf(userIDHeader, "%d", &userID); err == nil {
-			return userID
-		}
+	if id, err := strconv.ParseInt(r.Header.Get("X-Grafana-User-Id"), 10, 64); err == nil {
+		return id
 	}
 
 	return 0
@@ -562,17 +767,10 @@ func stringPtr(s string) *string {
 }
 
 func getOrgID(r *http.Request) int64 {
-	orgIDStr := r.Header.Get("X-Grafana-Org-Id")
-	if orgIDStr == "" {
-		return 1
+	if id, err := strconv.ParseInt(r.Header.Get("X-Grafana-Org-Id"), 10, 64); err == nil && id > 0 {
+		return id
 	}
-
-	var orgID int64
-	fmt.Sscanf(orgIDStr, "%d", &orgID)
-	if orgID == 0 {
-		return 1
-	}
-	return orgID
+	return 1
 }
 
 func (p *Plugin) handleCreateShare(w http.ResponseWriter, r *http.Request) {
