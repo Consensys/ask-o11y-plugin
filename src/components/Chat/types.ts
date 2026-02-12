@@ -54,8 +54,6 @@ export interface ChatInterfaceProps {
   currentInput: string;
   isGenerating: boolean;
   currentSessionTitle?: string;
-  isSummarizing: boolean;
-  hasSummary: boolean;
   setCurrentInput: (value: string) => void;
   sendMessage: () => void;
   handleKeyPress: (e: React.KeyboardEvent) => void;

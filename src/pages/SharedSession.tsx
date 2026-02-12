@@ -109,7 +109,6 @@ export function SharedSession(): React.ReactElement {
     return {
       id: sharedSession.id,
       messages,
-      summary: undefined,
     };
   }, [sharedSession]);
 

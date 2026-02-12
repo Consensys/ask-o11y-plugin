@@ -19,7 +19,7 @@ import type { AppPluginSettings } from '../../types/plugin';
 interface ChatProps {
   pluginSettings: AppPluginSettings;
   readOnly?: boolean;
-  initialSession?: { id?: string; messages?: ChatMessage[]; summary?: string };
+  initialSession?: { id?: string; messages?: ChatMessage[] };
   /** Message to auto-send on mount (for alert investigation mode) */
   initialMessage?: string;
   /** Override for session title (for alert investigation mode) */
@@ -137,8 +137,6 @@ function ChatComponent({
       currentInput,
       isGenerating,
       currentSessionTitle,
-      isSummarizing: sessionManager.isSummarizing,
-      hasSummary: !!sessionManager.currentSummary,
       setCurrentInput,
       sendMessage,
       handleKeyPress,
@@ -157,8 +155,6 @@ function ChatComponent({
       currentInput,
       isGenerating,
       currentSessionTitle,
-      sessionManager.isSummarizing,
-      sessionManager.currentSummary,
       sessionManager.sessions.length,
       setCurrentInput,
       sendMessage,

@@ -5,7 +5,6 @@ import { ChatInterfaceProps } from '../types';
 import { ChatHeader } from '../components/ChatHeader/ChatHeader';
 import { ChatHistory } from '../components/ChatHistory/ChatHistory';
 import { ChatInput } from '../components/ChatInput/ChatInput';
-import { SummarizationIndicator } from '../components/SummarizationIndicator/SummarizationIndicator';
 import { WelcomeMessage } from '../components/WelcomeMessage/WelcomeMessage';
 import { QuickSuggestions } from '../components/QuickSuggestions/QuickSuggestions';
 
@@ -19,8 +18,6 @@ function useChatInterface(model: ChatInterfaceScene): ChatInterfaceProps {
     currentInput: state.currentInput,
     isGenerating: state.isGenerating,
     currentSessionTitle: state.currentSessionTitle,
-    isSummarizing: state.isSummarizing,
-    hasSummary: state.hasSummary,
     setCurrentInput: state.setCurrentInput,
     sendMessage: state.sendMessage,
     handleKeyPress: state.handleKeyPress,
@@ -53,8 +50,6 @@ function ChatInterfaceRenderer({ model }: SceneComponentProps<ChatInterfaceScene
     currentInput,
     isGenerating,
     currentSessionTitle,
-    isSummarizing,
-    hasSummary,
     setCurrentInput,
     sendMessage,
     handleKeyPress,
@@ -79,9 +74,6 @@ function ChatInterfaceRenderer({ model }: SceneComponentProps<ChatInterfaceScene
           <div className="chat-interface-scroll-container w-full px-4 max-w-4xl mx-auto" style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, overflow: 'auto' }}>
             {/* Header - only show when there are messages */}
             <ChatHeader isGenerating={isGenerating} currentSessionTitle={currentSessionTitle} />
-
-            {/* Summarization indicator */}
-            <SummarizationIndicator isSummarizing={isSummarizing} hasSummary={hasSummary} />
 
             {/* Chat messages */}
             <div

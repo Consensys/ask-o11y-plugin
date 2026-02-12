@@ -22,7 +22,6 @@ import { MAX_TOTAL_TOKENS } from '../../../constants';
 interface InitialSessionData {
   id?: string;
   messages?: ChatMessage[];
-  summary?: string;
 }
 
 function updateLastAssistantMessage(
@@ -287,7 +286,7 @@ export function useChat(
       const result = await runAgentDetached({
         messages: messagesForBackend,
         systemPrompt: effectiveSystemPrompt,
-        summary: sessionManager.currentSummary || '',
+        summary: '',
         maxTotalTokens: pluginSettings.maxTotalTokens || MAX_TOTAL_TOKENS,
         recentMessageCount: 15,
         orgId,
