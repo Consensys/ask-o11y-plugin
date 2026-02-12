@@ -18,6 +18,9 @@ type RedisRunStore struct {
 	broadcasters map[string]*RunBroadcaster
 }
 
+func runKey(runID string) string    { return fmt.Sprintf("run:%s", runID) }
+func eventsKey(runID string) string { return fmt.Sprintf("run:%s:events", runID) }
+
 func NewRedisRunStore(client *redis.Client, logger log.Logger) *RedisRunStore {
 	return &RedisRunStore{
 		client:       client,
@@ -44,10 +47,9 @@ func (s *RedisRunStore) CreateRun(runID string, userID, orgID int64) *AgentRun {
 		return run
 	}
 
-	key := fmt.Sprintf("run:%s", runID)
 	ctx, cancel := getContextWithTimeout(RedisOpTimeout)
 	defer cancel()
-	if err := s.client.Set(ctx, key, runJSON, RunMaxAge).Err(); err != nil {
+	if err := s.client.Set(ctx, runKey(runID), runJSON, RunMaxAge).Err(); err != nil {
 		s.logger.Error("Failed to store run in Redis", "error", err, "runId", runID)
 	}
 
@@ -65,24 +67,20 @@ func (s *RedisRunStore) AppendEvent(runID string, event agent.SSEEvent) {
 		return
 	}
 
-	eventsKey := fmt.Sprintf("run:%s:events", runID)
+	ek := eventsKey(runID)
 	pushCtx, pushCancel := getContextWithTimeout(RedisOpTimeout)
 	defer pushCancel()
 
-	listLen, err := s.client.RPush(pushCtx, eventsKey, eventJSON).Result()
+	listLen, err := s.client.RPush(pushCtx, ek, eventJSON).Result()
 	if err != nil {
 		s.logger.Error("Failed to append event to Redis", "error", err, "runId", runID)
 		return
 	}
 
-	if listLen == 1 {
+	if listLen > int64(RunMaxEventsPerRun) {
 		ctx, cancel := getContextWithTimeout(RedisOpTimeout)
 		defer cancel()
-		s.client.Expire(ctx, eventsKey, RunMaxAge)
-	} else if listLen > int64(RunMaxEventsPerRun) {
-		ctx, cancel := getContextWithTimeout(RedisOpTimeout)
-		defer cancel()
-		s.client.LTrim(ctx, eventsKey, -int64(RunMaxEventsPerRun), -1)
+		s.client.LTrim(ctx, ek, -int64(RunMaxEventsPerRun), -1)
 	}
 
 	s.touchRun(runID)
@@ -96,11 +94,10 @@ func (s *RedisRunStore) AppendEvent(runID string, event agent.SSEEvent) {
 }
 
 func (s *RedisRunStore) FinishRun(runID string, status RunStatus, errMsg string) {
-	key := fmt.Sprintf("run:%s", runID)
 	ctx, cancel := getContextWithTimeout(RedisOpTimeout)
 	defer cancel()
 
-	runJSON, err := s.client.Get(ctx, key).Result()
+	runJSON, err := s.client.Get(ctx, runKey(runID)).Result()
 	if err != nil {
 		s.logger.Error("Failed to get run from Redis for finish", "error", err, "runId", runID)
 		return
@@ -124,7 +121,9 @@ func (s *RedisRunStore) FinishRun(runID string, status RunStatus, errMsg string)
 
 	ctx2, cancel2 := getContextWithTimeout(RedisOpTimeout)
 	defer cancel2()
-	s.client.Set(ctx2, key, updatedJSON, RunMaxAge)
+	s.client.Set(ctx2, runKey(runID), updatedJSON, RunMaxAge)
+
+	s.refreshEventsTTL(runID)
 
 	s.mu.Lock()
 	b := s.broadcasters[runID]
@@ -138,11 +137,10 @@ func (s *RedisRunStore) FinishRun(runID string, status RunStatus, errMsg string)
 }
 
 func (s *RedisRunStore) GetRun(runID string) (*AgentRun, error) {
-	key := fmt.Sprintf("run:%s", runID)
 	ctx, cancel := getContextWithTimeout(RedisOpTimeout)
 	defer cancel()
 
-	runJSON, err := s.client.Get(ctx, key).Result()
+	runJSON, err := s.client.Get(ctx, runKey(runID)).Result()
 	if err == redis.Nil {
 		return nil, fmt.Errorf("run not found")
 	}
@@ -155,11 +153,10 @@ func (s *RedisRunStore) GetRun(runID string) (*AgentRun, error) {
 		return nil, fmt.Errorf("failed to unmarshal run: %w", err)
 	}
 
-	eventsKey := fmt.Sprintf("run:%s:events", runID)
 	ctx2, cancel2 := getContextWithTimeout(RedisBulkOpTimeout)
 	defer cancel2()
 
-	eventStrings, err := s.client.LRange(ctx2, eventsKey, 0, -1).Result()
+	eventStrings, err := s.client.LRange(ctx2, eventsKey(runID), 0, -1).Result()
 	if err != nil && err != redis.Nil {
 		s.logger.Warn("Failed to load events from Redis", "error", err, "runId", runID)
 		return &run, nil
@@ -196,11 +193,10 @@ func (s *RedisRunStore) CleanupOld() {
 }
 
 func (s *RedisRunStore) touchRun(runID string) {
-	key := fmt.Sprintf("run:%s", runID)
 	ctx, cancel := getContextWithTimeout(RedisOpTimeout)
 	defer cancel()
 
-	runJSON, err := s.client.Get(ctx, key).Result()
+	runJSON, err := s.client.Get(ctx, runKey(runID)).Result()
 	if err != nil {
 		return
 	}
@@ -219,5 +215,13 @@ func (s *RedisRunStore) touchRun(runID string) {
 
 	ctx2, cancel2 := getContextWithTimeout(RedisOpTimeout)
 	defer cancel2()
-	s.client.Set(ctx2, key, updatedJSON, RunMaxAge)
+	s.client.Set(ctx2, runKey(runID), updatedJSON, RunMaxAge)
+
+	s.refreshEventsTTL(runID)
+}
+
+func (s *RedisRunStore) refreshEventsTTL(runID string) {
+	ctx, cancel := getContextWithTimeout(RedisOpTimeout)
+	defer cancel()
+	s.client.Expire(ctx, eventsKey(runID), RunMaxAge)
 }
