@@ -201,7 +201,9 @@ export function useChat(
     setToolCalls(new Map());
 
     setChatHistory((prev) => [...prev, { role: 'assistant', content: '', toolCalls: [] }]);
-    const messagesForBackend = newChatHistory.map((m) => ({ role: m.role, content: m.content }));
+    const messagesForBackend = newChatHistory
+      .filter((m) => m.role !== 'assistant' || m.content.trim() !== '')
+      .map((m) => ({ role: m.role, content: m.content }));
 
     const abortController = new AbortController();
     abortControllerRef.current = abortController;

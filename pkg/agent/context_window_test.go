@@ -95,6 +95,81 @@ func TestTrimToolResponses(t *testing.T) {
 	}
 }
 
+func TestSanitizeMessages_RemovesEmptyAssistant(t *testing.T) {
+	messages := []Message{
+		{Role: "user", Content: "hello"},
+		{Role: "assistant", Content: ""},
+		{Role: "user", Content: "world"},
+	}
+
+	result := sanitizeMessages(messages)
+	if len(result) != 2 {
+		t.Fatalf("expected 2 messages, got %d", len(result))
+	}
+	if result[0].Content != "hello" || result[1].Content != "world" {
+		t.Errorf("unexpected messages: %+v", result)
+	}
+}
+
+func TestSanitizeMessages_KeepsAssistantWithContent(t *testing.T) {
+	messages := []Message{
+		{Role: "user", Content: "hello"},
+		{Role: "assistant", Content: "I can help"},
+		{Role: "user", Content: "thanks"},
+	}
+
+	result := sanitizeMessages(messages)
+	if len(result) != 3 {
+		t.Fatalf("expected 3 messages, got %d", len(result))
+	}
+}
+
+func TestSanitizeMessages_KeepsAssistantWithToolCalls(t *testing.T) {
+	messages := []Message{
+		{Role: "user", Content: "query metrics"},
+		{Role: "assistant", Content: "", ToolCalls: []ToolCall{
+			{ID: "1", Type: "function", Function: FunctionCall{Name: "query_prometheus", Arguments: "{}"}},
+		}},
+	}
+
+	result := sanitizeMessages(messages)
+	if len(result) != 2 {
+		t.Fatalf("expected 2 messages, got %d", len(result))
+	}
+}
+
+func TestSanitizeMessages_RemovesWhitespaceOnlyAssistant(t *testing.T) {
+	messages := []Message{
+		{Role: "user", Content: "hello"},
+		{Role: "assistant", Content: "   \n\t  "},
+		{Role: "user", Content: "world"},
+	}
+
+	result := sanitizeMessages(messages)
+	if len(result) != 2 {
+		t.Fatalf("expected 2 messages, got %d", len(result))
+	}
+}
+
+func TestBuildContextWindow_FiltersEmptyAssistant(t *testing.T) {
+	messages := []Message{
+		{Role: "user", Content: "hello"},
+		{Role: "assistant", Content: ""},
+		{Role: "user", Content: "retry"},
+	}
+
+	result := BuildContextWindow("sys", messages, "", 10)
+	// system + user + user (empty assistant filtered out)
+	if len(result) != 3 {
+		t.Fatalf("expected 3 messages, got %d", len(result))
+	}
+	for _, m := range result {
+		if m.Role == "assistant" {
+			t.Error("empty assistant message should have been filtered")
+		}
+	}
+}
+
 func TestEstimateTokens(t *testing.T) {
 	// ~4 chars per token
 	if got := EstimateTokens("hello world!"); got < 2 || got > 5 {
