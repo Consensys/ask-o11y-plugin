@@ -52,7 +52,6 @@ export interface ChatInterfaceProps {
   chatHistory: ChatMessage[];
   currentInput: string;
   isGenerating: boolean;
-  toolsLoading: boolean;
   currentSessionTitle?: string;
   isSummarizing: boolean;
   hasSummary: boolean;
@@ -66,6 +65,8 @@ export interface ChatInterfaceProps {
   rightSlot?: React.ReactNode;
   readOnly?: boolean;
   onSuggestionClick?: (message: string) => void;
+  queuedMessageCount: number;
+  onStopGeneration?: () => void;
 }
 
 /** Props for the Grafana page panel */

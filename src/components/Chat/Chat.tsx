@@ -51,8 +51,6 @@ function ChatComponent({
     currentInput,
     isGenerating,
     chatContainerRef,
-    toolsLoading,
-    toolsError,
     setCurrentInput,
     sendMessage,
     handleKeyPress,
@@ -60,6 +58,8 @@ function ChatComponent({
     sessionManager,
     bottomSpacerRef,
     detectedPageRefs,
+    messageQueue,
+    stopGeneration,
   } = useChat(
     pluginSettings,
     sessionIdFromUrl,
@@ -135,7 +135,6 @@ function ChatComponent({
       chatHistory,
       currentInput,
       isGenerating,
-      toolsLoading,
       currentSessionTitle,
       isSummarizing: sessionManager.isSummarizing,
       hasSummary: !!sessionManager.currentSummary,
@@ -149,12 +148,13 @@ function ChatComponent({
       rightSlot: <HistoryButton onClick={openHistory} sessionCount={sessionManager.sessions.length} />,
       readOnly,
       onSuggestionClick: handleSuggestionClick,
+      queuedMessageCount: messageQueue.length,
+      onStopGeneration: stopGeneration,
     }),
     [
       chatHistory,
       currentInput,
       isGenerating,
-      toolsLoading,
       currentSessionTitle,
       sessionManager.isSummarizing,
       sessionManager.currentSummary,
@@ -170,6 +170,8 @@ function ChatComponent({
       openHistory,
       readOnly,
       handleSuggestionClick,
+      messageQueue.length,
+      stopGeneration,
     ]
   );
 
@@ -185,10 +187,6 @@ function ChatComponent({
   );
 
   const chatScene = useChatScene(showSidePanel, chatInterfaceState, grafanaPageState, chatPanelPosition);
-
-  if (toolsError) {
-    return <div>Error: {toolsError.message}</div>;
-  }
 
   return (
     <div

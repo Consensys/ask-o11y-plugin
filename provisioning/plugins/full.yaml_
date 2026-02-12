@@ -75,4 +75,3 @@ apps:
           url: 'http://mcp-grafana:8000/mcp'
           enabled: true
           type: 'streamable-http'
-

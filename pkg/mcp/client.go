@@ -111,6 +111,8 @@ func (c *Client) connectMCP() error {
 		Version: "1.0.0",
 	}, nil)
 
+	httpClient := c.httpClientWithHeaders()
+
 	var transport mcpsdk.Transport
 	var err error
 
@@ -118,12 +120,12 @@ func (c *Client) connectMCP() error {
 	case "sse":
 		transport = &mcpsdk.SSEClientTransport{
 			Endpoint:   c.config.URL,
-			HTTPClient: http.DefaultClient,
+			HTTPClient: httpClient,
 		}
 	case "streamable-http", "http+streamable":
 		transport = &mcpsdk.StreamableClientTransport{
 			Endpoint:   c.config.URL,
-			HTTPClient: http.DefaultClient,
+			HTTPClient: httpClient,
 			MaxRetries: 3,
 		}
 	case "standard":
@@ -149,6 +151,31 @@ func (c *Client) connectMCP() error {
 
 	c.logger.Debug("Connected to MCP server", "type", c.config.Type, "url", c.config.URL)
 	return nil
+}
+
+func (c *Client) httpClientWithHeaders() *http.Client {
+	if len(c.config.Headers) == 0 {
+		return http.DefaultClient
+	}
+	return &http.Client{
+		Transport: &configHeaderRoundTripper{
+			base:    http.DefaultTransport,
+			headers: c.config.Headers,
+		},
+	}
+}
+
+type configHeaderRoundTripper struct {
+	base    http.RoundTripper
+	headers map[string]string
+}
+
+func (t *configHeaderRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	req = req.Clone(req.Context())
+	for key, value := range t.headers {
+		req.Header.Set(key, value)
+	}
+	return t.base.RoundTrip(req)
 }
 
 // connectMCPWithOrgContext establishes a connection to an MCP server with a custom HTTP client that includes org headers.
@@ -337,10 +364,21 @@ func (c *Client) listMCPTools() ([]Tool, error) {
 		// LiteLLM expects at least a "properties" field as an object, not null
 		inputSchema = normalizeJSONSchema(inputSchema)
 
+		var annotations *ToolAnnotations
+		if sdkTool.Annotations != nil {
+			annotations = &ToolAnnotations{
+				ReadOnlyHint:    boolPtrTrueOnly(sdkTool.Annotations.ReadOnlyHint),
+				DestructiveHint: sdkTool.Annotations.DestructiveHint,
+				IdempotentHint:  boolPtrTrueOnly(sdkTool.Annotations.IdempotentHint),
+				OpenWorldHint:   sdkTool.Annotations.OpenWorldHint,
+			}
+		}
+
 		tools[i] = Tool{
 			Name:        sdkTool.Name,
 			Description: sdkTool.Description,
 			InputSchema: inputSchema,
+			Annotations: annotations,
 		}
 	}
 

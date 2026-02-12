@@ -22,6 +22,7 @@
     "coverage:merge": "mkdir -p coverage-combined/.nyc_output && cp coverage-unit/coverage-final.json coverage-combined/.nyc_output/unit.json 2>/dev/null; cp coverage-e2e/.nyc_output/*.json coverage-combined/.nyc_output/ 2>/dev/null; nyc report --temp-dir coverage-combined/.nyc_output --report-dir coverage-combined",
     "coverage": "npm run coverage:clean && npm run coverage:unit && npm run build:frontend:coverage && npm run e2e:coverage && npm run coverage:merge",
     "server": "docker compose up --build",
+    "server:full": "bash -c 'cleanup() { mv provisioning/plugins/full.yaml provisioning/plugins/full.yaml_ 2>/dev/null; mv provisioning/plugins/app.yaml_ provisioning/plugins/app.yaml 2>/dev/null; }; trap cleanup EXIT; mv provisioning/plugins/app.yaml provisioning/plugins/app.yaml_ 2>/dev/null; mv provisioning/plugins/full.yaml_ provisioning/plugins/full.yaml 2>/dev/null; docker compose -f docker-compose-full.yaml up --build'",
     "sign": "npx --yes @grafana/sign-plugin@latest",
     "backend:mod": "go mod tidy",
     "validate": "npm run validate:build && npm run validate:archive && npm run validate:run",

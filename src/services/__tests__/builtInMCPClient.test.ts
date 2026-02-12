@@ -61,17 +61,14 @@ describe('BuiltInMCPClient', () => {
       (mcp.enabled as jest.Mock).mockResolvedValue(true);
       mockMCPClient.listTools.mockResolvedValue({
         tools: [
-          { name: 'mcp-grafana_get_dashboard_by_uid', description: 'Get dashboard' },
-          { name: 'mcp-grafana_create_dashboard', description: 'Create dashboard' },
+          { name: 'get_dashboard_by_uid', description: 'Get dashboard', annotations: { readOnlyHint: true } },
+          { name: 'create_dashboard', description: 'Create dashboard', annotations: { readOnlyHint: false } },
         ],
       });
 
       const tools = await client.listTools();
       expect(tools).toHaveLength(2); // Admin gets all tools
-      expect(tools.map((t) => t.name)).toEqual([
-        'mcp-grafana_get_dashboard_by_uid',
-        'mcp-grafana_create_dashboard',
-      ]);
+      expect(tools.map((t) => t.name)).toEqual(['get_dashboard_by_uid', 'create_dashboard']);
     });
 
     it('should filter tools for Viewer role', async () => {
@@ -79,14 +76,14 @@ describe('BuiltInMCPClient', () => {
       (mcp.enabled as jest.Mock).mockResolvedValue(true);
       mockMCPClient.listTools.mockResolvedValue({
         tools: [
-          { name: 'mcp-grafana_get_dashboard_by_uid', description: 'Get dashboard' },
-          { name: 'mcp-grafana_create_dashboard', description: 'Create dashboard' },
+          { name: 'get_dashboard_by_uid', description: 'Get dashboard', annotations: { readOnlyHint: true } },
+          { name: 'create_dashboard', description: 'Create dashboard', annotations: { readOnlyHint: false } },
         ],
       });
 
       const tools = await client.listTools();
-      expect(tools).toHaveLength(1); // Viewer only gets get_dashboard
-      expect(tools[0].name).toBe('mcp-grafana_get_dashboard_by_uid');
+      expect(tools).toHaveLength(1); // Viewer only gets read-only tools
+      expect(tools[0].name).toBe('get_dashboard_by_uid');
     });
 
     it('should return empty array when MCP is unavailable', async () => {
@@ -98,7 +95,13 @@ describe('BuiltInMCPClient', () => {
     it('should cache tools and apply RBAC on subsequent calls', async () => {
       (mcp.enabled as jest.Mock).mockResolvedValue(true);
       mockMCPClient.listTools.mockResolvedValue({
-        tools: [{ name: 'mcp-grafana_get_dashboard_by_uid', description: 'Get dashboard' }],
+        tools: [
+          {
+            name: 'get_dashboard_by_uid',
+            description: 'Get dashboard',
+            annotations: { readOnlyHint: true },
+          },
+        ],
       });
 
       // First call
@@ -142,10 +145,12 @@ describe('BuiltInMCPClient', () => {
       (config.bootData as any).user.orgRole = 'Viewer';
       (mcp.enabled as jest.Mock).mockResolvedValue(true);
       mockMCPClient.listTools.mockResolvedValue({
-        tools: [{ name: 'mcp-grafana_create_dashboard', description: 'Create dashboard' }],
+        tools: [
+          { name: 'create_dashboard', description: 'Create dashboard', annotations: { readOnlyHint: false } },
+        ],
       });
 
-      const result = await client.callTool({ name: 'mcp-grafana_create_dashboard' });
+      const result = await client.callTool({ name: 'create_dashboard' });
       expect(result.isError).toBe(true);
       const content = result.content[0];
       expect(content.type).toBe('text');
@@ -201,11 +206,13 @@ describe('BuiltInMCPClient', () => {
       (config.bootData as any).user.orgRole = 'Viewer';
       (mcp.enabled as jest.Mock).mockResolvedValue(true);
       mockMCPClient.listTools.mockResolvedValue({
-        tools: [{ name: 'mcp-grafana_create_dashboard', description: 'Create dashboard' }],
+        tools: [
+          { name: 'create_dashboard', description: 'Create dashboard', annotations: { readOnlyHint: false } },
+        ],
       });
 
       await client.listTools(); // Populate cache
-      expect(client.isTool('mcp-grafana_create_dashboard')).toBe(false);
+      expect(client.isTool('create_dashboard')).toBe(false);
     });
 
     it('should return false when cache is empty', () => {

@@ -84,5 +84,10 @@
         "name": "LLM"
       }
     ]
+  },
+  "iam": {
+    "permissions": [
+      { "action": "plugins.app:access", "scope": "plugins:id:grafana-llm-app" }
+    ]
   }
 }

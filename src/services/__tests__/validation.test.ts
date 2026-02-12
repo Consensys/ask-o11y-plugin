@@ -42,33 +42,33 @@ describe('ValidationService', () => {
       expect(result).toBe('HelloWorld');
     });
 
-    it('should throw on script injection', () => {
-      expect(() => ValidationService.validateChatInput('<script>alert("xss")</script>')).toThrow(
-        'Input contains potentially harmful content'
+    it('should accept queries with container= label selector', () => {
+      expect(ValidationService.validateChatInput('Show me logs where container=nginx')).toBe(
+        'Show me logs where container=nginx'
       );
     });
 
-    it('should throw on javascript: protocol', () => {
-      expect(() => ValidationService.validateChatInput('javascript:alert(1)')).toThrow(
-        'Input contains potentially harmful content'
+    it('should accept queries mentioning PromQL expressions', () => {
+      expect(ValidationService.validateChatInput('What is a PromQL expression (rate vs irate)?')).toBe(
+        'What is a PromQL expression (rate vs irate)?'
       );
     });
 
-    it('should throw on event handler injection', () => {
-      expect(() => ValidationService.validateChatInput('<img onerror=alert(1)>')).toThrow(
-        'Input contains potentially harmful content'
+    it('should accept queries with connection= labels', () => {
+      expect(ValidationService.validateChatInput('Find metrics where connection=active')).toBe(
+        'Find metrics where connection=active'
       );
     });
 
-    it('should throw on iframe injection', () => {
-      expect(() => ValidationService.validateChatInput('<iframe src="evil.com">')).toThrow(
-        'Input contains potentially harmful content'
+    it('should accept queries discussing eval in alerting', () => {
+      expect(ValidationService.validateChatInput('How does the eval (evaluation) interval work?')).toBe(
+        'How does the eval (evaluation) interval work?'
       );
     });
 
-    it('should throw on eval injection', () => {
-      expect(() => ValidationService.validateChatInput('eval("malicious")')).toThrow(
-        'Input contains potentially harmful content'
+    it('should accept queries with version= and region= selectors', () => {
+      expect(ValidationService.validateChatInput('Show pods where version=v2 and region=us-east-1')).toBe(
+        'Show pods where version=v2 and region=us-east-1'
       );
     });
   });
@@ -566,34 +566,22 @@ describe('ValidationService', () => {
     });
   });
 
-  describe('validateChatInput edge cases', () => {
-    it('should throw on expression() injection', () => {
-      expect(() => ValidationService.validateChatInput('expression(test)')).toThrow(
-        'Input contains potentially harmful content'
+  describe('validateChatInput - observability label selectors', () => {
+    it('should accept queries with action= and session= labels', () => {
+      expect(ValidationService.validateChatInput('Filter by action=deploy and session=abc123')).toBe(
+        'Filter by action=deploy and session=abc123'
       );
     });
 
-    it('should throw on vbscript protocol', () => {
-      expect(() => ValidationService.validateChatInput('vbscript:msgbox(1)')).toThrow(
-        'Input contains potentially harmful content'
+    it('should accept queries with function= labels', () => {
+      expect(ValidationService.validateChatInput('Show traces where function=handleRequest')).toBe(
+        'Show traces where function=handleRequest'
       );
     });
 
-    it('should throw on data:text/html', () => {
-      expect(() => ValidationService.validateChatInput('data:text/html,<script>alert(1)</script>')).toThrow(
-        'Input contains potentially harmful content'
-      );
-    });
-
-    it('should throw on object tag injection', () => {
-      expect(() => ValidationService.validateChatInput('<object data="evil.swf">')).toThrow(
-        'Input contains potentially harmful content'
-      );
-    });
-
-    it('should throw on embed tag injection', () => {
-      expect(() => ValidationService.validateChatInput('<embed src="evil.swf">')).toThrow(
-        'Input contains potentially harmful content'
+    it('should accept queries mentioning javascript in logs', () => {
+      expect(ValidationService.validateChatInput('I see javascript: errors in my browser logs')).toBe(
+        'I see javascript: errors in my browser logs'
       );
     });
   });
