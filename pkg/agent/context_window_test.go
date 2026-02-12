@@ -95,6 +95,79 @@ func TestTrimToolResponses(t *testing.T) {
 	}
 }
 
+func TestSanitizeMessages(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    []Message
+		expected int
+	}{
+		{
+			name: "removes empty assistant",
+			input: []Message{
+				{Role: "user", Content: "hello"},
+				{Role: "assistant", Content: ""},
+				{Role: "user", Content: "world"},
+			},
+			expected: 2,
+		},
+		{
+			name: "keeps assistant with content",
+			input: []Message{
+				{Role: "user", Content: "hello"},
+				{Role: "assistant", Content: "I can help"},
+				{Role: "user", Content: "thanks"},
+			},
+			expected: 3,
+		},
+		{
+			name: "keeps assistant with tool calls",
+			input: []Message{
+				{Role: "user", Content: "query metrics"},
+				{Role: "assistant", Content: "", ToolCalls: []ToolCall{
+					{ID: "1", Type: "function", Function: FunctionCall{Name: "query_prometheus", Arguments: "{}"}},
+				}},
+			},
+			expected: 2,
+		},
+		{
+			name: "removes whitespace-only assistant",
+			input: []Message{
+				{Role: "user", Content: "hello"},
+				{Role: "assistant", Content: "   \n\t  "},
+				{Role: "user", Content: "world"},
+			},
+			expected: 2,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := sanitizeMessages(tt.input)
+			if len(result) != tt.expected {
+				t.Fatalf("expected %d messages, got %d", tt.expected, len(result))
+			}
+		})
+	}
+}
+
+func TestBuildContextWindow_FiltersEmptyAssistant(t *testing.T) {
+	messages := []Message{
+		{Role: "user", Content: "hello"},
+		{Role: "assistant", Content: ""},
+		{Role: "user", Content: "retry"},
+	}
+
+	result := BuildContextWindow("sys", messages, "", 10)
+	if len(result) != 3 {
+		t.Fatalf("expected 3 messages, got %d", len(result))
+	}
+	for _, m := range result {
+		if m.Role == "assistant" {
+			t.Error("empty assistant message should have been filtered")
+		}
+	}
+}
+
 func TestEstimateTokens(t *testing.T) {
 	// ~4 chars per token
 	if got := EstimateTokens("hello world!"); got < 2 || got > 5 {

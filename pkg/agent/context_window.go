@@ -1,6 +1,9 @@
 package agent
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"strings"
+)
 
 const defaultMaxTotalTokens = 100_000
 const defaultRecentMessageCount = 15
@@ -51,7 +54,20 @@ func BuildContextWindow(systemPrompt string, allMessages []Message, summary stri
 	}
 	ctx = append(ctx, allMessages[start:]...)
 
-	return ctx
+	return sanitizeMessages(ctx)
+}
+
+// sanitizeMessages drops empty assistant messages that appear when a user stops
+// generation before any content streams back (OpenAI rejects these with 400).
+func sanitizeMessages(messages []Message) []Message {
+	out := make([]Message, 0, len(messages))
+	for _, m := range messages {
+		if m.Role == "assistant" && strings.TrimSpace(m.Content) == "" && len(m.ToolCalls) == 0 {
+			continue
+		}
+		out = append(out, m)
+	}
+	return out
 }
 
 func TrimMessagesToTokenLimit(messages []Message, tools []OpenAITool, maxTokens int) []Message {
