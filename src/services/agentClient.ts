@@ -60,6 +60,7 @@ export interface AgentCallbacks {
   onDone: (event: DoneEvent) => void;
   onError: (message: string) => void;
   onRunStarted?: (event: RunStartedEvent) => void;
+  onReconnect?: () => void;
 }
 
 export interface AgentRunStatus {
@@ -85,7 +86,6 @@ function orgIdHeaders(orgId?: string): Record<string, string> {
 
 interface ReadSSEStreamOptions {
   warnOnMalformedJSON?: boolean;
-  expectTerminalEvent?: boolean;
   abortSignal?: AbortSignal;
 }
 
@@ -93,7 +93,7 @@ async function readSSEStream(
   body: ReadableStream<Uint8Array>,
   callbacks: AgentCallbacks,
   options: ReadSSEStreamOptions = {}
-): Promise<void> {
+): Promise<boolean> {
   const reader = body.getReader();
   const decoder = new TextDecoder();
   let buffer = '';
@@ -137,18 +137,16 @@ async function readSSEStream(
         dispatchEvent(event, callbacks);
       }
     }
-
-    if (options.expectTerminalEvent && !receivedTerminalEvent && !options.abortSignal?.aborted) {
-      callbacks.onError('Agent stream ended unexpectedly without a completion event');
-    }
   } catch (err) {
     if (err instanceof DOMException && err.name === 'AbortError') {
-      return;
+      return true;
     }
     throw err;
   } finally {
     reader.releaseLock();
   }
+
+  return receivedTerminalEvent;
 }
 
 export async function runAgent(
@@ -180,11 +178,13 @@ export async function runAgent(
     return;
   }
 
-  await readSSEStream(resp.body, callbacks, {
+  const completed = await readSSEStream(resp.body, callbacks, {
     warnOnMalformedJSON: true,
-    expectTerminalEvent: true,
     abortSignal,
   });
+  if (!completed && !abortSignal?.aborted) {
+    callbacks.onError('Agent stream ended unexpectedly without a completion event');
+  }
 }
 
 function dispatchEvent(event: SSEEvent, callbacks: AgentCallbacks): void {
@@ -265,31 +265,51 @@ export async function getAgentRunStatus(runId: string, orgId?: string): Promise<
   return resp.json();
 }
 
+const MAX_RECONNECT_ATTEMPTS = 10;
+const RECONNECT_DELAY_MS = 1000;
+
 export async function reconnectToAgentRun(
   runId: string,
   callbacks: AgentCallbacks,
   orgId?: string,
   abortSignal?: AbortSignal
 ): Promise<void> {
-  const resp = await fetch(`${AGENT_RUNS_URL}/${runId}/events`, {
-    headers: orgIdHeaders(orgId),
-    signal: abortSignal,
-  });
+  for (let attempt = 0; attempt <= MAX_RECONNECT_ATTEMPTS; attempt++) {
+    if (abortSignal?.aborted) {
+      return;
+    }
 
-  if (!resp.ok) {
-    const text = await resp.text();
-    callbacks.onError(`Failed to reconnect to run (${resp.status}): ${text}`);
-    return;
+    if (attempt > 0) {
+      console.log(`[agentClient] SSE stream dropped, reconnecting (attempt ${attempt})`);
+      callbacks.onReconnect?.();
+      await new Promise((resolve) => setTimeout(resolve, RECONNECT_DELAY_MS));
+    }
+
+    const resp = await fetch(`${AGENT_RUNS_URL}/${runId}/events`, {
+      headers: orgIdHeaders(orgId),
+      signal: abortSignal,
+    });
+
+    if (!resp.ok) {
+      const text = await resp.text();
+      callbacks.onError(`Failed to reconnect to run (${resp.status}): ${text}`);
+      return;
+    }
+
+    if (!resp.body) {
+      callbacks.onError('No response body from agent run events');
+      return;
+    }
+
+    const completed = await readSSEStream(resp.body, callbacks, {
+      warnOnMalformedJSON: true,
+      abortSignal,
+    });
+
+    if (completed || abortSignal?.aborted) {
+      return;
+    }
   }
 
-  if (!resp.body) {
-    callbacks.onError('No response body from agent run events');
-    return;
-  }
-
-  await readSSEStream(resp.body, callbacks, {
-    warnOnMalformedJSON: true,
-    expectTerminalEvent: true,
-    abortSignal,
-  });
+  callbacks.onError('Agent run did not complete after multiple reconnection attempts');
 }

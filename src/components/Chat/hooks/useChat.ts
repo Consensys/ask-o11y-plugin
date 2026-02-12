@@ -220,6 +220,17 @@ export function useChat(
         });
       },
       onDone: () => {},
+      onReconnect: () => {
+        setChatHistory((prev) =>
+          updateLastAssistantMessage(prev, (msg) => ({
+            ...msg,
+            content: '',
+            reasoning: undefined,
+            pageRefs: undefined,
+          }))
+        );
+        setToolCalls(new Map());
+      },
       onError: (message: string) => {
         hadErrorRef.current = true;
         console.error('[useChat] Agent error:', message);
