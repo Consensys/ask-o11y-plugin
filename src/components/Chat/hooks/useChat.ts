@@ -299,6 +299,7 @@ export function useChat(
     const abortController = new AbortController();
     abortControllerRef.current = abortController;
     const hadErrorRef = { current: false };
+    const sessionId = sessionManager.currentSessionId;
 
     try {
       const { runId } = await runAgentDetached({
@@ -313,7 +314,6 @@ export function useChat(
       });
 
       activeRunIdRef.current = runId;
-      const sessionId = sessionManager.currentSessionId;
       if (sessionId) {
         setActiveRunId(sessionId, runId);
       } else {
@@ -323,7 +323,7 @@ export function useChat(
       const callbacks = makeCallbacks(abortController, hadErrorRef);
       await reconnectToAgentRun(runId, callbacks, orgId, abortController.signal);
 
-      cleanupRun(sessionManager.currentSessionId);
+      cleanupRun(sessionId);
 
       if (hadErrorRef.current) {
         setRetryCount((prev) => prev + 1);
@@ -331,7 +331,7 @@ export function useChat(
         setRetryCount(0);
       }
     } catch (error) {
-      cleanupRun(sessionManager.currentSessionId);
+      cleanupRun(sessionId);
 
       if (error instanceof DOMException && error.name === 'AbortError') {
         setChatHistory((prev) =>
