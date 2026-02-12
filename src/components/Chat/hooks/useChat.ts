@@ -291,7 +291,6 @@ export function useChat(
         recentMessageCount: 15,
         orgId,
         orgName: config.bootData.user.orgName || '',
-        mode: 'detached',
         sessionId: sessionManager.currentSessionId || undefined,
         title: sessionTitleOverrideRef.current,
       });

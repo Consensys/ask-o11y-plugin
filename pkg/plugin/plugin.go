@@ -510,11 +510,6 @@ func (p *Plugin) handleAgentRun(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	if req.Mode != "" && req.Mode != "stream" && req.Mode != "detached" {
-		http.Error(w, "Invalid mode: must be 'stream' or 'detached'", http.StatusBadRequest)
-		return
-	}
-
 	runID, err := generateShareID()
 	if err != nil {
 		p.logger.Error("Failed to generate run ID", "error", err)
@@ -552,7 +547,7 @@ func (p *Plugin) handleAgentRun(w http.ResponseWriter, r *http.Request) {
 	}
 	p.runStore.CreateRun(runID, userID, numericOrgID)
 
-	p.logger.Info("Agent run request", "role", userRole, "orgID", orgID, "runId", runID, "sessionId", sessionID, "mode", req.Mode, "messageCount", len(req.Messages))
+	p.logger.Info("Agent run request", "role", userRole, "orgID", orgID, "runId", runID, "sessionId", sessionID, "messageCount", len(req.Messages))
 
 	eventCh := make(chan agent.SSEEvent, 16)
 
@@ -572,50 +567,27 @@ func (p *Plugin) handleAgentRun(w http.ResponseWriter, r *http.Request) {
 		ScopeOrgID:         req.ScopeOrgID,
 	}
 
-	if req.Mode == "detached" {
-		runCtx, runCancel := context.WithCancel(p.ctx)
+	runCtx, runCancel := context.WithCancel(p.ctx)
 
-		p.runCancelsMu.Lock()
-		p.runCancels[runID] = runCancel
-		p.runCancelsMu.Unlock()
+	p.runCancelsMu.Lock()
+	p.runCancels[runID] = runCancel
+	p.runCancelsMu.Unlock()
 
-		go p.agentLoop.Run(runCtx, loopReq, eventCh)
-		go func() {
-			p.consumeAgentEvents(runID, sessionID, userID, numericOrgID, eventCh)
-			runCancel()
-			p.runCancelsMu.Lock()
-			delete(p.runCancels, runID)
-			p.runCancelsMu.Unlock()
-		}()
-
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"runId":     runID,
-			"sessionId": sessionID,
-			"status":    RunStatusRunning,
-		})
-		return
-	}
-
-	// Stream mode: subscribe BEFORE launching consumer to avoid losing early events.
-	broadcaster := p.runStore.GetBroadcaster(runID)
-	if broadcaster == nil {
-		http.Error(w, "Internal error: no broadcaster for run", http.StatusInternalServerError)
-		return
-	}
-	subscriberCh, unsub := broadcaster.Subscribe()
-
-	loopCtx, loopCancel := context.WithCancel(p.ctx)
-	defer loopCancel()
+	go p.agentLoop.Run(runCtx, loopReq, eventCh)
 	go func() {
-		<-r.Context().Done()
-		loopCancel()
+		p.consumeAgentEvents(runID, sessionID, userID, numericOrgID, eventCh)
+		runCancel()
+		p.runCancelsMu.Lock()
+		delete(p.runCancels, runID)
+		p.runCancelsMu.Unlock()
 	}()
 
-	go p.agentLoop.Run(loopCtx, loopReq, eventCh)
-	go p.consumeAgentEvents(runID, sessionID, userID, numericOrgID, eventCh)
-
-	p.streamRunSSE(w, runID, sessionID, subscriberCh, unsub)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"runId":     runID,
+		"sessionId": sessionID,
+		"status":    RunStatusRunning,
+	})
 }
 
 func (p *Plugin) consumeAgentEvents(runID, sessionID string, userID, orgID int64, eventCh <-chan agent.SSEEvent) {
@@ -664,39 +636,6 @@ func initSSEWriter(w http.ResponseWriter) (http.Flusher, bool) {
 	w.Header().Set("X-Accel-Buffering", "no")
 
 	return flusher, true
-}
-
-func (p *Plugin) streamRunSSE(w http.ResponseWriter, runID, sessionID string, ch <-chan agent.SSEEvent, unsub func()) {
-	defer unsub()
-
-	flusher, ok := initSSEWriter(w)
-	if !ok {
-		return
-	}
-
-	startEvent := agent.SSEEvent{
-		Type: "run_started",
-		Data: agent.RunStartedEvent{RunID: runID, SessionID: sessionID},
-	}
-	if data, err := agent.MarshalSSE(startEvent); err == nil {
-		if _, err := w.Write(data); err != nil {
-			return
-		}
-		flusher.Flush()
-	}
-
-	for event := range ch {
-		data, err := agent.MarshalSSE(event)
-		if err != nil {
-			p.logger.Error("Failed to marshal SSE event", "error", err)
-			continue
-		}
-		if _, err := w.Write(data); err != nil {
-			p.logger.Debug("Client disconnected during SSE stream", "error", err)
-			return
-		}
-		flusher.Flush()
-	}
 }
 
 func (p *Plugin) getAuthorizedRun(w http.ResponseWriter, r *http.Request, runID string) (*AgentRun, bool) {

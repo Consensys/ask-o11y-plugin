@@ -98,7 +98,6 @@ type RunRequest struct {
 	RecentMessageCount int       `json:"recentMessageCount,omitempty"`
 	OrgName            string    `json:"orgName,omitempty"`
 	ScopeOrgID         string    `json:"scopeOrgId,omitempty"`
-	Mode               string    `json:"mode,omitempty"`
 	SessionID          string    `json:"sessionId,omitempty"`
 	Title              string    `json:"title,omitempty"`
 }

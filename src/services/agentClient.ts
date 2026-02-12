@@ -7,7 +7,6 @@ export interface AgentRunRequest {
   orgId?: string;
   orgName?: string;
   scopeOrgId?: string;
-  mode?: 'stream' | 'detached';
   sessionId?: string;
   title?: string;
 }
@@ -152,44 +151,6 @@ async function readSSEStream(
   return receivedTerminalEvent;
 }
 
-export async function runAgent(
-  request: AgentRunRequest,
-  callbacks: AgentCallbacks,
-  abortSignal?: AbortSignal
-): Promise<void> {
-  const { orgId, ...body } = request;
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
-    ...orgIdHeaders(orgId),
-  };
-
-  const resp = await fetch(AGENT_RUN_URL, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify(body),
-    signal: abortSignal,
-  });
-
-  if (!resp.ok) {
-    const text = await resp.text();
-    callbacks.onError(`Agent request failed (${resp.status}): ${text}`);
-    return;
-  }
-
-  if (!resp.body) {
-    callbacks.onError('No response body from agent');
-    return;
-  }
-
-  const completed = await readSSEStream(resp.body, callbacks, {
-    warnOnMalformedJSON: true,
-    abortSignal,
-  });
-  if (!completed && !abortSignal?.aborted) {
-    callbacks.onError('Agent stream ended unexpectedly without a completion event');
-  }
-}
-
 function dispatchEvent(event: SSEEvent, callbacks: AgentCallbacks): void {
   switch (event.type) {
     case 'content':
@@ -233,7 +194,7 @@ export async function runAgentDetached(request: AgentRunRequest): Promise<Detach
       'Content-Type': 'application/json',
       ...orgIdHeaders(orgId),
     },
-    body: JSON.stringify({ ...body, mode: 'detached' }),
+    body: JSON.stringify(body),
   });
 
   if (!resp.ok) {
