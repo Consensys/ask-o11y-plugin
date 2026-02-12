@@ -225,6 +225,19 @@ describe('ChatMessage', () => {
       expect(screen.queryByTestId('reasoning-indicator')).not.toBeInTheDocument();
     });
 
+    it('should hide reasoning indicator and show content when content arrives alongside reasoning', () => {
+      const message: ChatMessageType = {
+        role: 'assistant',
+        content: 'Here is the answer',
+        reasoning: 'Let me think...',
+      };
+
+      render(<ChatMessage message={message} isGenerating={true} isLastMessage={true} />);
+
+      expect(screen.queryByTestId('reasoning-indicator')).not.toBeInTheDocument();
+      expect(screen.getByTestId('streamdown')).toBeInTheDocument();
+    });
+
     it('should not show reasoning indicator when not generating', () => {
       const message: ChatMessageType = {
         role: 'assistant',

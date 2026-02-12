@@ -50,7 +50,8 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({ message, isGenerating 
   const theme = useTheme2();
   const showThinking =
     message.role === 'assistant' && isGenerating && isLastMessage && !message.content && !message.reasoning;
-  const showReasoning = message.role === 'assistant' && isGenerating && isLastMessage && !!message.reasoning;
+  const showReasoning =
+    message.role === 'assistant' && isGenerating && isLastMessage && !!message.reasoning && !message.content;
   const isUser = message.role === 'user';
 
   if (isUser) {
@@ -112,7 +113,7 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({ message, isGenerating 
           </div>
         )}
 
-        {!showThinking && !showReasoning && contentSections.length > 0 && (
+        {!showThinking && contentSections.length > 0 && (
           <div
             className="text-sm leading-relaxed whitespace-normal break-words"
             style={{ color: theme.colors.text.primary }}
@@ -139,7 +140,7 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({ message, isGenerating 
           </div>
         )}
 
-        {!showThinking && !showReasoning && contentSections.length === 0 && (
+        {!showThinking && contentSections.length === 0 && (
           <div
             className="text-sm leading-relaxed whitespace-normal break-words prose prose-sm max-w-none"
             style={{ color: theme.colors.text.primary }}
