@@ -15,7 +15,7 @@ func EstimateTokens(text string) int {
 func estimateMessagesTokens(messages []Message, tools []OpenAITool) int {
 	total := 0
 	for _, m := range messages {
-		total += EstimateTokens(m.Content)
+		total += EstimateTokens(m.Content) + EstimateTokens(m.ReasoningContent)
 		if m.ToolCallID != "" {
 			total += 10
 		}

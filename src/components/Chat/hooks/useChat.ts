@@ -6,7 +6,13 @@ import { SYSTEM_PROMPT } from '../constants';
 import { ValidationService } from '../../../services/validation';
 import { ChatSession } from '../../../core/models/ChatSession';
 import { parseGrafanaLinks } from '../utils/grafanaLinkParser';
-import { runAgent, ContentEvent, ToolCallStartEvent, ToolCallResultEvent } from '../../../services/agentClient';
+import {
+  runAgent,
+  ContentEvent,
+  ReasoningEvent,
+  ToolCallStartEvent,
+  ToolCallResultEvent,
+} from '../../../services/agentClient';
 import type { AppPluginSettings } from '../../../types/plugin';
 import { MAX_TOTAL_TOKENS } from '../../../constants';
 
@@ -17,6 +23,16 @@ function updateLastAssistantMessage(
   return history.map((msg, idx) =>
     idx === history.length - 1 && msg.role === 'assistant' ? updater(msg) : msg
   );
+}
+
+function stripReasoningFromHistory(history: ChatMessage[]): ChatMessage[] {
+  return history.map((msg) => {
+    if (msg.reasoning === undefined) {
+      return msg;
+    }
+    const { reasoning: _, ...rest } = msg;
+    return rest;
+  });
 }
 
 function buildEffectiveSystemPrompt(
@@ -213,6 +229,17 @@ export function useChat(
           orgName: config.bootData.user.orgName || '',
         },
         {
+          onReasoning: (event: ReasoningEvent) => {
+            if (abortController.signal.aborted) {
+              return;
+            }
+            setChatHistory((prev) =>
+              updateLastAssistantMessage(prev, (msg) => ({
+                ...msg,
+                reasoning: (msg.reasoning || '') + event.content,
+              }))
+            );
+          },
           onContent: (event: ContentEvent) => {
             if (abortController.signal.aborted) {
               return;
@@ -220,7 +247,12 @@ export function useChat(
             setChatHistory((prev) =>
               updateLastAssistantMessage(prev, (msg) => {
                 const accumulated = msg.content + event.content;
-                return { ...msg, content: accumulated, pageRefs: parseGrafanaLinks(accumulated) };
+                return {
+                  ...msg,
+                  content: accumulated,
+                  reasoning: undefined,
+                  pageRefs: parseGrafanaLinks(accumulated),
+                };
               })
             );
           },
@@ -307,7 +339,7 @@ export function useChat(
   useEffect(() => {
     if (prevIsGeneratingRef.current && !isGenerating && chatHistory.length > 0 && !readOnly) {
       sessionManager
-        .saveImmediately(chatHistory)
+        .saveImmediately(stripReasoningFromHistory(chatHistory))
         .then((createdSessionId) => {
           if (createdSessionId) {
             onSessionIdChange(createdSessionId);

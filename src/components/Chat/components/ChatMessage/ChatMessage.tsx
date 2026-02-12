@@ -2,6 +2,7 @@ import React from 'react';
 import { Streamdown } from 'streamdown';
 import { useTheme2 } from '@grafana/ui';
 import { ToolCallsSection } from '../ToolCallsSection/ToolCallsSection';
+import { ReasoningIndicator } from '../ReasoningIndicator/ReasoningIndicator';
 import { GraphRenderer } from '../GraphRenderer/GraphRenderer';
 import { LogsRenderer } from '../LogsRenderer/LogsRenderer';
 import { TracesRenderer } from '../TracesRenderer/TracesRenderer';
@@ -58,7 +59,9 @@ function QuerySection({ section }: QuerySectionProps): React.ReactElement | null
 
 export const ChatMessage: React.FC<ChatMessageProps> = ({ message, isGenerating = false, isLastMessage = false }) => {
   const theme = useTheme2();
-  const showThinking = message.role === 'assistant' && isGenerating && isLastMessage && !message.content;
+  const showThinking =
+    message.role === 'assistant' && isGenerating && isLastMessage && !message.content && !message.reasoning;
+  const showReasoning = message.role === 'assistant' && isGenerating && isLastMessage && !!message.reasoning;
   const isUser = message.role === 'user';
 
   if (isUser) {
@@ -97,6 +100,9 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({ message, isGenerating 
             <ToolCallsSection toolCalls={message.toolCalls} />
           </div>
         )}
+
+        {/* Reasoning Indicator */}
+        {showReasoning && <ReasoningIndicator reasoning={message.reasoning!} />}
 
         {/* Message Content */}
         {showThinking ? (

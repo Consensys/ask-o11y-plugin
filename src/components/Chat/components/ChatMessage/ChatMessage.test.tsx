@@ -26,6 +26,12 @@ jest.mock('../ToolCallsSection/ToolCallsSection', () => ({
   ),
 }));
 
+jest.mock('../ReasoningIndicator/ReasoningIndicator', () => ({
+  ReasoningIndicator: ({ reasoning }: { reasoning: string }) => (
+    <div data-testid="reasoning-indicator">{reasoning}</div>
+  ),
+}));
+
 jest.mock('../GraphRenderer/GraphRenderer', () => ({
   GraphRenderer: () => <div data-testid="graph-renderer">Graph</div>,
 }));
@@ -193,6 +199,42 @@ describe('ChatMessage', () => {
       render(<ChatMessage message={message} isGenerating={true} isLastMessage={false} />);
 
       expect(screen.queryByText('Thinking...')).not.toBeInTheDocument();
+    });
+
+    it('should show reasoning indicator instead of thinking dots when reasoning is present', () => {
+      const message: ChatMessageType = {
+        role: 'assistant',
+        content: '',
+        reasoning: 'Let me analyze the metrics...',
+      };
+
+      render(<ChatMessage message={message} isGenerating={true} isLastMessage={true} />);
+
+      expect(screen.getByTestId('reasoning-indicator')).toBeInTheDocument();
+      expect(screen.getByText('Let me analyze the metrics...')).toBeInTheDocument();
+    });
+
+    it('should not show reasoning indicator when content arrives', () => {
+      const message: ChatMessageType = {
+        role: 'assistant',
+        content: 'Here is the answer',
+      };
+
+      render(<ChatMessage message={message} isGenerating={true} isLastMessage={true} />);
+
+      expect(screen.queryByTestId('reasoning-indicator')).not.toBeInTheDocument();
+    });
+
+    it('should not show reasoning indicator when not generating', () => {
+      const message: ChatMessageType = {
+        role: 'assistant',
+        content: '',
+        reasoning: 'Some reasoning...',
+      };
+
+      render(<ChatMessage message={message} isGenerating={false} isLastMessage={true} />);
+
+      expect(screen.queryByTestId('reasoning-indicator')).not.toBeInTheDocument();
     });
   });
 
