@@ -110,6 +110,7 @@ type Plugin struct {
 	agentLoop     *agent.AgentLoop
 	shareStore    ShareStoreInterface
 	runStore      RunStoreInterface
+	sessionStore  SessionStoreInterface
 	redisClient   *redis.Client
 	usingRedis    bool
 	useBuiltInMCP bool
@@ -158,13 +159,16 @@ func NewPlugin(ctx context.Context, settings backend.AppInstanceSettings) (insta
 	}
 
 	var runStore RunStoreInterface
+	var sessionStore SessionStoreInterface
 	if !usingRedis {
 		rateLimiter := NewInMemoryRateLimiter(logger)
 		shareStore = NewShareStore(logger, rateLimiter)
 		runStore = NewRunStore(logger)
-		logger.Info("Using in-memory storage for session sharing (not suitable for multi-replica deployments)")
+		sessionStore = NewSessionStore(logger)
+		logger.Info("Using in-memory storage (not suitable for multi-replica deployments)")
 	} else {
 		runStore = NewRedisRunStore(redisClient, logger)
+		sessionStore = NewRedisSessionStore(redisClient, logger)
 	}
 
 	pluginCtx, cancel := context.WithCancel(context.Background())
@@ -178,6 +182,7 @@ func NewPlugin(ctx context.Context, settings backend.AppInstanceSettings) (insta
 		agentLoop:     agentLoop,
 		shareStore:    shareStore,
 		runStore:      runStore,
+		sessionStore:  sessionStore,
 		redisClient:   redisClient,
 		usingRedis:    usingRedis,
 		useBuiltInMCP: pluginSettings.UseBuiltInMCP,
@@ -279,10 +284,14 @@ func (p *Plugin) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/mcp/servers", p.handleMCPServers)
 	mux.HandleFunc("/api/agent/run", p.handleAgentRun)
 	mux.HandleFunc("/api/agent/runs/", p.handleAgentRuns)
+
+	// Session CRUD (new) — registered before share routes for specificity
+	mux.HandleFunc("/api/sessions/current", p.handleSessionCurrent)
 	mux.HandleFunc("/api/sessions/share", p.handleCreateShare)
 	mux.HandleFunc("/api/sessions/shared/", p.handleGetSharedSession)
 	mux.HandleFunc("/api/sessions/share/", p.handleDeleteShare)
-	mux.HandleFunc("/api/sessions/", p.handleGetSessionShares)
+	mux.HandleFunc("/api/sessions/", p.handleSessionRouter)
+	mux.HandleFunc("/api/sessions", p.handleSessionsRoot)
 
 	mux.HandleFunc("/", p.handleDefault)
 }
@@ -514,9 +523,36 @@ func (p *Plugin) handleAgentRun(w http.ResponseWriter, r *http.Request) {
 	}
 
 	numericOrgID := getOrgID(r)
+
+	// Session management: create or link a session to this run.
+	sessionID := req.SessionID
+	if sessionID != "" {
+		// Verify the session exists and belongs to this user.
+		if _, err := p.sessionStore.GetSession(sessionID, userID, numericOrgID); err != nil {
+			http.Error(w, "Session not found", http.StatusNotFound)
+			return
+		}
+	} else {
+		// Create a new session from the user messages.
+		sessionMsgs := agentMessagesToSessionMessages(req.Messages)
+		session, err := p.sessionStore.CreateSession(userID, numericOrgID, req.Title, sessionMsgs)
+		if err != nil {
+			p.logger.Error("Failed to create session", "error", err)
+			http.Error(w, "Failed to create session", http.StatusInternalServerError)
+			return
+		}
+		sessionID = session.ID
+		if err := p.sessionStore.SetCurrentSessionID(userID, numericOrgID, sessionID); err != nil {
+			p.logger.Warn("Failed to set current session ID", "error", err)
+		}
+	}
+
+	if err := p.sessionStore.SetActiveRunID(sessionID, userID, numericOrgID, runID); err != nil {
+		p.logger.Warn("Failed to set active run ID", "error", err)
+	}
 	p.runStore.CreateRun(runID, userID, numericOrgID)
 
-	p.logger.Info("Agent run request", "role", userRole, "orgID", orgID, "runId", runID, "mode", req.Mode, "messageCount", len(req.Messages))
+	p.logger.Info("Agent run request", "role", userRole, "orgID", orgID, "runId", runID, "sessionId", sessionID, "mode", req.Mode, "messageCount", len(req.Messages))
 
 	eventCh := make(chan agent.SSEEvent, 16)
 
@@ -545,7 +581,7 @@ func (p *Plugin) handleAgentRun(w http.ResponseWriter, r *http.Request) {
 
 		go p.agentLoop.Run(runCtx, loopReq, eventCh)
 		go func() {
-			p.consumeAgentEvents(runID, eventCh)
+			p.consumeAgentEvents(runID, sessionID, userID, numericOrgID, eventCh)
 			runCancel()
 			p.runCancelsMu.Lock()
 			delete(p.runCancels, runID)
@@ -554,8 +590,9 @@ func (p *Plugin) handleAgentRun(w http.ResponseWriter, r *http.Request) {
 
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]interface{}{
-			"runId":  runID,
-			"status": RunStatusRunning,
+			"runId":     runID,
+			"sessionId": sessionID,
+			"status":    RunStatusRunning,
 		})
 		return
 	}
@@ -576,15 +613,17 @@ func (p *Plugin) handleAgentRun(w http.ResponseWriter, r *http.Request) {
 	}()
 
 	go p.agentLoop.Run(loopCtx, loopReq, eventCh)
-	go p.consumeAgentEvents(runID, eventCh)
+	go p.consumeAgentEvents(runID, sessionID, userID, numericOrgID, eventCh)
 
-	p.streamRunSSE(w, runID, subscriberCh, unsub)
+	p.streamRunSSE(w, runID, sessionID, subscriberCh, unsub)
 }
 
-func (p *Plugin) consumeAgentEvents(runID string, eventCh <-chan agent.SSEEvent) {
+func (p *Plugin) consumeAgentEvents(runID, sessionID string, userID, orgID int64, eventCh <-chan agent.SSEEvent) {
 	var lastEvent agent.SSEEvent
+	var allEvents []agent.SSEEvent
 	for event := range eventCh {
 		p.runStore.AppendEvent(runID, event)
+		allEvents = append(allEvents, event)
 		lastEvent = event
 	}
 
@@ -601,6 +640,14 @@ func (p *Plugin) consumeAgentEvents(runID string, eventCh <-chan agent.SSEEvent)
 		p.runStore.FinishRun(runID, RunStatusFailed, "agent terminated without producing events")
 	default:
 		p.runStore.FinishRun(runID, RunStatusCancelled, "")
+	}
+
+	if sessionID != "" {
+		assistantMsg := reconstructAssistantMessage(allEvents)
+		if err := p.sessionStore.AppendMessages(sessionID, userID, orgID, []SessionMessage{assistantMsg}); err != nil {
+			p.logger.Warn("Failed to append assistant message to session", "error", err, "sessionId", sessionID)
+		}
+		p.sessionStore.ClearActiveRunID(sessionID, userID, orgID)
 	}
 }
 
@@ -619,7 +666,7 @@ func initSSEWriter(w http.ResponseWriter) (http.Flusher, bool) {
 	return flusher, true
 }
 
-func (p *Plugin) streamRunSSE(w http.ResponseWriter, runID string, ch <-chan agent.SSEEvent, unsub func()) {
+func (p *Plugin) streamRunSSE(w http.ResponseWriter, runID, sessionID string, ch <-chan agent.SSEEvent, unsub func()) {
 	defer unsub()
 
 	flusher, ok := initSSEWriter(w)
@@ -629,7 +676,7 @@ func (p *Plugin) streamRunSSE(w http.ResponseWriter, runID string, ch <-chan age
 
 	startEvent := agent.SSEEvent{
 		Type: "run_started",
-		Data: agent.RunStartedEvent{RunID: runID},
+		Data: agent.RunStartedEvent{RunID: runID, SessionID: sessionID},
 	}
 	if data, err := agent.MarshalSSE(startEvent); err == nil {
 		if _, err := w.Write(data); err != nil {
@@ -1033,36 +1080,187 @@ func (p *Plugin) handleDeleteShare(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(response)
 }
 
-func (p *Plugin) handleGetSessionShares(w http.ResponseWriter, r *http.Request) {
+// handleSessionsRoot handles /api/sessions (no trailing slash).
+func (p *Plugin) handleSessionsRoot(w http.ResponseWriter, r *http.Request) {
+	userID := getUserID(r)
+	orgID := getOrgID(r)
+
+	switch r.Method {
+	case http.MethodGet:
+		sessions, err := p.sessionStore.ListSessions(userID, orgID)
+		if err != nil {
+			p.logger.Error("Failed to list sessions", "error", err)
+			http.Error(w, "Failed to list sessions", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(sessions)
+
+	case http.MethodPost:
+		var req struct {
+			Title    string           `json:"title"`
+			Messages []SessionMessage `json:"messages"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, fmt.Sprintf("Invalid request: %v", err), http.StatusBadRequest)
+			return
+		}
+		session, err := p.sessionStore.CreateSession(userID, orgID, req.Title, req.Messages)
+		if err != nil {
+			p.logger.Error("Failed to create session", "error", err)
+			http.Error(w, "Failed to create session", http.StatusInternalServerError)
+			return
+		}
+		if err := p.sessionStore.SetCurrentSessionID(userID, orgID, session.ID); err != nil {
+			p.logger.Warn("Failed to set current session ID", "error", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		json.NewEncoder(w).Encode(session)
+
+	case http.MethodDelete:
+		if err := p.sessionStore.DeleteAllSessions(userID, orgID); err != nil {
+			p.logger.Error("Failed to delete all sessions", "error", err)
+			http.Error(w, "Failed to delete sessions", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]bool{"success": true})
+
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+// handleSessionCurrent handles /api/sessions/current.
+func (p *Plugin) handleSessionCurrent(w http.ResponseWriter, r *http.Request) {
+	userID := getUserID(r)
+	orgID := getOrgID(r)
+
+	switch r.Method {
+	case http.MethodGet:
+		id, err := p.sessionStore.GetCurrentSessionID(userID, orgID)
+		if err != nil {
+			http.Error(w, "Failed to get current session", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"sessionId": id})
+
+	case http.MethodPut:
+		var req struct {
+			SessionID string `json:"sessionId"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, fmt.Sprintf("Invalid request: %v", err), http.StatusBadRequest)
+			return
+		}
+		if req.SessionID == "" {
+			if err := p.sessionStore.ClearCurrentSessionID(userID, orgID); err != nil {
+				http.Error(w, "Failed to clear current session", http.StatusInternalServerError)
+				return
+			}
+		} else {
+			if err := p.sessionStore.SetCurrentSessionID(userID, orgID, req.SessionID); err != nil {
+				http.Error(w, "Session not found", http.StatusNotFound)
+				return
+			}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]bool{"success": true})
+
+	case http.MethodDelete:
+		if err := p.sessionStore.ClearCurrentSessionID(userID, orgID); err != nil {
+			http.Error(w, "Failed to clear current session", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]bool{"success": true})
+
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+// handleSessionRouter dispatches /api/sessions/{id} and /api/sessions/{id}/shares.
+func (p *Plugin) handleSessionRouter(w http.ResponseWriter, r *http.Request) {
+	path := r.URL.Path
+	prefix := "/api/sessions/"
+
+	// Delegate to share-related handlers based on path prefix.
+	if strings.HasPrefix(path, "/api/sessions/shared/") || strings.HasPrefix(path, "/api/sessions/share/") {
+		http.Error(w, "Invalid path format", http.StatusBadRequest)
+		return
+	}
+
+	remainder := strings.TrimPrefix(path, prefix)
+	if remainder == "" {
+		http.Error(w, "Session ID required", http.StatusBadRequest)
+		return
+	}
+
+	// /api/sessions/{id}/shares → list shares for session
+	if sessionID, isShares := strings.CutSuffix(remainder, "/shares"); isShares {
+		if !isValidSecureID(sessionID) {
+			http.Error(w, "Invalid session ID format", http.StatusBadRequest)
+			return
+		}
+		p.handleGetSessionShares(w, r, sessionID)
+		return
+	}
+
+	// /api/sessions/{id} → CRUD on a single session
+	sessionID := remainder
+	if !isValidSecureID(sessionID) {
+		http.Error(w, "Invalid session ID format", http.StatusBadRequest)
+		return
+	}
+
+	userID := getUserID(r)
+	orgID := getOrgID(r)
+
+	switch r.Method {
+	case http.MethodGet:
+		session, err := p.sessionStore.GetSession(sessionID, userID, orgID)
+		if err != nil {
+			http.Error(w, "Session not found", http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(session)
+
+	case http.MethodPut:
+		var update SessionUpdate
+		if err := json.NewDecoder(r.Body).Decode(&update); err != nil {
+			http.Error(w, fmt.Sprintf("Invalid request: %v", err), http.StatusBadRequest)
+			return
+		}
+		if err := p.sessionStore.UpdateSession(sessionID, userID, orgID, update); err != nil {
+			http.Error(w, "Session not found", http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]bool{"success": true})
+
+	case http.MethodDelete:
+		if err := p.sessionStore.DeleteSession(sessionID, userID, orgID); err != nil {
+			http.Error(w, "Session not found", http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]bool{"success": true})
+
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+func (p *Plugin) handleGetSessionShares(w http.ResponseWriter, r *http.Request, sessionID string) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
-	path := r.URL.Path
-
-	if strings.HasPrefix(path, "/api/sessions/shared/") {
-		http.Error(w, "Invalid path format", http.StatusBadRequest)
-		return
-	}
-	if strings.HasPrefix(path, "/api/sessions/share/") {
-		http.Error(w, "Invalid path format", http.StatusBadRequest)
-		return
-	}
-	if path == "/api/sessions/share" {
-		http.Error(w, "Invalid path format", http.StatusBadRequest)
-		return
-	}
-
-	prefix := "/api/sessions/"
-	suffix := "/shares"
-
-	if !strings.HasPrefix(path, prefix) || !strings.HasSuffix(path, suffix) {
-		http.Error(w, "Invalid path format", http.StatusBadRequest)
-		return
-	}
-
-	sessionID := strings.TrimPrefix(strings.TrimSuffix(path, suffix), prefix)
 	if sessionID == "" {
 		http.Error(w, "Session ID required", http.StatusBadRequest)
 		return
@@ -1091,4 +1289,81 @@ func (p *Plugin) handleGetSessionShares(w http.ResponseWriter, r *http.Request) 
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(userShares)
+}
+
+func agentMessagesToSessionMessages(msgs []agent.Message) []SessionMessage {
+	result := make([]SessionMessage, len(msgs))
+	for i, m := range msgs {
+		result[i] = SessionMessage{
+			Role:    m.Role,
+			Content: m.Content,
+		}
+	}
+	return result
+}
+
+func reconstructAssistantMessage(events []agent.SSEEvent) SessionMessage {
+	var content string
+	var toolCallsRaw []map[string]interface{}
+
+	for _, e := range events {
+		switch e.Type {
+		case "content":
+			if ce, ok := e.Data.(agent.ContentEvent); ok {
+				content += ce.Content
+			} else if m, ok := e.Data.(map[string]interface{}); ok {
+				if c, ok := m["content"].(string); ok {
+					content += c
+				}
+			}
+		case "tool_call_start":
+			tc := map[string]interface{}{"running": true}
+			if tcs, ok := e.Data.(agent.ToolCallStartEvent); ok {
+				tc["name"] = tcs.Name
+				tc["arguments"] = tcs.Arguments
+			} else if m, ok := e.Data.(map[string]interface{}); ok {
+				tc["name"] = m["name"]
+				tc["arguments"] = m["arguments"]
+			}
+			toolCallsRaw = append(toolCallsRaw, tc)
+		case "tool_call_result":
+			tc := map[string]interface{}{"running": false}
+			if tcr, ok := e.Data.(agent.ToolCallResultEvent); ok {
+				tc["name"] = tcr.Name
+				tc["arguments"] = ""
+				if tcr.IsError {
+					tc["error"] = tcr.Content
+				} else {
+					tc["response"] = map[string]interface{}{
+						"content": []map[string]interface{}{{"type": "text", "text": tcr.Content}},
+					}
+				}
+			} else if m, ok := e.Data.(map[string]interface{}); ok {
+				tc["name"] = m["name"]
+				tc["arguments"] = ""
+				isErr, _ := m["isError"].(bool)
+				if isErr {
+					tc["error"] = m["content"]
+				} else {
+					tc["response"] = map[string]interface{}{
+						"content": []map[string]interface{}{{"type": "text", "text": m["content"]}},
+					}
+				}
+			}
+			toolCallsRaw = append(toolCallsRaw, tc)
+		}
+	}
+
+	msg := SessionMessage{
+		Role:    "assistant",
+		Content: content,
+	}
+
+	if len(toolCallsRaw) > 0 {
+		if data, err := json.Marshal(toolCallsRaw); err == nil {
+			msg.ToolCalls = data
+		}
+	}
+
+	return msg
 }

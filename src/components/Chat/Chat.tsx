@@ -12,13 +12,14 @@ import { GrafanaPageState } from './scenes/GrafanaPageScene';
 import { SessionSidebar, NewChatButton, HistoryButton } from './components';
 import { ChatInputRef } from './components/ChatInput/ChatInput';
 import { ChatErrorBoundary } from '../ErrorBoundary';
-import { SessionMetadata, ChatSession } from '../../core';
+import type { SessionMetadata } from './hooks/useSessionManager';
+import type { ChatMessage } from './types';
 import type { AppPluginSettings } from '../../types/plugin';
 
 interface ChatProps {
   pluginSettings: AppPluginSettings;
   readOnly?: boolean;
-  initialSession?: ChatSession;
+  initialSession?: { id?: string; messages?: ChatMessage[]; summary?: string };
   /** Message to auto-send on mount (for alert investigation mode) */
   initialMessage?: string;
   /** Override for session title (for alert investigation mode) */

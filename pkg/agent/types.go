@@ -99,10 +99,13 @@ type RunRequest struct {
 	OrgName            string    `json:"orgName,omitempty"`
 	ScopeOrgID         string    `json:"scopeOrgId,omitempty"`
 	Mode               string    `json:"mode,omitempty"`
+	SessionID          string    `json:"sessionId,omitempty"`
+	Title              string    `json:"title,omitempty"`
 }
 
 type RunStartedEvent struct {
-	RunID string `json:"runId"`
+	RunID     string `json:"runId"`
+	SessionID string `json:"sessionId,omitempty"`
 }
 
 func MarshalSSE(event SSEEvent) ([]byte, error) {

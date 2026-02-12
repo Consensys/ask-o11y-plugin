@@ -1,6 +1,5 @@
 import { getBackendSrv, config } from '@grafana/runtime';
 import { firstValueFrom } from 'rxjs';
-import { ChatSession } from '../core/models/ChatSession';
 import { ChatMessage } from '../components/Chat/types';
 import pluginJson from '../plugin.json';
 
@@ -51,13 +50,13 @@ export class SessionShareService {
    */
   async createShare(
     sessionId: string,
-    sessionData: ChatSession,
+    sessionData: { id: string; title: string; messages: ChatMessage[]; createdAt: string; updatedAt: string; messageCount: number; summary?: string },
     expiresInDays?: number,
     expiresInHours?: number
   ): Promise<CreateShareResponse> {
     const requestData: Record<string, unknown> = {
       sessionId,
-      sessionData: sessionData.toStorage(),
+      sessionData,
     };
 
     // Send expiresInHours if provided, otherwise expiresInDays

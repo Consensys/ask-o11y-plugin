@@ -1,6 +1,5 @@
-import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import { usePluginUserStorage, config } from '@grafana/runtime';
-import { ServiceFactory } from '../core/services/ServiceFactory';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { getSession } from '../services/backendSessionClient';
 
 export interface UseSessionUrlReturn {
   sessionIdFromUrl: string | null;
@@ -22,10 +21,6 @@ function removeSessionFromUrl(): void {
 }
 
 export function useSessionUrl(): UseSessionUrlReturn {
-  const storage = usePluginUserStorage();
-  const orgId = String(config.bootData.user.orgId || '1');
-  const sessionService = useMemo(() => ServiceFactory.getSessionService(storage), [storage]);
-
   const [sessionIdFromUrl, setSessionIdFromUrl] = useState<string | null>(null);
   const [isValidated, setIsValidated] = useState(false);
   const hasValidatedRef = useRef(false);
@@ -50,23 +45,17 @@ export function useSessionUrl(): UseSessionUrlReturn {
       return;
     }
 
-    sessionService
-      .getSession(orgId, urlSessionId)
-      .then((session) => {
-        if (session) {
-          setSessionIdFromUrl(urlSessionId);
-        } else {
-          console.warn(`[useSessionUrl] Session ${urlSessionId} not found, cleaning URL`);
-          removeSessionFromUrl();
-        }
+    getSession(urlSessionId)
+      .then(() => {
+        setSessionIdFromUrl(urlSessionId);
         setIsValidated(true);
       })
       .catch((error) => {
-        console.error('[useSessionUrl] Validation error:', error);
+        console.warn(`[useSessionUrl] Session ${urlSessionId} not found, cleaning URL`, error);
         removeSessionFromUrl();
         setIsValidated(true);
       });
-  }, [sessionService, orgId]);
+  }, []);
 
   const updateUrlWithSession = useCallback((sessionId: string) => {
     if (!isValidSessionId(sessionId)) {

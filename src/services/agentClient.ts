@@ -8,6 +8,8 @@ export interface AgentRunRequest {
   orgName?: string;
   scopeOrgId?: string;
   mode?: 'stream' | 'detached';
+  sessionId?: string;
+  title?: string;
 }
 
 export interface ContentEvent {
@@ -41,6 +43,7 @@ export interface ErrorEvent {
 
 export interface RunStartedEvent {
   runId: string;
+  sessionId?: string;
 }
 
 export type SSEEvent =
@@ -218,6 +221,7 @@ function dispatchEvent(event: SSEEvent, callbacks: AgentCallbacks): void {
 
 export interface DetachedRunResult {
   runId: string;
+  sessionId: string;
   status: string;
 }
 

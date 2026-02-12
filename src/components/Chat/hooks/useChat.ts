@@ -4,12 +4,10 @@ import { ChatMessage, GrafanaPageRef, RenderedToolCall } from '../types';
 import { useSessionManager } from './useSessionManager';
 import { SYSTEM_PROMPT } from '../constants';
 import { ValidationService } from '../../../services/validation';
-import { ChatSession } from '../../../core/models/ChatSession';
 import { parseGrafanaLinks } from '../utils/grafanaLinkParser';
 import {
   runAgentDetached,
   reconnectToAgentRun,
-  getAgentRunStatus,
   cancelAgentRun,
   type AgentCallbacks,
   type ReasoningEvent,
@@ -17,9 +15,15 @@ import {
   type ToolCallStartEvent,
   type ToolCallResultEvent,
 } from '../../../services/agentClient';
+import { getSession } from '../../../services/backendSessionClient';
 import type { AppPluginSettings } from '../../../types/plugin';
 import { MAX_TOTAL_TOKENS } from '../../../constants';
-import { getActiveRunId, setActiveRunId, clearActiveRunId } from '../../../utils/activeRunStore';
+
+interface InitialSessionData {
+  id?: string;
+  messages?: ChatMessage[];
+  summary?: string;
+}
 
 function updateLastAssistantMessage(
   history: ChatMessage[],
@@ -28,10 +32,6 @@ function updateLastAssistantMessage(
   return history.map((msg, idx) =>
     idx === history.length - 1 && msg.role === 'assistant' ? updater(msg) : msg
   );
-}
-
-function stripReasoningFromHistory(history: ChatMessage[]): ChatMessage[] {
-  return history.map(({ reasoning: _, ...rest }) => rest);
 }
 
 function buildEffectiveSystemPrompt(
@@ -51,7 +51,7 @@ export function useChat(
   pluginSettings: AppPluginSettings,
   sessionIdFromUrl: string | null,
   onSessionIdChange: (sessionId: string | null) => void,
-  initialSession?: ChatSession,
+  initialSession?: InitialSessionData,
   readOnly?: boolean,
   initialMessage?: string,
   sessionTitleOverride?: string
@@ -101,7 +101,6 @@ export function useChat(
 
   const abortControllerRef = useRef<AbortController | null>(null);
   const activeRunIdRef = useRef<string | null>(null);
-  const pendingRunIdRef = useRef<string | null>(null);
 
   const sessionTitleOverrideRef = useRef<string | undefined>(sessionTitleOverride);
   useEffect(() => {
@@ -245,14 +244,6 @@ export function useChat(
     []
   );
 
-  const cleanupRun = useCallback((sessionId: string | null) => {
-    if (sessionId) {
-      clearActiveRunId(sessionId);
-    }
-    activeRunIdRef.current = null;
-    pendingRunIdRef.current = null;
-  }, []);
-
   const sendMessage = async (explicitInput?: string): Promise<void> => {
     const inputToSend = explicitInput ?? currentInput;
     if (!inputToSend.trim()) {
@@ -279,25 +270,6 @@ export function useChat(
     const userMessage: ChatMessage = { role: 'user', content: validatedInput };
     const newChatHistory = [...chatHistory, userMessage];
     setChatHistory(newChatHistory);
-
-    if (!readOnly) {
-      sessionManager
-        .saveImmediately(newChatHistory, sessionTitleOverrideRef.current)
-        .then((createdSessionId) => {
-          if (createdSessionId) {
-            onSessionIdChange(createdSessionId);
-            if (pendingRunIdRef.current) {
-              setActiveRunId(createdSessionId, pendingRunIdRef.current);
-              pendingRunIdRef.current = null;
-            }
-          }
-        })
-        .catch((error) => {
-          console.error('[useChat] Failed to save session:', error);
-        });
-      sessionTitleOverrideRef.current = undefined;
-    }
-
     setCurrentInput('');
     setIsGenerating(true);
     setToolCalls(new Map());
@@ -310,10 +282,9 @@ export function useChat(
     const abortController = new AbortController();
     abortControllerRef.current = abortController;
     const hadErrorRef = { current: false };
-    const sessionId = sessionManager.currentSessionId;
 
     try {
-      const { runId } = await runAgentDetached({
+      const result = await runAgentDetached({
         messages: messagesForBackend,
         systemPrompt: effectiveSystemPrompt,
         summary: sessionManager.currentSummary || '',
@@ -322,19 +293,27 @@ export function useChat(
         orgId,
         orgName: config.bootData.user.orgName || '',
         mode: 'detached',
+        sessionId: sessionManager.currentSessionId || undefined,
+        title: sessionTitleOverrideRef.current,
       });
 
-      activeRunIdRef.current = runId;
-      if (sessionId) {
-        setActiveRunId(sessionId, runId);
-      } else {
-        pendingRunIdRef.current = runId;
+      activeRunIdRef.current = result.runId;
+
+      if (result.sessionId && !sessionManager.currentSessionId) {
+        sessionManager.setCurrentSessionIdDirect(result.sessionId);
+        onSessionIdChange(result.sessionId);
       }
 
-      const callbacks = makeCallbacks(abortController, hadErrorRef);
-      await reconnectToAgentRun(runId, callbacks, orgId, abortController.signal);
+      sessionTitleOverrideRef.current = undefined;
 
-      cleanupRun(sessionId);
+      const callbacks = makeCallbacks(abortController, hadErrorRef);
+      await reconnectToAgentRun(result.runId, callbacks, orgId, abortController.signal);
+
+      activeRunIdRef.current = null;
+
+      if (!readOnly) {
+        sessionManager.refreshSessions().catch(() => {});
+      }
 
       if (hadErrorRef.current) {
         setRetryCount((prev) => prev + 1);
@@ -342,7 +321,7 @@ export function useChat(
         setRetryCount(0);
       }
     } catch (error) {
-      cleanupRun(sessionId);
+      activeRunIdRef.current = null;
 
       if (error instanceof DOMException && error.name === 'AbortError') {
         setChatHistory((prev) =>
@@ -378,23 +357,6 @@ export function useChat(
     }
   }, [toolCalls]);
 
-  const prevIsGeneratingRef = useRef(isGenerating);
-  useEffect(() => {
-    if (prevIsGeneratingRef.current && !isGenerating && chatHistory.length > 0 && !readOnly) {
-      sessionManager
-        .saveImmediately(stripReasoningFromHistory(chatHistory))
-        .then((createdSessionId) => {
-          if (createdSessionId) {
-            onSessionIdChange(createdSessionId);
-          }
-        })
-        .catch((error) => {
-          console.error('[useChat] Failed to save session after generation:', error);
-        });
-    }
-    prevIsGeneratingRef.current = isGenerating;
-  }, [isGenerating, chatHistory, sessionManager, readOnly, onSessionIdChange]);
-
   const stopGeneration = useCallback((): void => {
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
@@ -404,12 +366,12 @@ export function useChat(
       cancelAgentRun(runId, orgId).catch((err) => {
         console.error('[useChat] Failed to cancel agent run:', err);
       });
-      cleanupRun(sessionManager.currentSessionId);
+      activeRunIdRef.current = null;
     }
     setMessageQueue([]);
-  }, [orgId, sessionManager.currentSessionId, cleanupRun]);
+  }, [orgId]);
 
-  // Reconnect to an active run on mount / session change
+  // Reconnect to an active run on mount / session change (using backend activeRunId)
   const hasAttemptedReconnectRef = useRef<string | null>(null);
   useEffect(() => {
     const sessionId = sessionManager.currentSessionId;
@@ -421,11 +383,6 @@ export function useChat(
       return;
     }
 
-    const storedRunId = getActiveRunId(sessionId);
-    if (!storedRunId) {
-      return;
-    }
-
     hasAttemptedReconnectRef.current = sessionId;
 
     let cancelled = false;
@@ -433,16 +390,12 @@ export function useChat(
 
     const reconnect = async () => {
       try {
-        const runStatus = await getAgentRunStatus(storedRunId, orgId);
-
-        if (cancelled) {
+        const session = await getSession(sessionId);
+        if (cancelled || !session.activeRunId) {
           return;
         }
 
-        if (runStatus.status !== 'running') {
-          clearActiveRunId(sessionId);
-          return;
-        }
+        const activeRunId = session.activeRunId;
 
         setIsReconnecting(true);
         setIsGenerating(true);
@@ -457,11 +410,11 @@ export function useChat(
         });
 
         abortControllerRef.current = abortController;
-        activeRunIdRef.current = storedRunId;
+        activeRunIdRef.current = activeRunId;
 
         const hadErrorRef = { current: false };
         const callbacks = makeCallbacks(abortController, hadErrorRef);
-        await reconnectToAgentRun(storedRunId, callbacks, orgId, abortController.signal);
+        await reconnectToAgentRun(activeRunId, callbacks, orgId, abortController.signal);
       } catch (err) {
         if (!cancelled) {
           console.error('[useChat] Reconnection failed:', err);
@@ -474,7 +427,7 @@ export function useChat(
         }
       } finally {
         if (!cancelled) {
-          cleanupRun(sessionId);
+          activeRunIdRef.current = null;
           setIsReconnecting(false);
           setIsGenerating(false);
           if (abortControllerRef.current === abortController) {

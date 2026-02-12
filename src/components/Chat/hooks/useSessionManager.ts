@@ -1,28 +1,34 @@
-import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import { usePluginUserStorage } from '@grafana/runtime';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { ChatMessage } from '../types';
-import { SessionMetadata } from '../../../core';
-import { ServiceFactory } from '../../../core/services/ServiceFactory';
+import {
+  listSessions,
+  getSession,
+  updateSession,
+  deleteSession as deleteBackendSession,
+  deleteAllSessions as deleteAllBackendSessions,
+  getCurrentSessionId,
+  setCurrentSessionId,
+  type SessionMetadata,
+} from '../../../services/backendSessionClient';
 import { ConversationMemoryService } from '../../../services/memory';
+
+export type { SessionMetadata } from '../../../services/backendSessionClient';
 
 export interface UseSessionManagerReturn {
   currentSessionId: string | null;
   sessions: SessionMetadata[];
   currentSummary: string | undefined;
+  setCurrentSessionIdDirect: (sessionId: string) => void;
   createNewSession: () => Promise<void>;
   loadSession: (sessionId: string) => Promise<void>;
   loadSessionFromUrl: (sessionId: string) => Promise<void>;
   deleteSession: (sessionId: string) => Promise<void>;
   deleteAllSessions: () => Promise<void>;
-  saveImmediately: (messages: ChatMessage[], titleOverride?: string) => Promise<string | null>;
   refreshSessions: () => Promise<void>;
   loadCurrentSessionIfNeeded: () => Promise<void>;
   triggerSummarization: (messages: ChatMessage[]) => Promise<void>;
   isSummarizing: boolean;
-  storageStats: { used: number; total: number; sessionCount: number };
 }
-
-const INITIAL_STORAGE_STATS = { used: 0, total: 0, sessionCount: 0 };
 
 export function useSessionManager(
   orgId: string,
@@ -32,15 +38,11 @@ export function useSessionManager(
   onSessionIdChange: (sessionId: string | null) => void,
   readOnly?: boolean
 ): UseSessionManagerReturn {
-  const storage = usePluginUserStorage();
-  const sessionService = useMemo(() => ServiceFactory.getSessionService(storage), [storage]);
-  const [currentSessionId, setCurrentSessionId] = useState<string | null>(sessionIdFromUrl);
+  const [currentSessionId, setCurrentSessionId_] = useState<string | null>(sessionIdFromUrl);
   const [sessions, setSessions] = useState<SessionMetadata[]>([]);
   const [currentSummary, setCurrentSummary] = useState<string | undefined>(undefined);
   const [isSummarizing, setIsSummarizing] = useState(false);
-  const [storageStats, setStorageStats] = useState(INITIAL_STORAGE_STATS);
 
-  const isSavingRef = useRef(false);
   const lastInitializedOrgIdRef = useRef<string | null>(null);
   const initialChatHistoryLengthRef = useRef<number>(chatHistory.length);
 
@@ -55,20 +57,18 @@ export function useSessionManager(
 
   useEffect(() => {
     if (sessionIdFromUrl !== null && sessionIdFromUrl !== currentSessionId) {
-      setCurrentSessionId(sessionIdFromUrl);
+      setCurrentSessionId_(sessionIdFromUrl);
     }
   }, [sessionIdFromUrl, currentSessionId]);
 
   const refreshSessions = useCallback(async () => {
     try {
-      const loadedSessions = await sessionService.getAllSessions(orgId);
-      setSessions(loadedSessions);
-      const stats = await sessionService.getStorageStats(orgId);
-      setStorageStats(stats);
+      const loaded = await listSessions();
+      setSessions(loaded);
     } catch (error) {
       console.error('[SessionManager] Failed to refresh sessions:', error);
     }
-  }, [sessionService, orgId]);
+  }, []);
 
   const loadCurrentSessionIfNeeded = useCallback(async () => {
     if (readOnly || chatHistory.length > 0 || currentSessionId !== null) {
@@ -76,16 +76,17 @@ export function useSessionManager(
     }
 
     try {
-      const session = await sessionService.getCurrentSession(orgId);
-      if (session) {
-        setCurrentSessionId(session.id);
-        setChatHistory(session.messages);
+      const id = await getCurrentSessionId();
+      if (id) {
+        const session = await getSession(id);
+        setCurrentSessionId_(session.id);
+        setChatHistory(session.messages as ChatMessage[]);
         setCurrentSummary(session.summary);
       }
     } catch (error) {
       console.error('[SessionManager] Failed to load current session:', error);
     }
-  }, [sessionService, orgId, chatHistory.length, currentSessionId, readOnly, setChatHistory]);
+  }, [chatHistory.length, currentSessionId, readOnly, setChatHistory]);
 
   useEffect(() => {
     if (lastInitializedOrgIdRef.current === orgId) {
@@ -93,26 +94,22 @@ export function useSessionManager(
     }
 
     lastInitializedOrgIdRef.current = orgId;
-    
+
     let cancelled = false;
-    
+
     const initialize = async () => {
       try {
-        const loadedSessions = await sessionService.getAllSessions(orgId);
+        const loaded = await listSessions();
         if (!cancelled) {
-          setSessions(loadedSessions);
-        }
-        
-        const stats = await sessionService.getStorageStats(orgId);
-        if (!cancelled) {
-          setStorageStats(stats);
+          setSessions(loaded);
         }
 
         if (initialChatHistoryLengthRef.current === 0 && !sessionIdFromUrl) {
-          const session = await sessionService.getCurrentSession(orgId);
-          if (!cancelled && session) {
-            setCurrentSessionId(session.id);
-            setChatHistory(session.messages);
+          const id = await getCurrentSessionId();
+          if (!cancelled && id) {
+            const session = await getSession(id);
+            setCurrentSessionId_(session.id);
+            setChatHistory(session.messages as ChatMessage[]);
             setCurrentSummary(session.summary);
           }
         }
@@ -125,116 +122,85 @@ export function useSessionManager(
         }
       }
     };
-    
+
     initialize();
-    
+
     return () => {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [orgId, sessionService, sessionIdFromUrl]);
+  }, [orgId, sessionIdFromUrl]);
 
   const createNewSession = useCallback(async () => {
     setChatHistory([]);
-    setCurrentSessionId(null);
+    setCurrentSessionId_(null);
     setCurrentSummary(undefined);
     onSessionIdChange(null);
     try {
-      await sessionService.clearActiveSession(orgId);
+      await setCurrentSessionId(null);
     } catch (error) {
       console.error('[SessionManager] Failed to clear active session:', error);
     }
-  }, [sessionService, orgId, setChatHistory, onSessionIdChange]);
+  }, [setChatHistory, onSessionIdChange]);
 
   const loadSession = useCallback(
     async (sessionId: string) => {
       try {
-        const session = await sessionService.getSession(orgId, sessionId);
-        if (session) {
-          setCurrentSessionId(session.id);
-          setChatHistory(session.messages);
-          setCurrentSummary(session.summary);
-          onSessionIdChange(session.id);
-          await sessionService.setActiveSession(orgId, session.id);
-        } else {
-          console.error(`[SessionManager] Session ${sessionId} not found`);
-        }
+        const session = await getSession(sessionId);
+        setCurrentSessionId_(session.id);
+        setChatHistory(session.messages as ChatMessage[]);
+        setCurrentSummary(session.summary);
+        onSessionIdChange(session.id);
+        await setCurrentSessionId(session.id);
       } catch (error) {
-        console.error(`[SessionManager] Error loading session:`, error);
+        console.error('[SessionManager] Error loading session:', error);
       }
     },
-    [sessionService, orgId, setChatHistory, onSessionIdChange]
+    [setChatHistory, onSessionIdChange]
   );
 
   const loadSessionFromUrl = useCallback(
     async (sessionId: string) => {
       try {
-        const session = await sessionService.getSession(orgId, sessionId);
-        setCurrentSessionId(session?.id ?? sessionId);
-        setChatHistory(session?.messages ?? []);
-        setCurrentSummary(session?.summary);
+        const session = await getSession(sessionId);
+        setCurrentSessionId_(session.id);
+        setChatHistory(session.messages as ChatMessage[]);
+        setCurrentSummary(session.summary);
       } catch (error) {
-        console.error(`[SessionManager] Error loading URL session:`, error);
+        console.error('[SessionManager] Error loading URL session:', error);
+        setCurrentSessionId_(null);
+        setChatHistory([]);
+        onSessionIdChange(null);
       }
     },
-    [sessionService, orgId, setChatHistory]
+    [setChatHistory, onSessionIdChange]
   );
 
-  const deleteSession = useCallback(
+  const deleteSessionFn = useCallback(
     async (sessionId: string) => {
       try {
-        await sessionService.deleteSession(orgId, sessionId);
+        await deleteBackendSession(sessionId);
         await refreshSessions();
 
         if (sessionId === currentSessionId) {
           await createNewSession();
         }
-
       } catch (error) {
         console.error('[SessionManager] Error deleting session:', error);
       }
     },
-    [sessionService, orgId, currentSessionId, createNewSession, refreshSessions]
+    [currentSessionId, createNewSession, refreshSessions]
   );
 
-  const deleteAllSessions = useCallback(async () => {
+  const deleteAllSessionsFn = useCallback(async () => {
     try {
-      await sessionService.deleteAllSessions(orgId);
+      await deleteAllBackendSessions();
       await refreshSessions();
       await createNewSession();
     } catch (error) {
       console.error('[SessionManager] Error deleting all sessions:', error);
     }
-  }, [sessionService, orgId, createNewSession, refreshSessions]);
-
-  const saveImmediately = useCallback(
-    async (messages: ChatMessage[], titleOverride?: string): Promise<string | null> => {
-      if (readOnly || messages.length === 0 || isSavingRef.current) {
-        return null;
-      }
-
-      isSavingRef.current = true;
-      let createdSessionId: string | null = null;
-
-      try {
-        if (currentSessionId) {
-          await sessionService.updateSession(orgId, currentSessionId, messages, currentSummary, titleOverride);
-        } else {
-          const newSession = await sessionService.createSession(orgId, messages, titleOverride);
-          createdSessionId = newSession.id;
-          setCurrentSessionId((prevId) => prevId ?? newSession.id);
-        }
-        await refreshSessions();
-      } catch (error) {
-        console.error('[SessionManager] Immediate save failed:', error);
-      } finally {
-        isSavingRef.current = false;
-      }
-
-      return createdSessionId;
-    },
-    [sessionService, orgId, currentSessionId, currentSummary, refreshSessions, readOnly]
-  );
+  }, [createNewSession, refreshSessions]);
 
   const triggerSummarization = useCallback(
     async (messages: ChatMessage[]) => {
@@ -252,7 +218,7 @@ export function useSessionManager(
           setCurrentSummary(summary);
 
           if (currentSessionId) {
-            await sessionService.updateSession(orgId, currentSessionId, messages, summary);
+            await updateSession(currentSessionId, { summary });
           }
         }
       } catch (error) {
@@ -261,7 +227,7 @@ export function useSessionManager(
         setIsSummarizing(false);
       }
     },
-    [sessionService, orgId, currentSessionId, currentSummary, isSummarizing]
+    [currentSessionId, currentSummary, isSummarizing]
   );
 
   useEffect(() => {
@@ -278,16 +244,15 @@ export function useSessionManager(
     currentSessionId,
     sessions,
     currentSummary,
+    setCurrentSessionIdDirect: setCurrentSessionId_,
     createNewSession,
     loadSession,
     loadSessionFromUrl,
-    deleteSession,
-    deleteAllSessions,
-    saveImmediately,
+    deleteSession: deleteSessionFn,
+    deleteAllSessions: deleteAllSessionsFn,
     refreshSessions,
     loadCurrentSessionIfNeeded,
     triggerSummarization,
     isSummarizing,
-    storageStats,
   };
-};
+}

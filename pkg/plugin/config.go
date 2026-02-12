@@ -27,3 +27,7 @@ const (
 	RunCleanupInterval  = 5 * time.Minute
 	RunMaxEventsPerRun  = 500
 )
+
+const (
+	SessionMaxPerUserOrg = 50
+)
