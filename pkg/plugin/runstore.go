@@ -203,9 +203,8 @@ func (s *RunStore) GetBroadcaster(runID string) *RunBroadcaster {
 	return s.broadcasters[runID]
 }
 
-// SubscribeAndSnapshot atomically subscribes to live events and returns a
-// snapshot of already-persisted events.  This prevents the duplicate-event
-// window that exists when Subscribe and GetRun are called separately.
+// SubscribeAndSnapshot atomically subscribes and snapshots under one lock
+// to avoid the duplicate-event window of separate Subscribe + GetRun calls.
 func (s *RunStore) SubscribeAndSnapshot(runID string) (*AgentRun, <-chan agent.SSEEvent, func(), error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()

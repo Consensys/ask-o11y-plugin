@@ -99,7 +99,7 @@ func TrimMessagesToTokenLimit(messages []Message, tools []OpenAITool, maxTokens 
 	target := maxTokens - systemMessageBuffer
 
 	for i := 0; i < len(nonSystem); i++ {
-		// Skip orphaned tool results — they require a preceding assistant+tool_calls.
+		// Orphaned tool results cause 400s from OpenAI without a preceding assistant+tool_calls.
 		if nonSystem[i].Role == "tool" {
 			continue
 		}
