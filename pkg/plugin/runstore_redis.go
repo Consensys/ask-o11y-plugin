@@ -122,8 +122,7 @@ func (s *RedisRunStore) FinishRun(runID string, status RunStatus, errMsg string)
 	ctx2, cancel2 := getContextWithTimeout(RedisOpTimeout)
 	defer cancel2()
 	s.client.Set(ctx2, runKey(runID), updatedJSON, RunMaxAge)
-
-	s.refreshEventsTTL(runID)
+	s.client.Expire(ctx2, eventsKey(runID), RunMaxAge)
 
 	s.mu.Lock()
 	b := s.broadcasters[runID]
@@ -195,33 +194,6 @@ func (s *RedisRunStore) CleanupOld() {
 func (s *RedisRunStore) touchRun(runID string) {
 	ctx, cancel := getContextWithTimeout(RedisOpTimeout)
 	defer cancel()
-
-	runJSON, err := s.client.Get(ctx, runKey(runID)).Result()
-	if err != nil {
-		return
-	}
-
-	var run AgentRun
-	if err := json.Unmarshal([]byte(runJSON), &run); err != nil {
-		return
-	}
-
-	run.UpdatedAt = time.Now()
-
-	updatedJSON, err := json.Marshal(run)
-	if err != nil {
-		return
-	}
-
-	ctx2, cancel2 := getContextWithTimeout(RedisOpTimeout)
-	defer cancel2()
-	s.client.Set(ctx2, runKey(runID), updatedJSON, RunMaxAge)
-
-	s.refreshEventsTTL(runID)
-}
-
-func (s *RedisRunStore) refreshEventsTTL(runID string) {
-	ctx, cancel := getContextWithTimeout(RedisOpTimeout)
-	defer cancel()
+	s.client.Expire(ctx, runKey(runID), RunMaxAge)
 	s.client.Expire(ctx, eventsKey(runID), RunMaxAge)
 }
