@@ -2,6 +2,7 @@ package plugin
 
 import (
 	"consensys-asko11y-app/pkg/agent"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -47,6 +48,35 @@ func TestRunStore_AppendEvent(t *testing.T) {
 	}
 	if run.Events[0].Type != "content" {
 		t.Errorf("expected content event, got %q", run.Events[0].Type)
+	}
+}
+
+func TestRunStore_AppendEvent_TrimsOldest(t *testing.T) {
+	store := NewRunStore(log.DefaultLogger)
+	store.CreateRun("run-1", 100, 1)
+
+	for i := 0; i < RunMaxEventsPerRun+10; i++ {
+		store.AppendEvent("run-1", agent.SSEEvent{
+			Type: "content",
+			Data: agent.ContentEvent{Content: fmt.Sprintf("msg-%d", i)},
+		})
+	}
+
+	run, err := store.GetRun("run-1")
+	if err != nil {
+		t.Fatalf("failed to get run: %v", err)
+	}
+	if len(run.Events) != RunMaxEventsPerRun {
+		t.Fatalf("expected %d events, got %d", RunMaxEventsPerRun, len(run.Events))
+	}
+	first := run.Events[0].Data.(agent.ContentEvent).Content
+	if first != "msg-10" {
+		t.Errorf("expected oldest kept event to be msg-10, got %q", first)
+	}
+	last := run.Events[len(run.Events)-1].Data.(agent.ContentEvent).Content
+	expected := fmt.Sprintf("msg-%d", RunMaxEventsPerRun+9)
+	if last != expected {
+		t.Errorf("expected newest event to be %s, got %q", expected, last)
 	}
 }
 

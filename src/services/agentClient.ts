@@ -58,7 +58,7 @@ export interface AgentCallbacks {
 
 export interface AgentRunStatus {
   runId: string;
-  status: 'running' | 'completed' | 'failed';
+  status: 'running' | 'completed' | 'failed' | 'cancelled';
   userId: number;
   orgId: number;
   createdAt: string;

@@ -565,10 +565,13 @@ func (p *Plugin) consumeAgentEvents(runID string, eventCh <-chan agent.SSEEvent)
 		lastEventType = event.Type
 	}
 
-	if lastEventType == "error" {
-		p.runStore.FinishRun(runID, RunStatusFailed, "")
-	} else {
+	switch lastEventType {
+	case "done":
 		p.runStore.FinishRun(runID, RunStatusCompleted, "")
+	case "error":
+		p.runStore.FinishRun(runID, RunStatusFailed, "")
+	default:
+		p.runStore.FinishRun(runID, RunStatusCancelled, "")
 	}
 }
 

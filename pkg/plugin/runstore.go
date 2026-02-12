@@ -15,6 +15,7 @@ const (
 	RunStatusRunning   RunStatus = "running"
 	RunStatusCompleted RunStatus = "completed"
 	RunStatusFailed    RunStatus = "failed"
+	RunStatusCancelled RunStatus = "cancelled"
 )
 
 type AgentRun struct {
@@ -146,8 +147,9 @@ func (s *RunStore) AppendEvent(runID string, event agent.SSEEvent) {
 		s.mu.Unlock()
 		return
 	}
-	if len(run.Events) < RunMaxEventsPerRun {
-		run.Events = append(run.Events, event)
+	run.Events = append(run.Events, event)
+	if len(run.Events) > RunMaxEventsPerRun {
+		run.Events = run.Events[len(run.Events)-RunMaxEventsPerRun:]
 	}
 	run.UpdatedAt = time.Now()
 	b := s.broadcasters[runID]
