@@ -35,6 +35,7 @@ export interface GrafanaPageRef {
 export interface ChatMessage {
   role: 'user' | 'assistant';
   content: string;
+  reasoning?: string;
   toolCalls?: RenderedToolCall[];
   pageRefs?: GrafanaPageRef[];
   timestamp?: Date;

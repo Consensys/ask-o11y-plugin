@@ -194,6 +194,119 @@ func TestAgentLoop_MaxIterations(t *testing.T) {
 	}
 }
 
+func TestAgentLoop_ReasoningContent(t *testing.T) {
+	loop, serverURL, cleanup := setupTestLoop(t, []ChatCompletionResponse{
+		{
+			ID: "1",
+			Choices: []Choice{{
+				Message: Message{
+					Role:             "assistant",
+					Content:          "The answer is 42.",
+					ReasoningContent: "Let me think about this...",
+				},
+				FinishReason: "stop",
+			}},
+		},
+	})
+	defer cleanup()
+
+	eventCh := make(chan SSEEvent, 32)
+	req := LoopRequest{
+		Messages:     []Message{{Role: "user", Content: "hello"}},
+		SystemPrompt: "You are helpful.",
+		GrafanaURL:   serverURL,
+		AuthToken:    "test-token",
+		UserRole:     "Admin",
+		OrgID:        "1",
+	}
+
+	go loop.Run(context.Background(), req, eventCh)
+	events := collectEvents(eventCh)
+
+	types := make([]string, len(events))
+	for i, e := range events {
+		types[i] = e.Type
+	}
+
+	expected := []string{"reasoning", "content", "done"}
+	if len(types) != len(expected) {
+		t.Fatalf("expected event types %v, got %v", expected, types)
+	}
+	for i := range expected {
+		if types[i] != expected[i] {
+			t.Errorf("event[%d]: expected %q, got %q", i, expected[i], types[i])
+		}
+	}
+
+	reasoning := events[0].Data.(ReasoningEvent)
+	if reasoning.Content != "Let me think about this..." {
+		t.Errorf("unexpected reasoning: %q", reasoning.Content)
+	}
+	content := events[1].Data.(ContentEvent)
+	if content.Content != "The answer is 42." {
+		t.Errorf("unexpected content: %q", content.Content)
+	}
+}
+
+func TestAgentLoop_ReasoningWithToolCalls(t *testing.T) {
+	loop, serverURL, cleanup := setupTestLoop(t, []ChatCompletionResponse{
+		{
+			ID: "1",
+			Choices: []Choice{{
+				Message: Message{
+					Role:             "assistant",
+					ReasoningContent: "I need to query metrics first.",
+					ToolCalls: []ToolCall{{
+						ID:   "tc_1",
+						Type: "function",
+						Function: FunctionCall{
+							Name:      "unknown_tool",
+							Arguments: `{"query": "up"}`,
+						},
+					}},
+				},
+				FinishReason: "tool_calls",
+			}},
+		},
+		{
+			ID: "2",
+			Choices: []Choice{{
+				Message:      Message{Role: "assistant", Content: "Based on the results..."},
+				FinishReason: "stop",
+			}},
+		},
+	})
+	defer cleanup()
+
+	eventCh := make(chan SSEEvent, 32)
+	req := LoopRequest{
+		Messages:     []Message{{Role: "user", Content: "query metrics"}},
+		SystemPrompt: "sys",
+		GrafanaURL:   serverURL,
+		AuthToken:    "test-token",
+		UserRole:     "Admin",
+		OrgID:        "1",
+	}
+
+	go loop.Run(context.Background(), req, eventCh)
+	events := collectEvents(eventCh)
+
+	types := make([]string, len(events))
+	for i, e := range events {
+		types[i] = e.Type
+	}
+
+	expected := []string{"reasoning", "tool_call_start", "tool_call_result", "content", "done"}
+	if len(types) != len(expected) {
+		t.Fatalf("expected event types %v, got %v", expected, types)
+	}
+	for i := range expected {
+		if types[i] != expected[i] {
+			t.Errorf("event[%d]: expected %q, got %q", i, expected[i], types[i])
+		}
+	}
+}
+
 func TestAgentLoop_ContextCancellation(t *testing.T) {
 	// Slow server — context will be cancelled
 	slowServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

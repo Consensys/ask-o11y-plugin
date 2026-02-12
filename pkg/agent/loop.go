@@ -96,6 +96,13 @@ func (a *AgentLoop) Run(ctx context.Context, req LoopRequest, eventCh chan<- SSE
 
 		msg := resp.Choices[0].Message
 
+		if msg.ReasoningContent != "" {
+			a.send(ctx, eventCh, SSEEvent{
+				Type: "reasoning",
+				Data: ReasoningEvent{Content: msg.ReasoningContent},
+			})
+		}
+
 		if msg.Content != "" {
 			a.send(ctx, eventCh, SSEEvent{
 				Type: "content",
@@ -111,6 +118,7 @@ func (a *AgentLoop) Run(ctx context.Context, req LoopRequest, eventCh chan<- SSE
 			return
 		}
 
+		msg.ReasoningContent = ""
 		messages = append(messages, msg)
 
 		for _, tc := range msg.ToolCalls {

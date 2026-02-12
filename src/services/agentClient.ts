@@ -13,6 +13,10 @@ export interface ContentEvent {
   content: string;
 }
 
+export interface ReasoningEvent {
+  content: string;
+}
+
 export interface ToolCallStartEvent {
   id: string;
   name: string;
@@ -36,6 +40,7 @@ export interface ErrorEvent {
 
 export type SSEEvent =
   | { type: 'content'; data: ContentEvent }
+  | { type: 'reasoning'; data: ReasoningEvent }
   | { type: 'tool_call_start'; data: ToolCallStartEvent }
   | { type: 'tool_call_result'; data: ToolCallResultEvent }
   | { type: 'done'; data: DoneEvent }
@@ -43,6 +48,7 @@ export type SSEEvent =
 
 export interface AgentCallbacks {
   onContent: (event: ContentEvent) => void;
+  onReasoning: (event: ReasoningEvent) => void;
   onToolCallStart: (event: ToolCallStartEvent) => void;
   onToolCallResult: (event: ToolCallResultEvent) => void;
   onDone: (event: DoneEvent) => void;
@@ -140,6 +146,9 @@ function dispatchEvent(event: SSEEvent, callbacks: AgentCallbacks): void {
   switch (event.type) {
     case 'content':
       callbacks.onContent(event.data);
+      break;
+    case 'reasoning':
+      callbacks.onReasoning(event.data);
       break;
     case 'tool_call_start':
       callbacks.onToolCallStart(event.data);

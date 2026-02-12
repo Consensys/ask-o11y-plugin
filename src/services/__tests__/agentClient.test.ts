@@ -21,6 +21,7 @@ function createMockBody(lines: string[]) {
 function createMockCallbacks(): jest.Mocked<AgentCallbacks> {
   return {
     onContent: jest.fn(),
+    onReasoning: jest.fn(),
     onToolCallStart: jest.fn(),
     onToolCallResult: jest.fn(),
     onDone: jest.fn(),
@@ -189,6 +190,29 @@ describe('agentClient', () => {
         body: JSON.stringify(request),
       })
     );
+  });
+
+  it('should parse reasoning events from SSE stream', async () => {
+    const callbacks = createMockCallbacks();
+    const sseLines = [
+      'data: {"type":"reasoning","data":{"content":"Let me think..."}}',
+      '',
+      'data: {"type":"content","data":{"content":"The answer is 42."}}',
+      '',
+      'data: {"type":"done","data":{"totalIterations":1}}',
+      '',
+    ];
+
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      body: createMockBody(sseLines),
+    });
+
+    await runAgent(defaultRequest, callbacks);
+
+    expect(callbacks.onReasoning).toHaveBeenCalledWith({ content: 'Let me think...' });
+    expect(callbacks.onContent).toHaveBeenCalledWith({ content: 'The answer is 42.' });
+    expect(callbacks.onDone).toHaveBeenCalledWith({ totalIterations: 1 });
   });
 
   it('should set X-Grafana-Org-Id header when orgId is provided', async () => {
