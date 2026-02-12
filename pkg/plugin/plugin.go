@@ -1250,7 +1250,10 @@ func agentMessagesToSessionMessages(msgs []agent.Message) []SessionMessage {
 
 func reconstructAssistantMessage(events []agent.SSEEvent) SessionMessage {
 	var content string
-	var toolCallsRaw []map[string]interface{}
+	// Merge tool_call_start and tool_call_result by ID so each tool call
+	// produces exactly one entry (no duplicates when reopening a session).
+	toolCallsByID := make(map[string]map[string]interface{})
+	var toolCallOrder []string
 
 	for _, e := range events {
 		switch e.Type {
@@ -1263,40 +1266,56 @@ func reconstructAssistantMessage(events []agent.SSEEvent) SessionMessage {
 				}
 			}
 		case "tool_call_start":
-			tc := map[string]interface{}{"running": true}
+			var id, name, arguments string
 			if tcs, ok := e.Data.(agent.ToolCallStartEvent); ok {
-				tc["name"] = tcs.Name
-				tc["arguments"] = tcs.Arguments
+				id, name, arguments = tcs.ID, tcs.Name, tcs.Arguments
 			} else if m, ok := e.Data.(map[string]interface{}); ok {
-				tc["name"] = m["name"]
-				tc["arguments"] = m["arguments"]
+				id, _ = m["id"].(string)
+				name, _ = m["name"].(string)
+				arguments, _ = m["arguments"].(string)
 			}
-			toolCallsRaw = append(toolCallsRaw, tc)
+			if id == "" {
+				continue
+			}
+			if _, exists := toolCallsByID[id]; !exists {
+				toolCallOrder = append(toolCallOrder, id)
+			}
+			toolCallsByID[id] = map[string]interface{}{
+				"name":      name,
+				"arguments": arguments,
+				"running":   true,
+			}
 		case "tool_call_result":
-			tc := map[string]interface{}{"running": false}
+			var id, name, resultContent string
+			var isError bool
 			if tcr, ok := e.Data.(agent.ToolCallResultEvent); ok {
-				tc["name"] = tcr.Name
-				tc["arguments"] = ""
-				if tcr.IsError {
-					tc["error"] = tcr.Content
-				} else {
-					tc["response"] = map[string]interface{}{
-						"content": []map[string]interface{}{{"type": "text", "text": tcr.Content}},
-					}
-				}
+				id, name, resultContent, isError = tcr.ID, tcr.Name, tcr.Content, tcr.IsError
 			} else if m, ok := e.Data.(map[string]interface{}); ok {
-				tc["name"] = m["name"]
+				id, _ = m["id"].(string)
+				name, _ = m["name"].(string)
+				resultContent, _ = m["content"].(string)
+				isError, _ = m["isError"].(bool)
+			}
+			if id == "" {
+				continue
+			}
+			tc, exists := toolCallsByID[id]
+			if !exists {
+				tc = map[string]interface{}{"name": name}
+				toolCallOrder = append(toolCallOrder, id)
+			}
+			tc["running"] = false
+			if tc["arguments"] == nil || tc["arguments"] == "" {
 				tc["arguments"] = ""
-				isErr, _ := m["isError"].(bool)
-				if isErr {
-					tc["error"] = m["content"]
-				} else {
-					tc["response"] = map[string]interface{}{
-						"content": []map[string]interface{}{{"type": "text", "text": m["content"]}},
-					}
+			}
+			if isError {
+				tc["error"] = resultContent
+			} else {
+				tc["response"] = map[string]interface{}{
+					"content": []map[string]interface{}{{"type": "text", "text": resultContent}},
 				}
 			}
-			toolCallsRaw = append(toolCallsRaw, tc)
+			toolCallsByID[id] = tc
 		}
 	}
 
@@ -1305,7 +1324,11 @@ func reconstructAssistantMessage(events []agent.SSEEvent) SessionMessage {
 		Content: content,
 	}
 
-	if len(toolCallsRaw) > 0 {
+	if len(toolCallOrder) > 0 {
+		toolCallsRaw := make([]map[string]interface{}, 0, len(toolCallOrder))
+		for _, id := range toolCallOrder {
+			toolCallsRaw = append(toolCallsRaw, toolCallsByID[id])
+		}
 		if data, err := json.Marshal(toolCallsRaw); err == nil {
 			msg.ToolCalls = data
 		}
