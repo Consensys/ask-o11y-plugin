@@ -582,33 +582,39 @@ func (p *Plugin) handleAgentRun(w http.ResponseWriter, r *http.Request) {
 }
 
 func (p *Plugin) consumeAgentEvents(runID string, eventCh <-chan agent.SSEEvent) {
-	var lastEventType string
+	var lastEvent agent.SSEEvent
 	for event := range eventCh {
 		p.runStore.AppendEvent(runID, event)
-		lastEventType = event.Type
+		lastEvent = event
 	}
 
-	switch lastEventType {
+	switch lastEvent.Type {
 	case "done":
 		p.runStore.FinishRun(runID, RunStatusCompleted, "")
 	case "error":
-		p.runStore.FinishRun(runID, RunStatusFailed, "")
+		var errMsg string
+		if ee, ok := lastEvent.Data.(agent.ErrorEvent); ok {
+			errMsg = ee.Message
+		}
+		p.runStore.FinishRun(runID, RunStatusFailed, errMsg)
 	default:
 		p.runStore.FinishRun(runID, RunStatusCancelled, "")
 	}
 }
 
 func initSSEWriter(w http.ResponseWriter) (http.Flusher, bool) {
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "Streaming not supported", http.StatusInternalServerError)
+		return nil, false
+	}
+
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
 	w.Header().Set("X-Accel-Buffering", "no")
 
-	flusher, ok := w.(http.Flusher)
-	if !ok {
-		http.Error(w, "Streaming not supported", http.StatusInternalServerError)
-	}
-	return flusher, ok
+	return flusher, true
 }
 
 func (p *Plugin) streamRunSSE(w http.ResponseWriter, runID string, ch <-chan agent.SSEEvent, unsub func()) {
