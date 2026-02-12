@@ -226,7 +226,7 @@ export function useChat(
             setChatHistory((prev) =>
               updateLastAssistantMessage(prev, (msg) => ({
                 ...msg,
-                reasoning: (msg.reasoning || '') + event.content,
+                reasoning: event.content,
               }))
             );
           },
