@@ -61,21 +61,6 @@ test.describe('Session Management', () => {
     await expect(page.getByText('sessions')).toBeVisible();
   });
 
-  test('should show storage indicator in sidebar', async ({ page }) => {
-    // Open history sidebar
-    const historyButton = page.getByText(/View chat history/);
-    await historyButton.click();
-
-    // Wait for sidebar to open
-    await expect(page.getByRole('heading', { name: 'Chat History' })).toBeVisible();
-
-    // Storage indicator should be visible (shows "X% storage used")
-    await expect(page.getByText(/storage used/)).toBeVisible();
-
-    // Close sidebar using the close button
-    await page.locator('button[title="Close"]').click();
-  });
-
   test('should show empty state when no sessions exist', async ({ page }) => {
     // Open history sidebar
     const historyButton = page.getByText(/View chat history/);

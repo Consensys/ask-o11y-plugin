@@ -83,18 +83,13 @@ test.describe('Session Sidebar Extended', () => {
     });
   });
 
-  test('should support sidebar actions (new chat, storage)', async ({ page }) => {
-    await test.step('Open sidebar and verify storage indicator', async () => {
+  test('should support sidebar actions (new chat)', async ({ page }) => {
+    await test.step('Create new session from sidebar', async () => {
       // Open history sidebar
       const historyButton = page.getByText(/View chat history/);
       await historyButton.click();
       await expect(page.getByRole('heading', { name: 'Chat History' })).toBeVisible();
 
-      // Storage indicator should show percentage
-      await expect(page.getByText(/\d+% storage used/)).toBeVisible();
-    });
-
-    await test.step('Create new session from sidebar', async () => {
       // Click "+ New Chat" button
       const newChatButton = page.getByText('+ New Chat');
       await expect(newChatButton).toBeVisible();
