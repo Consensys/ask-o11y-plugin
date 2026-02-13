@@ -56,6 +56,16 @@ npm run e2e -- --debug
 - `*.spec.ts` - Test files organized by feature
 - Coverage reports are generated in `coverage-e2e/` when `COVERAGE=true`
 
+### Test Execution Strategy
+
+Tests are organized into projects with different parallelization strategies:
+
+- **Session tests** (`session*.spec.ts`): Run serially (1 worker) to avoid storage conflicts
+- **LLM-dependent tests** (`chatFlows`, `chatInteractions`, `sidePanel`, `errorHandling`): Run serially (1 worker) to avoid LLM API rate limiting
+- **UI-only tests** (all others): Run in parallel (6 workers) for speed
+
+This ensures reliable test execution while maximizing performance for tests that don't have concurrency constraints.
+
 ## Debugging Failed Tests
 
 1. Check Grafana logs: `docker compose logs -f grafana`

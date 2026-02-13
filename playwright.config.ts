@@ -21,6 +21,8 @@ export default defineConfig<PluginOptions>({
   forbidOnly: !!process.env.CI,
   /* Retry on CI only */
   retries: process.env.CI ? 2 : 0,
+  /* Default workers - overridden per project */
+  workers: process.env.CI ? 1 : undefined,
   /* Reporter to use. See https://playwright.dev/docs/test-reporters */
   reporter: 'html',
   /* Shared settings for all the projects below. See https://playwright.dev/docs/api/class-testoptions. */
@@ -52,15 +54,39 @@ export default defineConfig<PluginOptions>({
       fullyParallel: false,
       workers: 1, // Force single worker to avoid storage conflicts between test files
     },
-    // 3. Run other tests in parallel
+    // 3. Run LLM-dependent tests with single worker to avoid rate limiting
     {
-      name: 'chromium',
-      testIgnore: [/session.*\.spec\.ts/],
+      name: 'chromium-llm-tests',
+      testMatch: [
+        /chatFlows\.spec\.ts/,
+        /chatInteractions\.spec\.ts/,
+        /sidePanel\.spec\.ts/,
+        /errorHandling\.spec\.ts/,
+      ],
       use: {
         ...devices['Desktop Chrome'],
         storageState: 'playwright/.auth/admin.json',
       },
       dependencies: ['chromium-session-tests'],
+      fullyParallel: false,
+      workers: 1, // Single worker to avoid LLM API rate limiting
+    },
+    // 4. Run other tests in parallel with multiple workers
+    {
+      name: 'chromium',
+      testIgnore: [
+        /session.*\.spec\.ts/,
+        /chatFlows\.spec\.ts/,
+        /chatInteractions\.spec\.ts/,
+        /sidePanel\.spec\.ts/,
+        /errorHandling\.spec\.ts/,
+      ],
+      use: {
+        ...devices['Desktop Chrome'],
+        storageState: 'playwright/.auth/admin.json',
+      },
+      dependencies: ['chromium-session-tests'],
+      workers: 6, // Parallel execution for fast UI-only tests
     },
   ],
 });
