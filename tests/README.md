@@ -8,6 +8,8 @@ This directory contains Playwright end-to-end tests for the Ask O11y plugin.
 
 **IMPORTANT**: E2E tests that involve AI chat functionality require a valid Anthropic API key.
 
+**Note**: The environment variable is `LLM_API_KEY` (used by `grafana-llm-app`), even though the key comes from Anthropic.
+
 1. Create a `.env` file in the project root (copy from `.env.example`):
    ```bash
    cp .env.example .env
