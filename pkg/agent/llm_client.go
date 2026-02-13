@@ -31,7 +31,7 @@ func NewLLMClient(logger log.Logger) *LLMClient {
 	}
 }
 
-func (c *LLMClient) ChatCompletion(ctx context.Context, req ChatCompletionRequest, grafanaURL, authToken, orgID, userCookie string) (*ChatCompletionResponse, error) {
+func (c *LLMClient) ChatCompletion(ctx context.Context, req ChatCompletionRequest, grafanaURL, authToken, orgID string) (*ChatCompletionResponse, error) {
 	req.Model = llmModel
 
 	body, err := json.Marshal(req)
@@ -46,14 +46,11 @@ func (c *LLMClient) ChatCompletion(ctx context.Context, req ChatCompletionReques
 	}
 
 	httpReq.Header.Set("Content-Type", "application/json")
-	// Prefer user cookie for LLM calls — it carries the user's org context,
-	// ensuring grafana-llm-app uses the correct org's LLM configuration.
-	// Falls back to SA token when cookie is not available (e.g. API-token access).
+	// Use SA token for LLM authentication.
+	// Note: Grafana 12 strips Cookie headers from backend plugin requests,
+	// so user session cookies cannot be used for auth.
 	authMethod := "none"
-	if userCookie != "" {
-		httpReq.Header.Set("Cookie", userCookie)
-		authMethod = "cookie"
-	} else if authToken != "" {
+	if authToken != "" {
 		httpReq.Header.Set("Authorization", "Bearer "+authToken)
 		authMethod = "sa-token"
 		if orgID != "" && orgID != "1" {

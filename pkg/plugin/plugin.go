@@ -567,7 +567,6 @@ func (p *Plugin) handleAgentRun(w http.ResponseWriter, r *http.Request) {
 		MaxIterations:      AgentMaxIterations,
 		GrafanaURL:         builtInMCPBaseURL(),
 		AuthToken:          saToken,
-		UserCookie:         r.Header.Get("Cookie"),
 		UserRole:           userRole,
 		OrgID:              orgID,
 		OrgName:            req.OrgName,

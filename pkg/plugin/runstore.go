@@ -65,6 +65,9 @@ func (b *RunBroadcaster) Subscribe() (<-chan agent.SSEEvent, func()) {
 	unsubscribe := func() {
 		b.mu.Lock()
 		defer b.mu.Unlock()
+		if b.closed {
+			return
+		}
 		for i, sub := range b.subscribers {
 			if sub == ch {
 				b.subscribers = append(b.subscribers[:i], b.subscribers[i+1:]...)
@@ -156,7 +159,7 @@ func (s *RunStore) AppendEvent(runID string, event agent.SSEEvent) {
 	b := s.broadcasters[runID]
 	s.mu.Unlock()
 
-	if b != nil {
+	if b != nil && !b.IsClosed() {
 		b.Broadcast(event)
 	}
 }

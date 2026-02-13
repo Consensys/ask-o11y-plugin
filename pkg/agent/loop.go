@@ -36,7 +36,6 @@ type LoopRequest struct {
 
 	GrafanaURL string
 	AuthToken  string
-	UserCookie string // User's session cookie for org-aware LLM calls
 
 	UserRole   string
 	OrgID      string
@@ -82,7 +81,7 @@ func (a *AgentLoop) Run(ctx context.Context, req LoopRequest, eventCh chan<- SSE
 			Messages: messages,
 			Tools:    openAITools,
 		}
-		resp, err := a.llmClient.ChatCompletion(ctx, llmReq, req.GrafanaURL, req.AuthToken, req.OrgID, req.UserCookie)
+		resp, err := a.llmClient.ChatCompletion(ctx, llmReq, req.GrafanaURL, req.AuthToken, req.OrgID)
 		if err != nil {
 			if ctx.Err() != nil {
 				return

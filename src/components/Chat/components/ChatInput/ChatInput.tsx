@@ -173,11 +173,7 @@ export const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(
 
                 {queuedMessageCount > 0 && (
                   <div
-                    className="flex items-center text-xs px-2 py-0.5 rounded-full"
-                    style={{
-                      color: theme.colors.text.secondary,
-                      backgroundColor: theme.isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)',
-                    }}
+                    className="flex items-center text-xs px-2 py-0.5 rounded-full bg-surface text-secondary"
                     aria-label={`${queuedMessageCount} message${queuedMessageCount > 1 ? 's' : ''} queued`}
                     data-testid="chat-queue-indicator"
                   >

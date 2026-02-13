@@ -90,13 +90,7 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({ message, isGenerating 
         {showReasoning && <ReasoningIndicator reasoning={message.reasoning!} />}
 
         {showThinking && (
-          <div
-            className="flex items-center gap-3 px-4 py-3 rounded-lg animate-pulse"
-            style={{
-              backgroundColor: theme.isDark ? 'rgba(255, 255, 255, 0.03)' : 'rgba(0, 0, 0, 0.02)',
-              color: theme.colors.text.secondary,
-            }}
-          >
+          <div className="flex items-center gap-3 px-4 py-3 rounded-lg animate-pulse bg-surface text-secondary">
             <div className="flex gap-1.5">
               {[0, 150, 300].map((delay) => (
                 <div
