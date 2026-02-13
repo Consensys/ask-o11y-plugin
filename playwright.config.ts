@@ -15,6 +15,7 @@ const pluginE2eAuth = `${dirname(require.resolve('@grafana/plugin-e2e'))}/auth`;
  */
 export default defineConfig<PluginOptions>({
   testDir: './tests',
+  workers: 1,
   /* Fail the build on CI if you accidentally left test.only in the source code. */
   forbidOnly: !!process.env.CI,
   /* Retry on CI only */
@@ -47,10 +48,8 @@ export default defineConfig<PluginOptions>({
         storageState: 'playwright/.auth/admin.json',
       },
       dependencies: ['auth'],
-      fullyParallel: false,
-      workers: 1, // Force single worker to avoid storage conflicts between test files
     },
-    // 3. Run LLM-dependent tests with single worker to avoid rate limiting
+    // 3. Run LLM-dependent tests serially to avoid rate limiting
     {
       name: 'chromium-llm-tests',
       testMatch: [
@@ -64,10 +63,8 @@ export default defineConfig<PluginOptions>({
         storageState: 'playwright/.auth/admin.json',
       },
       dependencies: ['chromium-session-tests'],
-      fullyParallel: false,
-      workers: 1, // Single worker to avoid LLM API rate limiting
     },
-    // 4. Run other tests in parallel with multiple workers
+    // 4. Run other tests after LLM tests
     {
       name: 'chromium',
       testIgnore: [
@@ -82,7 +79,6 @@ export default defineConfig<PluginOptions>({
         storageState: 'playwright/.auth/admin.json',
       },
       dependencies: ['chromium-session-tests'],
-      workers: 6, // Parallel execution for fast UI-only tests
     },
   ],
 });
