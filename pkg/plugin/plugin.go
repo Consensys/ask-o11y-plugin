@@ -615,7 +615,15 @@ func (p *Plugin) consumeAgentEvents(runID, sessionID string, userID, orgID int64
 		}
 		p.runStore.FinishRun(runID, RunStatusFailed, errMsg)
 	case "":
-		p.runStore.FinishRun(runID, RunStatusFailed, "agent terminated without producing events")
+		p.runCancelsMu.Lock()
+		_, stillCancellable := p.runCancels[runID]
+		p.runCancelsMu.Unlock()
+
+		if !stillCancellable {
+			p.runStore.FinishRun(runID, RunStatusCancelled, "run cancelled by user")
+		} else {
+			p.runStore.FinishRun(runID, RunStatusFailed, "agent terminated without producing events")
+		}
 	default:
 		p.runStore.FinishRun(runID, RunStatusCancelled, "")
 	}

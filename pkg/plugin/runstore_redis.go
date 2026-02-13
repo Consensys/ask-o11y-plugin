@@ -18,8 +18,9 @@ type RedisRunStore struct {
 	broadcasters map[string]*RunBroadcaster
 }
 
-func runKey(runID string) string    { return fmt.Sprintf("run:%s", runID) }
-func eventsKey(runID string) string { return fmt.Sprintf("run:%s:events", runID) }
+func runKey(runID string) string     { return fmt.Sprintf("run:%s", runID) }
+func eventsKey(runID string) string  { return fmt.Sprintf("run:%s:events", runID) }
+func sequenceKey(runID string) string { return fmt.Sprintf("run:%s:sequence", runID) }
 
 func NewRedisRunStore(client *redis.Client, logger log.Logger) *RedisRunStore {
 	return &RedisRunStore{
@@ -61,6 +62,16 @@ func (s *RedisRunStore) CreateRun(runID string, userID, orgID int64) *AgentRun {
 }
 
 func (s *RedisRunStore) AppendEvent(runID string, event agent.SSEEvent) {
+	seqCtx, seqCancel := getContextWithTimeout(RedisOpTimeout)
+	defer seqCancel()
+
+	seq, err := s.client.Incr(seqCtx, sequenceKey(runID)).Result()
+	if err != nil {
+		s.logger.Error("Failed to increment sequence", "error", err, "runId", runID)
+		return
+	}
+	event.Sequence = seq - 1
+
 	eventJSON, err := json.Marshal(event)
 	if err != nil {
 		s.logger.Error("Failed to marshal event", "error", err, "runId", runID)
@@ -225,4 +236,5 @@ func (s *RedisRunStore) touchRun(runID string) {
 	defer cancel()
 	s.client.Expire(ctx, runKey(runID), RunMaxAge)
 	s.client.Expire(ctx, eventsKey(runID), RunMaxAge)
+	s.client.Expire(ctx, sequenceKey(runID), RunMaxAge)
 }

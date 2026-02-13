@@ -46,13 +46,13 @@ export interface RunStartedEvent {
 }
 
 export type SSEEvent =
-  | { type: 'content'; data: ContentEvent }
-  | { type: 'reasoning'; data: ReasoningEvent }
-  | { type: 'tool_call_start'; data: ToolCallStartEvent }
-  | { type: 'tool_call_result'; data: ToolCallResultEvent }
-  | { type: 'done'; data: DoneEvent }
-  | { type: 'error'; data: ErrorEvent }
-  | { type: 'run_started'; data: RunStartedEvent };
+  | { type: 'content'; data: ContentEvent; sequence: number }
+  | { type: 'reasoning'; data: ReasoningEvent; sequence: number }
+  | { type: 'tool_call_start'; data: ToolCallStartEvent; sequence: number }
+  | { type: 'tool_call_result'; data: ToolCallResultEvent; sequence: number }
+  | { type: 'done'; data: DoneEvent; sequence: number }
+  | { type: 'error'; data: ErrorEvent; sequence: number }
+  | { type: 'run_started'; data: RunStartedEvent; sequence: number };
 
 export interface AgentCallbacks {
   onContent: (event: ContentEvent) => void;
@@ -89,6 +89,7 @@ function orgIdHeaders(orgId?: string): Record<string, string> {
 interface ReadSSEStreamOptions {
   warnOnMalformedJSON?: boolean;
   abortSignal?: AbortSignal;
+  lastSeenSequence?: number;
 }
 
 async function readSSEStream(
@@ -100,6 +101,7 @@ async function readSSEStream(
   const decoder = new TextDecoder();
   let buffer = '';
   let receivedTerminalEvent = false;
+  let lastSeenSequence = options.lastSeenSequence ?? -1;
 
   try {
     while (true) {
@@ -132,6 +134,11 @@ async function readSSEStream(
           }
           continue;
         }
+
+        if (event.sequence <= lastSeenSequence) {
+          continue;
+        }
+        lastSeenSequence = event.sequence;
 
         if (event.type === 'done' || event.type === 'error') {
           receivedTerminalEvent = true;

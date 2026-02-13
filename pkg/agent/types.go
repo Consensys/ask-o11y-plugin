@@ -57,8 +57,9 @@ type Usage struct {
 }
 
 type SSEEvent struct {
-	Type string      `json:"type"`
-	Data interface{} `json:"data"`
+	Type     string      `json:"type"`
+	Data     interface{} `json:"data"`
+	Sequence int64       `json:"sequence"`
 }
 
 type ContentEvent struct {

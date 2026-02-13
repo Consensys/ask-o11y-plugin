@@ -19,14 +19,15 @@ const (
 )
 
 type AgentRun struct {
-	RunID     string           `json:"runId"`
-	Status    RunStatus        `json:"status"`
-	UserID    int64            `json:"userId"`
-	OrgID     int64            `json:"orgId"`
-	CreatedAt time.Time        `json:"createdAt"`
-	UpdatedAt time.Time        `json:"updatedAt"`
-	Events    []agent.SSEEvent `json:"events"`
-	Error     string           `json:"error,omitempty"`
+	RunID        string           `json:"runId"`
+	Status       RunStatus        `json:"status"`
+	UserID       int64            `json:"userId"`
+	OrgID        int64            `json:"orgId"`
+	CreatedAt    time.Time        `json:"createdAt"`
+	UpdatedAt    time.Time        `json:"updatedAt"`
+	Events       []agent.SSEEvent `json:"events"`
+	Error        string           `json:"error,omitempty"`
+	NextSequence int64            `json:"-"`
 }
 
 type RunStoreInterface interface {
@@ -151,6 +152,8 @@ func (s *RunStore) AppendEvent(runID string, event agent.SSEEvent) {
 		s.mu.Unlock()
 		return
 	}
+	event.Sequence = run.NextSequence
+	run.NextSequence++
 	run.Events = append(run.Events, event)
 	if len(run.Events) > RunMaxEventsPerRun {
 		run.Events = run.Events[len(run.Events)-RunMaxEventsPerRun:]
