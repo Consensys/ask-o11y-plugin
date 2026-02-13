@@ -439,7 +439,10 @@ export function useChat(
 
     return () => {
       cancelled = true;
-      abortController.abort();
+      // Only abort if we're not actively generating (to avoid aborting mid-stream when sessionId is set)
+      if (!isGenerating) {
+        abortController.abort();
+      }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionManager.currentSessionId, readOnly]);
