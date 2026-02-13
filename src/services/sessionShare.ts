@@ -161,9 +161,10 @@ export class SessionShareService {
     const origin = window.location.origin;
     const orgId = String(config.bootData.user.orgId || '1');
 
-    // If it's already a full path from backend (starts with /a/), use it
+    // If it's already a full path from backend (starts with /a/), use it as-is
+    // Backend already includes orgId query param
     if (shareUrlOrId.startsWith('/a/')) {
-      return `${origin}${shareUrlOrId}?orgId=${orgId}`;
+      return `${origin}${shareUrlOrId}`;
     }
 
     // Fallback for backward compatibility (just shareId)
