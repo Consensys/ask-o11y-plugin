@@ -31,6 +31,8 @@ jobs:
               - 'go.mod'
               - 'go.sum'
               - 'tsconfig.json'
+              - '.github/workflows/e2e.yml'
+              - 'package.json'
 
   build:
     name: Build Plugin with Coverage
@@ -163,7 +165,7 @@ jobs:
 
       - name: Run E2E tests with coverage
         id: run-tests
-        run: npm run e2e:coverage -- --workers=1
+        run: npm run e2e:coverage
 
       - name: Generate coverage report
         if: always()
