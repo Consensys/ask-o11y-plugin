@@ -9,6 +9,8 @@ services:
       GF_AUTH_BASIC_ENABLED: true
       GF_AUTH_ANONYMOUS_ENABLED: false
       GF_SECURITY_ALLOW_EMBEDDING: true
+      GF_FEATURE_TOGGLES_ENABLE: 'externalServiceAccounts'
+      GF_AUTH_MANAGED_SERVICE_ACCOUNTS_ENABLED: 'true'
       LLM_API_KEY: ${LLM_API_KEY:-}
       GF_PLUGIN_ASKO11Y_REDIS: ${GF_PLUGIN_ASKO11Y_REDIS:-redis://redis:6379/0}
     depends_on:
@@ -55,4 +57,3 @@ services:
 
 volumes:
   redis-data:
-

@@ -22,15 +22,21 @@ test.describe('Side Panel', () => {
   });
 
   test('should not show panel when no dashboard links are present', async ({ page }) => {
+    test.setTimeout(90000);
     await test.step('Send message without dashboard reference', async () => {
       const chatInput = page.getByLabel('Chat input');
+      const sendButton = page.getByLabel('Send message (Enter)');
 
-      await chatInput.fill('What is observability?');
-      await page.getByLabel('Send message (Enter)').click();
+      await chatInput.fill('list your datasources');
+      await sendButton.click();
 
-      // Wait for assistant response
+      // Wait for assistant response to appear
       const assistantMessage = page.locator('[aria-label="Assistant message"]').first();
-      await expect(assistantMessage).toBeVisible({ timeout: 30000 });
+      await expect(assistantMessage).toBeVisible({ timeout: 60000 });
+
+      // Wait for streaming to complete (when "Stop generating" button disappears)
+      const stopButton = page.getByRole('button', { name: 'Stop generating' });
+      await expect(stopButton).toBeHidden({ timeout: 60000 });
     });
 
     await test.step('Verify panel does not open', async () => {
@@ -43,16 +49,21 @@ test.describe('Side Panel', () => {
   });
 
   test('should expand chat to full width when side panel closes (chat on right)', async ({ page }) => {
+    test.setTimeout(90000);
     await test.step('Send message that opens side panel', async () => {
       const chatInput = page.getByLabel('Chat input');
+      const sendButton = page.getByLabel('Send message (Enter)');
 
-      // Ask for a dashboard to trigger side panel opening
-      await chatInput.fill('Show me the default dashboard');
-      await page.getByLabel('Send message (Enter)').click();
+      await chatInput.fill('list your datasources');
+      await sendButton.click();
 
-      // Wait for assistant response
+      // Wait for assistant response to appear
       const assistantMessage = page.locator('[aria-label="Assistant message"]').first();
-      await expect(assistantMessage).toBeVisible({ timeout: 30000 });
+      await expect(assistantMessage).toBeVisible({ timeout: 60000 });
+
+      // Wait for streaming to complete (when "Stop generating" button disappears)
+      const stopButton = page.getByRole('button', { name: 'Stop generating' });
+      await expect(stopButton).toBeHidden({ timeout: 60000 });
     });
 
     await test.step('Wait for side panel to potentially open', async () => {

@@ -39,13 +39,7 @@ export class ValidationService {
    */
   static validateChatInput(input: string): string {
     const trimmed = this.validateNonEmptyString(input, 'Input', this.MAX_INPUT_LENGTH);
-    const cleaned = this.removeControlCharacters(trimmed);
-
-    if (this.containsScriptInjection(cleaned)) {
-      throw new Error('Input contains potentially harmful content');
-    }
-
-    return cleaned;
+    return this.removeControlCharacters(trimmed);
   }
 
   /**
@@ -258,23 +252,6 @@ export class ValidationService {
     return input.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '');
   }
 
-  private static containsScriptInjection(input: string): boolean {
-    const dangerousPatterns = [
-      /<script\b/i,
-      /javascript:/i,
-      /on\w+\s*=/i, // Event handlers
-      /<iframe/i,
-      /<object/i,
-      /<embed/i,
-      /eval\s*\(/i,
-      /expression\s*\(/i,
-      /vbscript:/i,
-      /data:text\/html/i,
-    ];
-
-    return dangerousPatterns.some((pattern) => pattern.test(input));
-  }
-
   /**
    * Check if brackets are balanced in a string
    */
@@ -302,16 +279,7 @@ export class ValidationService {
   }
 
   private static validateLogQL(query: string): void {
-    // Basic LogQL structure validation
-    // Similar to PromQL but with LogQL-specific checks
-
-    // Check for balanced brackets and quotes
-    this.validatePromQL(query); // Reuse basic structure validation
-
-    // LogQL-specific: Check for valid stream selectors
-    if (!query.includes('{') && !query.includes('}')) {
-      // LogQL queries should typically have stream selectors (warning silenced)
-    }
+    this.validatePromQL(query);
   }
 
   /**
@@ -431,14 +399,3 @@ export class ValidationService {
   }
 }
 
-// Export validation functions for convenience
-export const {
-  validateChatInput,
-  validateQuery,
-  validateMCPServerURL,
-  validateSessionData,
-  sanitizeMessageContent,
-  escapeHTML,
-  validateConfigValue,
-  validateCustomSystemPrompt,
-} = ValidationService;

@@ -25,17 +25,12 @@ test.describe('Session Sharing', () => {
     const chatInput = page.getByLabel('Chat input');
 
     await test.step('Create a session with messages', async () => {
-      // Send a message to create a session
-      await chatInput.fill('Test message for sharing');
+      await chatInput.fill('list your datasources');
       await page.getByLabel('Send message (Enter)').click();
-      await expect(page.locator('[role="log"]').getByText('Test message for sharing')).toBeVisible();
 
-      // Wait for chat input to become enabled (indicates message processing is done)
-      await expect(chatInput).toBeEnabled({ timeout: 30000 });
-
-      // Session is saved immediately, but wait a bit longer to ensure it's fully persisted
-      // and indexed before trying to share it
-      await page.waitForTimeout(2000);
+      await expect(page.locator('[aria-label="User message"]').first()).toBeVisible({ timeout: 30000 });
+      await expect(page.locator('[aria-label="Assistant message"]').first()).toBeVisible({ timeout: 60000 });
+      await expect(page.getByRole('button', { name: 'Stop generating' })).toBeHidden({ timeout: 60000 });
     });
 
     await test.step('Open sidebar and share session', async () => {
@@ -127,9 +122,7 @@ test.describe('Session Sharing', () => {
     });
   });
 
-  // IMPORTANT: This test requires the in-memory share store to persist between API calls and
-  // proper error status propagation through Grafana's proxy layer. Both are unreliable in test environments.
-  test.skip('should view a shared session in read-only mode', async ({ page }) => {
+  test('should view a shared session in read-only mode', async ({ page }) => {
     // Delete all sessions first to ensure clean slate for this test
     await deleteAllPersistedSessions(page);
     await expect(page.getByRole('heading', { name: 'Ask O11y Assistant' })).toBeVisible({ timeout: 10000 });
@@ -139,13 +132,12 @@ test.describe('Session Sharing', () => {
     await test.step('Create a session and share it', async () => {
       const chatInput = page.getByLabel('Chat input');
 
-      // Create a session
-      await chatInput.fill('Message to be shared');
+      await chatInput.fill('list your datasources');
       await page.getByLabel('Send message (Enter)').click();
-      await expect(page.locator('[role="log"]').getByText('Message to be shared')).toBeVisible();
-      await expect(chatInput).toBeEnabled({ timeout: 30000 });
-      // Wait longer for session to be saved and indexed
-      await page.waitForTimeout(5000);
+
+      await expect(page.locator('[aria-label="User message"]').first()).toBeVisible({ timeout: 30000 });
+      await expect(page.locator('[aria-label="Assistant message"]').first()).toBeVisible({ timeout: 60000 });
+      await expect(page.getByRole('button', { name: 'Stop generating' })).toBeHidden({ timeout: 60000 });
 
       // Open sidebar and share
       await page.getByRole('button', { name: /History/i }).click();
@@ -234,7 +226,7 @@ test.describe('Session Sharing', () => {
       await expect(chatLog.locator('[role="article"]').first()).toBeVisible({ timeout: 10000 });
 
       // Verify the specific message is visible
-      await expect(chatLog.getByText('Message to be shared')).toBeVisible({ timeout: 5000 });
+      await expect(chatLog.getByText('list your datasources')).toBeVisible({ timeout: 5000 });
 
       // Verify chat input is NOT visible (read-only mode)
       const chatInput = page.getByLabel('Chat input');
@@ -245,9 +237,7 @@ test.describe('Session Sharing', () => {
     });
   });
 
-  // IMPORTANT: This test requires the in-memory share store to persist between API calls and
-  // proper error status propagation through Grafana's proxy layer. Both are unreliable in test environments.
-  test.skip('should import a shared session', async ({ page }) => {
+  test('should import a shared session', async ({ page }) => {
     // Delete all sessions first to ensure clean slate for this test
     await deleteAllPersistedSessions(page);
     await expect(page.getByRole('heading', { name: 'Ask O11y Assistant' })).toBeVisible({ timeout: 10000 });
@@ -257,13 +247,12 @@ test.describe('Session Sharing', () => {
     await test.step('Create and share a session', async () => {
       const chatInput = page.getByLabel('Chat input');
 
-      // Create a session
-      await chatInput.fill('Session to be imported');
+      await chatInput.fill('list your datasources');
       await page.getByLabel('Send message (Enter)').click();
-      await expect(page.locator('[role="log"]').getByText('Session to be imported')).toBeVisible();
-      await expect(chatInput).toBeEnabled({ timeout: 30000 });
-      // Wait for session to be saved
-      await page.waitForTimeout(2000);
+
+      await expect(page.locator('[aria-label="User message"]').first()).toBeVisible({ timeout: 30000 });
+      await expect(page.locator('[aria-label="Assistant message"]').first()).toBeVisible({ timeout: 60000 });
+      await expect(page.getByRole('button', { name: 'Stop generating' })).toBeHidden({ timeout: 60000 });
 
       // Share the session
       await page.getByRole('button', { name: /History/i }).click();
@@ -317,11 +306,11 @@ test.describe('Session Sharing', () => {
 
       // Wait for message content to be visible - retry if needed
       try {
-        await page.waitForSelector('text=Session to be imported', { timeout: 15000 });
+        await page.waitForSelector('text=list your datasources', { timeout: 15000 });
       } catch (e) {
         // If not found, wait longer and try again
         await page.waitForTimeout(3000);
-        await page.waitForSelector('text=Session to be imported', { timeout: 10000 });
+        await page.waitForSelector('text=list your datasources', { timeout: 10000 });
       }
       await page.waitForTimeout(1000);
 
@@ -332,14 +321,14 @@ test.describe('Session Sharing', () => {
 
       // Wait for navigation back to home - the import triggers a page reload
       // The imported session will be loaded immediately, so we should see messages, NOT the welcome screen
-      await page.waitForURL(/\/a\/consensys-asko11y-app\/?$/, { timeout: 15000 });
+      await page.waitForURL(/\/a\/consensys-asko11y-app\/?(\?.*)?$/, { timeout: 15000 });
 
       // Verify the imported session content is visible in the chat log
       const homeChatLog = page.locator('[role="log"]');
       await expect(homeChatLog).toBeVisible({ timeout: 10000 });
 
       // Verify the message from the imported session appears
-      await expect(homeChatLog.getByText('Session to be imported')).toBeVisible({ timeout: 10000 });
+      await expect(homeChatLog.getByText('list your datasources')).toBeVisible({ timeout: 10000 });
     });
 
     await test.step('Verify imported session is available', async () => {
@@ -353,16 +342,14 @@ test.describe('Session Sharing', () => {
 
       // Click on the session to verify it loads
       await sessionItems.first().click();
-      await expect(page.locator('[role="log"]').getByText('Session to be imported')).toBeVisible({ timeout: 5000 });
+      await expect(page.locator('[role="log"]').getByText('list your datasources')).toBeVisible({ timeout: 5000 });
 
       // Close sidebar
       await page.locator('button[title="Close"]').click();
     });
   });
 
-  // IMPORTANT: This test requires the in-memory share store to persist between API calls and
-  // proper list of existing shares to be loaded. Both are unreliable in test environments.
-  test.skip('should revoke a share link', async ({ page }) => {
+  test('should revoke a share link', async ({ page }) => {
     // Delete all sessions first to ensure clean slate for this test
     await deleteAllPersistedSessions(page);
     await expect(page.getByRole('heading', { name: 'Ask O11y Assistant' })).toBeVisible({ timeout: 10000 });
@@ -370,12 +357,12 @@ test.describe('Session Sharing', () => {
     await test.step('Create a session and share it', async () => {
       const chatInput = page.getByLabel('Chat input');
 
-      // Create a session
-      await chatInput.fill('Message for revoke test');
+      await chatInput.fill('list your datasources');
       await page.getByLabel('Send message (Enter)').click();
-      await expect(page.locator('[role="log"]').getByText('Message for revoke test')).toBeVisible();
-      await expect(chatInput).toBeEnabled({ timeout: 30000 });
-      await page.waitForTimeout(2000);
+
+      await expect(page.locator('[aria-label="User message"]').first()).toBeVisible({ timeout: 30000 });
+      await expect(page.locator('[aria-label="Assistant message"]').first()).toBeVisible({ timeout: 60000 });
+      await expect(page.getByRole('button', { name: 'Stop generating' })).toBeHidden({ timeout: 60000 });
 
       // Open sidebar and share
       await page.getByRole('button', { name: /History/i }).click();
@@ -460,9 +447,7 @@ test.describe('Session Sharing', () => {
     });
   });
 
-  // IMPORTANT: This test requires proper HTTP status code propagation from the Go backend through
-  // Grafana's proxy layer. The status code is not reliably available in the frontend error object.
-  test.skip('should show error for invalid share ID', async ({ page }) => {
+  test('should show error for invalid share ID', async ({ page }) => {
     // Navigate to a non-existent share
     await page.goto('/a/consensys-asko11y-app/shared/invalid-share-id-12345');
 
@@ -475,9 +460,7 @@ test.describe('Session Sharing', () => {
     await expect(page.getByRole('button', { name: /Go to Home/i })).toBeVisible();
   });
 
-  // IMPORTANT: This test requires the in-memory share store to persist between API calls and
-  // proper list of existing shares to be loaded. Both are unreliable in test environments.
-  test.skip('should display existing shares in share dialog', async ({ page }) => {
+  test('should display existing shares in share dialog', async ({ page }) => {
     // Delete all sessions first to ensure clean slate for this test
     await deleteAllPersistedSessions(page);
     await expect(page.getByRole('heading', { name: 'Ask O11y Assistant' })).toBeVisible({ timeout: 10000 });
@@ -485,12 +468,12 @@ test.describe('Session Sharing', () => {
     await test.step('Create a session and share it twice', async () => {
       const chatInput = page.getByLabel('Chat input');
 
-      // Create a session
-      await chatInput.fill('Message for multiple shares');
+      await chatInput.fill('list your datasources');
       await page.getByLabel('Send message (Enter)').click();
-      await expect(page.locator('[role="log"]').getByText('Message for multiple shares')).toBeVisible();
-      await expect(chatInput).toBeEnabled({ timeout: 30000 });
-      await page.waitForTimeout(2000);
+
+      await expect(page.locator('[aria-label="User message"]').first()).toBeVisible({ timeout: 30000 });
+      await expect(page.locator('[aria-label="Assistant message"]').first()).toBeVisible({ timeout: 60000 });
+      await expect(page.getByRole('button', { name: 'Stop generating' })).toBeHidden({ timeout: 60000 });
 
       // Open sidebar
       await page.getByRole('button', { name: /History/i }).click();
@@ -584,12 +567,12 @@ test.describe('Session Sharing', () => {
     await test.step('Create a share with 7-day expiration', async () => {
       const chatInput = page.getByLabel('Chat input');
 
-      // Create a session
-      await chatInput.fill('Message with expiration');
+      await chatInput.fill('list your datasources');
       await page.getByLabel('Send message (Enter)').click();
-      await expect(page.locator('[role="log"]').getByText('Message with expiration')).toBeVisible();
-      await expect(chatInput).toBeEnabled({ timeout: 30000 });
-      await page.waitForTimeout(2000);
+
+      await expect(page.locator('[aria-label="User message"]').first()).toBeVisible({ timeout: 30000 });
+      await expect(page.locator('[aria-label="Assistant message"]').first()).toBeVisible({ timeout: 60000 });
+      await expect(page.getByRole('button', { name: 'Stop generating' })).toBeHidden({ timeout: 60000 });
 
       // Open sidebar and share
       await page.getByRole('button', { name: /History/i }).click();

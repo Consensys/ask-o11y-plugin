@@ -5,12 +5,13 @@ import { ValidationService } from '../../../../services/validation';
 interface ChatInputProps {
   currentInput: string;
   isGenerating: boolean;
-  toolsLoading: boolean;
   setCurrentInput: (value: string) => void;
   sendMessage: () => void;
   handleKeyPress: (e: React.KeyboardEvent) => void;
   rightSlot?: React.ReactNode;
   leftSlot?: React.ReactNode;
+  queuedMessageCount: number;
+  onStopGeneration?: () => void;
 }
 
 export interface ChatInputRef {
@@ -20,7 +21,7 @@ export interface ChatInputRef {
 
 export const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(
   (
-    { currentInput, isGenerating, toolsLoading, setCurrentInput, sendMessage, handleKeyPress, rightSlot, leftSlot },
+    { currentInput, isGenerating, setCurrentInput, sendMessage, handleKeyPress, rightSlot, leftSlot, queuedMessageCount, onStopGeneration },
     ref
   ) => {
     const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -57,7 +58,6 @@ export const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(
         textareaRef.current.value = currentInput;
         autoResize();
       }
-      // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [currentInput]);
 
     const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
@@ -121,22 +121,6 @@ export const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(
               backgroundColor: theme.isDark ? '#1a1a1a' : theme.colors.background.primary,
             }}
           >
-            {/* Top row: @ symbol and settings icon */}
-            {/* <div className="flex items-center justify-between mb-3">
-              <span className="text-base font-medium" style={{ color: theme.colors.text.secondary }}>
-                @
-              </span>
-              <button
-                type="button"
-                className="p-1.5 rounded hover:bg-white/5 transition-colors"
-                aria-label="Settings"
-                style={{ color: theme.colors.text.secondary }}
-              >
-                <Icon name="cog" size="md" />
-              </button>
-            </div> */}
-
-            {/* Text input area */}
             <textarea
               ref={textareaRef}
               defaultValue={currentInput}
@@ -148,7 +132,6 @@ export const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(
                 handleInputChange(e as any);
               }}
               placeholder="Ask me anything about your metrics, logs, or observability..."
-              disabled={isGenerating || toolsLoading}
               rows={1}
               className="w-full resize-none bg-transparent border-0 text-base placeholder-secondary focus:outline-none focus:ring-0 min-h-[28px] max-h-[200px]"
               style={{
@@ -156,7 +139,7 @@ export const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(
                 height: 'auto',
                 color: theme.colors.text.primary,
               }}
-              aria-label="Chat input"
+              aria-label={isGenerating ? 'Chat input (message will be queued)' : 'Chat input'}
               aria-invalid={!!validationError}
               aria-describedby={validationError ? 'input-error' : undefined}
             />
@@ -168,29 +151,33 @@ export const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(
                 {leftSlot}
 
                 {/* Loading indicator */}
-                {(isGenerating || toolsLoading) && (
+                {isGenerating && (
                   <div className="flex items-center text-sm" style={{ color: theme.colors.text.secondary }}>
-                    {isGenerating ? (
-                      <>
-                        <div className="flex gap-1 mr-2">
-                          <div
-                            className="w-1.5 h-1.5 bg-current rounded-full animate-pulse"
-                            style={{ animationDelay: '0ms' }}
-                          />
-                          <div
-                            className="w-1.5 h-1.5 bg-current rounded-full animate-pulse"
-                            style={{ animationDelay: '150ms' }}
-                          />
-                          <div
-                            className="w-1.5 h-1.5 bg-current rounded-full animate-pulse"
-                            style={{ animationDelay: '300ms' }}
-                          />
-                        </div>
-                        <span>Generating...</span>
-                      </>
-                    ) : (
-                      <span>Loading tools...</span>
-                    )}
+                    <div className="flex gap-1 mr-2">
+                      <div
+                        className="w-1.5 h-1.5 bg-current rounded-full animate-pulse"
+                        style={{ animationDelay: '0ms' }}
+                      />
+                      <div
+                        className="w-1.5 h-1.5 bg-current rounded-full animate-pulse"
+                        style={{ animationDelay: '150ms' }}
+                      />
+                      <div
+                        className="w-1.5 h-1.5 bg-current rounded-full animate-pulse"
+                        style={{ animationDelay: '300ms' }}
+                      />
+                    </div>
+                    <span>Generating...</span>
+                  </div>
+                )}
+
+                {queuedMessageCount > 0 && (
+                  <div
+                    className="flex items-center text-xs px-2 py-0.5 rounded-full bg-surface text-secondary"
+                    aria-label={`${queuedMessageCount} message${queuedMessageCount > 1 ? 's' : ''} queued`}
+                    data-testid="chat-queue-indicator"
+                  >
+                    <span>{queuedMessageCount} queued</span>
                   </div>
                 )}
               </div>
@@ -199,10 +186,23 @@ export const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(
                 {/* Right slot for optional actions */}
                 {rightSlot}
 
+                {isGenerating && onStopGeneration && (
+                  <button
+                    onClick={onStopGeneration}
+                    className="p-2 rounded-md hover:bg-white/10 transition-colors"
+                    aria-label="Stop generating"
+                    title="Stop generating"
+                    data-testid="chat-stop-button"
+                    style={{ color: theme.colors.text.secondary }}
+                  >
+                    <Icon name="square-shape" size="lg" />
+                  </button>
+                )}
+
                 {/* Enter/Send button */}
                 <button
                   onClick={handleSendClick}
-                  disabled={!currentInput.trim() || isGenerating || toolsLoading || !!validationError}
+                  disabled={!currentInput.trim() || !!validationError}
                   className="p-2 rounded-md hover:bg-white/10 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
                   aria-label="Send message (Enter)"
                   style={{ color: theme.colors.text.secondary }}

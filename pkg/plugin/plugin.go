@@ -1,7 +1,9 @@
 package plugin
 
 import (
+	"consensys-asko11y-app/pkg/agent"
 	"consensys-asko11y-app/pkg/mcp"
+	"consensys-asko11y-app/pkg/rbac"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -11,6 +13,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/grafana/grafana-plugin-sdk-go/backend"
@@ -20,17 +23,14 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-// PluginID is the plugin identifier
 const PluginID = "consensys-asko11y-app"
 
-// Make sure Plugin implements required interfaces
 var (
 	_ backend.CallResourceHandler   = (*Plugin)(nil)
 	_ instancemgmt.InstanceDisposer = (*Plugin)(nil)
 	_ backend.CheckHealthHandler    = (*Plugin)(nil)
 )
 
-// RedisConfig holds Redis connection configuration
 type RedisConfig struct {
 	Addr     string
 	Password string
@@ -42,6 +42,20 @@ func getRedisAddr() string {
 		return addr
 	}
 	return "localhost:6379"
+}
+
+// builtInMCPBaseURL returns the localhost base URL for communicating with
+// plugins in the same Grafana instance. Uses localhost to avoid hairpin
+// routing through external proxies/CDN that cfg.AppURL() may point to.
+func builtInMCPBaseURL() string {
+	if override := os.Getenv("GF_PLUGIN_ASKO11Y_BUILTIN_MCP_BASE_URL"); override != "" {
+		return strings.TrimRight(override, "/")
+	}
+	port := os.Getenv("GF_SERVER_HTTP_PORT")
+	if port == "" {
+		port = "3000"
+	}
+	return "http://localhost:" + port
 }
 
 func createRedisClient(logger log.Logger) (*redis.Client, error) {
@@ -84,28 +98,31 @@ func createRedisClient(logger log.Logger) (*redis.Client, error) {
 	return redis.NewClient(opt), nil
 }
 
-// PluginSettings represents the plugin configuration
 type PluginSettings struct {
-	MCPServers []mcp.ServerConfig `json:"mcpServers"`
+	MCPServers    []mcp.ServerConfig `json:"mcpServers"`
+	UseBuiltInMCP bool               `json:"useBuiltInMCP"`
 }
 
-// Plugin is the backend plugin implementation
 type Plugin struct {
 	backend.CallResourceHandler
-	logger      log.Logger
-	mcpProxy    *mcp.Proxy
-	shareStore  ShareStoreInterface
-	redisClient *redis.Client      // Store Redis client for health checks and cleanup
-	usingRedis  bool               // Track if we're using Redis or in-memory
-	ctx         context.Context    // Plugin lifecycle context
-	cancel      context.CancelFunc // Cancel function for plugin lifecycle context
+	logger        log.Logger
+	mcpProxy      *mcp.Proxy
+	agentLoop     *agent.AgentLoop
+	shareStore    ShareStoreInterface
+	runStore      RunStoreInterface
+	sessionStore  SessionStoreInterface
+	redisClient   *redis.Client
+	usingRedis    bool
+	useBuiltInMCP bool
+	ctx           context.Context
+	cancel        context.CancelFunc
+	runCancelsMu  sync.Mutex
+	runCancels    map[string]context.CancelFunc
 }
 
-// NewPlugin creates a new backend plugin instance
 func NewPlugin(ctx context.Context, settings backend.AppInstanceSettings) (instancemgmt.Instance, error) {
 	logger := log.DefaultLogger
 
-	// Parse plugin settings
 	var pluginSettings PluginSettings
 	if err := json.Unmarshal(settings.JSONData, &pluginSettings); err != nil {
 		logger.Warn("Failed to parse plugin settings, using empty config", "error", err)
@@ -114,25 +131,20 @@ func NewPlugin(ctx context.Context, settings backend.AppInstanceSettings) (insta
 		}
 	}
 
-	// Create MCP proxy
 	mcpProxy := mcp.NewProxy(logger)
 	mcpProxy.UpdateConfig(pluginSettings.MCPServers)
 
-	// Start health monitoring
 	mcpProxy.StartHealthMonitoring(MCPHealthMonitoringInterval)
 
-	// Try to create Redis-backed share store, fallback to in-memory
 	var shareStore ShareStoreInterface
 	var redisClient *redis.Client
 	usingRedis := false
 
 	redisClient, err := createRedisClient(logger)
 	if err == nil {
-		// Test connection
 		ctx, cancel := context.WithTimeout(context.Background(), RedisConnectionTimeout)
 		defer cancel()
 		if err := redisClient.Ping(ctx).Err(); err == nil {
-			// Create Redis-backed rate limiter
 			rateLimiter := NewRedisRateLimiter(redisClient, logger)
 			shareStore = NewRedisShareStore(redisClient, logger, rateLimiter)
 			usingRedis = true
@@ -146,28 +158,39 @@ func NewPlugin(ctx context.Context, settings backend.AppInstanceSettings) (insta
 		logger.Warn("Failed to create Redis client, falling back to in-memory storage", "error", err)
 	}
 
-	// Fallback to in-memory store if Redis is not available
+	var runStore RunStoreInterface
+	var sessionStore SessionStoreInterface
 	if !usingRedis {
-		// Create in-memory rate limiter
 		rateLimiter := NewInMemoryRateLimiter(logger)
 		shareStore = NewShareStore(logger, rateLimiter)
-		logger.Info("Using in-memory storage for session sharing (not suitable for multi-replica deployments)")
+		runStore = NewRunStore(logger)
+		sessionStore = NewSessionStore(logger)
+		logger.Info("Using in-memory storage (not suitable for multi-replica deployments)")
+	} else {
+		runStore = NewRedisRunStore(redisClient, logger)
+		sessionStore = NewRedisSessionStore(redisClient, logger)
 	}
 
-	// Create a context that lives for the plugin's lifetime (not the initialization context)
 	pluginCtx, cancel := context.WithCancel(context.Background())
 
+	llmClient := agent.NewLLMClient(logger)
+	agentLoop := agent.NewAgentLoop(llmClient, mcpProxy, logger)
+
 	p := &Plugin{
-		logger:      logger,
-		mcpProxy:    mcpProxy,
-		shareStore:  shareStore,
-		redisClient: redisClient,
-		usingRedis:  usingRedis,
-		ctx:         pluginCtx,
-		cancel:      cancel,
+		logger:        logger,
+		mcpProxy:      mcpProxy,
+		agentLoop:     agentLoop,
+		shareStore:    shareStore,
+		runStore:      runStore,
+		sessionStore:  sessionStore,
+		redisClient:   redisClient,
+		usingRedis:    usingRedis,
+		useBuiltInMCP: pluginSettings.UseBuiltInMCP,
+		ctx:           pluginCtx,
+		cancel:        cancel,
+		runCancels:    make(map[string]context.CancelFunc),
 	}
 
-	// Start cleanup goroutine for expired shares (only needed for in-memory store)
 	if !usingRedis {
 		go func() {
 			ticker := time.NewTicker(ShareCleanupInterval)
@@ -183,7 +206,19 @@ func NewPlugin(ctx context.Context, settings backend.AppInstanceSettings) (insta
 		}()
 	}
 
-	// Setup resource handler using httpadapter
+	go func() {
+		ticker := time.NewTicker(RunCleanupInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				runStore.CleanupOld()
+			case <-pluginCtx.Done():
+				return
+			}
+		}
+	}()
+
 	mux := http.NewServeMux()
 	p.registerRoutes(mux)
 	p.CallResourceHandler = httpadapter.New(mux)
@@ -195,9 +230,14 @@ func NewPlugin(ctx context.Context, settings backend.AppInstanceSettings) (insta
 	return p, nil
 }
 
-// Dispose cleans up plugin resources
 func (p *Plugin) Dispose() {
-	// Cancel the plugin lifecycle context to stop the cleanup goroutine
+	p.runCancelsMu.Lock()
+	for _, cancel := range p.runCancels {
+		cancel()
+	}
+	p.runCancels = nil
+	p.runCancelsMu.Unlock()
+
 	if p.cancel != nil {
 		p.cancel()
 	}
@@ -210,7 +250,6 @@ func (p *Plugin) Dispose() {
 	p.logger.Info("Plugin disposed")
 }
 
-// CheckHealth handles health checks for the backend plugin
 func (p *Plugin) CheckHealth(ctx context.Context, req *backend.CheckHealthRequest) (*backend.CheckHealthResult, error) {
 	p.logger.Info("CheckHealth called")
 
@@ -218,19 +257,16 @@ func (p *Plugin) CheckHealth(ctx context.Context, req *backend.CheckHealthReques
 	status := backend.HealthStatusOk
 	message := fmt.Sprintf("Plugin is healthy (MCP servers: %d)", serverCount)
 
-	// Check Redis connection if using Redis
 	if p.usingRedis && p.redisClient != nil {
 		healthCtx, cancel := context.WithTimeout(ctx, HealthCheckTimeout)
 		defer cancel()
 		if err := p.redisClient.Ping(healthCtx).Err(); err != nil {
-			// Plugin is still functional, but Redis is down - use warning message
 			message = fmt.Sprintf("Plugin is healthy but Redis connection failed (MCP servers: %d). Session sharing may not work across replicas.", serverCount)
 			p.logger.Warn("Redis health check failed", "error", err)
 		} else {
 			message = fmt.Sprintf("Plugin is healthy (MCP servers: %d, Redis: connected)", serverCount)
 		}
 	} else if !p.usingRedis {
-		// Plugin is functional but using in-memory storage - include warning in message
 		message = fmt.Sprintf("Plugin is healthy but using in-memory storage (MCP servers: %d). Session sharing will not work across multiple Grafana replicas. Configure Redis for production.", serverCount)
 	}
 
@@ -240,28 +276,23 @@ func (p *Plugin) CheckHealth(ctx context.Context, req *backend.CheckHealthReques
 	}, nil
 }
 
-// registerRoutes registers HTTP routes for the plugin
 func (p *Plugin) registerRoutes(mux *http.ServeMux) {
-	// Health check endpoint
 	mux.HandleFunc("/health", p.handleHealth)
-
-	// MCP JSON-RPC endpoint
 	mux.HandleFunc("/mcp", p.handleMCP)
-
-	// API endpoints for MCP operations (alternative REST-style interface)
 	mux.HandleFunc("/api/mcp/tools", p.handleMCPTools)
 	mux.HandleFunc("/api/mcp/call-tool", p.handleMCPCallTool)
 	mux.HandleFunc("/api/mcp/servers", p.handleMCPServers)
+	mux.HandleFunc("/api/agent/run", p.handleAgentRun)
+	mux.HandleFunc("/api/agent/runs/", p.handleAgentRuns)
 
-	// Session sharing endpoints
-	// IMPORTANT: Register more specific routes BEFORE general ones
-	// Go's ServeMux matches longest pattern, but we need specific routes first to avoid conflicts
-	mux.HandleFunc("/api/sessions/share", p.handleCreateShare)        // Exact match: POST /api/sessions/share
-	mux.HandleFunc("/api/sessions/shared/", p.handleGetSharedSession) // Prefix: GET /api/sessions/shared/{shareId}
-	mux.HandleFunc("/api/sessions/share/", p.handleDeleteShare)       // Prefix: DELETE /api/sessions/share/{shareId}
-	mux.HandleFunc("/api/sessions/", p.handleGetSessionShares)        // Prefix: GET /api/sessions/{sessionId}/shares (must be last)
+	// Session CRUD (new) — registered before share routes for specificity
+	mux.HandleFunc("/api/sessions/current", p.handleSessionCurrent)
+	mux.HandleFunc("/api/sessions/share", p.handleCreateShare)
+	mux.HandleFunc("/api/sessions/shared/", p.handleGetSharedSession)
+	mux.HandleFunc("/api/sessions/share/", p.handleDeleteShare)
+	mux.HandleFunc("/api/sessions/", p.handleSessionRouter)
+	mux.HandleFunc("/api/sessions", p.handleSessionsRoot)
 
-	// Fallback handler
 	mux.HandleFunc("/", p.handleDefault)
 }
 
@@ -274,7 +305,6 @@ func getUserRole(r *http.Request) string {
 		}
 	}
 
-	// Fallback: try to get role from headers (for testing or direct API calls)
 	roleHeaders := []string{
 		"X-Grafana-User-Role",
 		"X-Grafana-Org-Role",
@@ -287,104 +317,7 @@ func getUserRole(r *http.Request) string {
 		}
 	}
 
-	// Default to most restrictive role if no role information found
 	return "Viewer"
-}
-
-// isReadOnlyTool checks if a tool is read-only (safe for Viewers)
-func isReadOnlyTool(toolName string) bool {
-	// List of read-only Grafana tools (get, list, query, search, find, generate operations)
-	readOnlyTools := map[string]bool{
-		"mcp-grafana_fetch_pyroscope_profile":         true,
-		"mcp-grafana_find_error_pattern_logs":         true,
-		"mcp-grafana_find_slow_requests":              true,
-		"mcp-grafana_generate_deeplink":               true,
-		"mcp-grafana_get_alert_group":                 true,
-		"mcp-grafana_get_alert_rule_by_uid":           true,
-		"mcp-grafana_get_annotation_tags":             true,
-		"mcp-grafana_get_annotations":                 true,
-		"mcp-grafana_get_assertions":                  true,
-		"mcp-grafana_get_current_oncall_users":        true,
-		"mcp-grafana_get_dashboard_by_uid":            true,
-		"mcp-grafana_get_dashboard_panel_queries":     true,
-		"mcp-grafana_get_dashboard_property":          true,
-		"mcp-grafana_get_dashboard_summary":           true,
-		"mcp-grafana_get_datasource_by_name":          true,
-		"mcp-grafana_get_datasource_by_uid":           true,
-		"mcp-grafana_get_incident":                    true,
-		"mcp-grafana_get_oncall_shift":                true,
-		"mcp-grafana_get_sift_analysis":               true,
-		"mcp-grafana_get_sift_investigation":          true,
-		"mcp-grafana_list_alert_groups":               true,
-		"mcp-grafana_list_alert_rules":                true,
-		"mcp-grafana_list_contact_points":             true,
-		"mcp-grafana_list_datasources":                true,
-		"mcp-grafana_list_incidents":                  true,
-		"mcp-grafana_list_loki_label_names":           true,
-		"mcp-grafana_list_loki_label_values":          true,
-		"mcp-grafana_list_oncall_schedules":           true,
-		"mcp-grafana_list_oncall_teams":               true,
-		"mcp-grafana_list_oncall_users":               true,
-		"mcp-grafana_list_prometheus_label_names":     true,
-		"mcp-grafana_list_prometheus_label_values":    true,
-		"mcp-grafana_list_prometheus_metric_metadata": true,
-		"mcp-grafana_list_prometheus_metric_names":    true,
-		"mcp-grafana_list_pyroscope_label_names":      true,
-		"mcp-grafana_list_pyroscope_label_values":     true,
-		"mcp-grafana_list_pyroscope_profile_types":    true,
-		"mcp-grafana_list_sift_investigations":        true,
-		"mcp-grafana_list_teams":                      true,
-		"mcp-grafana_list_users_by_org":               true,
-		"mcp-grafana_query_loki_logs":                 true,
-		"mcp-grafana_query_loki_stats":                true,
-		"mcp-grafana_query_prometheus":                true,
-		"mcp-grafana_search_dashboards":               true,
-		"mcp-grafana_search_folders":                  true,
-	}
-
-	return readOnlyTools[toolName]
-}
-
-// canAccessTool checks if a user with the given role can access a tool
-func canAccessTool(role string, toolName string) bool {
-	// Admin and Editor can access all tools
-	if role == "Admin" || role == "Editor" {
-		return true
-	}
-
-	// Viewer can only access read-only tools
-	if role == "Viewer" {
-		// Non-Grafana tools are accessible to all roles
-		if len(toolName) < 12 || toolName[:12] != "mcp-grafana_" {
-			return true
-		}
-		// Grafana tools: check if read-only
-		return isReadOnlyTool(toolName)
-	}
-
-	// Unknown roles default to Viewer permissions
-	if len(toolName) < 12 || toolName[:12] != "mcp-grafana_" {
-		return true
-	}
-	return isReadOnlyTool(toolName)
-}
-
-// filterToolsByRole filters the tool list based on user role
-func filterToolsByRole(tools []mcp.Tool, role string) []mcp.Tool {
-	// Admin and Editor get all tools
-	if role == "Admin" || role == "Editor" {
-		return tools
-	}
-
-	// Viewer gets filtered tools
-	filtered := make([]mcp.Tool, 0, len(tools))
-	for _, tool := range tools {
-		if canAccessTool(role, tool.Name) {
-			filtered = append(filtered, tool)
-		}
-	}
-
-	return filtered
 }
 
 func (p *Plugin) handleHealth(w http.ResponseWriter, r *http.Request) {
@@ -426,7 +359,6 @@ func (p *Plugin) handleMCP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (p *Plugin) handleMCPTools(w http.ResponseWriter, r *http.Request) {
-	// Get user role from headers
 	userRole := getUserRole(r)
 	p.logger.Info("MCP tools request", "method", r.Method, "role", userRole)
 
@@ -437,8 +369,7 @@ func (p *Plugin) handleMCPTools(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Filter tools based on user role
-	filteredTools := filterToolsByRole(tools, userRole)
+	filteredTools := rbac.FilterToolsByRole(tools, userRole)
 	p.logger.Debug("Tools filtered by role", "role", userRole, "totalTools", len(tools), "filteredTools", len(filteredTools))
 
 	w.Header().Set("Content-Type", "application/json")
@@ -456,14 +387,13 @@ func (p *Plugin) handleMCPCallTool(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Get user role from headers
 	userRole := getUserRole(r)
 
 	var req struct {
 		Name       string                 `json:"name"`
 		Arguments  map[string]interface{} `json:"arguments"`
-		OrgName    string                 `json:"orgName"`    // Org name passed in body (headers not forwarded by Grafana proxy)
-		ScopeOrgId string                 `json:"scopeOrgId"` // Direct X-Scope-OrgId value if provided
+		OrgName    string                 `json:"orgName"`
+		ScopeOrgId string                 `json:"scopeOrgId"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -473,25 +403,31 @@ func (p *Plugin) handleMCPCallTool(w http.ResponseWriter, r *http.Request) {
 
 	p.logger.Info("MCP call tool request", "tool", req.Name, "role", userRole)
 
-	// Check if user has access to this tool
-	if !canAccessTool(userRole, req.Name) {
+	tool, found := p.mcpProxy.FindToolByName(req.Name)
+	if !found {
+		// Tool cache may be empty if ListTools hasn't been called yet; populate it.
+		if _, err := p.mcpProxy.ListTools(); err == nil {
+			tool, found = p.mcpProxy.FindToolByName(req.Name)
+		}
+		if !found {
+			http.Error(w, fmt.Sprintf("Unknown tool: %s", req.Name), http.StatusNotFound)
+			return
+		}
+	}
+	if !rbac.CanAccessTool(userRole, tool) {
 		p.logger.Warn("Access denied to tool", "tool", req.Name, "role", userRole)
 		http.Error(w, fmt.Sprintf("Access denied: %s role cannot access tool %s", userRole, req.Name), http.StatusForbidden)
 		return
 	}
 
-	// Extract Org ID from request header (automatically forwarded by Grafana)
-	// Org Name and Scope Org ID come from the request body (custom headers are NOT forwarded by Grafana's proxy)
 	orgID := r.Header.Get("X-Grafana-Org-Id")
 	if orgID == "" {
-		orgID = "1" // Default to org 1 if not specified
+		orgID = "1"
 	}
-	orgName := req.OrgName
-	scopeOrgId := req.ScopeOrgId
 
-	p.logger.Debug("Tool call context", "orgID", orgID, "orgName", orgName, "scopeOrgId", scopeOrgId, "tool", req.Name)
+	p.logger.Debug("Tool call context", "orgID", orgID, "orgName", req.OrgName, "scopeOrgId", req.ScopeOrgId, "tool", req.Name)
 
-	result, err := p.mcpProxy.CallToolWithContext(req.Name, req.Arguments, orgID, orgName, scopeOrgId)
+	result, err := p.mcpProxy.CallToolWithContext(req.Name, req.Arguments, orgID, req.OrgName, req.ScopeOrgId)
 	if err != nil {
 		p.logger.Error("Failed to call tool", "error", err)
 		http.Error(w, fmt.Sprintf("Failed to call tool: %v", err), http.StatusInternalServerError)
@@ -519,6 +455,357 @@ func (p *Plugin) handleMCPServers(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(response)
 }
 
+func (p *Plugin) handleAgentRun(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	userRole := getUserRole(r)
+	userID := getUserID(r)
+	orgID := r.Header.Get("X-Grafana-Org-Id")
+	if orgID == "" {
+		orgID = "1"
+	}
+
+	var req agent.RunRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, fmt.Sprintf("Invalid request: %v", err), http.StatusBadRequest)
+		return
+	}
+
+	if len(req.Messages) == 0 {
+		http.Error(w, "messages is required", http.StatusBadRequest)
+		return
+	}
+	if req.SystemPrompt == "" {
+		http.Error(w, "systemPrompt is required", http.StatusBadRequest)
+		return
+	}
+
+	cfg := backend.GrafanaConfigFromContext(r.Context())
+	if cfg == nil {
+		p.logger.Error("Grafana configuration not available in request context")
+		http.Error(w, "Grafana configuration not available", http.StatusInternalServerError)
+		return
+	}
+	saToken, err := cfg.PluginAppClientSecret()
+	if err != nil {
+		p.logger.Error("Failed to get service account token from context", "error", err)
+		http.Error(w, "Failed to resolve service account token", http.StatusInternalServerError)
+		return
+	}
+
+	if p.useBuiltInMCP {
+		builtInURL := builtInMCPBaseURL() + "/api/plugins/grafana-llm-app/resources/mcp/grafana"
+		p.mcpProxy.EnsureServer(mcp.ServerConfig{
+			ID:      "mcp-grafana",
+			Name:    "Grafana Built-in MCP",
+			URL:     builtInURL,
+			Type:    "streamable-http",
+			Enabled: true,
+			Headers: map[string]string{
+				"Authorization": "Bearer " + saToken,
+			},
+		})
+	}
+
+	runID, err := generateShareID()
+	if err != nil {
+		p.logger.Error("Failed to generate run ID", "error", err)
+		http.Error(w, "Failed to generate run ID", http.StatusInternalServerError)
+		return
+	}
+
+	numericOrgID := getOrgID(r)
+
+	// Session management: create or link a session to this run.
+	sessionID := req.SessionID
+	if sessionID != "" {
+		// Verify the session exists and belongs to this user.
+		if _, err := p.sessionStore.GetSession(sessionID, userID, numericOrgID); err != nil {
+			http.Error(w, "Session not found", http.StatusNotFound)
+			return
+		}
+		// Append the latest user message so it's persisted on the session.
+		if last := req.Messages[len(req.Messages)-1]; last.Role == "user" {
+			userMsg := SessionMessage{Role: last.Role, Content: last.Content}
+			if err := p.sessionStore.AppendMessages(sessionID, userID, numericOrgID, []SessionMessage{userMsg}); err != nil {
+				p.logger.Warn("Failed to append user message to session", "error", err, "sessionId", sessionID)
+			}
+		}
+	} else {
+		// Create a new session from the user messages.
+		sessionMsgs := agentMessagesToSessionMessages(req.Messages)
+		session, err := p.sessionStore.CreateSession(userID, numericOrgID, req.Title, sessionMsgs)
+		if err != nil {
+			p.logger.Error("Failed to create session", "error", err)
+			http.Error(w, "Failed to create session", http.StatusInternalServerError)
+			return
+		}
+		sessionID = session.ID
+		if err := p.sessionStore.SetCurrentSessionID(userID, numericOrgID, sessionID); err != nil {
+			p.logger.Warn("Failed to set current session ID", "error", err)
+		}
+	}
+
+	if err := p.sessionStore.SetActiveRunID(sessionID, userID, numericOrgID, runID); err != nil {
+		p.logger.Warn("Failed to set active run ID", "error", err)
+	}
+	p.runStore.CreateRun(runID, userID, numericOrgID)
+
+	p.logger.Info("Agent run request", "role", userRole, "orgID", orgID, "runId", runID, "sessionId", sessionID, "messageCount", len(req.Messages))
+
+	eventCh := make(chan agent.SSEEvent, 16)
+
+	loopReq := agent.LoopRequest{
+		Messages:           req.Messages,
+		SystemPrompt:       req.SystemPrompt,
+		Summary:            req.Summary,
+		MaxTotalTokens:     req.MaxTotalTokens,
+		RecentMessageCount: req.RecentMessageCount,
+		MaxIterations:      AgentMaxIterations,
+		GrafanaURL:         builtInMCPBaseURL(),
+		AuthToken:          saToken,
+		UserRole:           userRole,
+		OrgID:              orgID,
+		OrgName:            req.OrgName,
+		ScopeOrgID:         req.ScopeOrgID,
+	}
+
+	runCtx, runCancel := context.WithCancel(p.ctx)
+
+	p.runCancelsMu.Lock()
+	p.runCancels[runID] = runCancel
+	p.runCancelsMu.Unlock()
+
+	go p.agentLoop.Run(runCtx, loopReq, eventCh)
+	go func() {
+		p.consumeAgentEvents(runID, sessionID, userID, numericOrgID, eventCh)
+		runCancel()
+		p.runCancelsMu.Lock()
+		delete(p.runCancels, runID)
+		p.runCancelsMu.Unlock()
+	}()
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"runId":     runID,
+		"sessionId": sessionID,
+		"status":    RunStatusRunning,
+	})
+}
+
+func (p *Plugin) consumeAgentEvents(runID, sessionID string, userID, orgID int64, eventCh <-chan agent.SSEEvent) {
+	var lastEvent agent.SSEEvent
+	var allEvents []agent.SSEEvent
+	for event := range eventCh {
+		p.runStore.AppendEvent(runID, event)
+		allEvents = append(allEvents, event)
+		lastEvent = event
+	}
+
+	switch lastEvent.Type {
+	case "done":
+		p.runStore.FinishRun(runID, RunStatusCompleted, "")
+	case "error":
+		var errMsg string
+		if ee, ok := lastEvent.Data.(agent.ErrorEvent); ok {
+			errMsg = ee.Message
+		}
+		p.runStore.FinishRun(runID, RunStatusFailed, errMsg)
+	case "":
+		p.runCancelsMu.Lock()
+		_, stillCancellable := p.runCancels[runID]
+		p.runCancelsMu.Unlock()
+
+		if !stillCancellable {
+			p.runStore.FinishRun(runID, RunStatusCancelled, "run cancelled by user")
+		} else {
+			p.runStore.FinishRun(runID, RunStatusFailed, "agent terminated without producing events")
+		}
+	default:
+		p.runStore.FinishRun(runID, RunStatusCancelled, "")
+	}
+
+	if sessionID != "" {
+		assistantMsg := reconstructAssistantMessage(allEvents)
+		if err := p.sessionStore.AppendMessages(sessionID, userID, orgID, []SessionMessage{assistantMsg}); err != nil {
+			p.logger.Warn("Failed to append assistant message to session", "error", err, "sessionId", sessionID)
+		}
+		p.sessionStore.ClearActiveRunID(sessionID, userID, orgID)
+	}
+}
+
+func initSSEWriter(w http.ResponseWriter) (http.Flusher, bool) {
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "Streaming not supported", http.StatusInternalServerError)
+		return nil, false
+	}
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("X-Accel-Buffering", "no")
+
+	return flusher, true
+}
+
+func (p *Plugin) getAuthorizedRun(w http.ResponseWriter, r *http.Request, runID string) (*AgentRun, bool) {
+	run, err := p.runStore.GetRun(runID)
+	if err != nil {
+		http.Error(w, "Run not found", http.StatusNotFound)
+		return nil, false
+	}
+
+	if run.OrgID != getOrgID(r) || run.UserID != getUserID(r) {
+		http.Error(w, "Access denied", http.StatusForbidden)
+		return nil, false
+	}
+
+	return run, true
+}
+
+func (p *Plugin) handleAgentRuns(w http.ResponseWriter, r *http.Request) {
+	path := r.URL.Path
+	prefix := "/api/agent/runs/"
+	if !strings.HasPrefix(path, prefix) {
+		http.Error(w, "Invalid path format", http.StatusBadRequest)
+		return
+	}
+
+	remainder := strings.TrimPrefix(path, prefix)
+	if remainder == "" {
+		http.Error(w, "Run ID required", http.StatusBadRequest)
+		return
+	}
+
+	if runID, isCancel := strings.CutSuffix(remainder, "/cancel"); isCancel {
+		if r.Method != http.MethodPost {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if !isValidSecureID(runID) {
+			http.Error(w, "Invalid run ID format", http.StatusBadRequest)
+			return
+		}
+		p.handleCancelRun(w, r, runID)
+		return
+	}
+
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	runID, isEvents := strings.CutSuffix(remainder, "/events")
+	if !isValidSecureID(runID) {
+		http.Error(w, "Invalid run ID format", http.StatusBadRequest)
+		return
+	}
+
+	if isEvents {
+		p.handleAgentRunEvents(w, r, runID)
+		return
+	}
+
+	run, ok := p.getAuthorizedRun(w, r, runID)
+	if !ok {
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(run)
+}
+
+func (p *Plugin) handleCancelRun(w http.ResponseWriter, r *http.Request, runID string) {
+	run, ok := p.getAuthorizedRun(w, r, runID)
+	if !ok {
+		return
+	}
+
+	if run.Status != RunStatusRunning {
+		http.Error(w, "Run is not running", http.StatusConflict)
+		return
+	}
+
+	p.runCancelsMu.Lock()
+	cancelFn, exists := p.runCancels[runID]
+	p.runCancelsMu.Unlock()
+
+	if exists {
+		cancelFn()
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"status": "cancelled"})
+}
+
+func (p *Plugin) handleAgentRunEvents(w http.ResponseWriter, r *http.Request, runID string) {
+	if _, ok := p.getAuthorizedRun(w, r, runID); !ok {
+		return
+	}
+
+	run, subscriberCh, unsub, err := p.runStore.SubscribeAndSnapshot(runID)
+	if err != nil {
+		http.Error(w, "Run not found", http.StatusNotFound)
+		return
+	}
+	if unsub != nil {
+		defer unsub()
+	}
+
+	flusher, ok := initSSEWriter(w)
+	if !ok {
+		return
+	}
+
+	for _, event := range run.Events {
+		data, err := agent.MarshalSSE(event)
+		if err != nil {
+			p.logger.Error("Failed to marshal SSE event during replay", "error", err, "runId", runID, "eventType", event.Type)
+			continue
+		}
+		if _, err := w.Write(data); err != nil {
+			return
+		}
+	}
+	flusher.Flush()
+
+	if subscriberCh == nil {
+		return
+	}
+
+	// SSE keepalive: send comment lines to prevent proxy idle timeouts.
+	// Also select on r.Context().Done() since httpadapter's Write never
+	// returns an error, so we can't detect client disconnection via writes.
+	keepalive := time.NewTicker(15 * time.Second)
+	defer keepalive.Stop()
+
+	for {
+		select {
+		case event, ok := <-subscriberCh:
+			if !ok {
+				return
+			}
+			data, err := agent.MarshalSSE(event)
+			if err != nil {
+				p.logger.Error("Failed to marshal SSE event", "error", err, "runId", runID, "eventType", event.Type)
+				continue
+			}
+			w.Write(data)
+			flusher.Flush()
+		case <-keepalive.C:
+			w.Write([]byte(": keepalive\n\n"))
+			flusher.Flush()
+		case <-r.Context().Done():
+			p.logger.Debug("Client disconnected during SSE reconnect stream", "runId", runID)
+			return
+		}
+	}
+}
+
 func (p *Plugin) handleDefault(w http.ResponseWriter, r *http.Request) {
 	p.logger.Info("Default handler", "path", r.URL.Path, "method", r.Method)
 
@@ -535,51 +822,28 @@ func (p *Plugin) handleDefault(w http.ResponseWriter, r *http.Request) {
 
 func getUserID(r *http.Request) int64 {
 	pluginContext := httpadapter.PluginConfigFromContext(r.Context())
-	if pluginContext.User != nil {
-		// Try to get user ID from Login (hash it to int64 for storage)
-		login := pluginContext.User.Login
-		if login != "" {
-			// Use FNV-1a hash for deterministic, collision-resistant hashing
-			// FNV-1a is fast, has good distribution, and avoids overflow issues
-			h := fnv.New64a()
-			h.Write([]byte(login))
-			hash := h.Sum64()
-
-			// Convert uint64 to int64 safely (take lower 63 bits to ensure positive)
-			// This avoids sign issues while maintaining good distribution
-			return int64(hash & 0x7FFFFFFFFFFFFFFF)
-		}
+	if pluginContext.User != nil && pluginContext.User.Login != "" {
+		h := fnv.New64a()
+		h.Write([]byte(pluginContext.User.Login))
+		return int64(h.Sum64() & 0x7FFFFFFFFFFFFFFF)
 	}
 
-	// Fallback: try to get from header
-	userIDHeader := r.Header.Get("X-Grafana-User-Id")
-	if userIDHeader != "" {
-		var userID int64
-		if _, err := fmt.Sscanf(userIDHeader, "%d", &userID); err == nil {
-			return userID
-		}
+	if id, err := strconv.ParseInt(r.Header.Get("X-Grafana-User-Id"), 10, 64); err == nil {
+		return id
 	}
 
 	return 0
 }
 
 func stringPtr(s string) *string {
-	sCopy := s
-	return &sCopy
+	return &s
 }
 
 func getOrgID(r *http.Request) int64 {
-	orgIDStr := r.Header.Get("X-Grafana-Org-Id")
-	if orgIDStr == "" {
-		return 1 // Default to org 1 if not specified
+	if id, err := strconv.ParseInt(r.Header.Get("X-Grafana-Org-Id"), 10, 64); err == nil && id > 0 {
+		return id
 	}
-
-	var orgID int64
-	fmt.Sscanf(orgIDStr, "%d", &orgID)
-	if orgID == 0 {
-		return 1 // Default to org 1 if parsing fails
-	}
-	return orgID
+	return 1
 }
 
 func (p *Plugin) handleCreateShare(w http.ResponseWriter, r *http.Request) {
@@ -594,8 +858,8 @@ func (p *Plugin) handleCreateShare(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		SessionID      string          `json:"sessionId"`
 		SessionData    json.RawMessage `json:"sessionData"`
-		ExpiresInDays  *int            `json:"expiresInDays,omitempty"`  // Deprecated: use ExpiresInHours (converted to hours internally)
-		ExpiresInHours *int            `json:"expiresInHours,omitempty"` // Accepts hours directly
+		ExpiresInDays  *int            `json:"expiresInDays,omitempty"`
+		ExpiresInHours *int            `json:"expiresInHours,omitempty"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -603,14 +867,12 @@ func (p *Plugin) handleCreateShare(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Validate session data
 	if err := ValidateSessionData(req.SessionData); err != nil {
 		p.logger.Warn("Invalid session data", "error", err)
 		http.Error(w, fmt.Sprintf("Invalid session data: %v", err), http.StatusBadRequest)
 		return
 	}
 
-	// Validate sessionId matches session data
 	var sessionData map[string]interface{}
 	if err := json.Unmarshal(req.SessionData, &sessionData); err != nil {
 		http.Error(w, "Invalid session data format", http.StatusBadRequest)
@@ -622,7 +884,6 @@ func (p *Plugin) handleCreateShare(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Handle expiration: prefer ExpiresInHours, fall back to ExpiresInDays (for backward compatibility)
 	var expiresInHours *int
 	if req.ExpiresInHours != nil {
 		if *req.ExpiresInHours <= 0 {
@@ -635,7 +896,6 @@ func (p *Plugin) handleCreateShare(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "expiresInDays must be positive", http.StatusBadRequest)
 			return
 		}
-		// Convert days to hours for backward compatibility
 		hours := *req.ExpiresInDays * 24
 		expiresInHours = &hours
 	}
@@ -651,12 +911,10 @@ func (p *Plugin) handleCreateShare(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Build share URL
 	shareURL := fmt.Sprintf("/a/%s/shared/%s?orgId=%d", PluginID, share.ShareID, orgID)
 
 	var expiresAtStr *string
 	if share.ExpiresAt != nil {
-		// Allocate string on heap to avoid pointer to local variable going out of scope
 		expStr := share.ExpiresAt.Format(time.RFC3339)
 		expiresAtStr = stringPtr(expStr)
 	}
@@ -677,8 +935,6 @@ func (p *Plugin) handleGetSharedSession(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// Extract shareId from URL path
-	// Path format: /api/sessions/shared/{shareId}
 	path := r.URL.Path
 	if !strings.HasPrefix(path, "/api/sessions/shared/") {
 		http.Error(w, "Invalid path format", http.StatusBadRequest)
@@ -693,7 +949,6 @@ func (p *Plugin) handleGetSharedSession(w http.ResponseWriter, r *http.Request) 
 
 	orgID := getOrgID(r)
 
-	// Get share
 	share, err := p.shareStore.GetShare(shareID)
 	if err != nil {
 		if err.Error() == "share not found" {
@@ -709,13 +964,11 @@ func (p *Plugin) handleGetSharedSession(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// Validate org match
 	if share.OrgID != orgID {
 		http.Error(w, "You don't have access to this shared session", http.StatusForbidden)
 		return
 	}
 
-	// Parse session data
 	var sessionData map[string]interface{}
 	if err := json.Unmarshal(share.SessionData, &sessionData); err != nil {
 		p.logger.Error("Failed to parse session data", "error", err)
@@ -723,7 +976,6 @@ func (p *Plugin) handleGetSharedSession(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// Add shared metadata
 	sessionData["isShared"] = true
 	sessionData["sharedBy"] = fmt.Sprintf("%d", share.UserID)
 
@@ -737,8 +989,6 @@ func (p *Plugin) handleDeleteShare(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Extract shareId from URL path
-	// Path format: /api/sessions/share/{shareId}
 	path := r.URL.Path
 	if !strings.HasPrefix(path, "/api/sessions/share/") {
 		http.Error(w, "Invalid path format", http.StatusBadRequest)
@@ -753,7 +1003,6 @@ func (p *Plugin) handleDeleteShare(w http.ResponseWriter, r *http.Request) {
 
 	userID := getUserID(r)
 
-	// Get share to verify ownership
 	share, err := p.shareStore.GetShare(shareID)
 	if err != nil {
 		if err.Error() == "share not found" || err.Error() == "share expired" {
@@ -765,13 +1014,11 @@ func (p *Plugin) handleDeleteShare(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Validate ownership
 	if share.UserID != userID {
 		http.Error(w, "You don't have permission to revoke this share", http.StatusForbidden)
 		return
 	}
 
-	// Delete share
 	if err := p.shareStore.DeleteShare(shareID); err != nil {
 		p.logger.Error("Failed to delete share", "error", err)
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
@@ -786,41 +1033,187 @@ func (p *Plugin) handleDeleteShare(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(response)
 }
 
-func (p *Plugin) handleGetSessionShares(w http.ResponseWriter, r *http.Request) {
+// handleSessionsRoot handles /api/sessions (no trailing slash).
+func (p *Plugin) handleSessionsRoot(w http.ResponseWriter, r *http.Request) {
+	userID := getUserID(r)
+	orgID := getOrgID(r)
+
+	switch r.Method {
+	case http.MethodGet:
+		sessions, err := p.sessionStore.ListSessions(userID, orgID)
+		if err != nil {
+			p.logger.Error("Failed to list sessions", "error", err)
+			http.Error(w, "Failed to list sessions", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(sessions)
+
+	case http.MethodPost:
+		var req struct {
+			Title    string           `json:"title"`
+			Messages []SessionMessage `json:"messages"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, fmt.Sprintf("Invalid request: %v", err), http.StatusBadRequest)
+			return
+		}
+		session, err := p.sessionStore.CreateSession(userID, orgID, req.Title, req.Messages)
+		if err != nil {
+			p.logger.Error("Failed to create session", "error", err)
+			http.Error(w, "Failed to create session", http.StatusInternalServerError)
+			return
+		}
+		if err := p.sessionStore.SetCurrentSessionID(userID, orgID, session.ID); err != nil {
+			p.logger.Warn("Failed to set current session ID", "error", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		json.NewEncoder(w).Encode(session)
+
+	case http.MethodDelete:
+		if err := p.sessionStore.DeleteAllSessions(userID, orgID); err != nil {
+			p.logger.Error("Failed to delete all sessions", "error", err)
+			http.Error(w, "Failed to delete sessions", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]bool{"success": true})
+
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+// handleSessionCurrent handles /api/sessions/current.
+func (p *Plugin) handleSessionCurrent(w http.ResponseWriter, r *http.Request) {
+	userID := getUserID(r)
+	orgID := getOrgID(r)
+
+	switch r.Method {
+	case http.MethodGet:
+		id, err := p.sessionStore.GetCurrentSessionID(userID, orgID)
+		if err != nil {
+			http.Error(w, "Failed to get current session", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"sessionId": id})
+
+	case http.MethodPut:
+		var req struct {
+			SessionID string `json:"sessionId"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, fmt.Sprintf("Invalid request: %v", err), http.StatusBadRequest)
+			return
+		}
+		if req.SessionID == "" {
+			if err := p.sessionStore.ClearCurrentSessionID(userID, orgID); err != nil {
+				http.Error(w, "Failed to clear current session", http.StatusInternalServerError)
+				return
+			}
+		} else {
+			if err := p.sessionStore.SetCurrentSessionID(userID, orgID, req.SessionID); err != nil {
+				http.Error(w, "Session not found", http.StatusNotFound)
+				return
+			}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]bool{"success": true})
+
+	case http.MethodDelete:
+		if err := p.sessionStore.ClearCurrentSessionID(userID, orgID); err != nil {
+			http.Error(w, "Failed to clear current session", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]bool{"success": true})
+
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+// handleSessionRouter dispatches /api/sessions/{id} and /api/sessions/{id}/shares.
+func (p *Plugin) handleSessionRouter(w http.ResponseWriter, r *http.Request) {
+	path := r.URL.Path
+	prefix := "/api/sessions/"
+
+	// Delegate to share-related handlers based on path prefix.
+	if strings.HasPrefix(path, "/api/sessions/shared/") || strings.HasPrefix(path, "/api/sessions/share/") {
+		http.Error(w, "Invalid path format", http.StatusBadRequest)
+		return
+	}
+
+	remainder := strings.TrimPrefix(path, prefix)
+	if remainder == "" {
+		http.Error(w, "Session ID required", http.StatusBadRequest)
+		return
+	}
+
+	// /api/sessions/{id}/shares → list shares for session
+	if sessionID, isShares := strings.CutSuffix(remainder, "/shares"); isShares {
+		if !isValidSecureID(sessionID) {
+			http.Error(w, "Invalid session ID format", http.StatusBadRequest)
+			return
+		}
+		p.handleGetSessionShares(w, r, sessionID)
+		return
+	}
+
+	// /api/sessions/{id} → CRUD on a single session
+	sessionID := remainder
+	if !isValidSecureID(sessionID) {
+		http.Error(w, "Invalid session ID format", http.StatusBadRequest)
+		return
+	}
+
+	userID := getUserID(r)
+	orgID := getOrgID(r)
+
+	switch r.Method {
+	case http.MethodGet:
+		session, err := p.sessionStore.GetSession(sessionID, userID, orgID)
+		if err != nil {
+			http.Error(w, "Session not found", http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(session)
+
+	case http.MethodPut:
+		var update SessionUpdate
+		if err := json.NewDecoder(r.Body).Decode(&update); err != nil {
+			http.Error(w, fmt.Sprintf("Invalid request: %v", err), http.StatusBadRequest)
+			return
+		}
+		if err := p.sessionStore.UpdateSession(sessionID, userID, orgID, update); err != nil {
+			http.Error(w, "Session not found", http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]bool{"success": true})
+
+	case http.MethodDelete:
+		if err := p.sessionStore.DeleteSession(sessionID, userID, orgID); err != nil {
+			http.Error(w, "Session not found", http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]bool{"success": true})
+
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+func (p *Plugin) handleGetSessionShares(w http.ResponseWriter, r *http.Request, sessionID string) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
-	// Extract sessionId from URL path
-	// Path format: /api/sessions/{sessionId}/shares
-	// IMPORTANT: This handler must reject paths that match more specific routes
-	path := r.URL.Path
-
-	// Reject paths that should be handled by more specific routes
-	if strings.HasPrefix(path, "/api/sessions/shared/") {
-		http.Error(w, "Invalid path format", http.StatusBadRequest)
-		return
-	}
-	if strings.HasPrefix(path, "/api/sessions/share/") {
-		http.Error(w, "Invalid path format", http.StatusBadRequest)
-		return
-	}
-	if path == "/api/sessions/share" {
-		http.Error(w, "Invalid path format", http.StatusBadRequest)
-		return
-	}
-
-	prefix := "/api/sessions/"
-	suffix := "/shares"
-
-	if !strings.HasPrefix(path, prefix) || !strings.HasSuffix(path, suffix) {
-		http.Error(w, "Invalid path format", http.StatusBadRequest)
-		return
-	}
-
-	// Extract sessionId: remove prefix and suffix
-	sessionID := strings.TrimPrefix(strings.TrimSuffix(path, suffix), prefix)
 	if sessionID == "" {
 		http.Error(w, "Session ID required", http.StatusBadRequest)
 		return
@@ -828,17 +1221,14 @@ func (p *Plugin) handleGetSessionShares(w http.ResponseWriter, r *http.Request) 
 
 	userID := getUserID(r)
 
-	// Get shares for session
 	shares := p.shareStore.GetSharesBySession(sessionID)
 
-	// Filter to only shares created by this user
 	var userShares []map[string]interface{}
 	for _, share := range shares {
 		if share.UserID == userID {
 			shareURL := fmt.Sprintf("/a/%s/shared/%s?orgId=%d", PluginID, share.ShareID, share.OrgID)
 			var expiresAtStr *string
 			if share.ExpiresAt != nil {
-				// Allocate string on heap to avoid pointer to local variable going out of scope
 				expStr := share.ExpiresAt.Format(time.RFC3339)
 				expiresAtStr = stringPtr(expStr)
 			}
@@ -852,4 +1242,104 @@ func (p *Plugin) handleGetSessionShares(w http.ResponseWriter, r *http.Request) 
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(userShares)
+}
+
+func agentMessagesToSessionMessages(msgs []agent.Message) []SessionMessage {
+	result := make([]SessionMessage, len(msgs))
+	for i, m := range msgs {
+		result[i] = SessionMessage{
+			Role:    m.Role,
+			Content: m.Content,
+		}
+	}
+	return result
+}
+
+func reconstructAssistantMessage(events []agent.SSEEvent) SessionMessage {
+	var content string
+	// Merge tool_call_start and tool_call_result by ID so each tool call
+	// produces exactly one entry (no duplicates when reopening a session).
+	toolCallsByID := make(map[string]map[string]interface{})
+	var toolCallOrder []string
+
+	for _, e := range events {
+		switch e.Type {
+		case "content":
+			if ce, ok := e.Data.(agent.ContentEvent); ok {
+				content += ce.Content
+			} else if m, ok := e.Data.(map[string]interface{}); ok {
+				if c, ok := m["content"].(string); ok {
+					content += c
+				}
+			}
+		case "tool_call_start":
+			var id, name, arguments string
+			if tcs, ok := e.Data.(agent.ToolCallStartEvent); ok {
+				id, name, arguments = tcs.ID, tcs.Name, tcs.Arguments
+			} else if m, ok := e.Data.(map[string]interface{}); ok {
+				id, _ = m["id"].(string)
+				name, _ = m["name"].(string)
+				arguments, _ = m["arguments"].(string)
+			}
+			if id == "" {
+				continue
+			}
+			if _, exists := toolCallsByID[id]; !exists {
+				toolCallOrder = append(toolCallOrder, id)
+			}
+			toolCallsByID[id] = map[string]interface{}{
+				"name":      name,
+				"arguments": arguments,
+				"running":   true,
+			}
+		case "tool_call_result":
+			var id, name, resultContent string
+			var isError bool
+			if tcr, ok := e.Data.(agent.ToolCallResultEvent); ok {
+				id, name, resultContent, isError = tcr.ID, tcr.Name, tcr.Content, tcr.IsError
+			} else if m, ok := e.Data.(map[string]interface{}); ok {
+				id, _ = m["id"].(string)
+				name, _ = m["name"].(string)
+				resultContent, _ = m["content"].(string)
+				isError, _ = m["isError"].(bool)
+			}
+			if id == "" {
+				continue
+			}
+			tc, exists := toolCallsByID[id]
+			if !exists {
+				tc = map[string]interface{}{"name": name}
+				toolCallOrder = append(toolCallOrder, id)
+			}
+			tc["running"] = false
+			if tc["arguments"] == nil || tc["arguments"] == "" {
+				tc["arguments"] = ""
+			}
+			if isError {
+				tc["error"] = resultContent
+			} else {
+				tc["response"] = map[string]interface{}{
+					"content": []map[string]interface{}{{"type": "text", "text": resultContent}},
+				}
+			}
+			toolCallsByID[id] = tc
+		}
+	}
+
+	msg := SessionMessage{
+		Role:    "assistant",
+		Content: content,
+	}
+
+	if len(toolCallOrder) > 0 {
+		toolCallsRaw := make([]map[string]interface{}, 0, len(toolCallOrder))
+		for _, id := range toolCallOrder {
+			toolCallsRaw = append(toolCallsRaw, toolCallsByID[id])
+		}
+		if data, err := json.Marshal(toolCallsRaw); err == nil {
+			msg.ToolCalls = data
+		}
+	}
+
+	return msg
 }

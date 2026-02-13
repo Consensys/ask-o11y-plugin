@@ -12,13 +12,14 @@ import { GrafanaPageState } from './scenes/GrafanaPageScene';
 import { SessionSidebar, NewChatButton, HistoryButton } from './components';
 import { ChatInputRef } from './components/ChatInput/ChatInput';
 import { ChatErrorBoundary } from '../ErrorBoundary';
-import { SessionMetadata, ChatSession } from '../../core';
+import type { SessionMetadata } from './hooks/useSessionManager';
+import type { ChatMessage } from './types';
 import type { AppPluginSettings } from '../../types/plugin';
 
 interface ChatProps {
   pluginSettings: AppPluginSettings;
   readOnly?: boolean;
-  initialSession?: ChatSession;
+  initialSession?: { id?: string; messages?: ChatMessage[] };
   /** Message to auto-send on mount (for alert investigation mode) */
   initialMessage?: string;
   /** Override for session title (for alert investigation mode) */
@@ -51,8 +52,6 @@ function ChatComponent({
     currentInput,
     isGenerating,
     chatContainerRef,
-    toolsLoading,
-    toolsError,
     setCurrentInput,
     sendMessage,
     handleKeyPress,
@@ -60,6 +59,8 @@ function ChatComponent({
     sessionManager,
     bottomSpacerRef,
     detectedPageRefs,
+    messageQueue,
+    stopGeneration,
   } = useChat(
     pluginSettings,
     sessionIdFromUrl,
@@ -135,10 +136,7 @@ function ChatComponent({
       chatHistory,
       currentInput,
       isGenerating,
-      toolsLoading,
       currentSessionTitle,
-      isSummarizing: sessionManager.isSummarizing,
-      hasSummary: !!sessionManager.currentSummary,
       setCurrentInput,
       sendMessage,
       handleKeyPress,
@@ -149,15 +147,14 @@ function ChatComponent({
       rightSlot: <HistoryButton onClick={openHistory} sessionCount={sessionManager.sessions.length} />,
       readOnly,
       onSuggestionClick: handleSuggestionClick,
+      queuedMessageCount: messageQueue.length,
+      onStopGeneration: stopGeneration,
     }),
     [
       chatHistory,
       currentInput,
       isGenerating,
-      toolsLoading,
       currentSessionTitle,
-      sessionManager.isSummarizing,
-      sessionManager.currentSummary,
       sessionManager.sessions.length,
       setCurrentInput,
       sendMessage,
@@ -170,6 +167,8 @@ function ChatComponent({
       openHistory,
       readOnly,
       handleSuggestionClick,
+      messageQueue.length,
+      stopGeneration,
     ]
   );
 
@@ -185,10 +184,6 @@ function ChatComponent({
   );
 
   const chatScene = useChatScene(showSidePanel, chatInterfaceState, grafanaPageState, chatPanelPosition);
-
-  if (toolsError) {
-    return <div>Error: {toolsError.message}</div>;
-  }
 
   return (
     <div

@@ -1,106 +1,126 @@
 import { test, expect } from './fixtures';
 
-test.describe('App Configuration', () => {
-  test('should be possible to save app configuration', async ({ appConfigPage, page }) => {
+test.describe('LLM Settings', () => {
+  test('should save valid config and reject invalid token limits', async ({ appConfigPage, page }) => {
+    const maxTokensInput = page.getByLabel('Max Total Tokens');
     const saveButton = page.getByRole('button', { name: /Save LLM settings/i });
 
-    // enter a valid token limit
-    const maxTokensInput = page.getByLabel('Max Total Tokens');
+    // Reject value below minimum (1000)
+    await maxTokensInput.clear();
+    await maxTokensInput.fill('500');
+    await expect(saveButton).toBeDisabled();
+
+    // Accept valid value and save
     await maxTokensInput.clear();
     await maxTokensInput.fill('75000');
+    await expect(saveButton).toBeEnabled();
 
-    // listen for the server response on the saved form
     const saveResponse = appConfigPage.waitForSettingsResponse();
-
     await saveButton.click();
     await expect(saveResponse).toBeOK();
   });
+});
 
-  test('should show validation error for invalid token limit', async ({ appConfigPage, page }) => {
-    // Suppress the appConfigPage unused variable warning - we need it to navigate to the page
+test.describe('MCP Server Management', () => {
+  test('should add, configure, and remove MCP servers', async ({ appConfigPage, page }) => {
     void appConfigPage;
 
-    const saveButton = page.getByRole('button', { name: /Save LLM settings/i });
-    const maxTokensInput = page.getByLabel('Max Total Tokens');
-
-    // Enter an invalid token limit (below minimum of 1000)
-    await maxTokensInput.clear();
-    await maxTokensInput.fill('500');
-
-    // The save button should be disabled when validation fails
-    await expect(saveButton).toBeDisabled();
-
-    // Enter a valid value and verify button is enabled
-    await maxTokensInput.clear();
-    await maxTokensInput.fill('50000');
-    await expect(saveButton).toBeEnabled();
-  });
-
-  test('should be able to add and configure an MCP server', async ({ appConfigPage, page }) => {
-    // Suppress the appConfigPage unused variable warning
-    void appConfigPage;
-
-    // Wait for the Add MCP Server button to be visible (page fully loaded) - using test ID
-    // Note: testIds include 'data-testid ' prefix in their values
     const addButton = page.locator('[data-testid="data-testid ac-add-mcp-server"]');
     await expect(addButton).toBeVisible();
 
-    // Count existing servers before adding - using test ID pattern
-    const removeButtonsLocator = page.locator('[data-testid^="data-testid ac-mcp-server-remove-"]');
-    const existingServerCount = await removeButtonsLocator.count();
+    const removeButtons = page.locator('[data-testid^="data-testid ac-mcp-server-remove-"]');
+    const initialCount = await removeButtons.count();
 
-    // Click the Add MCP Server button
+    // Add a server
     await addButton.click();
-
-    // Wait for the new server card to appear with default name "New MCP Server"
+    await expect(removeButtons).toHaveCount(initialCount + 1);
     await expect(page.getByText('New MCP Server').first()).toBeVisible();
 
-    // Verify a new server was added (one more Remove button than before)
-    await expect(removeButtonsLocator).toHaveCount(existingServerCount + 1);
-
-    // Find the last server name input using test ID pattern
-    const newServerNameInput = page.locator('[data-testid^="data-testid ac-mcp-server-name-"]').last();
-    await newServerNameInput.clear();
-    await newServerNameInput.fill('E2E Test Server');
-
-    // Verify the name changed in the card header (use .first() in case of duplicates from previous runs)
+    // Configure name and URL
+    const nameInput = page.locator('[data-testid^="data-testid ac-mcp-server-name-"]').last();
+    await nameInput.clear();
+    await nameInput.fill('E2E Test Server');
     await expect(page.getByText('E2E Test Server').first()).toBeVisible();
 
-    // Fill in the server URL using test ID pattern
-    const newServerUrlInput = page.locator('[data-testid^="data-testid ac-mcp-server-url-"]').last();
-    await newServerUrlInput.fill('https://test-mcp.example.com');
+    const urlInput = page.locator('[data-testid^="data-testid ac-mcp-server-url-"]').last();
+    await urlInput.fill('https://test-mcp.example.com');
 
-    // Verify the Save MCP Server Connections button is enabled - using test ID
+    // Change server type
+    const typeDropdown = page.locator('select.gf-form-input').last();
+    await expect(typeDropdown).toHaveValue('openapi');
+    await typeDropdown.selectOption('sse');
+    await expect(typeDropdown).toHaveValue('sse');
+    await typeDropdown.selectOption('streamable-http');
+    await expect(typeDropdown).toHaveValue('streamable-http');
+
+    // Save button should be enabled
     const saveMcpButton = page.locator('[data-testid="data-testid ac-save-mcp-servers"]');
     await expect(saveMcpButton).toBeEnabled();
+
+    // Remove the server
+    await removeButtons.last().click();
+    await expect(removeButtons).toHaveCount(initialCount);
   });
 
-  test('should be able to remove an MCP server', async ({ appConfigPage, page }) => {
-    // Suppress the appConfigPage unused variable warning
+  test('should show "Unnamed Server" when name is cleared', async ({ appConfigPage, page }) => {
     void appConfigPage;
 
-    // Wait for the Add MCP Server button to be visible (page fully loaded) - using test ID
-    // Note: testIds include 'data-testid ' prefix in their values
     const addButton = page.locator('[data-testid="data-testid ac-add-mcp-server"]');
-    await expect(addButton).toBeVisible();
-
-    // Count existing servers before adding - using test ID pattern
-    const removeButtonsLocator = page.locator('[data-testid^="data-testid ac-mcp-server-remove-"]');
-    const existingServerCount = await removeButtonsLocator.count();
-
-    // First add an MCP server
     await addButton.click();
 
-    // Wait for the new server card to be visible
-    await expect(page.getByText('New MCP Server').first()).toBeVisible();
+    const nameInput = page.locator('[data-testid^="data-testid ac-mcp-server-name-"]').last();
+    await nameInput.clear();
+    await nameInput.blur();
 
-    // Verify a new server was added
-    await expect(removeButtonsLocator).toHaveCount(existingServerCount + 1);
+    await expect(page.getByText('Unnamed Server')).toBeVisible();
+  });
+});
 
-    // Click the last Remove button (the newly added server) - using test ID pattern
-    await removeButtonsLocator.last().click();
+test.describe('System Prompt', () => {
+  test('should handle mode switching and validation', async ({ appConfigPage, page }) => {
+    void appConfigPage;
 
-    // Verify we're back to the original count (server was removed)
-    await expect(removeButtonsLocator).toHaveCount(existingServerCount);
+    const customPromptTextarea = page.locator('[data-testid="data-testid ac-custom-system-prompt"]');
+    const saveButton = page.locator('[data-testid="data-testid ac-save-system-prompt"]');
+
+    // Default mode: textarea hidden, save enabled
+    await expect(page.getByLabel('Use default prompt')).toBeChecked();
+    await expect(customPromptTextarea).not.toBeVisible();
+    await expect(saveButton).toBeEnabled();
+
+    // Replace mode: textarea visible, save disabled when empty
+    await page.getByLabel('Replace with custom prompt').click();
+    await expect(customPromptTextarea).toBeVisible();
+    await expect(saveButton).toBeDisabled();
+
+    // Fill prompt, verify char count, save enabled
+    await customPromptTextarea.fill('Test prompt content');
+    const charCount = page.locator('[data-testid="data-testid ac-custom-prompt-char-count"]');
+    await expect(charCount).toContainText('Characters: 19');
+    await expect(saveButton).toBeEnabled();
+
+    // Append mode: textarea visible
+    await page.getByLabel('Append to default prompt').click();
+    await expect(customPromptTextarea).toBeVisible();
+    // Content preserved across mode switches
+    await expect(customPromptTextarea).toHaveValue('Test prompt content');
+
+    // Back to default: textarea hidden
+    await page.getByLabel('Use default prompt').click();
+    await expect(customPromptTextarea).not.toBeVisible();
+  });
+
+  test('should interact with default prompt modal', async ({ appConfigPage, page }) => {
+    void appConfigPage;
+
+    const viewDefaultButton = page.locator('[data-testid="data-testid ac-view-default-prompt"]');
+    await viewDefaultButton.click();
+
+    await expect(page.getByRole('heading', { name: 'Default System Prompt' })).toBeVisible();
+    await expect(page.locator('[data-testid="data-testid ac-default-prompt-content"]')).toBeVisible();
+    await expect(page.locator('[data-testid="data-testid ac-copy-default-prompt"]')).toBeVisible();
+
+    await page.locator('[data-testid="data-testid ac-close-default-prompt"]').click();
+    await expect(page.getByRole('heading', { name: 'Default System Prompt' })).not.toBeVisible();
   });
 });

@@ -246,9 +246,53 @@ func (p *Proxy) errorResponse(id interface{}, code int, message string, data int
 	return json.Marshal(resp)
 }
 
-// GetServerCount returns the number of configured servers
+// Lock ordering: proxy.mu -> client.mu (must never be reversed).
+func (p *Proxy) FindToolByName(name string) (Tool, bool) {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	for _, client := range p.clients {
+		client.mu.RLock()
+		for _, t := range client.tools {
+			if t.Name == name {
+				client.mu.RUnlock()
+				return t, true
+			}
+		}
+		client.mu.RUnlock()
+	}
+	return Tool{}, false
+}
+
 func (p *Proxy) GetServerCount() int {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 	return len(p.clients)
+}
+
+func (p *Proxy) EnsureServer(config ServerConfig) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	if existing, ok := p.clients[config.ID]; ok {
+		if existing.config.URL == config.URL && headersEqual(existing.config.Headers, config.Headers) {
+			return
+		}
+		existing.Close()
+		p.logger.Debug("Replacing MCP client", "id", config.ID)
+	}
+
+	p.clients[config.ID] = NewClient(config, p.logger)
+	p.logger.Info("Ensured MCP client", "id", config.ID, "url", config.URL, "type", config.Type)
+}
+
+func headersEqual(a, b map[string]string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for k, v := range a {
+		if b[k] != v {
+			return false
+		}
+	}
+	return true
 }
