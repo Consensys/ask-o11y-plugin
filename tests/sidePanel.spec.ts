@@ -24,13 +24,17 @@ test.describe('Side Panel', () => {
   test('should not show panel when no dashboard links are present', async ({ page }) => {
     await test.step('Send message without dashboard reference', async () => {
       const chatInput = page.getByLabel('Chat input');
+      const sendButton = page.getByLabel('Send message (Enter)');
 
       await chatInput.fill('What is observability?');
-      await page.getByLabel('Send message (Enter)').click();
+      await sendButton.click();
+
+      // Wait for agent run to complete
+      await expect(sendButton).toBeEnabled({ timeout: 60000 });
 
       // Wait for assistant response
       const assistantMessage = page.locator('[aria-label="Assistant message"]').first();
-      await expect(assistantMessage).toBeVisible({ timeout: 30000 });
+      await expect(assistantMessage).toBeVisible({ timeout: 5000 });
     });
 
     await test.step('Verify panel does not open', async () => {
@@ -45,14 +49,18 @@ test.describe('Side Panel', () => {
   test('should expand chat to full width when side panel closes (chat on right)', async ({ page }) => {
     await test.step('Send message that opens side panel', async () => {
       const chatInput = page.getByLabel('Chat input');
+      const sendButton = page.getByLabel('Send message (Enter)');
 
       // Ask for a dashboard to trigger side panel opening
       await chatInput.fill('Show me the default dashboard');
-      await page.getByLabel('Send message (Enter)').click();
+      await sendButton.click();
+
+      // Wait for agent run to complete (button re-enabled)
+      await expect(sendButton).toBeEnabled({ timeout: 60000 });
 
       // Wait for assistant response
       const assistantMessage = page.locator('[aria-label="Assistant message"]').first();
-      await expect(assistantMessage).toBeVisible({ timeout: 30000 });
+      await expect(assistantMessage).toBeVisible({ timeout: 5000 });
     });
 
     await test.step('Wait for side panel to potentially open', async () => {

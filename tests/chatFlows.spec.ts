@@ -14,11 +14,12 @@ test.describe('Chat Flow Tests', () => {
 
   test('should display and manage messages with proper roles', async ({ page }) => {
     const chatInput = page.getByLabel('Chat input');
+    const sendButton = page.getByLabel('Send message (Enter)');
 
     await test.step('Send first message and verify container appears', async () => {
       // Send a message
       await chatInput.fill('Hello Grafana');
-      await page.getByLabel('Send message (Enter)').click();
+      await sendButton.click();
 
       // Wait for message to appear
       await expect(page.getByText('Hello Grafana')).toBeVisible();
@@ -35,13 +36,19 @@ test.describe('Chat Flow Tests', () => {
       await expect(userMessage).toContainText('Hello Grafana');
     });
 
-    await test.step('Send second message and verify scroll', async () => {
-      // Wait for assistant response from first message
-      await page.waitForTimeout(3000);
+    await test.step('Wait for first assistant response', async () => {
+      // Wait for agent run to complete
+      await expect(sendButton).toBeEnabled({ timeout: 60000 });
 
+      // Wait for assistant response
+      const assistantMessage = page.locator('[aria-label="Assistant message"]').first();
+      await expect(assistantMessage).toBeVisible({ timeout: 5000 });
+    });
+
+    await test.step('Send second message and verify scroll', async () => {
       // Send second message
       await chatInput.fill('Second message');
-      await page.getByLabel('Send message (Enter)').click();
+      await sendButton.click();
       await expect(page.getByText('Second message')).toBeVisible();
 
       // The chat container should have scrolled
@@ -49,23 +56,18 @@ test.describe('Chat Flow Tests', () => {
       await expect(chatLog).toBeVisible();
     });
 
-    await test.step('Verify assistant response appears with correct role', async () => {
-      // Wait for assistant response
-      const assistantMessage = page.locator('[aria-label="Assistant message"]').first();
-      await expect(assistantMessage).toBeVisible({ timeout: 30000 });
-    });
-
     await test.step('Verify conversation context is maintained', async () => {
+      // Wait for second agent run to complete
+      await expect(sendButton).toBeEnabled({ timeout: 60000 });
+
       // Wait for second assistant response to appear
       const assistantMessage2 = page.locator('[aria-label="Assistant message"]').nth(1);
-      await expect(assistantMessage2).toBeVisible({ timeout: 30000 });
+      await expect(assistantMessage2).toBeVisible({ timeout: 5000 });
 
       // Both user messages should be in the chat history
       const chatLog = page.locator('[role="log"]');
       await expect(chatLog.getByText('Hello Grafana')).toBeVisible();
       await expect(chatLog.getByText('Second message')).toBeVisible();
-
-      // The fact that we received a second response proves context is maintained
     });
   });
 
@@ -88,13 +90,17 @@ test.describe('Chat Flow Tests', () => {
 
   test('should focus input after response is received', async ({ page }) => {
     const chatInput = page.getByLabel('Chat input');
+    const sendButton = page.getByLabel('Send message (Enter)');
 
     // Send a message
     await chatInput.fill('Test focus');
-    await page.getByLabel('Send message (Enter)').click();
+    await sendButton.click();
 
-    // Wait for response
-    await expect(page.locator('[aria-label="Assistant message"]').first()).toBeVisible({ timeout: 30000 });
+    // Wait for agent run to complete
+    await expect(sendButton).toBeEnabled({ timeout: 60000 });
+
+    // Wait for assistant response
+    await expect(page.locator('[aria-label="Assistant message"]').first()).toBeVisible({ timeout: 5000 });
 
     // The input should be ready for the next message
     await expect(chatInput).toBeVisible();
@@ -127,16 +133,14 @@ test.describe('Chat Streaming Tests', () => {
     });
 
     await test.step('Re-enable button after completion', async () => {
-      // Wait for response to complete
-      await expect(page.locator('[aria-label="Assistant message"]').first()).toBeVisible({ timeout: 30000 });
+      // Wait for the send button to be re-enabled (indicates agent run completed)
+      await expect(sendButton).toBeEnabled({ timeout: 60000 });
 
-      // Wait for button to be re-enabled
-      await page.waitForTimeout(1000);
+      // Wait for assistant message to appear
+      await expect(page.locator('[aria-label="Assistant message"]').first()).toBeVisible({ timeout: 5000 });
 
-      // Fill new message
+      // Fill new message to verify button is still enabled
       await chatInput.fill('Another message');
-
-      // The button should be enabled now
       await expect(sendButton).toBeEnabled();
     });
   });
