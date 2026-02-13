@@ -16,10 +16,13 @@ const pluginE2eAuth = `${dirname(require.resolve('@grafana/plugin-e2e'))}/auth`;
 export default defineConfig<PluginOptions>({
   testDir: './tests',
   workers: 1,
+  timeout: 120 * 1000,
   /* Fail the build on CI if you accidentally left test.only in the source code. */
   forbidOnly: !!process.env.CI,
   /* Retry on CI only */
-  retries: process.env.CI ? 2 : 0,
+  retries: process.env.CI ? 1 : 0,
+  /* Optional grep filter via TEST_FILTER env var */
+  grep: process.env.TEST_FILTER ? new RegExp(process.env.TEST_FILTER) : undefined,
   /* Reporter to use. See https://playwright.dev/docs/test-reporters */
   reporter: 'html',
   /* Shared settings for all the projects below. See https://playwright.dev/docs/api/class-testoptions. */

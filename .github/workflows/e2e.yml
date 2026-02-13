@@ -121,6 +121,25 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Validate LLM API key
+        run: |
+          if [ -z "${{ secrets.LLM_API_KEY }}" ]; then
+            echo "Error: LLM_API_KEY secret not set"
+            exit 1
+          fi
+          echo "LLM_API_KEY is configured"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Cache Docker layers
+        uses: actions/cache@v4
+        with:
+          path: /tmp/.buildx-cache
+          key: ${{ runner.os }}-buildx-${{ hashFiles('docker-compose.yaml', 'Dockerfile') }}
+          restore-keys: |
+            ${{ runner.os }}-buildx-
+
       - name: Start Grafana
         env:
           LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
@@ -132,12 +151,19 @@ jobs:
         with:
           url: http://localhost:3000/login
 
+      - name: Wait for grafana-llm-app plugin
+        run: |
+          echo "Waiting for grafana-llm-app to be ready..."
+          timeout 60 bash -c 'until docker compose exec -T grafana curl -f http://localhost:3000/api/plugins/grafana-llm-app/health 2>/dev/null; do sleep 2; done'
+          echo "grafana-llm-app is ready"
+        timeout-minutes: 2
+
       - name: Install Playwright Browsers
         run: npm exec playwright install chromium --with-deps
 
       - name: Run E2E tests with coverage
         id: run-tests
-        run: npm run e2e:coverage
+        run: npm run e2e:coverage -- --workers=1
 
       - name: Generate coverage report
         if: always()
