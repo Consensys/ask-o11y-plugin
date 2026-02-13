@@ -94,7 +94,7 @@ jobs:
     needs: [check-changes, build]
     if: needs.check-changes.outputs.code == 'true' || github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 15
     permissions:
       contents: read
       id-token: write
