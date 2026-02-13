@@ -57,6 +57,7 @@ export default defineConfig<PluginOptions>({
         /chatInteractions\.spec\.ts/,
         /sidePanel\.spec\.ts/,
         /errorHandling\.spec\.ts/,
+        /simpleChat\.spec\.ts/,
       ],
       use: {
         ...devices['Desktop Chrome'],
