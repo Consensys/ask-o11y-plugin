@@ -37,12 +37,13 @@ test.describe('Chat Flow Tests', () => {
     });
 
     await test.step('Wait for first assistant response', async () => {
-      // Wait for agent run to complete
-      await expect(sendButton).toBeEnabled({ timeout: 60000 });
-
-      // Wait for assistant response
+      // Wait for assistant response to appear
       const assistantMessage = page.locator('[aria-label="Assistant message"]').first();
-      await expect(assistantMessage).toBeVisible({ timeout: 5000 });
+      await expect(assistantMessage).toBeVisible({ timeout: 60000 });
+
+      // Wait for streaming to complete (when "Stop generating" button disappears)
+      const stopButton = page.getByRole('button', { name: 'Stop generating' });
+      await expect(stopButton).toBeHidden({ timeout: 60000 });
     });
 
     await test.step('Send second message and verify scroll', async () => {
@@ -57,17 +58,18 @@ test.describe('Chat Flow Tests', () => {
     });
 
     await test.step('Verify conversation context is maintained', async () => {
-      // Wait for second agent run to complete
-      await expect(sendButton).toBeEnabled({ timeout: 60000 });
-
       // Wait for second assistant response to appear
       const assistantMessage2 = page.locator('[aria-label="Assistant message"]').nth(1);
-      await expect(assistantMessage2).toBeVisible({ timeout: 5000 });
+      await expect(assistantMessage2).toBeVisible({ timeout: 60000 });
+
+      // Wait for streaming to complete (when "Stop generating" button disappears)
+      const stopButton = page.getByRole('button', { name: 'Stop generating' });
+      await expect(stopButton).toBeHidden({ timeout: 60000 });
 
       // Both user messages should be in the chat history
       const chatLog = page.locator('[role="log"]');
-      await expect(chatLog.getByText('Hello Grafana')).toBeVisible();
-      await expect(chatLog.getByText('Second message')).toBeVisible();
+      await expect(chatLog.locator('[aria-label="User message"]').filter({ hasText: 'Hello Grafana' })).toBeVisible();
+      await expect(chatLog.locator('[aria-label="User message"]').filter({ hasText: 'Second message' })).toBeVisible();
     });
   });
 
@@ -96,11 +98,12 @@ test.describe('Chat Flow Tests', () => {
     await chatInput.fill('Test focus');
     await sendButton.click();
 
-    // Wait for agent run to complete
-    await expect(sendButton).toBeEnabled({ timeout: 60000 });
+    // Wait for assistant response to appear
+    await expect(page.locator('[aria-label="Assistant message"]').first()).toBeVisible({ timeout: 60000 });
 
-    // Wait for assistant response
-    await expect(page.locator('[aria-label="Assistant message"]').first()).toBeVisible({ timeout: 5000 });
+    // Wait for streaming to complete (when "Stop generating" button disappears)
+    const stopButton = page.getByRole('button', { name: 'Stop generating' });
+    await expect(stopButton).toBeHidden({ timeout: 60000 });
 
     // The input should be ready for the next message
     await expect(chatInput).toBeVisible();
@@ -133,13 +136,14 @@ test.describe('Chat Streaming Tests', () => {
     });
 
     await test.step('Re-enable button after completion', async () => {
-      // Wait for the send button to be re-enabled (indicates agent run completed)
-      await expect(sendButton).toBeEnabled({ timeout: 60000 });
+      // Wait for assistant response to appear
+      await expect(page.locator('[aria-label="Assistant message"]').first()).toBeVisible({ timeout: 60000 });
 
-      // Wait for assistant message to appear
-      await expect(page.locator('[aria-label="Assistant message"]').first()).toBeVisible({ timeout: 5000 });
+      // Wait for streaming to complete (when "Stop generating" button disappears)
+      const stopButton = page.getByRole('button', { name: 'Stop generating' });
+      await expect(stopButton).toBeHidden({ timeout: 60000 });
 
-      // Fill new message to verify button is still enabled
+      // Fill new message to verify button is enabled when there's text
       await chatInput.fill('Another message');
       await expect(sendButton).toBeEnabled();
     });

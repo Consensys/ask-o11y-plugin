@@ -57,13 +57,11 @@ export default defineConfig<PluginOptions>({
         /chatInteractions\.spec\.ts/,
         /sidePanel\.spec\.ts/,
         /errorHandling\.spec\.ts/,
-        /simpleChat\.spec\.ts/,
       ],
       use: {
         ...devices['Desktop Chrome'],
         storageState: 'playwright/.auth/admin.json',
-      },
-      dependencies: ['chromium-session-tests'],
+      }
     },
     // 4. Run other tests after LLM tests
     {

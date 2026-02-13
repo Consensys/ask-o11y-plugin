@@ -116,22 +116,6 @@ test.describe('Chat Interactions', () => {
     });
   });
 
-  test('should display assistant response', async ({ page }) => {
-    const chatInput = page.getByLabel('Chat input');
-    const sendButton = page.getByLabel('Send message (Enter)');
-
-    // Send a simple message
-    await chatInput.fill('Say hello');
-    await sendButton.click();
-
-    // Wait for agent run to complete
-    await expect(sendButton).toBeEnabled({ timeout: 60000 });
-
-    // Wait for assistant message to appear
-    const assistantMessage = page.locator('[aria-label="Assistant message"]').first();
-    await expect(assistantMessage).toBeVisible({ timeout: 5000 });
-  });
-
   test('should maintain chat history after multiple messages', async ({ page }) => {
     const chatInput = page.getByLabel('Chat input');
     const sendButton = page.getByLabel('Send message (Enter)');
@@ -144,11 +128,12 @@ test.describe('Chat Interactions', () => {
     // Wait for first message to appear
     await expect(chatMessages.getByText('First test message')).toBeVisible();
 
-    // Wait for agent run to complete (button re-enabled)
-    await expect(sendButton).toBeEnabled({ timeout: 60000 });
+    // Wait for first assistant response to appear
+    await expect(page.locator('[aria-label="Assistant message"]').first()).toBeVisible({ timeout: 60000 });
 
-    // Wait for assistant response to appear
-    await expect(page.locator('[aria-label="Assistant message"]').first()).toBeVisible({ timeout: 5000 });
+    // Wait for streaming to complete (when "Stop generating" button disappears)
+    const stopButton = page.getByRole('button', { name: 'Stop generating' });
+    await expect(stopButton).toBeHidden({ timeout: 60000 });
 
     // Send second message
     await chatInput.fill('Second test message');

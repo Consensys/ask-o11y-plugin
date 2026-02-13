@@ -29,12 +29,13 @@ test.describe('Side Panel', () => {
       await chatInput.fill('What is observability?');
       await sendButton.click();
 
-      // Wait for agent run to complete
-      await expect(sendButton).toBeEnabled({ timeout: 60000 });
-
-      // Wait for assistant response
+      // Wait for assistant response to appear
       const assistantMessage = page.locator('[aria-label="Assistant message"]').first();
-      await expect(assistantMessage).toBeVisible({ timeout: 5000 });
+      await expect(assistantMessage).toBeVisible({ timeout: 60000 });
+
+      // Wait for streaming to complete (when "Stop generating" button disappears)
+      const stopButton = page.getByRole('button', { name: 'Stop generating' });
+      await expect(stopButton).toBeHidden({ timeout: 60000 });
     });
 
     await test.step('Verify panel does not open', async () => {
@@ -55,12 +56,13 @@ test.describe('Side Panel', () => {
       await chatInput.fill('Show me the default dashboard');
       await sendButton.click();
 
-      // Wait for agent run to complete (button re-enabled)
-      await expect(sendButton).toBeEnabled({ timeout: 60000 });
-
-      // Wait for assistant response
+      // Wait for assistant response to appear
       const assistantMessage = page.locator('[aria-label="Assistant message"]').first();
-      await expect(assistantMessage).toBeVisible({ timeout: 5000 });
+      await expect(assistantMessage).toBeVisible({ timeout: 60000 });
+
+      // Wait for streaming to complete (when "Stop generating" button disappears)
+      const stopButton = page.getByRole('button', { name: 'Stop generating' });
+      await expect(stopButton).toBeHidden({ timeout: 60000 });
     });
 
     await test.step('Wait for side panel to potentially open', async () => {
