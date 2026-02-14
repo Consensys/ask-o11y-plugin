@@ -3,9 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { Alert, Button } from '@grafana/ui';
 import { sessionShareService, SharedSession as SharedSessionType } from '../services/sessionShare';
 import { Chat } from '../components/Chat';
-import { ServiceFactory } from '../core/services/ServiceFactory';
-import { usePluginUserStorage, config } from '@grafana/runtime';
-import { ChatSession } from '../core/models/ChatSession';
+import { createSession } from '../services/backendSessionClient';
 import { ChatMessage } from '../components/Chat/types';
 import type { AppPluginSettings } from '../types/plugin';
 import { normalizeMessageTimestamp } from '../utils/shareUtils';
@@ -47,8 +45,6 @@ function noop(): void {}
 export function SharedSession(): React.ReactElement {
   const { shareId } = useParams<{ shareId: string }>();
   const navigate = useNavigate();
-  const storage = usePluginUserStorage();
-  const orgId = String(config.bootData.user.orgId || '1');
   const [sharedSession, setSharedSession] = useState<SharedSessionType | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -90,9 +86,8 @@ export function SharedSession(): React.ReactElement {
 
     setImporting(true);
     try {
-      const sessionService = ServiceFactory.getSessionService(storage);
       const messages = convertToMessages(sharedSession.messages);
-      const newSession = await sessionService.createSession(orgId, messages, sharedSession.title);
+      const newSession = await createSession(sharedSession.title, messages);
 
       await new Promise((resolve) => setTimeout(resolve, NAVIGATION_DELAY_MS));
 
@@ -111,14 +106,10 @@ export function SharedSession(): React.ReactElement {
       return null;
     }
     const messages = convertToMessages(sharedSession.messages);
-    return ChatSession.fromStorage({
+    return {
       id: sharedSession.id,
-      title: sharedSession.title || 'Shared Session',
       messages,
-      createdAt: sharedSession.createdAt,
-      updatedAt: sharedSession.updatedAt,
-      messageCount: messages.length,
-    });
+    };
   }, [sharedSession]);
 
   if (loading) {

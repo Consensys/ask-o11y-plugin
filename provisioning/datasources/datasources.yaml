@@ -1,15 +1,25 @@
-# apiVersion: 1
 
+
+
+apiVersion: 1
 datasources:
-  # - name: Prometheus
-  #   type: prometheus
-  #   uid: prometheus
-  #   url: https://mimir:8080/prometheus
-  #   access: proxy
-  #   isDefault: true
-  # - name: Loki
-  #   type: loki
-  #   uid: loki
-  #   url: http://loki:3100
-  #   access: proxy
-  #   isDefault: false
+  - name: Prometheus
+    type: prometheus
+    uid: prometheus
+    access: proxy
+    isDefault: true
+    url: ${PROM_URL}
+    basicAuth: true
+    basicAuthUser: $O11Y_USER
+    secureJsonData:
+      basicAuthPassword: $O11Y_PWD
+  - name: Loki
+    type: loki
+    uid: loki
+    access: proxy
+    isDefault: false
+    url: ${LOKI_URL}
+    basicAuth: true
+    basicAuthUser: $O11Y_USER
+    secureJsonData:
+      basicAuthPassword: $O11Y_PWD

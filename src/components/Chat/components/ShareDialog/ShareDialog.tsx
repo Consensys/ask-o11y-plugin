@@ -3,7 +3,7 @@ import React, { useState, useEffect } from 'react';
 
 import { Modal, Button, Select, Input, ClipboardButton } from '@grafana/ui';
 import { sessionShareService, CreateShareResponse } from '../../../../services/sessionShare';
-import { ChatSession } from '../../../../core/models/ChatSession';
+import { ChatMessage } from '../../types';
 import {
   EXPIRY_OPTIONS,
   expiryConfigToApiParams,
@@ -12,9 +12,19 @@ import {
   findExpiryOptionByKey,
 } from '../../../../utils/shareUtils';
 
+interface SessionData {
+  id: string;
+  title: string;
+  messages: ChatMessage[];
+  createdAt: string;
+  updatedAt: string;
+  messageCount: number;
+  summary?: string;
+}
+
 interface ShareDialogProps {
   sessionId: string;
-  session: ChatSession;
+  session: SessionData;
   onClose: () => void;
   existingShares?: CreateShareResponse[];
   onSharesChanged?: (shares: CreateShareResponse[]) => void;

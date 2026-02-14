@@ -26,6 +26,7 @@ jest.mock('../ToolCallsSection/ToolCallsSection', () => ({
   ),
 }));
 
+
 jest.mock('../GraphRenderer/GraphRenderer', () => ({
   GraphRenderer: () => <div data-testid="graph-renderer">Graph</div>,
 }));
@@ -191,6 +192,52 @@ describe('ChatMessage', () => {
       };
 
       render(<ChatMessage message={message} isGenerating={true} isLastMessage={false} />);
+
+      expect(screen.queryByText('Thinking...')).not.toBeInTheDocument();
+    });
+
+    it('should show thinking indicator when no content is present', () => {
+      const message: ChatMessageType = {
+        role: 'assistant',
+        content: '',
+      };
+
+      render(<ChatMessage message={message} isGenerating={true} isLastMessage={true} />);
+
+      expect(screen.getByText('Thinking...')).toBeInTheDocument();
+    });
+
+    it('should show content and hide thinking when content arrives', () => {
+      const message: ChatMessageType = {
+        role: 'assistant',
+        content: 'Here is the answer',
+      };
+
+      render(<ChatMessage message={message} isGenerating={true} isLastMessage={true} />);
+
+      expect(screen.queryByText('Thinking...')).not.toBeInTheDocument();
+      expect(screen.getByTestId('streamdown')).toBeInTheDocument();
+    });
+
+    it('should show content and hide thinking when content is present', () => {
+      const message: ChatMessageType = {
+        role: 'assistant',
+        content: 'Here is the answer',
+      };
+
+      render(<ChatMessage message={message} isGenerating={true} isLastMessage={true} />);
+
+      expect(screen.getByTestId('streamdown')).toBeInTheDocument();
+      expect(screen.queryByText('Thinking...')).not.toBeInTheDocument();
+    });
+
+    it('should not show thinking when generation completes with no content', () => {
+      const message: ChatMessageType = {
+        role: 'assistant',
+        content: '',
+      };
+
+      render(<ChatMessage message={message} isGenerating={false} isLastMessage={true} />);
 
       expect(screen.queryByText('Thinking...')).not.toBeInTheDocument();
     });

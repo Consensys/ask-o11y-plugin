@@ -5,7 +5,6 @@ import { ChatInterfaceProps } from '../types';
 import { ChatHeader } from '../components/ChatHeader/ChatHeader';
 import { ChatHistory } from '../components/ChatHistory/ChatHistory';
 import { ChatInput } from '../components/ChatInput/ChatInput';
-import { SummarizationIndicator } from '../components/SummarizationIndicator/SummarizationIndicator';
 import { WelcomeMessage } from '../components/WelcomeMessage/WelcomeMessage';
 import { QuickSuggestions } from '../components/QuickSuggestions/QuickSuggestions';
 
@@ -18,10 +17,7 @@ function useChatInterface(model: ChatInterfaceScene): ChatInterfaceProps {
     chatHistory: state.chatHistory,
     currentInput: state.currentInput,
     isGenerating: state.isGenerating,
-    toolsLoading: state.toolsLoading,
     currentSessionTitle: state.currentSessionTitle,
-    isSummarizing: state.isSummarizing,
-    hasSummary: state.hasSummary,
     setCurrentInput: state.setCurrentInput,
     sendMessage: state.sendMessage,
     handleKeyPress: state.handleKeyPress,
@@ -32,6 +28,8 @@ function useChatInterface(model: ChatInterfaceScene): ChatInterfaceProps {
     rightSlot: state.rightSlot,
     readOnly: state.readOnly,
     onSuggestionClick: state.onSuggestionClick,
+    queuedMessageCount: state.queuedMessageCount,
+    onStopGeneration: state.onStopGeneration,
   };
 }
 
@@ -51,10 +49,7 @@ function ChatInterfaceRenderer({ model }: SceneComponentProps<ChatInterfaceScene
     chatHistory,
     currentInput,
     isGenerating,
-    toolsLoading,
     currentSessionTitle,
-    isSummarizing,
-    hasSummary,
     setCurrentInput,
     sendMessage,
     handleKeyPress,
@@ -65,6 +60,8 @@ function ChatInterfaceRenderer({ model }: SceneComponentProps<ChatInterfaceScene
     rightSlot,
     readOnly,
     onSuggestionClick,
+    queuedMessageCount,
+    onStopGeneration,
   } = props;
 
   const hasMessages = chatHistory.length > 0;
@@ -77,9 +74,6 @@ function ChatInterfaceRenderer({ model }: SceneComponentProps<ChatInterfaceScene
           <div className="chat-interface-scroll-container w-full px-4 max-w-4xl mx-auto" style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, overflow: 'auto' }}>
             {/* Header - only show when there are messages */}
             <ChatHeader isGenerating={isGenerating} currentSessionTitle={currentSessionTitle} />
-
-            {/* Summarization indicator */}
-            <SummarizationIndicator isSummarizing={isSummarizing} hasSummary={hasSummary} />
 
             {/* Chat messages */}
             <div
@@ -115,12 +109,13 @@ function ChatInterfaceRenderer({ model }: SceneComponentProps<ChatInterfaceScene
                 ref={chatInputRef}
                 currentInput={currentInput}
                 isGenerating={isGenerating}
-                toolsLoading={toolsLoading}
                 setCurrentInput={setCurrentInput}
                 sendMessage={sendMessage}
                 handleKeyPress={handleKeyPress}
                 leftSlot={leftSlot}
                 rightSlot={rightSlot}
+                queuedMessageCount={queuedMessageCount}
+                onStopGeneration={onStopGeneration}
               />
             </div>
           )}
@@ -128,21 +123,20 @@ function ChatInterfaceRenderer({ model }: SceneComponentProps<ChatInterfaceScene
       ) : (
         <div className="flex-1 flex flex-col min-h-0 w-full max-w-3xl mx-auto px-4">
           <div className="flex-1 flex flex-col items-center justify-center py-8">
-            {/* Welcome header */}
             <WelcomeMessage />
 
-            {/* Chat Input */}
             <div className="w-full mt-10 mb-4" role="region" aria-label="Message input">
               <ChatInput
                 ref={chatInputRef}
                 currentInput={currentInput}
                 isGenerating={isGenerating}
-                toolsLoading={toolsLoading}
                 setCurrentInput={setCurrentInput}
                 sendMessage={sendMessage}
                 handleKeyPress={handleKeyPress}
                 leftSlot={undefined}
                 rightSlot={rightSlot}
+                queuedMessageCount={queuedMessageCount}
+                onStopGeneration={onStopGeneration}
               />
             </div>
 

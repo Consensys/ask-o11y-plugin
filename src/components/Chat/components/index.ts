@@ -9,7 +9,6 @@ export { NewChatButton } from './NewChatButton/NewChatButton';
 export { QuickSuggestions } from './QuickSuggestions/QuickSuggestions';
 export { SessionSidebar } from './SessionSidebar/SessionSidebar';
 export { SidePanel } from './SidePanel/SidePanel';
-export { SummarizationIndicator } from './SummarizationIndicator/SummarizationIndicator';
 export { ToolCallDisplay } from './ToolCallsSection/ToolCallDisplay';
 export { ToolCallsSection } from './ToolCallsSection/ToolCallsSection';
 export { TracesRenderer } from './TracesRenderer/TracesRenderer';

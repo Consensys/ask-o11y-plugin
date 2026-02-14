@@ -51,13 +51,16 @@ describe('ChatInput', () => {
   const mockSendMessage = jest.fn();
   const mockHandleKeyPress = jest.fn();
 
+  const mockStopGeneration = jest.fn();
+
   const defaultProps = {
     currentInput: '',
     isGenerating: false,
-    toolsLoading: false,
     setCurrentInput: mockSetCurrentInput,
     sendMessage: mockSendMessage,
     handleKeyPress: mockHandleKeyPress,
+    queuedMessageCount: 0,
+    onStopGeneration: mockStopGeneration,
   };
 
   beforeEach(() => {
@@ -109,18 +112,11 @@ describe('ChatInput', () => {
       expect(mockSendMessage).toHaveBeenCalled();
     });
 
-    it('should be disabled when isGenerating is true', () => {
-      render(<ChatInput {...defaultProps} isGenerating={true} />);
-      
-      const sendButton = screen.getByLabelText('Send message (Enter)');
-      expect(sendButton).toBeDisabled();
-    });
+    it('should be enabled during generation when input has content (queues message)', () => {
+      render(<ChatInput {...defaultProps} isGenerating={true} currentInput="Hello" />);
 
-    it('should be disabled when toolsLoading is true', () => {
-      render(<ChatInput {...defaultProps} toolsLoading={true} />);
-      
       const sendButton = screen.getByLabelText('Send message (Enter)');
-      expect(sendButton).toBeDisabled();
+      expect(sendButton).not.toBeDisabled();
     });
 
     it('should be disabled when input is empty', () => {
@@ -206,14 +202,64 @@ describe('ChatInput', () => {
   describe('auto-resize', () => {
     it('should auto-resize on input change', () => {
       render(<ChatInput {...defaultProps} />);
-      
+
       const textarea = screen.getByPlaceholderText('Ask me anything about your metrics, logs, or observability...') as HTMLTextAreaElement;
-      
+
       // Simulate typing multiline content
       fireEvent.change(textarea, { target: { value: 'Line 1\nLine 2\nLine 3' } });
-      
+
       // The component should handle auto-resize internally
       expect(mockSetCurrentInput).toHaveBeenCalledWith('Line 1\nLine 2\nLine 3');
+    });
+  });
+
+  describe('stop button', () => {
+    it('should show stop button during generation', () => {
+      render(<ChatInput {...defaultProps} isGenerating={true} />);
+
+      expect(screen.getByLabelText('Stop generating')).toBeInTheDocument();
+    });
+
+    it('should hide stop button when not generating', () => {
+      render(<ChatInput {...defaultProps} isGenerating={false} />);
+
+      expect(screen.queryByLabelText('Stop generating')).not.toBeInTheDocument();
+    });
+
+    it('should call onStopGeneration when clicked', () => {
+      render(<ChatInput {...defaultProps} isGenerating={true} />);
+
+      fireEvent.click(screen.getByLabelText('Stop generating'));
+      expect(mockStopGeneration).toHaveBeenCalled();
+    });
+  });
+
+  describe('message queue', () => {
+    it('should not disable textarea during generation', () => {
+      render(<ChatInput {...defaultProps} isGenerating={true} />);
+
+      const textarea = screen.getByPlaceholderText('Ask me anything about your metrics, logs, or observability...');
+      expect(textarea).not.toBeDisabled();
+    });
+
+    it('should show queue indicator when messages are queued', () => {
+      render(<ChatInput {...defaultProps} queuedMessageCount={2} />);
+
+      expect(screen.getByTestId('chat-queue-indicator')).toBeInTheDocument();
+      expect(screen.getByText('2 queued')).toBeInTheDocument();
+    });
+
+    it('should hide queue indicator when no messages queued', () => {
+      render(<ChatInput {...defaultProps} queuedMessageCount={0} />);
+
+      expect(screen.queryByTestId('chat-queue-indicator')).not.toBeInTheDocument();
+    });
+
+    it('should update aria-label during generation to indicate queuing', () => {
+      render(<ChatInput {...defaultProps} isGenerating={true} />);
+
+      const textarea = screen.getByLabelText('Chat input (message will be queued)');
+      expect(textarea).toBeInTheDocument();
     });
   });
 });
