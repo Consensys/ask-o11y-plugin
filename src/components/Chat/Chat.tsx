@@ -19,13 +19,10 @@ interface ChatProps {
   pluginSettings: AppPluginSettings;
   readOnly?: boolean;
   initialSession?: { id?: string; messages?: ChatMessage[] };
-  /** Message to auto-send on mount (for alert investigation mode) */
   initialMessage?: string;
-  /** Override for session title (for alert investigation mode) */
+  initialMessageType?: 'chat' | 'investigation' | 'performance';
   sessionTitleOverride?: string;
-  /** Session ID from URL (for multi-tab isolation) */
   sessionIdFromUrl: string | null;
-  /** Callback to update session ID in URL */
   onSessionIdChange: (sessionId: string | null) => void;
 }
 
@@ -34,6 +31,7 @@ function ChatComponent({
   readOnly = false,
   initialSession,
   initialMessage,
+  initialMessageType,
   sessionTitleOverride,
   sessionIdFromUrl,
   onSessionIdChange,
@@ -66,6 +64,7 @@ function ChatComponent({
     readOnly ? initialSession : undefined,
     readOnly,
     initialMessage,
+    initialMessageType,
     sessionTitleOverride
   );
 

@@ -1,8 +1,7 @@
-import { useState, useRef, useEffect, useMemo, useCallback } from 'react';
+import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { config } from '@grafana/runtime';
 import { ChatMessage, GrafanaPageRef, RenderedToolCall } from '../types';
 import { useSessionManager } from './useSessionManager';
-import { SYSTEM_PROMPT } from '../constants';
 import { ValidationService } from '../../../services/validation';
 import { parseGrafanaLinks } from '../utils/grafanaLinkParser';
 import {
@@ -16,7 +15,6 @@ import {
 } from '../../../services/agentClient';
 import { getSession } from '../../../services/backendSessionClient';
 import type { AppPluginSettings } from '../../../types/plugin';
-import { MAX_TOTAL_TOKENS } from '../../../constants';
 
 interface InitialSessionData {
   id?: string;
@@ -32,19 +30,6 @@ function updateLastAssistantMessage(
   );
 }
 
-function buildEffectiveSystemPrompt(
-  mode: AppPluginSettings['systemPromptMode'] = 'default',
-  customPrompt = ''
-): string {
-  if (mode === 'replace') {
-    return customPrompt || SYSTEM_PROMPT;
-  }
-  if (mode === 'append' && customPrompt.trim()) {
-    return `${SYSTEM_PROMPT}\n\n## Additional Instructions\n\n${customPrompt}`;
-  }
-  return SYSTEM_PROMPT;
-}
-
 export function useChat(
   pluginSettings: AppPluginSettings,
   sessionIdFromUrl: string | null,
@@ -52,15 +37,10 @@ export function useChat(
   initialSession?: InitialSessionData,
   readOnly?: boolean,
   initialMessage?: string,
+  initialMessageType?: 'chat' | 'investigation' | 'performance',
   sessionTitleOverride?: string
 ) {
   const orgId = String(config.bootData.user.orgId || '1');
-  const { systemPromptMode, customSystemPrompt } = pluginSettings;
-
-  const effectiveSystemPrompt = useMemo(
-    () => buildEffectiveSystemPrompt(systemPromptMode, customSystemPrompt),
-    [systemPromptMode, customSystemPrompt]
-  );
 
   const initialMessages = initialSession?.messages || [];
   const [chatHistory, setChatHistory] = useState<ChatMessage[]>(initialMessages);
@@ -89,6 +69,9 @@ export function useChat(
 
   const [currentInput, setCurrentInput] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
+  const [conversationType, setConversationType] = useState<'chat' | 'investigation' | 'performance'>(
+    initialMessageType || 'chat'
+  );
   const [isReconnecting, setIsReconnecting] = useState(false);
   const chatContainerRef = useRef<HTMLDivElement>(null);
   const bottomSpacerRef = useRef<HTMLDivElement>(null);
@@ -260,25 +243,24 @@ export function useChat(
     setToolCalls(new Map());
 
     setChatHistory((prev) => [...prev, { role: 'assistant', content: '', toolCalls: [] }]);
-    const messagesForBackend = newChatHistory
-      .filter((m) => m.role !== 'assistant' || m.content.trim() !== '' || (m.toolCalls && m.toolCalls.length > 0))
-      .map((m) => ({ role: m.role, content: m.content }));
 
     const abortController = new AbortController();
     abortControllerRef.current = abortController;
     const hadErrorRef = { current: false };
 
+    const messageType = conversationType;
+    if (conversationType !== 'chat') {
+      setConversationType('chat');
+    }
+
     try {
       const result = await runAgentDetached({
-        messages: messagesForBackend,
-        systemPrompt: effectiveSystemPrompt,
-        summary: '',
-        maxTotalTokens: pluginSettings.maxTotalTokens || MAX_TOTAL_TOKENS,
-        recentMessageCount: 15,
+        message: validatedInput,
+        type: messageType,
+        sessionId: sessionManager.currentSessionId || undefined,
         orgId,
         orgName: config.bootData.user.orgName || '',
-        sessionId: sessionManager.currentSessionId || undefined,
-        title: sessionTitleOverrideRef.current,
+        scopeOrgId: config.bootData.user.orgName || '',
       });
 
       activeRunIdRef.current = result.runId;
@@ -507,6 +489,8 @@ export function useChat(
     isReconnecting,
     chatContainerRef,
     toolCalls,
+    conversationType,
+    setConversationType,
     setCurrentInput,
     sendMessage,
     handleKeyPress,

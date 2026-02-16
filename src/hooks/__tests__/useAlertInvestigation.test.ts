@@ -46,24 +46,23 @@ describe('useAlertInvestigation', () => {
     });
 
     it('should return isInvestigationMode false when no query params', () => {
-      clearSearchParams();
-
       const { result } = renderHook(() => useAlertInvestigation());
 
       expect(result.current.isInvestigationMode).toBe(false);
+      expect(result.current.initialMessage).toBeNull();
     });
   });
 
   describe('when in investigation mode', () => {
-    it('should build investigation prompt with alert name', () => {
+    it('should return alertName for backend prompt rendering', () => {
       setSearchParams({ type: 'investigation', alertName: 'HighCPUUsage' });
 
       const { result } = renderHook(() => useAlertInvestigation());
 
       expect(result.current.isInvestigationMode).toBe(true);
       expect(result.current.error).toBeNull();
-      expect(result.current.initialMessage).toContain('Investigate the alert "HighCPUUsage"');
-      expect(result.current.initialMessage).toContain('list_alert_rules');
+      expect(result.current.initialMessage).toBe('alertName:HighCPUUsage');
+      expect(result.current.initialMessageType).toBe('investigation');
       expect(result.current.sessionTitle).toBe('Alert Investigation: HighCPUUsage');
     });
 
@@ -73,22 +72,8 @@ describe('useAlertInvestigation', () => {
       const { result } = renderHook(() => useAlertInvestigation());
 
       expect(result.current.error).toBeNull();
-      expect(result.current.initialMessage).toContain('High CPU Usage Alert');
+      expect(result.current.initialMessage).toBe('alertName:High CPU Usage Alert');
       expect(result.current.sessionTitle).toBe('Alert Investigation: High CPU Usage Alert');
-    });
-
-    it('should include RCA workflow instructions in prompt', () => {
-      setSearchParams({ type: 'investigation', alertName: 'TestAlert' });
-
-      const { result } = renderHook(() => useAlertInvestigation());
-
-      const prompt = result.current.initialMessage;
-      expect(prompt).toContain('root cause analysis');
-      expect(prompt).toContain('list_datasources');
-      expect(prompt).toContain('Grafana-managed alerts');
-      expect(prompt).toContain('Query related metrics');
-      expect(prompt).toContain('Search for relevant error logs');
-      expect(prompt).toContain('remediation steps');
     });
 
     it('should validate alertName and reject script injection', () => {
