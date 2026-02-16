@@ -13,9 +13,34 @@ jobs:
   release-please:
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.RELEASE_TOKEN }}
+
       - uses: googleapis/release-please-action@v4
         id: release
         with:
           token: ${{ secrets.RELEASE_TOKEN }}
           config-file: .github/release-please-config.json
           manifest-file: .github/release-please-manifest.json
+
+      - name: Create git tag for merged release PR
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+          COMMIT_MSG: ${{ github.event.head_commit.message }}
+          COMMIT_SHA: ${{ github.sha }}
+        run: |
+          if [[ "$COMMIT_MSG" =~ chore\(main\):\ release ]]; then
+            VERSION=$(jq -r '."."' .github/release-please-manifest.json)
+            TAG_NAME="v${VERSION}"
+
+            if git ls-remote --tags origin "$TAG_NAME" | grep -q "$TAG_NAME"; then
+              echo "Tag ${TAG_NAME} already exists on remote, skipping"
+              exit 0
+            fi
+
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git tag -a "$TAG_NAME" "$COMMIT_SHA" -m "Release $TAG_NAME"
+            git push origin "$TAG_NAME"
+          fi
