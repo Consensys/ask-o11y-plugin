@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useTheme2 } from '@grafana/ui';
+import { Icon, useTheme2 } from '@grafana/ui';
 import { GrafanaPageRef } from '../../types';
 import { TabCloseButton } from './TabCloseButton';
 import { useEmbeddingAllowed } from '../../hooks/useEmbeddingAllowed';
@@ -45,14 +45,14 @@ export const SidePanel: React.FC<SidePanelProps> = ({ isOpen, onClose, pageRefs,
 
   const containerStyle = embedded
     ? {
-        backgroundColor: theme.isDark ? '#1a1b1f' : theme.colors.background.primary,
+        backgroundColor: theme.colors.background.primary,
         borderColor: theme.colors.border.weak,
       }
     : {
         width: '800px',
         minWidth: '400px',
         maxWidth: '65%',
-        backgroundColor: theme.isDark ? '#1a1b1f' : theme.colors.background.primary,
+        backgroundColor: theme.colors.background.primary,
         borderColor: theme.colors.border.weak,
       };
 
@@ -68,48 +68,22 @@ export const SidePanel: React.FC<SidePanelProps> = ({ isOpen, onClose, pageRefs,
         className="flex items-center justify-between px-4 py-3 border-b flex-shrink-0"
         style={{
           borderColor: theme.colors.border.weak,
-          backgroundColor: theme.isDark ? '#111217' : theme.colors.background.secondary,
+          backgroundColor: theme.colors.background.secondary,
         }}
       >
-        <div className="flex items-center gap-2">
-          <svg
-            width="16"
-            height="16"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            style={{ color: theme.colors.text.secondary }}
-          >
-            <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
-            <line x1="9" y1="3" x2="9" y2="21" />
-          </svg>
-          <span className="text-sm font-medium" style={{ color: theme.colors.text.primary }}>
+        <div className="flex items-center gap-2 text-secondary">
+          <Icon name="columns" size="md" />
+          <span className="text-sm font-medium text-primary">
             {activeRef.title || (activeRef.type === 'explore' ? 'Explore' : 'Dashboard')}
           </span>
         </div>
         <button
           onClick={onClose}
-          className="p-1.5 rounded-md hover:bg-white/10 transition-colors"
+          className="p-1.5 rounded-md hover:bg-white/10 transition-colors text-secondary"
           aria-label="Close panel"
           title="Close panel"
-          style={{ color: theme.colors.text.secondary }}
         >
-          <svg
-            width="16"
-            height="16"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          >
-            <line x1="18" y1="6" x2="6" y2="18" />
-            <line x1="6" y1="6" x2="18" y2="18" />
-          </svg>
+          <Icon name="times" size="md" />
         </button>
       </div>
 
@@ -119,7 +93,7 @@ export const SidePanel: React.FC<SidePanelProps> = ({ isOpen, onClose, pageRefs,
           className="flex gap-1 px-2 py-2 border-b flex-shrink-0"
           style={{
             borderColor: theme.colors.border.weak,
-            backgroundColor: theme.isDark ? '#111217' : theme.colors.background.secondary,
+            backgroundColor: theme.colors.background.secondary,
           }}
           role="tablist"
         >

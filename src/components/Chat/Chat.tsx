@@ -1,8 +1,7 @@
-import React, { useRef, useState, useCallback, useEffect, useMemo } from 'react';
+import React, { useRef, useState, useCallback, useMemo } from 'react';
 import { useTheme2 } from '@grafana/ui';
 
 import { useChat } from './hooks/useChat';
-import { useGrafanaTheme } from './hooks/useGrafanaTheme';
 import { useKeyboardNavigation, useAnnounce } from './hooks/useKeyboardNavigation';
 import { useEmbeddingAllowed } from './hooks/useEmbeddingAllowed';
 import { useChatScene } from './hooks/useChatScene';
@@ -39,7 +38,6 @@ function ChatComponent({
   sessionIdFromUrl,
   onSessionIdChange,
 }: ChatProps): React.ReactElement | null {
-  useGrafanaTheme();
   const theme = useTheme2();
   const allowEmbedding = useEmbeddingAllowed();
   const announce = useAnnounce();
@@ -84,15 +82,6 @@ function ChatComponent({
     currentSessionId: sessionManager.currentSessionId,
     allowEmbedding,
   });
-
-  useEffect(() => {
-    if (!readOnly) {
-      sessionManager.refreshSessions().then(() => {
-        sessionManager.loadCurrentSessionIfNeeded();
-      });
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   const focusChatInput = useCallback(() => {
     chatInputRef.current?.focus();
@@ -191,7 +180,7 @@ function ChatComponent({
       role="main"
       aria-label="Chat interface"
       style={{
-        backgroundColor: theme.isDark ? '#111217' : theme.colors.background.canvas,
+        backgroundColor: theme.colors.background.canvas,
       }}
     >
       {chatScene && (

@@ -16,13 +16,11 @@ export interface UseSessionManagerReturn {
   currentSessionId: string | null;
   sessions: SessionMetadata[];
   setCurrentSessionIdDirect: (sessionId: string) => void;
-  createNewSession: () => Promise<void>;
+  createNewSession: () => void;
   loadSession: (sessionId: string) => Promise<void>;
-  loadSessionFromUrl: (sessionId: string) => Promise<void>;
   deleteSession: (sessionId: string) => Promise<void>;
   deleteAllSessions: () => Promise<void>;
   refreshSessions: () => Promise<void>;
-  loadCurrentSessionIfNeeded: () => Promise<void>;
 }
 
 export function useSessionManager(
@@ -63,23 +61,7 @@ export function useSessionManager(
     }
   }, []);
 
-  const loadCurrentSessionIfNeeded = useCallback(async () => {
-    if (readOnly || chatHistory.length > 0 || currentSessionId !== null) {
-      return;
-    }
-
-    try {
-      const id = await getCurrentSessionId();
-      if (id) {
-        const session = await getSession(id);
-        setCurrentSessionId_(session.id);
-        setChatHistory(session.messages as ChatMessage[]);
-      }
-    } catch (error) {
-      console.error('[SessionManager] Failed to load current session:', error);
-    }
-  }, [chatHistory.length, currentSessionId, readOnly, setChatHistory]);
-
+  // On org change: list sessions and restore last-active session if no URL session
   useEffect(() => {
     if (lastInitializedOrgIdRef.current === orgId) {
       return;
@@ -100,8 +82,10 @@ export function useSessionManager(
           const id = await getCurrentSessionId();
           if (!cancelled && id) {
             const session = await getSession(id);
-            setCurrentSessionId_(session.id);
-            setChatHistory(session.messages as ChatMessage[]);
+            if (!cancelled) {
+              setCurrentSessionId_(session.id);
+              setChatHistory(session.messages as ChatMessage[]);
+            }
           }
         }
       } catch (error) {
@@ -128,8 +112,8 @@ export function useSessionManager(
     onSessionIdChange(null);
     try {
       await setCurrentSessionId(null);
-    } catch (error) {
-      console.error('[SessionManager] Failed to clear active session:', error);
+    } catch {
+      // Best-effort: clearing backend current session is not critical
     }
   }, [setChatHistory, onSessionIdChange]);
 
@@ -141,24 +125,14 @@ export function useSessionManager(
         setChatHistory(session.messages as ChatMessage[]);
         onSessionIdChange(session.id);
         await setCurrentSessionId(session.id);
-      } catch (error) {
+      } catch (error: unknown) {
         console.error('[SessionManager] Error loading session:', error);
-      }
-    },
-    [setChatHistory, onSessionIdChange]
-  );
-
-  const loadSessionFromUrl = useCallback(
-    async (sessionId: string) => {
-      try {
-        const session = await getSession(sessionId);
-        setCurrentSessionId_(session.id);
-        setChatHistory(session.messages as ChatMessage[]);
-      } catch (error) {
-        console.error('[SessionManager] Error loading URL session:', error);
-        setCurrentSessionId_(null);
-        setChatHistory([]);
-        onSessionIdChange(null);
+        const is404 = error instanceof Error && error.message.includes('404');
+        if (is404) {
+          setCurrentSessionId_(null);
+          setChatHistory([]);
+          onSessionIdChange(null);
+        }
       }
     },
     [setChatHistory, onSessionIdChange]
@@ -171,7 +145,7 @@ export function useSessionManager(
         await refreshSessions();
 
         if (sessionId === currentSessionId) {
-          await createNewSession();
+          createNewSession();
         }
       } catch (error) {
         console.error('[SessionManager] Error deleting session:', error);
@@ -184,7 +158,7 @@ export function useSessionManager(
     try {
       await deleteAllBackendSessions();
       await refreshSessions();
-      await createNewSession();
+      createNewSession();
     } catch (error) {
       console.error('[SessionManager] Error deleting all sessions:', error);
     }
@@ -196,10 +170,8 @@ export function useSessionManager(
     setCurrentSessionIdDirect: setCurrentSessionId_,
     createNewSession,
     loadSession,
-    loadSessionFromUrl,
     deleteSession: deleteSessionFn,
     deleteAllSessions: deleteAllSessionsFn,
     refreshSessions,
-    loadCurrentSessionIfNeeded,
   };
 }
