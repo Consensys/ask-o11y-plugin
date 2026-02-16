@@ -29,8 +29,8 @@ function createMockCallbacks(): jest.Mocked<AgentCallbacks> {
 }
 
 const defaultRequest: AgentRunRequest = {
-  messages: [{ role: 'user', content: 'Hello' }],
-  systemPrompt: 'You are helpful',
+  message: 'Hello',
+  type: 'chat',
 };
 
 describe('runAgentDetached', () => {
@@ -72,8 +72,8 @@ describe('runAgentDetached', () => {
     global.fetch = mockFetch;
 
     const request: AgentRunRequest = {
-      messages: [{ role: 'user', content: 'test' }],
-      systemPrompt: 'system',
+      message: 'test',
+      type: 'chat',
       orgId: '42',
     };
 
