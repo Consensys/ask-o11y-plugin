@@ -120,7 +120,7 @@ export function useChat(
   useEffect(() => {
     if (sessionIdFromUrl && !readOnly && !hasLoadedFromUrlRef.current && chatHistory.length === 0 && !initialMessage) {
       hasLoadedFromUrlRef.current = true;
-      sessionManager.loadSessionFromUrl(sessionIdFromUrl).catch((error) => {
+      sessionManager.loadSession(sessionIdFromUrl).catch((error) => {
         console.error('[useChat] Failed to load session from URL:', error);
       });
     }

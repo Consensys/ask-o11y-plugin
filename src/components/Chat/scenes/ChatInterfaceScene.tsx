@@ -85,7 +85,7 @@ function ChatInterfaceRenderer({ model }: SceneComponentProps<ChatInterfaceScene
               aria-relevant="additions"
               tabIndex={0}
               style={{
-                backgroundColor: theme.isDark ? '#1a1b1f' : theme.colors.background.primary,
+                backgroundColor: theme.colors.background.primary,
               }}
             >
               <div className="px-4">
@@ -102,7 +102,7 @@ function ChatInterfaceRenderer({ model }: SceneComponentProps<ChatInterfaceScene
               role="region"
               aria-label="Message input"
               style={{
-                backgroundColor: theme.isDark ? '#111217' : theme.colors.background.canvas,
+                backgroundColor: theme.colors.background.canvas,
               }}
             >
               <ChatInput

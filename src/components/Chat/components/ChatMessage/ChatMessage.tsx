@@ -58,8 +58,8 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({ message, isGenerating 
           <div
             className="px-4 py-3 rounded-xl rounded-br-sm"
             style={{
-              backgroundColor: theme.isDark ? '#3730a3' : '#4f46e5',
-              color: '#ffffff',
+              backgroundColor: theme.colors.primary.main,
+              color: theme.colors.primary.contrastText,
             }}
             tabIndex={0}
             aria-live="polite"
@@ -103,10 +103,7 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({ message, isGenerating 
         )}
 
         {!showThinking && contentSections.length > 0 && (
-          <div
-            className="text-sm leading-relaxed whitespace-normal break-words"
-            style={{ color: theme.colors.text.primary }}
-          >
+          <div className="text-sm leading-relaxed whitespace-normal break-words text-primary">
             {contentSections.map((section, index) => {
               if (section.type === 'text') {
                 return (
@@ -131,8 +128,7 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({ message, isGenerating 
 
         {!showThinking && contentSections.length === 0 && (
           <div
-            className="text-sm leading-relaxed whitespace-normal break-words prose prose-sm max-w-none"
-            style={{ color: theme.colors.text.primary }}
+            className="text-sm leading-relaxed whitespace-normal break-words prose prose-sm max-w-none text-primary"
           >
             <Streamdown>{message.content}</Streamdown>
           </div>

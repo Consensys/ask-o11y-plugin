@@ -299,14 +299,10 @@ src/
 │   ├── App/            # Main app shell, routing
 │   ├── Chat/           # Chat interface with streaming, visualization
 │   └── AppConfig/      # MCP server configuration, OAuth config
-├── core/               # Domain layer (Clean Architecture)
-│   ├── models/         # Domain models (ChatSession, Message)
-│   ├── repositories/   # Data access interfaces (ISessionRepository)
-│   │   └── GrafanaUserStorageRepository.ts  # Uses Grafana UserStorage API
-│   └── services/       # Business logic (SessionService)
 ├── services/           # Application services
-│   ├── backendMCPClient.ts    # Backend MCP proxy client
-│   ├── mcpClient.ts           # Direct MCP client
+│   ├── agentClient.ts         # Server-side agent loop client (SSE streaming)
+│   ├── backendMCPClient.ts    # Backend MCP proxy client (tool listing)
+│   ├── backendSessionClient.ts # Backend session API client
 │   ├── sessionShare.ts        # Session sharing client
 │   ├── oauthService.ts        # OAuth flow handling
 │   ├── tokenizer.ts           # Token counting utilities
@@ -348,9 +344,8 @@ pkg/
 
 **Frontend:**
 - Functional components with hooks (no class components)
-- Custom hooks for business logic: `useChat`, `useSessionManager`, `useMCPManager`
-- Repository Pattern for data access abstraction
-- Service Layer for business logic
+- Custom hooks for business logic: `useChat`, `useSessionManager`
+- Thin service layer for backend API calls (`services/`)
 - Async/await (not .then()/.catch())
 
 **Backend:**
@@ -361,12 +356,11 @@ pkg/
 
 ### Multi-Tenancy & Isolation
 
-**Session Storage (Frontend):**
-- Uses Grafana UserStorage API (per-user storage, not per-org)
-- Sessions are private to each user (not visible to other users)
-- Keys include orgId: `grafana-o11y-chat-org-{orgId}-*`
-- 5MB quota per user (auto-cleanup at limit)
-- Max 50 sessions per user per organization
+**Session Storage (Backend):**
+- Stored in Go backend (in-memory or Redis)
+- Sessions are private to each user per org
+- Max 50 sessions per user per organization (auto-eviction of oldest)
+- Frontend communicates via `src/services/backendSessionClient.ts` HTTP API
 
 **MCP Server Communication (Backend):**
 - Forwards org context via headers:
@@ -469,10 +463,11 @@ Ask O11y supports three MCP modes for flexible tool integration:
 - Natural disambiguation - conflicts extremely unlikely due to prefixing
 
 **Implementation:**
-- Frontend: `AggregatedMCPClient` ([src/services/aggregatedMCPClient.ts](src/services/aggregatedMCPClient.ts)) combines both sources
-- Tool routing: Registry-based lookup routes calls to correct client
-- Error isolation: If one source fails, the other continues to work
-- RBAC: Filtering applied by each underlying client independently
+- Backend: `pkg/mcp/proxy.go` aggregates multiple MCP servers and handles tool routing
+- Frontend: All tool execution goes through the server-side agent loop (`pkg/agent/loop.go`)
+- Tool listing: `src/services/backendMCPClient.ts` proxies through backend for RBAC-filtered listing
+- Error isolation: If one MCP server fails, others continue to work
+- RBAC: Filtering applied by backend proxy based on MCP ToolAnnotations
 
 ### Multi-Org Constraints (CRITICAL)
 
@@ -556,16 +551,16 @@ mcpServers:
 
 ### Session Management Implementation
 
-**Storage Layer** (`src/core/repositories/GrafanaUserStorageRepository.ts`):
-- Uses Grafana UserStorage API (per-user, not per-org)
-- Keys MUST include orgId: `grafana-o11y-chat-org-{orgId}-*`
-- 5MB quota per user (not per org)
-- Auto-cleanup at quota limit (removes 10 oldest)
+**Backend Storage** (`pkg/plugin/sessionstore.go`, `pkg/plugin/sessionstore_redis.go`):
+- In-memory (default) or Redis (production) session store
+- Per-user per-org isolation via `ownerKey = {userID}:{orgID}`
+- Max 50 sessions per user/org (auto-eviction of oldest)
+- `activeRunId` tracking for SSE reconnection on page refresh
 
-**Business Logic** (`src/core/services/SessionService.ts`):
-- Always validate org context
-- Auto-save when streaming completes (immediate, no debounce)
-- Maintain org isolation within user's storage
+**Frontend** (`src/services/backendSessionClient.ts`, `src/components/Chat/hooks/useSessionManager.ts`):
+- Thin HTTP client for backend session CRUD
+- `useSessionManager` hook manages session state and URL synchronization
+- Sessions created server-side during first agent run
 
 ### Session Sharing Implementation
 
