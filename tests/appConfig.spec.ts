@@ -76,51 +76,46 @@ test.describe('MCP Server Management', () => {
   });
 });
 
-test.describe('System Prompt', () => {
-  test('should handle mode switching and validation', async ({ appConfigPage, page }) => {
+test.describe('Prompt Templates', () => {
+  test('should display all three prompt editors', async ({ appConfigPage, page }) => {
     void appConfigPage;
 
-    const customPromptTextarea = page.locator('[data-testid="data-testid ac-custom-system-prompt"]');
-    const saveButton = page.locator('[data-testid="data-testid ac-save-system-prompt"]');
+    await expect(page.getByText('Prompt Templates', { exact: true })).toBeVisible();
 
-    // Default mode: textarea hidden, save enabled
-    await expect(page.getByLabel('Use default prompt')).toBeChecked();
-    await expect(customPromptTextarea).not.toBeVisible();
-    await expect(saveButton).toBeEnabled();
-
-    // Replace mode: textarea visible, save disabled when empty
-    await page.getByLabel('Replace with custom prompt').click();
-    await expect(customPromptTextarea).toBeVisible();
-    await expect(saveButton).toBeDisabled();
-
-    // Fill prompt, verify char count, save enabled
-    await customPromptTextarea.fill('Test prompt content');
-    const charCount = page.locator('[data-testid="data-testid ac-custom-prompt-char-count"]');
-    await expect(charCount).toContainText('Characters: 19');
-    await expect(saveButton).toBeEnabled();
-
-    // Append mode: textarea visible
-    await page.getByLabel('Append to default prompt').click();
-    await expect(customPromptTextarea).toBeVisible();
-    // Content preserved across mode switches
-    await expect(customPromptTextarea).toHaveValue('Test prompt content');
-
-    // Back to default: textarea hidden
-    await page.getByLabel('Use default prompt').click();
-    await expect(customPromptTextarea).not.toBeVisible();
+    await expect(page.locator('[data-testid="ac-prompt-system-edit-button"]')).toBeVisible();
+    await expect(page.locator('[data-testid="ac-prompt-investigation-edit-button"]')).toBeVisible();
+    await expect(page.locator('[data-testid="ac-prompt-performance-edit-button"]')).toBeVisible();
   });
 
-  test('should interact with default prompt modal', async ({ appConfigPage, page }) => {
+  test('should open editor modal with working controls', async ({ appConfigPage, page }) => {
     void appConfigPage;
 
-    const viewDefaultButton = page.locator('[data-testid="data-testid ac-view-default-prompt"]');
-    await viewDefaultButton.click();
+    await page.locator('[data-testid="ac-prompt-system-edit-button"]').click();
+    await expect(page.getByRole('heading', { name: 'Edit System Prompt' })).toBeVisible();
 
-    await expect(page.getByRole('heading', { name: 'Default System Prompt' })).toBeVisible();
-    await expect(page.locator('[data-testid="data-testid ac-default-prompt-content"]')).toBeVisible();
-    await expect(page.locator('[data-testid="data-testid ac-copy-default-prompt"]')).toBeVisible();
+    const textarea = page.locator('[data-testid="ac-prompt-system-textarea"]');
+    const saveButton = page.locator('[data-testid="ac-prompt-system-save-button"]');
+    const resetButton = page.locator('[data-testid="ac-prompt-system-reset-button"]');
 
-    await page.locator('[data-testid="data-testid ac-close-default-prompt"]').click();
-    await expect(page.getByRole('heading', { name: 'Default System Prompt' })).not.toBeVisible();
+    await expect(textarea).toBeVisible();
+
+    // No changes yet: save disabled, reset disabled (using default)
+    await expect(saveButton).toBeDisabled();
+    await expect(resetButton).toBeDisabled();
+
+    // Edit prompt: save becomes enabled, reset becomes enabled
+    await textarea.fill('Custom system prompt for testing');
+    await expect(saveButton).toBeEnabled();
+    await expect(resetButton).toBeEnabled();
+    await expect(page.getByText(/\d+ \/ 15000 characters/)).toBeVisible();
+
+    // Reset to default: both buttons disabled again
+    await resetButton.click();
+    await expect(saveButton).toBeDisabled();
+    await expect(resetButton).toBeDisabled();
+
+    // Dismiss modal via close button
+    await page.locator('[aria-label="Close"]').click();
+    await expect(page.getByRole('heading', { name: 'Edit System Prompt' })).not.toBeVisible();
   });
 });

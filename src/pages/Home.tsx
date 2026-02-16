@@ -66,7 +66,7 @@ function Home({ pluginSettings }: HomeProps): React.ReactElement {
         <Chat
           pluginSettings={pluginSettings}
           initialMessage={investigation.initialMessage ?? undefined}
-          sessionTitleOverride={investigation.sessionTitle ?? undefined}
+          initialMessageType={investigation.initialMessageType ?? undefined}
           sessionIdFromUrl={sessionIdFromUrl}
           onSessionIdChange={handleSessionIdChange}
         />

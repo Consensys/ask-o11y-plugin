@@ -5,7 +5,7 @@ import (
 	"strings"
 )
 
-const defaultMaxTotalTokens = 100_000
+const defaultMaxTotalTokens = 180_000
 const defaultRecentMessageCount = 15
 const systemMessageBuffer = 1000
 const maxToolResponseTokens = 8000

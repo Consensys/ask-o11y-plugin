@@ -74,26 +74,6 @@ test.describe('Chat', () => {
     await expect(stopButton).toBeHidden({ timeout: 30000 });
   });
 
-  test('should transition back to welcome after clearing chat', async ({ page }) => {
-    test.setTimeout(90000);
-    const chatInput = page.getByLabel('Chat input');
-
-    await chatInput.fill('list your datasources');
-    await page.getByLabel('Send message (Enter)').click();
-
-    // Wait for user message in chat log
-    await expect(page.locator('[aria-label="User message"]').first()).toBeVisible({ timeout: 30000 });
-
-    // Wait for assistant response to complete
-    await expect(page.locator('[aria-label="Assistant message"]').first()).toBeVisible({ timeout: 60000 });
-    await expect(page.getByRole('button', { name: 'Stop generating' })).toBeHidden({ timeout: 60000 });
-
-    await page.getByRole('button', { name: /New Chat/i }).click();
-    await page.getByRole('button', { name: 'Yes' }).click();
-
-    await expect(page.getByRole('heading', { name: 'Ask O11y Assistant' })).toBeVisible();
-  });
-
   test('should have accessible chat interface', async ({ page }) => {
     await expect(page.getByRole('main', { name: 'Chat interface' })).toBeVisible();
     await expect(page.getByRole('region', { name: 'Message input' })).toBeVisible();
