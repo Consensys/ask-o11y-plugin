@@ -5,6 +5,18 @@ All notable changes to the Ask O11y Grafana plugin will be documented in this fi
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.7](https://github.com/Consensys/ask-o11y-plugin/compare/v0.2.6...v0.2.7) (2026-02-14)
+
+
+### Features
+
+* **agent:** server-side agentic loop with detached execution and E2E test consolidation ([#46](https://github.com/Consensys/ask-o11y-plugin/issues/46)) ([c5fbe29](https://github.com/Consensys/ask-o11y-plugin/commit/c5fbe29383005d94e6713e3625916a8dbe54eb14))
+
+
+### Bug Fixes
+
+* **config:** enhance claude setup ([7d76956](https://github.com/Consensys/ask-o11y-plugin/commit/7d769561158d91b883a7116ccd956c8c0711ddd2))
+
 ## [0.2.6](https://github.com/Consensys/ask-o11y-plugin/compare/v0.2.5...v0.2.6) (2026-02-06)
 
 
