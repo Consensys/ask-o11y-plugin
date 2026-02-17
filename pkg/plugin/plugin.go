@@ -3,6 +3,7 @@ package plugin
 import (
 	"consensys-asko11y-app/pkg/agent"
 	"consensys-asko11y-app/pkg/mcp"
+	"consensys-asko11y-app/pkg/plugin/openapi"
 	"consensys-asko11y-app/pkg/rbac"
 	"context"
 	"encoding/json"
@@ -303,6 +304,7 @@ func (p *Plugin) CheckHealth(ctx context.Context, req *backend.CheckHealthReques
 
 func (p *Plugin) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/health", p.handleHealth)
+	mux.HandleFunc("/openapi.json", p.handleOpenAPISpec)
 	mux.HandleFunc("/mcp", p.handleMCP)
 	mux.HandleFunc("/api/mcp/tools", p.handleMCPTools)
 	mux.HandleFunc("/api/mcp/call-tool", p.handleMCPCallTool)
@@ -356,6 +358,19 @@ func (p *Plugin) handleHealth(w http.ResponseWriter, r *http.Request) {
 	}
 
 	json.NewEncoder(w).Encode(response)
+}
+
+func (p *Plugin) handleOpenAPISpec(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "public, max-age=3600")
+
+	specBytes := openapi.GetSpecBytes()
+	w.Write(specBytes)
 }
 
 func (p *Plugin) handleMCP(w http.ResponseWriter, r *http.Request) {
@@ -503,11 +518,8 @@ func (p *Plugin) handleAgentRun(w http.ResponseWriter, r *http.Request) {
 		req.OrgName = "Org" + orgID
 	}
 
-	isNewFormat := req.Message != ""
-	isOldFormat := len(req.Messages) > 0 && req.SystemPrompt != ""
-
-	if !isNewFormat && !isOldFormat {
-		http.Error(w, "either 'message' (new format) or 'messages' and 'systemPrompt' (old format) are required", http.StatusBadRequest)
+	if req.Message == "" {
+		http.Error(w, "'message' is required", http.StatusBadRequest)
 		return
 	}
 
@@ -547,106 +559,72 @@ func (p *Plugin) handleAgentRun(w http.ResponseWriter, r *http.Request) {
 
 	numericOrgID := getOrgID(r)
 
+	toolCtx := BuildToolContext(req.OrgName, userRole)
+
+	systemPrompt, err := p.promptRegistry.BuildSystemPrompt(toolCtx)
+	if err != nil {
+		p.logger.Error("Failed to build system prompt", "error", err)
+		http.Error(w, fmt.Sprintf("Failed to build system prompt: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	userPrompt, err := p.promptRegistry.BuildUserPrompt(req.Type, req.Message, toolCtx)
+	if err != nil {
+		p.logger.Error("Failed to build user prompt", "error", err, "type", req.Type)
+		http.Error(w, fmt.Sprintf("Failed to build user prompt: %v", err), http.StatusBadRequest)
+		return
+	}
+
 	var messages []agent.Message
 	var sessionID string
-	var systemPrompt string
-	var userPrompt string
 
-	if isNewFormat {
-		toolCtx := BuildToolContext(req.OrgName, userRole)
-
-		var err error
-		systemPrompt, err = p.promptRegistry.BuildSystemPrompt(toolCtx)
+	if req.SessionID != "" {
+		session, err := p.sessionStore.GetSession(req.SessionID, userID, numericOrgID)
 		if err != nil {
-			p.logger.Error("Failed to build system prompt", "error", err)
-			http.Error(w, fmt.Sprintf("Failed to build system prompt: %v", err), http.StatusInternalServerError)
+			http.Error(w, "Session not found", http.StatusNotFound)
 			return
 		}
+		sessionID = req.SessionID
 
-		userPrompt, err = p.promptRegistry.BuildUserPrompt(req.Type, req.Message, toolCtx)
-		if err != nil {
-			p.logger.Error("Failed to build user prompt", "error", err, "type", req.Type)
-			http.Error(w, fmt.Sprintf("Failed to build user prompt: %v", err), http.StatusBadRequest)
-			return
-		}
-
-		if req.SessionID != "" {
-			session, err := p.sessionStore.GetSession(req.SessionID, userID, numericOrgID)
-			if err != nil {
-				http.Error(w, "Session not found", http.StatusNotFound)
-				return
-			}
-			sessionID = req.SessionID
-
-			for _, msg := range session.Messages {
-				messages = append(messages, agent.Message{
-					Role:    msg.Role,
-					Content: msg.Content,
-				})
-			}
-
+		for _, msg := range session.Messages {
 			messages = append(messages, agent.Message{
-				Role:    "user",
-				Content: userPrompt,
+				Role:    msg.Role,
+				Content: msg.Content,
 			})
+		}
 
-			if err := p.sessionStore.AppendMessages(sessionID, userID, numericOrgID, []SessionMessage{{
-				Role:    "user",
-				Content: userPrompt,
-			}}); err != nil {
-				p.logger.Warn("Failed to append user message", "error", err)
-			}
-		} else {
-			messages = []agent.Message{{
-				Role:    "user",
-				Content: userPrompt,
-			}}
+		messages = append(messages, agent.Message{
+			Role:    "user",
+			Content: userPrompt,
+		})
 
-			sessionTitle := generateSessionTitleFromType(req.Type, req.Message)
-
-			session, err := p.sessionStore.CreateSession(userID, numericOrgID, sessionTitle, []SessionMessage{{
-				Role:    "user",
-				Content: userPrompt,
-			}})
-			if err != nil {
-				p.logger.Error("Failed to create session", "error", err)
-				http.Error(w, "Failed to create session", http.StatusInternalServerError)
-				return
-			}
-			sessionID = session.ID
-
-			if err := p.sessionStore.SetCurrentSessionID(userID, numericOrgID, sessionID); err != nil {
-				p.logger.Warn("Failed to set current session ID", "error", err)
-			}
+		if err := p.sessionStore.AppendMessages(sessionID, userID, numericOrgID, []SessionMessage{{
+			Role:    "user",
+			Content: userPrompt,
+		}}); err != nil {
+			p.logger.Warn("Failed to append user message", "error", err)
 		}
 	} else {
-		messages = req.Messages
-		systemPrompt = req.SystemPrompt
+		messages = []agent.Message{{
+			Role:    "user",
+			Content: userPrompt,
+		}}
 
-		sessionID = req.SessionID
-		if sessionID != "" {
-			if _, err := p.sessionStore.GetSession(sessionID, userID, numericOrgID); err != nil {
-				http.Error(w, "Session not found", http.StatusNotFound)
-				return
-			}
-			if last := req.Messages[len(req.Messages)-1]; last.Role == "user" {
-				userMsg := SessionMessage{Role: last.Role, Content: last.Content}
-				if err := p.sessionStore.AppendMessages(sessionID, userID, numericOrgID, []SessionMessage{userMsg}); err != nil {
-					p.logger.Warn("Failed to append user message to session", "error", err, "sessionId", sessionID)
-				}
-			}
-		} else {
-			sessionMsgs := agentMessagesToSessionMessages(req.Messages)
-			session, err := p.sessionStore.CreateSession(userID, numericOrgID, req.Title, sessionMsgs)
-			if err != nil {
-				p.logger.Error("Failed to create session", "error", err)
-				http.Error(w, "Failed to create session", http.StatusInternalServerError)
-				return
-			}
-			sessionID = session.ID
-			if err := p.sessionStore.SetCurrentSessionID(userID, numericOrgID, sessionID); err != nil {
-				p.logger.Warn("Failed to set current session ID", "error", err)
-			}
+		sessionTitle := generateSessionTitleFromType(req.Type, req.Message)
+
+		session, err := p.sessionStore.CreateSession(userID, numericOrgID, sessionTitle, []SessionMessage{{
+			Role:    "user",
+			Content: userPrompt,
+		}})
+		if err != nil {
+			p.logger.Error("Failed to create session", "error", err)
+			http.Error(w, "Failed to create session", http.StatusInternalServerError)
+			return
+		}
+		sessionID = session.ID
+
+		if err := p.sessionStore.SetCurrentSessionID(userID, numericOrgID, sessionID); err != nil {
+			p.logger.Warn("Failed to set current session ID", "error", err)
 		}
 	}
 
@@ -655,10 +633,6 @@ func (p *Plugin) handleAgentRun(w http.ResponseWriter, r *http.Request) {
 	}
 	p.runStore.CreateRun(runID, userID, numericOrgID)
 
-	format := "old"
-	if isNewFormat {
-		format = "new"
-	}
 	p.logger.Info("Agent run request",
 		"role", userRole,
 		"orgID", orgID,
@@ -666,28 +640,15 @@ func (p *Plugin) handleAgentRun(w http.ResponseWriter, r *http.Request) {
 		"sessionId", sessionID,
 		"messageCount", len(messages),
 		"type", req.Type,
-		"format", format,
 	)
 
 	eventCh := make(chan agent.SSEEvent, 16)
 
-	maxTokens := p.settings.MaxTotalTokens
-	recentMsgCount := p.settings.RecentMessageCount
-	if !isNewFormat {
-		if req.MaxTotalTokens > 0 {
-			maxTokens = req.MaxTotalTokens
-		}
-		if req.RecentMessageCount > 0 {
-			recentMsgCount = req.RecentMessageCount
-		}
-	}
-
 	loopReq := agent.LoopRequest{
 		Messages:           messages,
 		SystemPrompt:       systemPrompt,
-		Summary:            req.Summary,
-		MaxTotalTokens:     maxTokens,
-		RecentMessageCount: recentMsgCount,
+		MaxTotalTokens:     p.settings.MaxTotalTokens,
+		RecentMessageCount: p.settings.RecentMessageCount,
 		MaxIterations:      AgentMaxIterations,
 		GrafanaURL:         builtInMCPBaseURL(),
 		AuthToken:          saToken,
@@ -1366,17 +1327,6 @@ func (p *Plugin) handleGetSessionShares(w http.ResponseWriter, r *http.Request, 
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(userShares)
-}
-
-func agentMessagesToSessionMessages(msgs []agent.Message) []SessionMessage {
-	result := make([]SessionMessage, len(msgs))
-	for i, m := range msgs {
-		result[i] = SessionMessage{
-			Role:    m.Role,
-			Content: m.Content,
-		}
-	}
-	return result
 }
 
 func generateSessionTitleFromType(convType, message string) string {

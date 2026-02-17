@@ -6,13 +6,6 @@ export interface AgentRunRequest {
   orgId?: string;
   orgName?: string;
   scopeOrgId?: string;
-
-  messages?: Array<{ role: string; content: string }>;
-  systemPrompt?: string;
-  summary?: string;
-  maxTotalTokens?: number;
-  recentMessageCount?: number;
-  title?: string;
 }
 
 export interface ContentEvent {
