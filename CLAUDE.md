@@ -605,6 +605,74 @@ One-click RCA from alert notifications. URL params trigger auto-send of investig
 {{ end }}
 ```
 
+### API Documentation
+
+The plugin's REST API is fully documented using OpenAPI 3.0.3 specification.
+
+**Location:** `pkg/plugin/openapi/openapi.json`
+
+**Serving:** Available at `/openapi.json` endpoint (embedded at compile time using `//go:embed`)
+
+**Endpoint:** `/api/plugins/consensys-asko11y-app/resources/openapi.json`
+
+**Implementation Files:**
+- `pkg/plugin/openapi/openapi.json` - Complete OpenAPI 3.0.3 spec (all 23 endpoints)
+- `pkg/plugin/openapi/openapi.go` - Embed and serve logic
+- `pkg/plugin/openapi/openapi_test.go` - Validation tests
+- `pkg/plugin/plugin.go` - HTTP route registration (`/openapi.json`)
+
+**Maintenance Guidelines:**
+
+When adding or modifying API endpoints, follow this workflow:
+
+1. **Update Handler Code**: Implement the endpoint in `pkg/plugin/plugin.go`
+2. **Update OpenAPI Spec**: Add/modify the endpoint in `pkg/plugin/openapi/openapi.json`
+   - Add path definition with all HTTP methods
+   - Define request/response schemas in `components.schemas`
+   - Document RBAC requirements, rate limiting, headers
+   - Add examples for complex request/response bodies
+3. **Validate Spec**: Run `npm run validate:openapi` to check OpenAPI validity
+4. **Update Tests**: Add test coverage in `pkg/plugin/openapi/openapi_test.go` if adding new endpoints
+5. **Commit Together**: Always commit code changes and spec updates in the same PR
+
+**Testing:**
+```bash
+# Validate OpenAPI spec
+npm run validate:openapi
+
+# Run Go tests (includes spec validation)
+go test ./pkg/plugin/openapi/...
+
+# Manual testing with Swagger Editor
+curl http://localhost:3000/api/plugins/consensys-asko11y-app/resources/openapi.json > spec.json
+# Load spec.json into https://editor.swagger.io/
+```
+
+**Spec Validation Tests:**
+The spec is validated in CI and includes tests for:
+- JSON validity and OpenAPI 3.0.3 format
+- All 23 endpoints documented
+- RBAC documentation completeness (403 responses for protected endpoints)
+- SSE streaming endpoint format (`text/event-stream` content type)
+- Rate limiting documentation (429 responses)
+- Required schemas present (RunRequest, ChatSession, Tool, etc.)
+- Security schemes defined (GrafanaSession cookie auth)
+
+**Key Conventions:**
+- **SSE Endpoints**: Document with `text/event-stream` content type and event format examples
+- **RBAC**: Include 403 Forbidden responses with descriptions for all protected endpoints
+- **Rate Limiting**: Document rate limits in description and include 429 responses
+- **Multi-Org**: Document `X-Grafana-Org-Id` header in parameter definitions
+- **Path Parameters**: Use pattern validation for IDs (e.g., base64 URL-safe 32-byte tokens)
+
+**Future Migration:**
+If the API grows beyond 50 endpoints, consider:
+- Migrating to `swag` with handler annotations for auto-generation
+- Using `oapi-codegen` for spec-first development
+- Creating custom reflection-based schema generator
+
+For now, manual maintenance is pragmatic given the codebase size (23 endpoints) and provides better control over API documentation quality.
+
 ## Code Style & Conventions
 
 **Guiding Principle:** Always make the simplest change possible. Code readability matters most — we're happy to make bigger structural changes to achieve it. Don't worry about backwards compatibility or migration paths; just write the clearest code.

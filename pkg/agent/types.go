@@ -87,17 +87,9 @@ type ErrorEvent struct {
 }
 
 type RunRequest struct {
-	Message   string `json:"message"`
-	Type      string `json:"type,omitempty"`
-	SessionID string `json:"sessionId,omitempty"`
-
-	Messages           []Message `json:"messages,omitempty"`
-	SystemPrompt       string    `json:"systemPrompt,omitempty"`
-	Summary            string    `json:"summary,omitempty"`
-	MaxTotalTokens     int       `json:"maxTotalTokens,omitempty"`
-	RecentMessageCount int       `json:"recentMessageCount,omitempty"`
-	Title              string    `json:"title,omitempty"`
-
+	Message    string `json:"message"`
+	Type       string `json:"type,omitempty"`
+	SessionID  string `json:"sessionId,omitempty"`
 	OrgName    string `json:"orgName,omitempty"`
 	ScopeOrgID string `json:"scopeOrgId,omitempty"`
 }
