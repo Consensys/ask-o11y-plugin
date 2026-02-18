@@ -1,14 +1,11 @@
 export interface AgentRunRequest {
-  messages: Array<{ role: string; content: string }>;
-  systemPrompt: string;
-  summary?: string;
-  maxTotalTokens?: number;
-  recentMessageCount?: number;
+  message: string;
+  type?: 'chat' | 'investigation' | 'performance';
+  sessionId?: string;
+
   orgId?: string;
   orgName?: string;
   scopeOrgId?: string;
-  sessionId?: string;
-  title?: string;
 }
 
 export interface ContentEvent {

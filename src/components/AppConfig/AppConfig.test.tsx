@@ -1,8 +1,26 @@
 import React from 'react';
 import { render, screen } from '@testing-library/react';
+import { of } from 'rxjs';
 import { PluginType } from '@grafana/data';
 import AppConfig, { AppConfigProps } from './AppConfig';
 import { testIds } from 'components/testIds';
+
+jest.mock('@grafana/runtime', () => ({
+  getBackendSrv: () => ({
+    fetch: () =>
+      of({
+        data: {
+          defaultSystemPrompt: 'mock system prompt',
+          investigationPrompt: 'mock investigation prompt',
+          performancePrompt: 'mock performance prompt',
+        },
+      }),
+  }),
+}));
+
+jest.mock('@grafana/llm', () => ({
+  mcp: { enabled: () => Promise.resolve(false) },
+}));
 
 describe('Components/AppConfig', () => {
   let props: AppConfigProps;

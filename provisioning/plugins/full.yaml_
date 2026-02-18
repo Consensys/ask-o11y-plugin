@@ -16,7 +16,7 @@ apps:
   - type: consensys-asko11y-app
     org_id: 1
     jsonData:
-      maxTotalTokens: 100000
+      maxTotalTokens: 180000
       mcpServers:
         - id: 'time'
           name: 'Time Server'
@@ -53,7 +53,7 @@ apps:
   - type: consensys-asko11y-app
     org_id: 2
     jsonData:
-      maxTotalTokens: 50000
+      maxTotalTokens: 180000
       mcpServers:
         - id: 'time'
           name: 'Time Server'

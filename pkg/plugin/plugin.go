@@ -3,6 +3,7 @@ package plugin
 import (
 	"consensys-asko11y-app/pkg/agent"
 	"consensys-asko11y-app/pkg/mcp"
+	"consensys-asko11y-app/pkg/plugin/openapi"
 	"consensys-asko11y-app/pkg/rbac"
 	"context"
 	"encoding/json"
@@ -101,23 +102,33 @@ func createRedisClient(logger log.Logger) (*redis.Client, error) {
 type PluginSettings struct {
 	MCPServers    []mcp.ServerConfig `json:"mcpServers"`
 	UseBuiltInMCP bool               `json:"useBuiltInMCP"`
+
+	DefaultSystemPrompt string `json:"defaultSystemPrompt,omitempty"`
+	InvestigationPrompt string `json:"investigationPrompt,omitempty"`
+	PerformancePrompt   string `json:"performancePrompt,omitempty"`
+
+	MaxTotalTokens     int `json:"maxTotalTokens,omitempty"`
+	RecentMessageCount int `json:"recentMessageCount,omitempty"`
 }
 
 type Plugin struct {
 	backend.CallResourceHandler
-	logger        log.Logger
-	mcpProxy      *mcp.Proxy
-	agentLoop     *agent.AgentLoop
-	shareStore    ShareStoreInterface
-	runStore      RunStoreInterface
-	sessionStore  SessionStoreInterface
-	redisClient   *redis.Client
-	usingRedis    bool
-	useBuiltInMCP bool
-	ctx           context.Context
-	cancel        context.CancelFunc
-	runCancelsMu  sync.Mutex
-	runCancels    map[string]context.CancelFunc
+	logger         log.Logger
+	mcpProxy       *mcp.Proxy
+	agentLoop      *agent.AgentLoop
+	shareStore     ShareStoreInterface
+	runStore       RunStoreInterface
+	sessionStore   SessionStoreInterface
+	redisClient    *redis.Client
+	usingRedis     bool
+	useBuiltInMCP  bool
+	promptRegistry *PromptRegistry
+	settings       PluginSettings
+	settingsMu     sync.RWMutex
+	ctx            context.Context
+	cancel         context.CancelFunc
+	runCancelsMu   sync.Mutex
+	runCancels     map[string]context.CancelFunc
 }
 
 func NewPlugin(ctx context.Context, settings backend.AppInstanceSettings) (instancemgmt.Instance, error) {
@@ -131,6 +142,19 @@ func NewPlugin(ctx context.Context, settings backend.AppInstanceSettings) (insta
 		}
 	}
 
+	if pluginSettings.MaxTotalTokens <= 0 {
+		pluginSettings.MaxTotalTokens = 180000
+	}
+	if pluginSettings.RecentMessageCount <= 0 {
+		pluginSettings.RecentMessageCount = 10
+	}
+
+	promptRegistry, err := NewPromptRegistry(pluginSettings)
+	if err != nil {
+		logger.Error("Failed to initialize prompt registry, using defaults", "error", err)
+		promptRegistry, _ = NewPromptRegistry(PluginSettings{})
+	}
+
 	mcpProxy := mcp.NewProxy(logger)
 	mcpProxy.UpdateConfig(pluginSettings.MCPServers)
 
@@ -140,8 +164,8 @@ func NewPlugin(ctx context.Context, settings backend.AppInstanceSettings) (insta
 	var redisClient *redis.Client
 	usingRedis := false
 
-	redisClient, err := createRedisClient(logger)
-	if err == nil {
+	redisClient, redisErr := createRedisClient(logger)
+	if redisErr == nil {
 		ctx, cancel := context.WithTimeout(context.Background(), RedisConnectionTimeout)
 		defer cancel()
 		if err := redisClient.Ping(ctx).Err(); err == nil {
@@ -155,7 +179,7 @@ func NewPlugin(ctx context.Context, settings backend.AppInstanceSettings) (insta
 			redisClient = nil
 		}
 	} else {
-		logger.Warn("Failed to create Redis client, falling back to in-memory storage", "error", err)
+		logger.Warn("Failed to create Redis client, falling back to in-memory storage", "error", redisErr)
 	}
 
 	var runStore RunStoreInterface
@@ -177,18 +201,20 @@ func NewPlugin(ctx context.Context, settings backend.AppInstanceSettings) (insta
 	agentLoop := agent.NewAgentLoop(llmClient, mcpProxy, logger)
 
 	p := &Plugin{
-		logger:        logger,
-		mcpProxy:      mcpProxy,
-		agentLoop:     agentLoop,
-		shareStore:    shareStore,
-		runStore:      runStore,
-		sessionStore:  sessionStore,
-		redisClient:   redisClient,
-		usingRedis:    usingRedis,
-		useBuiltInMCP: pluginSettings.UseBuiltInMCP,
-		ctx:           pluginCtx,
-		cancel:        cancel,
-		runCancels:    make(map[string]context.CancelFunc),
+		logger:         logger,
+		mcpProxy:       mcpProxy,
+		agentLoop:      agentLoop,
+		shareStore:     shareStore,
+		runStore:       runStore,
+		sessionStore:   sessionStore,
+		redisClient:    redisClient,
+		usingRedis:     usingRedis,
+		useBuiltInMCP:  pluginSettings.UseBuiltInMCP,
+		promptRegistry: promptRegistry,
+		settings:       pluginSettings,
+		ctx:            pluginCtx,
+		cancel:         cancel,
+		runCancels:     make(map[string]context.CancelFunc),
 	}
 
 	if !usingRedis {
@@ -278,12 +304,14 @@ func (p *Plugin) CheckHealth(ctx context.Context, req *backend.CheckHealthReques
 
 func (p *Plugin) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/health", p.handleHealth)
+	mux.HandleFunc("/openapi.json", p.handleOpenAPISpec)
 	mux.HandleFunc("/mcp", p.handleMCP)
 	mux.HandleFunc("/api/mcp/tools", p.handleMCPTools)
 	mux.HandleFunc("/api/mcp/call-tool", p.handleMCPCallTool)
 	mux.HandleFunc("/api/mcp/servers", p.handleMCPServers)
 	mux.HandleFunc("/api/agent/run", p.handleAgentRun)
 	mux.HandleFunc("/api/agent/runs/", p.handleAgentRuns)
+	mux.HandleFunc("/api/prompt-defaults", p.handlePromptDefaults)
 
 	// Session CRUD (new) — registered before share routes for specificity
 	mux.HandleFunc("/api/sessions/current", p.handleSessionCurrent)
@@ -331,6 +359,19 @@ func (p *Plugin) handleHealth(w http.ResponseWriter, r *http.Request) {
 	}
 
 	json.NewEncoder(w).Encode(response)
+}
+
+func (p *Plugin) handleOpenAPISpec(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "public, max-age=3600")
+
+	specBytes := openapi.GetSpecBytes()
+	w.Write(specBytes)
 }
 
 func (p *Plugin) handleMCP(w http.ResponseWriter, r *http.Request) {
@@ -474,12 +515,12 @@ func (p *Plugin) handleAgentRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if len(req.Messages) == 0 {
-		http.Error(w, "messages is required", http.StatusBadRequest)
-		return
+	if req.OrgName == "" {
+		req.OrgName = "Org" + orgID
 	}
-	if req.SystemPrompt == "" {
-		http.Error(w, "systemPrompt is required", http.StatusBadRequest)
+
+	if req.Message == "" {
+		http.Error(w, "'message' is required", http.StatusBadRequest)
 		return
 	}
 
@@ -519,31 +560,70 @@ func (p *Plugin) handleAgentRun(w http.ResponseWriter, r *http.Request) {
 
 	numericOrgID := getOrgID(r)
 
-	// Session management: create or link a session to this run.
-	sessionID := req.SessionID
-	if sessionID != "" {
-		// Verify the session exists and belongs to this user.
-		if _, err := p.sessionStore.GetSession(sessionID, userID, numericOrgID); err != nil {
+	toolCtx := BuildToolContext(req.OrgName, userRole)
+
+	systemPrompt, err := p.promptRegistry.BuildSystemPrompt(toolCtx)
+	if err != nil {
+		p.logger.Error("Failed to build system prompt", "error", err)
+		http.Error(w, fmt.Sprintf("Failed to build system prompt: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	userPrompt, err := p.promptRegistry.BuildUserPrompt(req.Type, req.Message, toolCtx)
+	if err != nil {
+		p.logger.Error("Failed to build user prompt", "error", err, "type", req.Type)
+		http.Error(w, fmt.Sprintf("Failed to build user prompt: %v", err), http.StatusBadRequest)
+		return
+	}
+
+	var messages []agent.Message
+	var sessionID string
+
+	if req.SessionID != "" {
+		session, err := p.sessionStore.GetSession(req.SessionID, userID, numericOrgID)
+		if err != nil {
 			http.Error(w, "Session not found", http.StatusNotFound)
 			return
 		}
-		// Append the latest user message so it's persisted on the session.
-		if last := req.Messages[len(req.Messages)-1]; last.Role == "user" {
-			userMsg := SessionMessage{Role: last.Role, Content: last.Content}
-			if err := p.sessionStore.AppendMessages(sessionID, userID, numericOrgID, []SessionMessage{userMsg}); err != nil {
-				p.logger.Warn("Failed to append user message to session", "error", err, "sessionId", sessionID)
-			}
+		sessionID = req.SessionID
+
+		for _, msg := range session.Messages {
+			messages = append(messages, agent.Message{
+				Role:    msg.Role,
+				Content: msg.Content,
+			})
+		}
+
+		messages = append(messages, agent.Message{
+			Role:    "user",
+			Content: userPrompt,
+		})
+
+		if err := p.sessionStore.AppendMessages(sessionID, userID, numericOrgID, []SessionMessage{{
+			Role:    "user",
+			Content: userPrompt,
+		}}); err != nil {
+			p.logger.Warn("Failed to append user message", "error", err)
 		}
 	} else {
-		// Create a new session from the user messages.
-		sessionMsgs := agentMessagesToSessionMessages(req.Messages)
-		session, err := p.sessionStore.CreateSession(userID, numericOrgID, req.Title, sessionMsgs)
+		messages = []agent.Message{{
+			Role:    "user",
+			Content: userPrompt,
+		}}
+
+		sessionTitle := generateSessionTitleFromType(req.Type, req.Message)
+
+		session, err := p.sessionStore.CreateSession(userID, numericOrgID, sessionTitle, []SessionMessage{{
+			Role:    "user",
+			Content: userPrompt,
+		}})
 		if err != nil {
 			p.logger.Error("Failed to create session", "error", err)
 			http.Error(w, "Failed to create session", http.StatusInternalServerError)
 			return
 		}
 		sessionID = session.ID
+
 		if err := p.sessionStore.SetCurrentSessionID(userID, numericOrgID, sessionID); err != nil {
 			p.logger.Warn("Failed to set current session ID", "error", err)
 		}
@@ -554,16 +634,22 @@ func (p *Plugin) handleAgentRun(w http.ResponseWriter, r *http.Request) {
 	}
 	p.runStore.CreateRun(runID, userID, numericOrgID)
 
-	p.logger.Info("Agent run request", "role", userRole, "orgID", orgID, "runId", runID, "sessionId", sessionID, "messageCount", len(req.Messages))
+	p.logger.Info("Agent run request",
+		"role", userRole,
+		"orgID", orgID,
+		"runId", runID,
+		"sessionId", sessionID,
+		"messageCount", len(messages),
+		"type", req.Type,
+	)
 
 	eventCh := make(chan agent.SSEEvent, 16)
 
 	loopReq := agent.LoopRequest{
-		Messages:           req.Messages,
-		SystemPrompt:       req.SystemPrompt,
-		Summary:            req.Summary,
-		MaxTotalTokens:     req.MaxTotalTokens,
-		RecentMessageCount: req.RecentMessageCount,
+		Messages:           messages,
+		SystemPrompt:       systemPrompt,
+		MaxTotalTokens:     p.settings.MaxTotalTokens,
+		RecentMessageCount: p.settings.RecentMessageCount,
 		MaxIterations:      AgentMaxIterations,
 		GrafanaURL:         builtInMCPBaseURL(),
 		AuthToken:          saToken,
@@ -804,6 +890,19 @@ func (p *Plugin) handleAgentRunEvents(w http.ResponseWriter, r *http.Request, ru
 			return
 		}
 	}
+}
+
+func (p *Plugin) handlePromptDefaults(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{
+		"defaultSystemPrompt": DefaultSystemPrompt,
+		"investigationPrompt": DefaultInvestigationPrompt,
+		"performancePrompt":   DefaultPerformancePrompt,
+	})
 }
 
 func (p *Plugin) handleDefault(w http.ResponseWriter, r *http.Request) {
@@ -1244,15 +1343,44 @@ func (p *Plugin) handleGetSessionShares(w http.ResponseWriter, r *http.Request, 
 	json.NewEncoder(w).Encode(userShares)
 }
 
-func agentMessagesToSessionMessages(msgs []agent.Message) []SessionMessage {
-	result := make([]SessionMessage, len(msgs))
-	for i, m := range msgs {
-		result[i] = SessionMessage{
-			Role:    m.Role,
-			Content: m.Content,
+func generateSessionTitleFromType(convType, message string) string {
+	const maxTitleLen = 50
+	switch convType {
+	case "investigation":
+		alertName := extractAlertNameForTitle(message)
+		return truncateTitle(fmt.Sprintf("Alert Investigation: %s", alertName), maxTitleLen)
+	case "performance":
+		target := extractTargetForTitle(message)
+		return truncateTitle(fmt.Sprintf("Performance Analysis: %s", target), maxTitleLen)
+	default:
+		return truncateTitle(message, maxTitleLen)
+	}
+}
+
+func trimCaseInsensitivePrefix(s string, prefixes ...string) string {
+	lower := strings.ToLower(s)
+	for _, p := range prefixes {
+		if strings.HasPrefix(lower, p) {
+			return strings.TrimSpace(s[len(p):])
 		}
 	}
-	return result
+	return s
+}
+
+func extractAlertNameForTitle(message string) string {
+	return trimCaseInsensitivePrefix(strings.TrimSpace(message), "alertname:", "alert:")
+}
+
+func extractTargetForTitle(message string) string {
+	return trimCaseInsensitivePrefix(strings.TrimSpace(message), "target:")
+}
+
+func truncateTitle(s string, maxLen int) string {
+	runes := []rune(s)
+	if len(runes) <= maxLen {
+		return s
+	}
+	return string(runes[:maxLen-3]) + "..."
 }
 
 func reconstructAssistantMessage(events []agent.SSEEvent) SessionMessage {

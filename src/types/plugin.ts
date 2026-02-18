@@ -7,14 +7,17 @@ export interface MCPServerConfig {
   headers?: Record<string, string>;
 }
 
-export type SystemPromptMode = 'default' | 'replace' | 'append';
-
 export type AppPluginSettings = {
-  maxTotalTokens?: number;
   mcpServers?: MCPServerConfig[];
-  systemPromptMode?: SystemPromptMode;
-  customSystemPrompt?: string;
+  useBuiltInMCP?: boolean;
+
+  defaultSystemPrompt?: string;
+  investigationPrompt?: string;
+  performancePrompt?: string;
+
+  maxTotalTokens?: number;
+  recentMessageCount?: number;
+
   kioskModeEnabled?: boolean;
   chatPanelPosition?: 'left' | 'right';
-  useBuiltInMCP?: boolean;
 };

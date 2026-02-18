@@ -1,0 +1,2050 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Ask O11y - AI-Powered Observability Assistant API",
+    "version": "0.2.7",
+    "description": "REST API for Ask O11y Grafana plugin. Provides AI-powered observability assistance through natural language conversations. Users can query metrics, logs, traces, manage dashboards, and troubleshoot issues without writing PromQL/LogQL or navigating complex UIs.\n\n## Authentication\nAll endpoints (except `/health` and `/`) require Grafana session authentication via the `grafana_session` cookie.\n\n## Role-Based Access Control (RBAC)\nThe plugin enforces role-based access control:\n- **Admin/Editor**: Full access to all endpoints and MCP tools\n- **Viewer**: Read-only access (MCP tools with `readOnlyHint: true` annotation only)\n\n## Multi-Tenant Organization Isolation\nAll endpoints support multi-tenant organization isolation via headers:\n- `X-Grafana-Org-Id`: Numeric organization ID (defaults to \"1\")\n- `X-Scope-OrgID`: Tenant name (optional)\n- Sessions, shares, and agent runs are scoped to user + organization\n\n## Rate Limiting\n- Session sharing: 50 shares per hour per user\n\n## Limits\n- Max sessions per user/org: 50 (oldest auto-evicted)\n- Max agent iterations per run: 25\n- Max events per run: 500\n- Default token limit: 50,000",
+    "contact": {
+      "name": "Ask O11y Support",
+      "url": "https://github.com/Consensys/ask-o11y-plugin"
+    },
+    "license": {
+      "name": "MIT",
+      "url": "https://github.com/Consensys/ask-o11y-plugin/blob/main/LICENSE"
+    }
+  },
+  "servers": [
+    {
+      "url": "/api/plugins/consensys-asko11y-app/resources",
+      "description": "Grafana plugin API base path"
+    }
+  ],
+  "security": [
+    {
+      "GrafanaSession": []
+    },
+    {
+      "BearerToken": []
+    }
+  ],
+  "tags": [
+    {
+      "name": "Health",
+      "description": "Health check and diagnostic endpoints"
+    },
+    {
+      "name": "MCP",
+      "description": "Model Context Protocol operations for tool discovery and execution"
+    },
+    {
+      "name": "Agent",
+      "description": "Agentic conversation loop with streaming responses"
+    },
+    {
+      "name": "Sessions",
+      "description": "Chat session management (CRUD operations)"
+    },
+    {
+      "name": "Shares",
+      "description": "Session sharing for collaboration"
+    },
+    {
+      "name": "Configuration",
+      "description": "Plugin configuration and defaults"
+    }
+  ],
+  "paths": {
+    "/health": {
+      "get": {
+        "summary": "Health check",
+        "description": "Returns the health status of the plugin and MCP server connectivity. This endpoint does not require authentication.",
+        "operationId": "healthCheck",
+        "tags": ["Health"],
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Service is healthy",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "enum": ["ok", "warning"],
+                      "description": "Overall health status"
+                    },
+                    "message": {
+                      "type": "string",
+                      "description": "Human-readable status message"
+                    },
+                    "mcpServers": {
+                      "type": "integer",
+                      "description": "Number of healthy MCP servers"
+                    }
+                  },
+                  "required": ["status", "message"]
+                },
+                "example": {
+                  "status": "ok",
+                  "message": "Plugin is healthy",
+                  "mcpServers": 2
+                }
+              }
+            }
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    },
+    "/": {
+      "get": {
+        "summary": "Default handler",
+        "description": "Informational endpoint that returns plugin metadata. This endpoint does not require authentication.",
+        "operationId": "defaultInfo",
+        "tags": ["Health"],
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Plugin information",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "message": {
+                      "type": "string"
+                    },
+                    "path": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "example": {
+                  "message": "Consensys Assistant Backend Plugin",
+                  "path": "/"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/openapi.json": {
+      "get": {
+        "summary": "OpenAPI specification",
+        "description": "Returns the complete OpenAPI 3.0.3 specification for this API. This endpoint does not require authentication.",
+        "operationId": "getOpenAPISpec",
+        "tags": ["Health"],
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "OpenAPI specification",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "OpenAPI 3.0.3 specification document"
+                }
+              }
+            },
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Caching directive"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/mcp": {
+      "post": {
+        "summary": "MCP JSON-RPC proxy",
+        "description": "Raw MCP protocol JSON-RPC 2.0 proxy endpoint. Forwards requests to configured MCP servers. This is a low-level endpoint; most users should use `/api/mcp/tools` and `/api/mcp/call-tool` instead.",
+        "operationId": "mcpProxy",
+        "tags": ["MCP"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/X-Grafana-Org-Id"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "description": "MCP JSON-RPC 2.0 request",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MCPRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "MCP JSON-RPC 2.0 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MCPResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    },
+    "/api/mcp/tools": {
+      "get": {
+        "summary": "List MCP tools",
+        "description": "Returns a list of available MCP tools filtered by the user's role. Admin/Editor roles see all tools, while Viewer role only sees tools with `readOnlyHint: true` annotation. Tools from multiple MCP servers are aggregated.",
+        "operationId": "listMCPTools",
+        "tags": ["MCP"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/X-Grafana-Org-Id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List of MCP tools (RBAC-filtered)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "tools": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Tool"
+                      }
+                    }
+                  },
+                  "required": ["tools"]
+                },
+                "example": {
+                  "tools": [
+                    {
+                      "name": "query_prometheus",
+                      "description": "Execute PromQL queries against Prometheus",
+                      "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                          "query": {
+                            "type": "string",
+                            "description": "PromQL query"
+                          }
+                        },
+                        "required": ["query"]
+                      },
+                      "annotations": {
+                        "readOnlyHint": true
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    },
+    "/api/mcp/call-tool": {
+      "post": {
+        "summary": "Execute MCP tool",
+        "description": "Executes an MCP tool with RBAC enforcement. The tool must be available in the user's filtered tool list (see `/api/mcp/tools`). Admin/Editor roles can access all tools, while Viewer role can only access tools with `readOnlyHint: true` annotation. RBAC is enforced both at tool listing time and at execution time (double-check pattern).",
+        "operationId": "callMCPTool",
+        "tags": ["MCP"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/X-Grafana-Org-Id"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CallToolParams"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Tool execution result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CallToolResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "description": "Access denied (RBAC violation)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "example": {
+                  "error": "Access denied: Viewer role cannot access tool create_dashboard"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Tool not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "example": {
+                  "error": "Tool not found: unknown_tool"
+                }
+              }
+            }
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    },
+    "/api/mcp/servers": {
+      "get": {
+        "summary": "Get MCP server health",
+        "description": "Returns health status for all configured MCP servers. Used for monitoring MCP server connectivity.",
+        "operationId": "getMCPServerHealth",
+        "tags": ["MCP"],
+        "responses": {
+          "200": {
+            "description": "MCP server health status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "servers": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "serverId": {
+                            "type": "string"
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "url": {
+                            "type": "string"
+                          },
+                          "type": {
+                            "type": "string",
+                            "enum": ["openapi", "standard", "sse", "streamable-http"]
+                          },
+                          "status": {
+                            "type": "string",
+                            "enum": ["healthy", "unhealthy", "degraded", "disconnected"]
+                          },
+                          "lastCheck": {
+                            "type": "string",
+                            "format": "date-time"
+                          },
+                          "responseTime": {
+                            "type": "number"
+                          },
+                          "successRate": {
+                            "type": "number"
+                          },
+                          "errorCount": {
+                            "type": "integer"
+                          },
+                          "consecutiveFailures": {
+                            "type": "integer"
+                          },
+                          "toolCount": {
+                            "type": "integer"
+                          },
+                          "tools": {
+                            "type": "array",
+                            "items": {
+                              "$ref": "#/components/schemas/Tool"
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "systemHealth": {
+                      "type": "object",
+                      "properties": {
+                        "overallStatus": {
+                          "type": "string",
+                          "enum": ["healthy", "degraded", "unhealthy"]
+                        },
+                        "total": {
+                          "type": "integer"
+                        },
+                        "healthy": {
+                          "type": "integer"
+                        },
+                        "unhealthy": {
+                          "type": "integer"
+                        },
+                        "degraded": {
+                          "type": "integer"
+                        },
+                        "disconnected": {
+                          "type": "integer"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    },
+    "/api/agent/run": {
+      "post": {
+        "summary": "Start detached agent run",
+        "description": "Starts an agentic conversation loop in detached mode. The agent processes the user's message asynchronously, calling MCP tools as needed. Returns immediately with a `runId` and `sessionId`. Use `/api/agent/runs/{runId}/events` to stream the results via SSE.\n\n## RBAC\nTool execution within the agent loop respects user role permissions. Viewer role can only use read-only tools.\n\n## Iteration Limit\nMax 25 iterations per run.",
+        "operationId": "startAgentRun",
+        "tags": ["Agent"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/X-Grafana-Org-Id"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RunRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Agent run started successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "runId": {
+                      "type": "string",
+                      "description": "Unique run ID (base64 URL-safe 32-byte token)"
+                    },
+                    "sessionId": {
+                      "type": "string",
+                      "description": "Session ID (new or existing)"
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": ["running"],
+                      "description": "Initial run status"
+                    }
+                  },
+                  "required": ["runId", "sessionId", "status"]
+                },
+                "example": {
+                  "runId": "fL3eq5ZJZuczUSZa643ltfg8eXhAvvppZu_X4rksm8w",
+                  "sessionId": "Qgy-DFhlul0hTHLKBJqrHyLrITYOApxS4n85_zjGbus",
+                  "status": "running"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    },
+    "/api/agent/runs/{runId}": {
+      "get": {
+        "summary": "Get agent run status and events",
+        "description": "Returns the current status and all events for an agent run. Only the user who created the run (in the same organization) can access it.",
+        "operationId": "getAgentRun",
+        "tags": ["Agent"],
+        "parameters": [
+          {
+            "name": "runId",
+            "in": "path",
+            "required": true,
+            "description": "Agent run ID (base64 URL-safe 32-byte token)",
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{43}$"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/X-Grafana-Org-Id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Agent run details",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentRun"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "description": "Access denied (wrong user or org)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "example": {
+                  "error": "Access denied: run belongs to different user or org"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    },
+    "/api/agent/runs/{runId}/events": {
+      "get": {
+        "summary": "Stream agent run events",
+        "description": "Streams all events for an agent run using Server-Sent Events (SSE). Replays all historical events, then streams new events until the run completes. Includes keepalive comments every 15 seconds. Only the user who created the run (in the same organization) can access it.\n\nThis endpoint is useful for reconnecting to an in-progress run after a page refresh.",
+        "operationId": "streamAgentRunEvents",
+        "tags": ["Agent"],
+        "parameters": [
+          {
+            "name": "runId",
+            "in": "path",
+            "required": true,
+            "description": "Agent run ID (base64 URL-safe 32-byte token)",
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{43}$"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/X-Grafana-Org-Id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Server-Sent Events stream",
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "type": "string",
+                  "description": "SSE stream replaying all historical events, then streaming new events until completion"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    },
+    "/api/agent/runs/{runId}/cancel": {
+      "post": {
+        "summary": "Cancel agent run",
+        "description": "Cancels a running agent. Only the user who created the run (in the same organization) can cancel it. Returns 409 if the run is not currently running.",
+        "operationId": "cancelAgentRun",
+        "tags": ["Agent"],
+        "parameters": [
+          {
+            "name": "runId",
+            "in": "path",
+            "required": true,
+            "description": "Agent run ID (base64 URL-safe 32-byte token)",
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{43}$"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/X-Grafana-Org-Id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Run cancelled successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "enum": ["cancelled"]
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "description": "Run is not running (already completed, failed, or cancelled)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "example": {
+                  "error": "Run is not in running state"
+                }
+              }
+            }
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    },
+    "/api/prompt-defaults": {
+      "get": {
+        "summary": "Get prompt template defaults",
+        "description": "Returns the built-in default prompt templates from the Go backend. Used by the frontend settings UI to populate prompt editors and power the 'Reset to Default' button. The Go backend is the single source of truth for prompt defaults.",
+        "operationId": "getPromptDefaults",
+        "tags": ["Configuration"],
+        "responses": {
+          "200": {
+            "description": "Default prompt templates",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PromptDefaults"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "Method not allowed (only GET is supported)"
+          }
+        }
+      }
+    },
+    "/api/sessions": {
+      "get": {
+        "summary": "List user sessions",
+        "description": "Returns a list of all sessions for the current user in the current organization. Sessions are sorted by last update time (most recent first). Max 50 sessions per user/org; oldest sessions are auto-evicted when limit is reached.",
+        "operationId": "listSessions",
+        "tags": ["Sessions"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/X-Grafana-Org-Id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Array of session metadata",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SessionMetadata"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      },
+      "post": {
+        "summary": "Create session",
+        "description": "Creates a new chat session. If this is the first session for the user/org, it is automatically set as the current session. Max 50 sessions per user/org; oldest sessions are auto-evicted when limit is reached.",
+        "operationId": "createSession",
+        "tags": ["Sessions"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/X-Grafana-Org-Id"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "title": {
+                    "type": "string",
+                    "description": "Session title (auto-generated from first message if not provided)"
+                  },
+                  "messages": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/components/schemas/SessionMessage"
+                    },
+                    "description": "Initial messages for the session"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Session created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChatSession"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      },
+      "delete": {
+        "summary": "Delete all sessions",
+        "description": "Deletes all sessions for the current user in the current organization. This action is irreversible.",
+        "operationId": "deleteAllSessions",
+        "tags": ["Sessions"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/X-Grafana-Org-Id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "All sessions deleted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    },
+    "/api/sessions/current": {
+      "get": {
+        "summary": "Get current session ID",
+        "description": "Returns the ID of the current active session for the user/org, or empty string if no current session is set.",
+        "operationId": "getCurrentSessionId",
+        "tags": ["Sessions"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/X-Grafana-Org-Id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Current session ID",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "sessionId": {
+                      "type": "string",
+                      "description": "Current session ID (empty string if none)"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      },
+      "put": {
+        "summary": "Set current session",
+        "description": "Sets the specified session as the current active session for the user/org. Pass empty string to clear the current session.",
+        "operationId": "setCurrentSession",
+        "tags": ["Sessions"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/X-Grafana-Org-Id"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "sessionId": {
+                    "type": "string",
+                    "description": "Session ID to set as current (empty string to clear)"
+                  }
+                },
+                "required": ["sessionId"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Current session updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      },
+      "delete": {
+        "summary": "Clear current session",
+        "description": "Clears the current active session for the user/org. Equivalent to PUT with empty sessionId.",
+        "operationId": "clearCurrentSession",
+        "tags": ["Sessions"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/X-Grafana-Org-Id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Current session cleared",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    },
+    "/api/sessions/{sessionId}": {
+      "get": {
+        "summary": "Get session by ID",
+        "description": "Returns full session details including all messages. Only the session owner (same user + org) can access it.",
+        "operationId": "getSession",
+        "tags": ["Sessions"],
+        "parameters": [
+          {
+            "name": "sessionId",
+            "in": "path",
+            "required": true,
+            "description": "Session ID (base64 URL-safe 32-byte token)",
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{43}$"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/X-Grafana-Org-Id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Session details",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChatSession"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      },
+      "put": {
+        "summary": "Update session",
+        "description": "Updates session metadata (title, summary) or appends messages. Only the session owner (same user + org) can update it.",
+        "operationId": "updateSession",
+        "tags": ["Sessions"],
+        "parameters": [
+          {
+            "name": "sessionId",
+            "in": "path",
+            "required": true,
+            "description": "Session ID (base64 URL-safe 32-byte token)",
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{43}$"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/X-Grafana-Org-Id"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "messages": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/components/schemas/SessionMessage"
+                    },
+                    "description": "Messages to append (optional)"
+                  },
+                  "title": {
+                    "type": "string",
+                    "description": "New session title (optional)"
+                  },
+                  "summary": {
+                    "type": "string",
+                    "description": "New session summary (optional)"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Session updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      },
+      "delete": {
+        "summary": "Delete session",
+        "description": "Deletes a session. Only the session owner (same user + org) can delete it. This action is irreversible.",
+        "operationId": "deleteSession",
+        "tags": ["Sessions"],
+        "parameters": [
+          {
+            "name": "sessionId",
+            "in": "path",
+            "required": true,
+            "description": "Session ID (base64 URL-safe 32-byte token)",
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{43}$"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/X-Grafana-Org-Id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Session deleted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    },
+    "/api/sessions/{sessionId}/shares": {
+      "get": {
+        "summary": "List shares for session",
+        "description": "Returns all active shares created by the current user for the specified session.",
+        "operationId": "getSessionShares",
+        "tags": ["Shares"],
+        "parameters": [
+          {
+            "name": "sessionId",
+            "in": "path",
+            "required": true,
+            "description": "Session ID (base64 URL-safe 32-byte token)",
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{43}$"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/X-Grafana-Org-Id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List of shares",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "shareId": {
+                        "type": "string"
+                      },
+                      "shareUrl": {
+                        "type": "string"
+                      },
+                      "expiresAt": {
+                        "type": "string",
+                        "format": "date-time",
+                        "nullable": true
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    },
+    "/api/sessions/share": {
+      "post": {
+        "summary": "Create share link",
+        "description": "Creates a shareable link for a session snapshot. The share is scoped to the organization and can be accessed by any user in the same org. Rate limited to 50 shares per hour per user. The share contains a snapshot of the session at creation time (not live updates).",
+        "operationId": "createShare",
+        "tags": ["Shares"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/X-Grafana-Org-Id"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "sessionId": {
+                    "type": "string",
+                    "description": "Session ID to share"
+                  },
+                  "sessionData": {
+                    "type": "object",
+                    "description": "Full session object (must include id and messages fields)"
+                  },
+                  "expiresInHours": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "description": "Expiration time in hours (optional)"
+                  },
+                  "expiresInDays": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "description": "Expiration time in days (optional, converted to hours)"
+                  }
+                },
+                "required": ["sessionId", "sessionData"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Share created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "shareId": {
+                      "type": "string",
+                      "description": "Cryptographically secure share ID (base64 URL-safe 32-byte token)"
+                    },
+                    "shareUrl": {
+                      "type": "string",
+                      "description": "Full URL to access the shared session"
+                    },
+                    "expiresAt": {
+                      "type": "string",
+                      "format": "date-time",
+                      "nullable": true,
+                      "description": "Expiration timestamp (null if no expiration)"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    },
+    "/api/sessions/shared/{shareId}": {
+      "get": {
+        "summary": "Get shared session",
+        "description": "Returns a read-only snapshot of a shared session. The share must belong to the same organization as the requesting user. The returned session includes `isShared: true` and `sharedBy` fields.",
+        "operationId": "getSharedSession",
+        "tags": ["Shares"],
+        "parameters": [
+          {
+            "name": "shareId",
+            "in": "path",
+            "required": true,
+            "description": "Share ID (base64 URL-safe 32-byte token)",
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{43}$"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/X-Grafana-Org-Id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Shared session data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ChatSession"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "isShared": {
+                          "type": "boolean",
+                          "enum": [true]
+                        },
+                        "sharedBy": {
+                          "type": "string",
+                          "description": "User ID who created the share"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "description": "Access denied (not in same org as share)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "example": {
+                  "error": "Share not found or access denied"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Share not found or expired",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "example": {
+                  "error": "Share not found"
+                }
+              }
+            }
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    },
+    "/api/sessions/share/{shareId}": {
+      "delete": {
+        "summary": "Revoke share",
+        "description": "Revokes a share link. Only the user who created the share can revoke it. After revocation, the share URL will no longer be accessible.",
+        "operationId": "revokeShare",
+        "tags": ["Shares"],
+        "parameters": [
+          {
+            "name": "shareId",
+            "in": "path",
+            "required": true,
+            "description": "Share ID (base64 URL-safe 32-byte token)",
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{43}$"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/X-Grafana-Org-Id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Share revoked",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "description": "Access denied (user doesn't own this share)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "example": {
+                  "error": "You do not have permission to delete this share"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "GrafanaSession": {
+        "type": "apiKey",
+        "in": "cookie",
+        "name": "grafana_session",
+        "description": "Grafana session cookie. Automatically provided by Grafana's authentication system."
+      },
+      "BearerToken": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "Grafana service account token or API key. Use `Authorization: Bearer <token>` header."
+      }
+    },
+    "parameters": {
+      "X-Grafana-Org-Id": {
+        "name": "X-Grafana-Org-Id",
+        "in": "header",
+        "required": false,
+        "description": "Grafana organization ID for multi-tenant isolation. Defaults to '1' if not provided.",
+        "schema": {
+          "type": "string",
+          "default": "1"
+        }
+      }
+    },
+    "responses": {
+      "BadRequest": {
+        "description": "Bad request (invalid parameters or malformed request body)",
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "properties": {
+                "error": {
+                  "type": "string"
+                }
+              }
+            },
+            "example": {
+              "error": "Invalid request: missing required field 'name'"
+            }
+          }
+        }
+      },
+      "Unauthorized": {
+        "description": "Unauthorized (missing or invalid authentication)",
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "properties": {
+                "error": {
+                  "type": "string"
+                }
+              }
+            },
+            "example": {
+              "error": "Unauthorized"
+            }
+          }
+        }
+      },
+      "Forbidden": {
+        "description": "Forbidden (insufficient permissions or RBAC violation)",
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "properties": {
+                "error": {
+                  "type": "string"
+                }
+              }
+            },
+            "example": {
+              "error": "Access denied"
+            }
+          }
+        }
+      },
+      "NotFound": {
+        "description": "Resource not found",
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "properties": {
+                "error": {
+                  "type": "string"
+                }
+              }
+            },
+            "example": {
+              "error": "Resource not found"
+            }
+          }
+        }
+      },
+      "TooManyRequests": {
+        "description": "Rate limit exceeded",
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "properties": {
+                "error": {
+                  "type": "string"
+                }
+              }
+            },
+            "example": {
+              "error": "Rate limit exceeded: 50 shares per hour"
+            }
+          }
+        }
+      },
+      "InternalError": {
+        "description": "Internal server error",
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "properties": {
+                "error": {
+                  "type": "string"
+                }
+              }
+            },
+            "example": {
+              "error": "Internal server error"
+            }
+          }
+        }
+      }
+    },
+    "schemas": {
+      "PromptDefaults": {
+        "type": "object",
+        "description": "Built-in default prompt templates from the Go backend",
+        "required": ["defaultSystemPrompt", "investigationPrompt", "performancePrompt"],
+        "properties": {
+          "defaultSystemPrompt": {
+            "type": "string",
+            "description": "Default system prompt sent to the LLM for all conversations"
+          },
+          "investigationPrompt": {
+            "type": "string",
+            "description": "Default template for alert investigation workflows (supports {{.AlertName}} variable)"
+          },
+          "performancePrompt": {
+            "type": "string",
+            "description": "Default template for performance analysis workflows (supports {{.Target}} variable)"
+          }
+        }
+      },
+      "MCPRequest": {
+        "type": "object",
+        "description": "MCP JSON-RPC 2.0 request",
+        "properties": {
+          "jsonrpc": {
+            "type": "string",
+            "enum": ["2.0"]
+          },
+          "id": {
+            "type": "string",
+            "nullable": true,
+            "description": "Request ID (string or integer, nullable for notifications)"
+          },
+          "method": {
+            "type": "string",
+            "description": "MCP method name (e.g., 'tools/list', 'tools/call')"
+          },
+          "params": {
+            "type": "object",
+            "description": "Method-specific parameters"
+          }
+        },
+        "required": ["jsonrpc", "method"]
+      },
+      "MCPResponse": {
+        "type": "object",
+        "description": "MCP JSON-RPC 2.0 response",
+        "properties": {
+          "jsonrpc": {
+            "type": "string",
+            "enum": ["2.0"]
+          },
+          "id": {
+            "type": "string",
+            "nullable": true,
+            "description": "Request ID matching the original request"
+          },
+          "result": {
+            "description": "Success result (mutually exclusive with error)"
+          },
+          "error": {
+            "type": "object",
+            "description": "Error object (mutually exclusive with result)",
+            "properties": {
+              "code": {
+                "type": "integer"
+              },
+              "message": {
+                "type": "string"
+              },
+              "data": {}
+            },
+            "required": ["code", "message"]
+          }
+        },
+        "required": ["jsonrpc", "id"]
+      },
+      "Tool": {
+        "type": "object",
+        "description": "MCP tool definition",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Tool name (unique identifier)"
+          },
+          "description": {
+            "type": "string",
+            "description": "Human-readable tool description"
+          },
+          "inputSchema": {
+            "type": "object",
+            "description": "JSON Schema for tool input parameters"
+          },
+          "annotations": {
+            "$ref": "#/components/schemas/ToolAnnotations"
+          }
+        },
+        "required": ["name", "inputSchema"]
+      },
+      "ToolAnnotations": {
+        "type": "object",
+        "description": "MCP tool annotations for RBAC and behavior hints",
+        "properties": {
+          "readOnlyHint": {
+            "type": "boolean",
+            "nullable": true,
+            "description": "Tool only reads data (safe for Viewer role). Null means unspecified."
+          },
+          "destructiveHint": {
+            "type": "boolean",
+            "nullable": true,
+            "description": "Tool may delete or modify data. Null means unspecified."
+          },
+          "idempotentHint": {
+            "type": "boolean",
+            "nullable": true,
+            "description": "Tool is idempotent (safe to retry). Null means unspecified."
+          },
+          "openWorldHint": {
+            "type": "boolean",
+            "nullable": true,
+            "description": "Tool may access external resources. Null means unspecified."
+          }
+        }
+      },
+      "CallToolParams": {
+        "type": "object",
+        "description": "Parameters for calling an MCP tool",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Tool name"
+          },
+          "arguments": {
+            "type": "object",
+            "description": "Tool-specific arguments matching the tool's inputSchema"
+          },
+          "orgName": {
+            "type": "string",
+            "description": "Organization name (optional, for multi-tenant routing)"
+          },
+          "scopeOrgId": {
+            "type": "string",
+            "description": "Scope organization ID (optional, for multi-tenant routing)"
+          }
+        },
+        "required": ["name"]
+      },
+      "CallToolResult": {
+        "type": "object",
+        "description": "Result of MCP tool execution",
+        "properties": {
+          "content": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "description": "Content type (e.g., 'text')"
+                },
+                "text": {
+                  "type": "string",
+                  "description": "Content text"
+                }
+              }
+            }
+          },
+          "isError": {
+            "type": "boolean",
+            "description": "True if tool execution failed"
+          }
+        },
+        "required": ["content"]
+      },
+      "RunRequest": {
+        "type": "object",
+        "description": "Request to start an agent run. The backend builds the system prompt and manages context window based on the message type and server-side session history.",
+        "required": ["message"],
+        "properties": {
+          "message": {
+            "type": "string",
+            "description": "User message to send to the agent"
+          },
+          "type": {
+            "type": "string",
+            "enum": ["investigation", "performance", "chat"],
+            "description": "Message type that determines which server-side prompt template to use"
+          },
+          "sessionId": {
+            "type": "string",
+            "description": "Existing session ID to continue (optional, creates new if not provided)"
+          },
+          "orgName": {
+            "type": "string",
+            "description": "Organization name (optional)"
+          },
+          "scopeOrgId": {
+            "type": "string",
+            "description": "Scope organization ID (optional)"
+          }
+        }
+      },
+      "SSEEvent": {
+        "type": "object",
+        "description": "Server-Sent Event wrapper for agent run events",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": ["run_started", "content", "tool_call_start", "tool_call_result", "done", "error"],
+            "description": "Event type"
+          },
+          "data": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/RunStartedEvent"
+              },
+              {
+                "$ref": "#/components/schemas/ContentEvent"
+              },
+              {
+                "$ref": "#/components/schemas/ToolCallStartEvent"
+              },
+              {
+                "$ref": "#/components/schemas/ToolCallResultEvent"
+              },
+              {
+                "$ref": "#/components/schemas/DoneEvent"
+              },
+              {
+                "$ref": "#/components/schemas/ErrorEvent"
+              }
+            ],
+            "description": "Event data (type-specific)"
+          },
+          "sequence": {
+            "type": "integer",
+            "description": "Event sequence number (monotonically increasing)"
+          }
+        },
+        "required": ["type", "data", "sequence"]
+      },
+      "RunStartedEvent": {
+        "type": "object",
+        "properties": {
+          "runId": {
+            "type": "string"
+          },
+          "sessionId": {
+            "type": "string"
+          }
+        },
+        "required": ["runId"]
+      },
+      "ContentEvent": {
+        "type": "object",
+        "properties": {
+          "content": {
+            "type": "string",
+            "description": "AI-generated text content"
+          }
+        },
+        "required": ["content"]
+      },
+      "ToolCallStartEvent": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Tool call ID"
+          },
+          "name": {
+            "type": "string",
+            "description": "Tool name"
+          },
+          "arguments": {
+            "type": "string",
+            "description": "JSON-encoded tool arguments"
+          }
+        },
+        "required": ["id", "name", "arguments"]
+      },
+      "ToolCallResultEvent": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Tool call ID"
+          },
+          "name": {
+            "type": "string",
+            "description": "Tool name"
+          },
+          "content": {
+            "type": "string",
+            "description": "Tool execution result"
+          },
+          "isError": {
+            "type": "boolean",
+            "description": "True if tool execution failed"
+          }
+        },
+        "required": ["id", "name", "content", "isError"]
+      },
+      "DoneEvent": {
+        "type": "object",
+        "properties": {
+          "totalIterations": {
+            "type": "integer",
+            "description": "Number of agent loop iterations completed"
+          }
+        },
+        "required": ["totalIterations"]
+      },
+      "ErrorEvent": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string",
+            "description": "Error message"
+          }
+        },
+        "required": ["message"]
+      },
+      "AgentRun": {
+        "type": "object",
+        "description": "Agent run status and events",
+        "properties": {
+          "runId": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": ["running", "completed", "failed", "cancelled"]
+          },
+          "userId": {
+            "type": "integer"
+          },
+          "orgId": {
+            "type": "integer"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "events": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SSEEvent"
+            },
+            "description": "All events for this run (max 500)"
+          },
+          "error": {
+            "type": "string",
+            "description": "Error message (only if status is 'failed')"
+          }
+        },
+        "required": ["runId", "status", "userId", "orgId", "createdAt", "updatedAt", "events"]
+      },
+      "SessionMessage": {
+        "type": "object",
+        "description": "Chat message in a session",
+        "properties": {
+          "role": {
+            "type": "string",
+            "enum": ["user", "assistant"],
+            "description": "Message role"
+          },
+          "content": {
+            "type": "string",
+            "description": "Message text content"
+          },
+          "toolCalls": {
+            "type": "object",
+            "description": "Tool calls made (raw JSON)",
+            "nullable": true
+          },
+          "pageRefs": {
+            "type": "object",
+            "description": "Page references (raw JSON)",
+            "nullable": true
+          }
+        },
+        "required": ["role", "content"]
+      },
+      "ChatSession": {
+        "type": "object",
+        "description": "Chat session with full message history",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Session ID (base64 URL-safe 32-byte token)"
+          },
+          "title": {
+            "type": "string",
+            "description": "Session title"
+          },
+          "messages": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SessionMessage"
+            },
+            "description": "All messages in the session"
+          },
+          "summary": {
+            "type": "string",
+            "description": "Session summary"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "messageCount": {
+            "type": "integer",
+            "description": "Total number of messages"
+          },
+          "activeRunId": {
+            "type": "string",
+            "description": "ID of currently active agent run (if any)"
+          }
+        },
+        "required": ["id", "title", "messages", "createdAt", "updatedAt", "messageCount"]
+      },
+      "SessionMetadata": {
+        "type": "object",
+        "description": "Session metadata (without full message list)",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Session ID (base64 URL-safe 32-byte token)"
+          },
+          "title": {
+            "type": "string",
+            "description": "Session title"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "messageCount": {
+            "type": "integer",
+            "description": "Total number of messages"
+          },
+          "activeRunId": {
+            "type": "string",
+            "description": "ID of currently active agent run (if any)"
+          }
+        },
+        "required": ["id", "title", "createdAt", "updatedAt", "messageCount"]
+      }
+    }
+  }
+}

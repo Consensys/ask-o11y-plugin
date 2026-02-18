@@ -334,6 +334,85 @@ In Grafana UI:
 
 ---
 
+## API Reference
+
+Ask O11y provides a comprehensive REST API for programmatic access. The complete API is documented using OpenAPI 3.0.3 specification.
+
+### Accessing the API Documentation
+
+**OpenAPI Specification:**
+- **URL**: `/api/plugins/consensys-asko11y-app/resources/openapi.json`
+- **Full path**: `http://your-grafana-instance/api/plugins/consensys-asko11y-app/resources/openapi.json`
+- **Format**: JSON (OpenAPI 3.0.3)
+
+**Interactive Documentation:**
+1. Download the spec from the endpoint above
+2. Load into [Swagger Editor](https://editor.swagger.io/) or [ReDoc](https://redocly.github.io/redoc/)
+3. Explore endpoints, schemas, and try API calls
+
+**Example:**
+```bash
+# Download OpenAPI spec
+curl http://localhost:3000/api/plugins/consensys-asko11y-app/resources/openapi.json > ask-o11y-api.json
+
+# Load in Swagger UI
+npx @apidevtools/swagger-cli validate ask-o11y-api.json
+```
+
+### Key API Endpoints
+
+**Agent Operations:**
+- `POST /api/agent/run` - Start AI conversation with streaming responses (SSE)
+- `GET /api/agent/runs/{runId}` - Get agent run status and events
+- `POST /api/agent/runs/{runId}/cancel` - Cancel running agent
+
+**Session Management:**
+- `GET /api/sessions` - List user sessions
+- `POST /api/sessions` - Create new session
+- `GET /api/sessions/{sessionId}` - Get session details
+- `DELETE /api/sessions/{sessionId}` - Delete session
+
+**MCP Tools:**
+- `GET /api/mcp/tools` - List available MCP tools (RBAC-filtered)
+- `POST /api/mcp/call-tool` - Execute MCP tool
+
+**Session Sharing:**
+- `POST /api/sessions/share` - Create share link
+- `GET /api/sessions/shared/{shareId}` - Get shared session
+
+### Authentication
+
+All API endpoints (except `/health` and `/openapi.json`) require Grafana session authentication via the `grafana_session` cookie.
+
+**RBAC:**
+- **Admin/Editor**: Full access to all endpoints and MCP tools
+- **Viewer**: Read-only access (MCP tools with `readOnlyHint: true` annotation only)
+
+### Rate Limiting
+
+- **Session sharing**: 50 shares per hour per user
+
+### Response Formats
+
+**Standard JSON responses:**
+```json
+{
+  "success": true,
+  "data": { ... }
+}
+```
+
+**Server-Sent Events (SSE) for streaming:**
+```
+data: {"type":"content","data":{"content":"Processing..."},"sequence":1}
+
+data: {"type":"done","data":{"totalIterations":3},"sequence":2}
+```
+
+For complete API documentation including request/response schemas, see the OpenAPI specification at `/api/plugins/consensys-asko11y-app/resources/openapi.json`.
+
+---
+
 ## Development Setup
 
 Want to contribute or customize the plugin?
