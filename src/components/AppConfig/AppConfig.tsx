@@ -39,12 +39,26 @@ export interface AppConfigProps extends PluginConfigPageProps<AppPluginMeta<AppP
 
 const PROMPT_DEFAULTS_URL = '/api/plugins/consensys-asko11y-app/resources/api/prompt-defaults';
 
+const getServerHeadersSecureFieldKey = (serverId: string) => `${serverId}__headers`;
+
+const hydrateMCPServers = (
+  mcpServers: MCPServerConfig[] | undefined,
+  secureJsonFields?: Record<string, boolean>
+): MCPServerConfig[] => {
+  return (mcpServers || []).map((server) => ({
+    ...server,
+    hasSecureHeaders:
+      Boolean(server.headers && Object.keys(server.headers).length > 0) ||
+      Boolean(secureJsonFields?.[getServerHeadersSecureFieldKey(server.id)]),
+  }));
+};
+
 const AppConfig = ({ plugin }: AppConfigProps) => {
-  const { enabled, pinned, jsonData } = plugin.meta;
+  const { enabled, pinned, jsonData, secureJsonFields } = plugin.meta;
   const [promptDefaults, setPromptDefaults] = useState<PromptDefaults | null>(null);
   const [state, setState] = useState<State>({
     maxTotalTokens: jsonData?.maxTotalTokens || 180000,
-    mcpServers: jsonData?.mcpServers || [],
+    mcpServers: hydrateMCPServers(jsonData?.mcpServers, secureJsonFields),
     useBuiltInMCP: jsonData?.useBuiltInMCP ?? false,
     builtInMCPAvailable: null,
     editingServer: null,
@@ -186,11 +200,20 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
 
   function handleSaveServer(updatedServer: MCPServerConfig) {
     const serverIndex = state.mcpServers.findIndex((s) => s.id === updatedServer.id);
+    const existingServer = serverIndex >= 0 ? state.mcpServers[serverIndex] : undefined;
+    const hasVisibleHeaders = Boolean(updatedServer.headers && Object.keys(updatedServer.headers).length > 0);
+    const hasOpaqueSecureHeaders = Boolean(
+      existingServer?.hasSecureHeaders && !existingServer.headers && !updatedServer.headers
+    );
+    const serverWithSecureState: MCPServerConfig = {
+      ...updatedServer,
+      hasSecureHeaders: hasVisibleHeaders || hasOpaqueSecureHeaders,
+    };
 
     if (serverIndex >= 0) {
       // Update existing server
       const updatedServers = [...state.mcpServers];
-      updatedServers[serverIndex] = updatedServer;
+      updatedServers[serverIndex] = serverWithSecureState;
       setState({
         ...state,
         mcpServers: updatedServers,
@@ -201,7 +224,7 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
       // Add new server
       setState({
         ...state,
-        mcpServers: [...state.mcpServers, updatedServer],
+        mcpServers: [...state.mcpServers, serverWithSecureState],
         editingServer: null,
         isModalOpen: false,
       });
@@ -290,28 +313,36 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
     }
 
     // Separate headers from server configs
-    const publicConfigs = state.mcpServers.map((server) => {
-      const { headers, ...publicConfig } = server;
-      return publicConfig; // No headers in jsonData
-    });
+    const publicConfigs = state.mcpServers.map((server) => ({
+      id: server.id,
+      name: server.name,
+      url: server.url,
+      enabled: server.enabled,
+      type: server.type,
+    }));
 
     // Build secureJsonData with headers
     const secureData: Record<string, string> = {};
     for (const server of state.mcpServers) {
       if (server.headers && Object.keys(server.headers).length > 0) {
-        secureData[`${server.id}__headers`] = JSON.stringify(server.headers);
+        secureData[getServerHeadersSecureFieldKey(server.id)] = JSON.stringify(server.headers);
       }
     }
 
-    updatePluginAndReload(plugin.meta.id, {
+    const payload: Partial<PluginMeta<AppPluginSettings>> = {
       enabled,
       pinned,
       jsonData: {
         ...jsonData,
         mcpServers: publicConfigs,
       },
-      secureJsonData: secureData,
-    });
+    };
+
+    if (Object.keys(secureData).length > 0) {
+      payload.secureJsonData = secureData;
+    }
+
+    updatePluginAndReload(plugin.meta.id, payload);
   }
 
   return (
@@ -446,7 +477,9 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
               </thead>
               <tbody>
                 {state.mcpServers.map((server) => {
-                  const hasHeaders = server.headers && Object.keys(server.headers).length > 0;
+                  const hasHeaders = Boolean(
+                    server.hasSecureHeaders || (server.headers && Object.keys(server.headers).length > 0)
+                  );
                   const truncatedUrl = server.url.length > 50 ? `${server.url.substring(0, 47)}...` : server.url;
 
                   return (
