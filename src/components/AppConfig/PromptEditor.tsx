@@ -12,7 +12,7 @@ interface PromptEditorProps {
 
 const MAX_PROMPT_LENGTH = 15000;
 
-const BLOCKED_TEMPLATE_ACTIONS = /\{\{\s*(call|template|define|block)\b/;
+const BLOCKED_TEMPLATE_ACTIONS = /\{\{-?\s*(call|template|define|block)\b/;
 
 function validateTemplateSyntax(text: string): string | null {
   const blocked = text.match(BLOCKED_TEMPLATE_ACTIONS);
