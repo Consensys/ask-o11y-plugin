@@ -56,7 +56,7 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
   const { enabled, pinned, jsonData } = plugin.meta;
   const [promptDefaults, setPromptDefaults] = useState<PromptDefaults | null>(null);
   const [state, setState] = useState<State>({
-    maxTotalTokens: jsonData?.maxTotalTokens || 50000,
+    maxTotalTokens: jsonData?.maxTotalTokens || 180000,
     mcpServers: jsonData?.mcpServers || [],
     useBuiltInMCP: jsonData?.useBuiltInMCP ?? false,
     builtInMCPAvailable: null,
@@ -425,7 +425,7 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
             data-testid={testIds.appConfig.maxTotalTokens}
             type="number"
             value={state.maxTotalTokens}
-            placeholder="50000"
+            placeholder="180000"
             min={1000}
             max={200000}
             onChange={onChange}
