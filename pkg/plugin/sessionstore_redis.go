@@ -175,6 +175,12 @@ func (s *RedisSessionStore) GetSession(sessionID string, userID, orgID int64) (*
 		defer cancel()
 		s.client.Del(ctx, sessionKey(sessionID))
 		s.client.SRem(ctx, sessionUserIdxKey(userID, orgID), sessionID)
+
+		curKey := sessionCurrentKey(userID, orgID)
+		cur, err := s.client.Get(ctx, curKey).Result()
+		if err == nil && cur == sessionID {
+			s.client.Del(ctx, curKey)
+		}
 		return nil, fmt.Errorf("session expired")
 	}
 
