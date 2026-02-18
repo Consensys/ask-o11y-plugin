@@ -97,6 +97,7 @@ func TestSpecHasAllEndpoints(t *testing.T) {
 		"/api/agent/runs/{runId}",
 		"/api/agent/runs/{runId}/events",
 		"/api/agent/runs/{runId}/cancel",
+		"/api/prompt-defaults",
 		"/api/sessions",
 		"/api/sessions/current",
 		"/api/sessions/{sessionId}",

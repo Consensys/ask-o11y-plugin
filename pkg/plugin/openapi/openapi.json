@@ -47,6 +47,10 @@
     {
       "name": "Shares",
       "description": "Session sharing for collaboration"
+    },
+    {
+      "name": "Configuration",
+      "description": "Plugin configuration and defaults"
     }
   ],
   "paths": {
@@ -685,6 +689,29 @@
           },
           "500": {
             "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    },
+    "/api/prompt-defaults": {
+      "get": {
+        "summary": "Get prompt template defaults",
+        "description": "Returns the built-in default prompt templates from the Go backend. Used by the frontend settings UI to populate prompt editors and power the 'Reset to Default' button. The Go backend is the single source of truth for prompt defaults.",
+        "operationId": "getPromptDefaults",
+        "tags": ["Configuration"],
+        "responses": {
+          "200": {
+            "description": "Default prompt templates",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PromptDefaults"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "Method not allowed (only GET is supported)"
           }
         }
       }
@@ -1557,6 +1584,25 @@
       }
     },
     "schemas": {
+      "PromptDefaults": {
+        "type": "object",
+        "description": "Built-in default prompt templates from the Go backend",
+        "required": ["defaultSystemPrompt", "investigationPrompt", "performancePrompt"],
+        "properties": {
+          "defaultSystemPrompt": {
+            "type": "string",
+            "description": "Default system prompt sent to the LLM for all conversations"
+          },
+          "investigationPrompt": {
+            "type": "string",
+            "description": "Default template for alert investigation workflows (supports {{.AlertName}} variable)"
+          },
+          "performancePrompt": {
+            "type": "string",
+            "description": "Default template for performance analysis workflows (supports {{.Target}} variable)"
+          }
+        }
+      },
       "MCPRequest": {
         "type": "object",
         "description": "MCP JSON-RPC 2.0 request",

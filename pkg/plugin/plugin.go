@@ -311,6 +311,7 @@ func (p *Plugin) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/mcp/servers", p.handleMCPServers)
 	mux.HandleFunc("/api/agent/run", p.handleAgentRun)
 	mux.HandleFunc("/api/agent/runs/", p.handleAgentRuns)
+	mux.HandleFunc("/api/prompt-defaults", p.handlePromptDefaults)
 
 	// Session CRUD (new) — registered before share routes for specificity
 	mux.HandleFunc("/api/sessions/current", p.handleSessionCurrent)
@@ -889,6 +890,19 @@ func (p *Plugin) handleAgentRunEvents(w http.ResponseWriter, r *http.Request, ru
 			return
 		}
 	}
+}
+
+func (p *Plugin) handlePromptDefaults(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{
+		"defaultSystemPrompt": DefaultSystemPrompt,
+		"investigationPrompt": DefaultInvestigationPrompt,
+		"performancePrompt":   DefaultPerformancePrompt,
+	})
 }
 
 func (p *Plugin) handleDefault(w http.ResponseWriter, r *http.Request) {

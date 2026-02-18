@@ -3,8 +3,12 @@ package plugin
 import (
 	"consensys-asko11y-app/pkg/agent"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"testing"
+
+	"github.com/grafana/grafana-plugin-sdk-go/backend/log"
 )
 
 func TestBuiltInMCPBaseURL(t *testing.T) {
@@ -144,6 +148,51 @@ func TestReconstructAssistantMessage(t *testing.T) {
 		}
 		if toolCalls[0]["response"] != nil {
 			t.Errorf("response should be nil for error tool call")
+		}
+	})
+}
+
+func TestHandlePromptDefaults(t *testing.T) {
+	p := &Plugin{logger: log.DefaultLogger}
+
+	t.Run("GET returns all three defaults", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/api/prompt-defaults", nil)
+		rec := httptest.NewRecorder()
+		p.handlePromptDefaults(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+		}
+
+		var body map[string]string
+		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+			t.Fatalf("failed to decode response: %v", err)
+		}
+
+		for _, key := range []string{"defaultSystemPrompt", "investigationPrompt", "performancePrompt"} {
+			if body[key] == "" {
+				t.Errorf("key %q is empty", key)
+			}
+		}
+
+		if body["defaultSystemPrompt"] != DefaultSystemPrompt {
+			t.Error("defaultSystemPrompt does not match Go constant")
+		}
+		if body["investigationPrompt"] != DefaultInvestigationPrompt {
+			t.Error("investigationPrompt does not match Go constant")
+		}
+		if body["performancePrompt"] != DefaultPerformancePrompt {
+			t.Error("performancePrompt does not match Go constant")
+		}
+	})
+
+	t.Run("POST returns 405", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodPost, "/api/prompt-defaults", nil)
+		rec := httptest.NewRecorder()
+		p.handlePromptDefaults(rec, req)
+
+		if rec.Code != http.StatusMethodNotAllowed {
+			t.Errorf("status = %d, want %d", rec.Code, http.StatusMethodNotAllowed)
 		}
 	})
 }

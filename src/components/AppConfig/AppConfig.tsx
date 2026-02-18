@@ -7,12 +7,13 @@ import { mcp } from '@grafana/llm';
 import { testIds } from '../testIds';
 import { ValidationService } from '../../services/validation';
 import { PromptEditor } from './PromptEditor';
-import {
-  DEFAULT_SYSTEM_PROMPT,
-  DEFAULT_INVESTIGATION_PROMPT,
-  DEFAULT_PERFORMANCE_PROMPT,
-} from './promptDefaults';
 import type { AppPluginSettings, MCPServerConfig } from '../../types/plugin';
+
+interface PromptDefaults {
+  defaultSystemPrompt: string;
+  investigationPrompt: string;
+  performancePrompt: string;
+}
 
 function normalizeHeaderKey(key: string): string {
   const trimmed = key.trim();
@@ -49,8 +50,11 @@ type ValidationErrors = {
 
 export interface AppConfigProps extends PluginConfigPageProps<AppPluginMeta<AppPluginSettings>> {}
 
+const PROMPT_DEFAULTS_URL = '/api/plugins/consensys-asko11y-app/resources/api/prompt-defaults';
+
 const AppConfig = ({ plugin }: AppConfigProps) => {
   const { enabled, pinned, jsonData } = plugin.meta;
+  const [promptDefaults, setPromptDefaults] = useState<PromptDefaults | null>(null);
   const [state, setState] = useState<State>({
     maxTotalTokens: jsonData?.maxTotalTokens || 50000,
     mcpServers: jsonData?.mcpServers || [],
@@ -59,26 +63,36 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
     expandedAdvanced: new Set<string>(),
     kioskModeEnabled: jsonData?.kioskModeEnabled ?? true,
     chatPanelPosition: jsonData?.chatPanelPosition || 'right',
-    defaultSystemPrompt: jsonData?.defaultSystemPrompt || DEFAULT_SYSTEM_PROMPT,
-    investigationPrompt: jsonData?.investigationPrompt || DEFAULT_INVESTIGATION_PROMPT,
-    performancePrompt: jsonData?.performancePrompt || DEFAULT_PERFORMANCE_PROMPT,
+    defaultSystemPrompt: jsonData?.defaultSystemPrompt || '',
+    investigationPrompt: jsonData?.investigationPrompt || '',
+    performancePrompt: jsonData?.performancePrompt || '',
   });
   const [validationErrors, setValidationErrors] = useState<ValidationErrors>({
     mcpServers: {},
   });
 
   useEffect(() => {
-    const checkAvailability = async () => {
-      try {
-        const available = await mcp.enabled();
-        setState((prev) => ({ ...prev, builtInMCPAvailable: available }));
-      } catch (error) {
-        console.error('Error checking built-in MCP availability:', error);
-        setState((prev) => ({ ...prev, builtInMCPAvailable: false }));
+    const init = async () => {
+      const [available, defaults] = await Promise.all([
+        mcp.enabled().catch(() => false),
+        lastValueFrom(getBackendSrv().fetch<PromptDefaults>({ url: PROMPT_DEFAULTS_URL }))
+          .then((res) => res.data)
+          .catch(() => null),
+      ]);
+
+      setState((prev) => ({
+        ...prev,
+        builtInMCPAvailable: available,
+        defaultSystemPrompt: prev.defaultSystemPrompt || defaults?.defaultSystemPrompt || '',
+        investigationPrompt: prev.investigationPrompt || defaults?.investigationPrompt || '',
+        performancePrompt: prev.performancePrompt || defaults?.performancePrompt || '',
+      }));
+      if (defaults) {
+        setPromptDefaults(defaults);
       }
     };
 
-    checkAvailability();
+    init();
   }, []);
 
   const isLLMSettingsDisabled = Boolean(!state.maxTotalTokens || state.maxTotalTokens < 1000);
@@ -700,39 +714,41 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
         </div>
       </FieldSet>
 
-      <FieldSet label="Prompt Templates" className="mt-4">
-        <p className="text-sm text-secondary mb-3">
-          Customize the prompt templates used by the AI assistant. Templates use Go text/template syntax.
-          Variables like {'{{.AlertName}}'} and {'{{.Target}}'} are replaced at runtime.
-        </p>
+      {promptDefaults && (
+        <FieldSet label="Prompt Templates" className="mt-4">
+          <p className="text-sm text-secondary mb-3">
+            Customize the prompt templates used by the AI assistant. Templates use Go text/template syntax.
+            Variables like {'{{.AlertName}}'} and {'{{.Target}}'} are replaced at runtime.
+          </p>
 
-        <PromptEditor
-          label="System Prompt"
-          description="Base instructions for the AI assistant across all conversation types."
-          currentValue={state.defaultSystemPrompt}
-          defaultValue={DEFAULT_SYSTEM_PROMPT}
-          onSave={(value) => savePrompt('defaultSystemPrompt', value)}
-          testIdPrefix={testIds.appConfig.promptEditor.system}
-        />
+          <PromptEditor
+            label="System Prompt"
+            description="Base instructions for the AI assistant across all conversation types."
+            currentValue={state.defaultSystemPrompt}
+            defaultValue={promptDefaults.defaultSystemPrompt}
+            onSave={(value) => savePrompt('defaultSystemPrompt', value)}
+            testIdPrefix={testIds.appConfig.promptEditor.system}
+          />
 
-        <PromptEditor
-          label="Investigation Prompt"
-          description="Template for alert investigation workflows. Use {{.AlertName}} for the alert name."
-          currentValue={state.investigationPrompt}
-          defaultValue={DEFAULT_INVESTIGATION_PROMPT}
-          onSave={(value) => savePrompt('investigationPrompt', value)}
-          testIdPrefix={testIds.appConfig.promptEditor.investigation}
-        />
+          <PromptEditor
+            label="Investigation Prompt"
+            description="Template for alert investigation workflows. Use {{.AlertName}} for the alert name."
+            currentValue={state.investigationPrompt}
+            defaultValue={promptDefaults.investigationPrompt}
+            onSave={(value) => savePrompt('investigationPrompt', value)}
+            testIdPrefix={testIds.appConfig.promptEditor.investigation}
+          />
 
-        <PromptEditor
-          label="Performance Prompt"
-          description="Template for performance analysis workflows. Use {{.Target}} for the target system."
-          currentValue={state.performancePrompt}
-          defaultValue={DEFAULT_PERFORMANCE_PROMPT}
-          onSave={(value) => savePrompt('performancePrompt', value)}
-          testIdPrefix={testIds.appConfig.promptEditor.performance}
-        />
-      </FieldSet>
+          <PromptEditor
+            label="Performance Prompt"
+            description="Template for performance analysis workflows. Use {{.Target}} for the target system."
+            currentValue={state.performancePrompt}
+            defaultValue={promptDefaults.performancePrompt}
+            onSave={(value) => savePrompt('performancePrompt', value)}
+            testIdPrefix={testIds.appConfig.promptEditor.performance}
+          />
+        </FieldSet>
+      )}
 
       <FieldSet label="Display Settings" data-testid={testIds.appConfig.displaySettings}>
         <Field
