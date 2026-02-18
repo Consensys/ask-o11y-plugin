@@ -5,6 +5,13 @@ All notable changes to the Ask O11y Grafana plugin will be documented in this fi
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.8](https://github.com/Consensys/ask-o11y-plugin/compare/v0.2.7...v0.2.8) (2026-02-18)
+
+
+### Features
+
+* **backend:** move agent loop logic server-side with template system and PromptEditor UI ([#53](https://github.com/Consensys/ask-o11y-plugin/issues/53)) ([f50ff9a](https://github.com/Consensys/ask-o11y-plugin/commit/f50ff9accfe79ac779663691fe02c7b5cd338921))
+
 ## [0.2.7](https://github.com/Consensys/ask-o11y-plugin/compare/v0.2.6...v0.2.7) (2026-02-14)
 
 
