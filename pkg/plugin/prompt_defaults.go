@@ -222,14 +222,16 @@ const DefaultInvestigationPrompt = `Investigate the alert "{{.AlertName}}" and p
 1. Prometheus datasource alerts (list available datasources first to get the Prometheus datasource UID)
 2. Grafana-managed alerts
 
-Once you find the alert, proceed with:
+Once you find the alert, check its annotations for a runbook URL (commonly found in the ` + "`runbook_url`" + ` annotation). If a runbook URL is present, fetch and read the runbook content BEFORE proceeding with further investigation. Use the appropriate tool based on the URL type (e.g., web_fetch for HTTP pages, confluence_get_page for Confluence URLs). The runbook will contain known causes, investigation steps, and resolution procedures specific to this alert — follow them.
+
+Then proceed with:
 1. Check the current alert status and recent state changes
 2. Query related metrics around the time the alert fired
 3. Search for relevant error logs in the affected services
 4. Check distributed traces for failed requests or high latency (if applicable)
 5. Identify correlations and patterns across the data
 6. Determine the root cause based on the evidence
-7. Suggest remediation steps to resolve the issue
+7. Suggest remediation steps, referencing the runbook's recommended actions if one was found
 
 Please use the available MCP tools to gather real data and provide actionable insights.`
 
