@@ -52,7 +52,7 @@ func builtInMCPBaseURL() string {
 	if override := os.Getenv("GF_PLUGIN_ASKO11Y_BUILTIN_MCP_BASE_URL"); override != "" {
 		return strings.TrimRight(override, "/")
 	}
-	port := os.Getenv("GF_SERVER_HTTP_PORT")
+	port := os.Getenv("GF_PLUGIN_ASKO11Y_SERVER_HTTP_PORT")
 	if port == "" {
 		port = "3000"
 	}
