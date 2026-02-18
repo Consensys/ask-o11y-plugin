@@ -18,6 +18,15 @@ describe('MCPServerModal', () => {
     jest.clearAllMocks();
   });
 
+  // Helper to expand headers section
+  const expandHeadersSection = async () => {
+    const headersButton = screen.getByRole('button', { name: /Headers/i });
+    fireEvent.click(headersButton);
+    await waitFor(() => {
+      expect(screen.getByTestId('mcp-modal-headers-textarea')).toBeInTheDocument();
+    });
+  };
+
   it('renders add mode when server is null', () => {
     render(<MCPServerModal {...defaultProps} />);
 
@@ -47,7 +56,7 @@ describe('MCPServerModal', () => {
     expect(screen.getByTestId('mcp-modal-type-select')).toHaveValue('openapi');
   });
 
-  it('converts headers object to textarea format in edit mode', () => {
+  it('converts headers object to textarea format in edit mode', async () => {
     const server: MCPServerConfig = {
       id: 'test-server',
       name: 'Test Server',
@@ -62,8 +71,14 @@ describe('MCPServerModal', () => {
 
     render(<MCPServerModal {...defaultProps} server={server} />);
 
-    const textarea = screen.getByTestId('mcp-modal-headers-textarea');
-    expect(textarea).toHaveValue('Authorization: Bearer token123\nX-API-Key: key456');
+    // Expand the headers section
+    const headersButton = screen.getByRole('button', { name: /Headers \(2 configured\)/i });
+    fireEvent.click(headersButton);
+
+    await waitFor(() => {
+      const textarea = screen.getByTestId('mcp-modal-headers-textarea');
+      expect(textarea).toHaveValue('Authorization: Bearer token123\nX-API-Key: key456');
+    });
   });
 
   it('validates required fields', async () => {
@@ -126,7 +141,8 @@ describe('MCPServerModal', () => {
     });
     fireEvent.blur(screen.getByTestId('mcp-modal-url-input'));
 
-    // Fill in headers
+    // Expand headers section and fill in headers
+    await expandHeadersSection();
     const textarea = screen.getByTestId('mcp-modal-headers-textarea');
     fireEvent.change(textarea, {
       target: { value: 'Authorization: Bearer token123\nX-API-Key: key456' },
@@ -164,7 +180,8 @@ describe('MCPServerModal', () => {
     });
     fireEvent.blur(screen.getByTestId('mcp-modal-url-input'));
 
-    // Enter invalid header format (missing colon)
+    // Expand headers section and enter invalid header format (missing colon)
+    await expandHeadersSection();
     const textarea = screen.getByTestId('mcp-modal-headers-textarea');
     fireEvent.change(textarea, {
       target: { value: 'InvalidHeader\nAuthorization: Bearer token' },
@@ -189,6 +206,9 @@ describe('MCPServerModal', () => {
       target: { value: 'https://example.com' },
     });
     fireEvent.blur(screen.getByTestId('mcp-modal-url-input'));
+
+    // Expand headers section first
+    await expandHeadersSection();
 
     // Enter duplicate keys
     const textarea = screen.getByTestId('mcp-modal-headers-textarea');
@@ -215,6 +235,9 @@ describe('MCPServerModal', () => {
       target: { value: 'https://example.com' },
     });
     fireEvent.blur(screen.getByTestId('mcp-modal-url-input'));
+
+    // Expand headers section first
+    await expandHeadersSection();
 
     // Enter headers with empty lines
     const textarea = screen.getByTestId('mcp-modal-headers-textarea');
