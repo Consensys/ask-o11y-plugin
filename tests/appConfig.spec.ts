@@ -59,9 +59,9 @@ test.describe('MCP Server Management', () => {
     await expect(tableRows).toHaveCount(initialCount + 1);
     await expect(page.getByText('E2E Test Server')).toBeVisible();
 
-    // Remove the server via delete button in table
-    const deleteButtons = page.locator('button:has-text("Delete")');
-    await deleteButtons.last().click();
+    // Remove the server via icon button in table
+    const removeButtons = page.getByRole('button', { name: /Remove server/i });
+    await removeButtons.last().click();
     await expect(tableRows).toHaveCount(initialCount);
   });
 
