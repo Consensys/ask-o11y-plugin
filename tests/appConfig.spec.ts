@@ -22,57 +22,81 @@ test.describe('LLM Settings', () => {
 });
 
 test.describe('MCP Server Management', () => {
-  test('should add, configure, and remove MCP servers', async ({ appConfigPage, page }) => {
+  test('should add, configure, and remove MCP servers via modal', async ({ appConfigPage, page }) => {
     void appConfigPage;
 
     const addButton = page.locator('[data-testid="data-testid ac-add-mcp-server"]');
     await expect(addButton).toBeVisible();
 
-    const removeButtons = page.locator('[data-testid^="data-testid ac-mcp-server-remove-"]');
-    const initialCount = await removeButtons.count();
+    // Count initial table rows
+    const tableRows = page.locator('table tbody tr');
+    const initialCount = await tableRows.count();
 
-    // Add a server
+    // Add a server - should open modal
     await addButton.click();
-    await expect(removeButtons).toHaveCount(initialCount + 1);
-    await expect(page.getByText('New MCP Server').first()).toBeVisible();
+    await expect(page.getByText('Add MCP Server')).toBeVisible();
 
-    // Configure name and URL
-    const nameInput = page.locator('[data-testid^="data-testid ac-mcp-server-name-"]').last();
-    await nameInput.clear();
+    // Fill in server details in modal
+    const nameInput = page.getByTestId('mcp-modal-name-input');
     await nameInput.fill('E2E Test Server');
-    await expect(page.getByText('E2E Test Server').first()).toBeVisible();
 
-    const urlInput = page.locator('[data-testid^="data-testid ac-mcp-server-url-"]').last();
+    const urlInput = page.getByTestId('mcp-modal-url-input');
     await urlInput.fill('https://test-mcp.example.com');
 
-    // Change server type
-    const typeDropdown = page.locator('select.gf-form-input').last();
-    await expect(typeDropdown).toHaveValue('openapi');
+    // Change server type in modal
+    const typeDropdown = page.getByTestId('mcp-modal-type-select');
+    await expect(typeDropdown).toHaveValue('streamable-http');
     await typeDropdown.selectOption('sse');
     await expect(typeDropdown).toHaveValue('sse');
-    await typeDropdown.selectOption('streamable-http');
-    await expect(typeDropdown).toHaveValue('streamable-http');
 
-    // Save button should be enabled
-    const saveMcpButton = page.locator('[data-testid="data-testid ac-save-mcp-servers"]');
-    await expect(saveMcpButton).toBeEnabled();
+    // Save the server
+    const saveButton = page.getByTestId('mcp-modal-save-button');
+    await expect(saveButton).toBeEnabled();
+    await saveButton.click();
 
-    // Remove the server
-    await removeButtons.last().click();
-    await expect(removeButtons).toHaveCount(initialCount);
+    // Modal should close and server should appear in table
+    await expect(page.getByText('Add MCP Server')).not.toBeVisible();
+    await expect(tableRows).toHaveCount(initialCount + 1);
+    await expect(page.getByText('E2E Test Server')).toBeVisible();
+
+    // Remove the server via delete button in table
+    const deleteButtons = page.locator('button:has-text("Delete")');
+    await deleteButtons.last().click();
+    await expect(tableRows).toHaveCount(initialCount);
   });
 
-  test('should show "Unnamed Server" when name is cleared', async ({ appConfigPage, page }) => {
+  test('should edit existing server via modal', async ({ appConfigPage, page }) => {
     void appConfigPage;
 
+    // Add a server first
     const addButton = page.locator('[data-testid="data-testid ac-add-mcp-server"]');
     await addButton.click();
+    await page.getByTestId('mcp-modal-name-input').fill('Test Server');
+    await page.getByTestId('mcp-modal-url-input').fill('https://test.example.com');
+    await page.getByTestId('mcp-modal-save-button').click();
 
-    const nameInput = page.locator('[data-testid^="data-testid ac-mcp-server-name-"]').last();
+    // Wait for modal to close
+    await expect(page.getByText('Add MCP Server')).not.toBeVisible();
+
+    // Click Edit button
+    const editButtons = page.locator('button:has-text("Edit")');
+    await editButtons.last().click();
+
+    // Modal should open in edit mode
+    await expect(page.getByText('Edit MCP Server')).toBeVisible();
+    const nameInput = page.getByTestId('mcp-modal-name-input');
+    await expect(nameInput).toHaveValue('Test Server');
+
+    // Change the name
     await nameInput.clear();
-    await nameInput.blur();
+    await nameInput.fill('Updated Server');
 
-    await expect(page.getByText('Unnamed Server')).toBeVisible();
+    // Save changes
+    await page.getByTestId('mcp-modal-save-button').click();
+
+    // Modal should close and changes should be visible
+    await expect(page.getByText('Edit MCP Server')).not.toBeVisible();
+    await expect(page.getByText('Updated Server')).toBeVisible();
   });
 });
 
