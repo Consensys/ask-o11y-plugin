@@ -32,6 +32,7 @@ coverage-combined/
 
 # Compiled binary addons (https://nodejs.org/api/addons.html)
 dist/
+dist.tar
 artifacts/
 work/
 ci/
