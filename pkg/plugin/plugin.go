@@ -59,6 +59,23 @@ func builtInMCPBaseURL() string {
 	return "http://localhost:" + port
 }
 
+// parseTTLDays parses a TTL environment variable in days and returns a duration.
+// Falls back to defaultDays if the env var is not set, invalid, or <= 0.
+func parseTTLDays(envVar string, defaultDays int, logger log.Logger) time.Duration {
+	if val := os.Getenv(envVar); val != "" {
+		days, err := strconv.Atoi(val)
+		if err != nil || days <= 0 {
+			logger.Warn("Invalid TTL value, using default",
+				"envVar", envVar,
+				"value", val,
+				"default", defaultDays)
+			return time.Duration(defaultDays) * 24 * time.Hour
+		}
+		return time.Duration(days) * 24 * time.Hour
+	}
+	return time.Duration(defaultDays) * 24 * time.Hour
+}
+
 func createRedisClient(logger log.Logger) (*redis.Client, error) {
 	// Try GF_PLUGIN_ASKO11Y_REDIS first (full connection string)
 	redisURL := os.Getenv("GF_PLUGIN_ASKO11Y_REDIS")
@@ -129,6 +146,8 @@ type Plugin struct {
 	cancel         context.CancelFunc
 	runCancelsMu   sync.Mutex
 	runCancels     map[string]context.CancelFunc
+	sessionTTL     time.Duration
+	shareTTL       time.Duration
 }
 
 func NewPlugin(ctx context.Context, settings backend.AppInstanceSettings) (instancemgmt.Instance, error) {
@@ -154,6 +173,12 @@ func NewPlugin(ctx context.Context, settings backend.AppInstanceSettings) (insta
 		logger.Error("Failed to initialize prompt registry, using defaults", "error", err)
 		promptRegistry, _ = NewPromptRegistry(PluginSettings{})
 	}
+
+	sessionTTL := parseTTLDays("GF_PLUGIN_ASKO11Y_SESSION_TTL_DAYS", DefaultSessionTTLDays, logger)
+	shareTTL := parseTTLDays("GF_PLUGIN_ASKO11Y_SHARE_TTL_DAYS", DefaultShareTTLDays, logger)
+	logger.Info("TTL configuration loaded",
+		"sessionTTL", sessionTTL,
+		"shareTTL", shareTTL)
 
 	mcpProxy := mcp.NewProxy(logger)
 	mcpProxy.UpdateConfig(pluginSettings.MCPServers)
@@ -215,9 +240,24 @@ func NewPlugin(ctx context.Context, settings backend.AppInstanceSettings) (insta
 		ctx:            pluginCtx,
 		cancel:         cancel,
 		runCancels:     make(map[string]context.CancelFunc),
+		sessionTTL:     sessionTTL,
+		shareTTL:       shareTTL,
 	}
 
 	if !usingRedis {
+		go func() {
+			ticker := time.NewTicker(SessionCleanupInterval)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ticker.C:
+					sessionStore.CleanupExpired()
+				case <-pluginCtx.Done():
+					return
+				}
+			}
+		}()
+
 		go func() {
 			ticker := time.NewTicker(ShareCleanupInterval)
 			defer ticker.Stop()
@@ -616,7 +656,7 @@ func (p *Plugin) handleAgentRun(w http.ResponseWriter, r *http.Request) {
 		session, err := p.sessionStore.CreateSession(userID, numericOrgID, sessionTitle, []SessionMessage{{
 			Role:    "user",
 			Content: userPrompt,
-		}})
+		}}, p.sessionTTL)
 		if err != nil {
 			p.logger.Error("Failed to create session", "error", err)
 			http.Error(w, "Failed to create session", http.StatusInternalServerError)
@@ -999,7 +1039,7 @@ func (p *Plugin) handleCreateShare(w http.ResponseWriter, r *http.Request) {
 		expiresInHours = &hours
 	}
 
-	share, err := p.shareStore.CreateShare(req.SessionID, req.SessionData, orgID, userID, expiresInHours)
+	share, err := p.shareStore.CreateShare(req.SessionID, req.SessionData, orgID, userID, expiresInHours, p.shareTTL)
 	if err != nil {
 		if err.Error() == "rate limit exceeded: too many share requests" {
 			http.Error(w, "Too many share requests. Please try again later.", http.StatusTooManyRequests)
@@ -1157,7 +1197,7 @@ func (p *Plugin) handleSessionsRoot(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, fmt.Sprintf("Invalid request: %v", err), http.StatusBadRequest)
 			return
 		}
-		session, err := p.sessionStore.CreateSession(userID, orgID, req.Title, req.Messages)
+		session, err := p.sessionStore.CreateSession(userID, orgID, req.Title, req.Messages, p.sessionTTL)
 		if err != nil {
 			p.logger.Error("Failed to create session", "error", err)
 			http.Error(w, "Failed to create session", http.StatusInternalServerError)

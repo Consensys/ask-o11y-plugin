@@ -37,7 +37,7 @@ func TestRedisShareStore_CreateShare(t *testing.T) {
 	sessionData := []byte(`{"id":"session-123","messages":[{"role":"user","content":"test"}]}`)
 
 	expiresInHours := 7 * 24 // 7 days in hours
-	share, err := store.CreateShare("session-123", sessionData, 1, 100, &expiresInHours)
+	share, err := store.CreateShare("session-123", sessionData, 1, 100, &expiresInHours, 90*24*time.Hour)
 	if err != nil {
 		t.Fatalf("Failed to create share: %v", err)
 	}
@@ -69,7 +69,7 @@ func TestRedisShareStore_GetShare(t *testing.T) {
 	store := NewRedisShareStore(client, log.DefaultLogger, NewRedisRateLimiter(client, log.DefaultLogger))
 	sessionData := []byte(`{"id":"session-123","messages":[{"role":"user","content":"test"}]}`)
 
-	share, err := store.CreateShare("session-123", sessionData, 1, 100, nil)
+	share, err := store.CreateShare("session-123", sessionData, 1, 100, nil, 90*24*time.Hour)
 	if err != nil {
 		t.Fatalf("Failed to create share: %v", err)
 	}
@@ -109,7 +109,7 @@ func TestRedisShareStore_DeleteShare(t *testing.T) {
 	store := NewRedisShareStore(client, log.DefaultLogger, NewRedisRateLimiter(client, log.DefaultLogger))
 	sessionData := []byte(`{"id":"session-123","messages":[{"role":"user","content":"test"}]}`)
 
-	share, err := store.CreateShare("session-123", sessionData, 1, 100, nil)
+	share, err := store.CreateShare("session-123", sessionData, 1, 100, nil, 90*24*time.Hour)
 	if err != nil {
 		t.Fatalf("Failed to create share: %v", err)
 	}
@@ -133,9 +133,9 @@ func TestRedisShareStore_GetSharesBySession(t *testing.T) {
 	sessionData := []byte(`{"id":"session-123","messages":[{"role":"user","content":"test"}]}`)
 
 	// Create multiple shares for the same session
-	share1, _ := store.CreateShare("session-123", sessionData, 1, 100, nil)
-	share2, _ := store.CreateShare("session-123", sessionData, 1, 100, nil)
-	store.CreateShare("session-456", sessionData, 1, 100, nil) // Different session
+	share1, _ := store.CreateShare("session-123", sessionData, 1, 100, nil, 90*24*time.Hour)
+	share2, _ := store.CreateShare("session-123", sessionData, 1, 100, nil, 90*24*time.Hour)
+	store.CreateShare("session-456", sessionData, 1, 100, nil, 90*24*time.Hour) // Different session
 
 	shares := store.GetSharesBySession("session-123")
 	if len(shares) != 2 {
@@ -160,14 +160,14 @@ func TestRedisShareStore_RateLimit(t *testing.T) {
 
 	// Create 50 shares (should succeed)
 	for i := 0; i < 50; i++ {
-		_, err := store.CreateShare("session-123", sessionData, 1, 100, nil)
+		_, err := store.CreateShare("session-123", sessionData, 1, 100, nil, 90*24*time.Hour)
 		if err != nil {
 			t.Fatalf("Failed to create share %d: %v", i, err)
 		}
 	}
 
 	// 51st share should fail due to rate limit
-	_, err := store.CreateShare("session-123", sessionData, 1, 100, nil)
+	_, err := store.CreateShare("session-123", sessionData, 1, 100, nil, 90*24*time.Hour)
 	if err == nil {
 		t.Error("Expected rate limit error")
 	}
@@ -185,14 +185,14 @@ func TestRedisShareStore_RateLimit_ResetsAfterHour(t *testing.T) {
 
 	// Create 50 shares
 	for i := 0; i < 50; i++ {
-		_, err := store.CreateShare("session-123", sessionData, 1, 100, nil)
+		_, err := store.CreateShare("session-123", sessionData, 1, 100, nil, 90*24*time.Hour)
 		if err != nil {
 			t.Fatalf("Failed to create share %d: %v", i, err)
 		}
 	}
 
 	// 51st should fail
-	_, err := store.CreateShare("session-123", sessionData, 1, 100, nil)
+	_, err := store.CreateShare("session-123", sessionData, 1, 100, nil, 90*24*time.Hour)
 	if err == nil {
 		t.Error("Expected rate limit error")
 	}
@@ -203,7 +203,7 @@ func TestRedisShareStore_RateLimit_ResetsAfterHour(t *testing.T) {
 	client.Del(ctx, rateLimitKey)
 
 	// Now should succeed again
-	_, err = store.CreateShare("session-123", sessionData, 1, 100, nil)
+	_, err = store.CreateShare("session-123", sessionData, 1, 100, nil, 90*24*time.Hour)
 	if err != nil {
 		t.Errorf("Should succeed after rate limit reset, got: %v", err)
 	}
@@ -218,7 +218,7 @@ func TestRedisShareStore_Expiration(t *testing.T) {
 
 	// Create share with 1 day expiration (24 hours)
 	expiresInHours := 24
-	share, err := store.CreateShare("session-123", sessionData, 1, 100, &expiresInHours)
+	share, err := store.CreateShare("session-123", sessionData, 1, 100, &expiresInHours, 90*24*time.Hour)
 	if err != nil {
 		t.Fatalf("Failed to create share: %v", err)
 	}
