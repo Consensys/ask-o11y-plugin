@@ -38,6 +38,11 @@ apps:
           url: 'http://mcp-grafana:8000/mcp'
           enabled: true
           type: 'streamable-http'
+    # secureJsonData:
+      # Headers are stored securely here (NOT in jsonData above)
+      # Format: {serverID}__headers -> JSON string of headers map
+      # Example for mcp-grafana server with authentication:
+      # mcp-grafana__headers: '{"Authorization":"Basic YWRtaW46YWRtaW4=","X-Custom-Header":"value"}'
   - type: grafana-llm-app
     org_id: 2
     jsonData:
@@ -75,3 +80,8 @@ apps:
           url: 'http://mcp-grafana:8000/mcp'
           enabled: true
           type: 'streamable-http'
+    # secureJsonData:
+      # Headers are stored securely here (NOT in jsonData above)
+      # Format: {serverID}__headers -> JSON string of headers map
+      # Example for mcp-grafana server with authentication:
+      # mcp-grafana__headers: '{"Authorization":"Basic YWRtaW46YWRtaW4=","X-Custom-Header":"value"}'

@@ -1,12 +1,13 @@
-import React, { ChangeEvent, useEffect, useRef, useState } from 'react';
+import React, { ChangeEvent, useEffect, useState } from 'react';
 import { lastValueFrom } from 'rxjs';
 import { AppPluginMeta, PluginConfigPageProps, PluginMeta } from '@grafana/data';
 import { getBackendSrv } from '@grafana/runtime';
-import { Button, Field, FieldSet, Input, Icon, Switch, Alert, RadioButtonGroup } from '@grafana/ui';
+import { Button, Field, FieldSet, Input, Icon, Switch, Alert, RadioButtonGroup, Tooltip } from '@grafana/ui';
 import { mcp } from '@grafana/llm';
 import { testIds } from '../testIds';
 import { ValidationService } from '../../services/validation';
 import { PromptEditor } from './PromptEditor';
+import { MCPServerModal } from './MCPServerModal';
 import type { AppPluginSettings, MCPServerConfig } from '../../types/plugin';
 
 interface PromptDefaults {
@@ -15,27 +16,13 @@ interface PromptDefaults {
   performancePrompt: string;
 }
 
-function normalizeHeaderKey(key: string): string {
-  const trimmed = key.trim();
-  if (trimmed.includes('__collision_')) {
-    return trimmed.split('__collision_')[0].trim();
-  }
-  return trimmed;
-}
-
-function getCollisionId(key: string): string | null {
-  if (key.includes('__collision_')) {
-    return key.split('__collision_')[1];
-  }
-  return null;
-}
-
 type State = {
   maxTotalTokens: number;
   mcpServers: MCPServerConfig[];
   useBuiltInMCP: boolean;
   builtInMCPAvailable: boolean | null;
-  expandedAdvanced: Set<string>;
+  editingServer: MCPServerConfig | null;
+  isModalOpen: boolean;
   kioskModeEnabled: boolean;
   chatPanelPosition: 'left' | 'right';
   defaultSystemPrompt: string;
@@ -60,7 +47,8 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
     mcpServers: jsonData?.mcpServers || [],
     useBuiltInMCP: jsonData?.useBuiltInMCP ?? false,
     builtInMCPAvailable: null,
-    expandedAdvanced: new Set<string>(),
+    editingServer: null,
+    isModalOpen: false,
     kioskModeEnabled: jsonData?.kioskModeEnabled ?? true,
     chatPanelPosition: jsonData?.chatPanelPosition || 'right',
     defaultSystemPrompt: jsonData?.defaultSystemPrompt || '',
@@ -119,20 +107,6 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
     }
   }
 
-  function addMCPServer() {
-    const newServer: MCPServerConfig = {
-      id: `mcp-${Date.now()}`,
-      name: 'New MCP Server',
-      url: '',
-      enabled: true,
-      type: 'openapi',
-    };
-    setState({
-      ...state,
-      mcpServers: [...state.mcpServers, newServer],
-    });
-  }
-
   function updateMCPServer(id: string, updates: Partial<MCPServerConfig>) {
     setState({
       ...state,
@@ -186,106 +160,52 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
     });
   }
 
-  function toggleAdvancedOptions(id: string) {
-    setState((prev) => {
-      const newExpanded = new Set(prev.expandedAdvanced);
-      if (newExpanded.has(id)) {
-        newExpanded.delete(id);
-      } else {
-        newExpanded.add(id);
-      }
-      return { ...prev, expandedAdvanced: newExpanded };
+  function openEditModal(server: MCPServerConfig) {
+    setState({
+      ...state,
+      editingServer: server,
+      isModalOpen: true,
     });
   }
 
-  const headerIdCounterRef = useRef(0);
-
-  function addHeader(serverId: string) {
-    const server = state.mcpServers.find((s) => s.id === serverId);
-    if (!server) {
-      return;
-    }
-
-    const currentHeaders = server.headers || {};
-    const headerCount = Object.keys(currentHeaders).length;
-
-    if (headerCount >= 10) {
-      return;
-    }
-
-    headerIdCounterRef.current += 1;
-    const tempKey = `__new_header_${Date.now()}_${headerIdCounterRef.current}`;
-
-    updateMCPServer(serverId, {
-      headers: { ...currentHeaders, [tempKey]: '' },
+  function openAddModal() {
+    setState({
+      ...state,
+      editingServer: null,
+      isModalOpen: true,
     });
   }
 
-  function updateHeader(serverId: string, oldKey: string, newKey: string, value: string) {
-    const server = state.mcpServers.find((s) => s.id === serverId);
-    if (!server) {
-      return;
-    }
-
-    const currentHeaders = server.headers || {};
-    const keyOrder = Object.keys(currentHeaders);
-
-    const finalKey = computeFinalHeaderKey(oldKey, newKey, keyOrder);
-
-    const newHeaders: Record<string, string> = {};
-    for (const k of keyOrder) {
-      if (k === oldKey) {
-        newHeaders[finalKey] = value;
-      } else {
-        newHeaders[k] = currentHeaders[k];
-      }
-    }
-
-    updateMCPServer(serverId, { headers: newHeaders });
+  function closeModal() {
+    setState({
+      ...state,
+      editingServer: null,
+      isModalOpen: false,
+    });
   }
 
-  function computeFinalHeaderKey(oldKey: string, newKey: string, existingKeys: string[]): string {
-    if (oldKey === newKey) {
-      return newKey;
+  function handleSaveServer(updatedServer: MCPServerConfig) {
+    const serverIndex = state.mcpServers.findIndex((s) => s.id === updatedServer.id);
+
+    if (serverIndex >= 0) {
+      // Update existing server
+      const updatedServers = [...state.mcpServers];
+      updatedServers[serverIndex] = updatedServer;
+      setState({
+        ...state,
+        mcpServers: updatedServers,
+        editingServer: null,
+        isModalOpen: false,
+      });
+    } else {
+      // Add new server
+      setState({
+        ...state,
+        mcpServers: [...state.mcpServers, updatedServer],
+        editingServer: null,
+        isModalOpen: false,
+      });
     }
-
-    const normalizedNewKey = normalizeHeaderKey(newKey);
-    const otherKeys = existingKeys.filter((k) => k !== oldKey);
-    const conflictingKey = otherKeys.find((k) => normalizeHeaderKey(k) === normalizedNewKey);
-
-    if (!normalizedNewKey || !conflictingKey) {
-      return newKey;
-    }
-
-    const oldCollisionId = getCollisionId(oldKey);
-    if (oldCollisionId) {
-      return `${newKey}__collision_${oldCollisionId}`;
-    }
-
-    const conflictingCollisionId = getCollisionId(conflictingKey);
-    if (conflictingCollisionId) {
-      return `${newKey}__collision_pair_${conflictingCollisionId}`;
-    }
-
-    if (oldKey.startsWith('__new_header_')) {
-      const uniquePart = oldKey.replace('__new_header_', '');
-      return `${newKey}__collision_${uniquePart}`;
-    }
-
-    const sanitizedKey = oldKey.replace(/[^a-zA-Z0-9]/g, '_');
-    return `${newKey}__collision_id_${sanitizedKey}_${Date.now()}`;
-  }
-
-  function removeHeader(serverId: string, key: string) {
-    const server = state.mcpServers.find((s) => s.id === serverId);
-    if (!server) {
-      return;
-    }
-
-    const currentHeaders = { ...(server.headers || {}) };
-    delete currentHeaders[key];
-
-    updateMCPServer(serverId, { headers: currentHeaders });
   }
 
   function savePrompt(field: 'defaultSystemPrompt' | 'investigationPrompt' | 'performancePrompt', value: string) {
@@ -369,43 +289,28 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
       return;
     }
 
-    const hasDuplicateHeaders = state.mcpServers.some(
-      (server) => server.headers && Object.keys(server.headers).some((key) => key.includes('__collision_'))
-    );
-    if (hasDuplicateHeaders) {
-      return;
-    }
-
-    const cleanedServers = state.mcpServers.map((server) => {
-      if (!server.headers) {
-        return server;
-      }
-
-      const cleanedHeaders: Record<string, string> = {};
-      for (const [key, value] of Object.entries(server.headers)) {
-        let cleanKey = key.trim();
-        if (!cleanKey || cleanKey.startsWith('__new_header_')) {
-          continue;
-        }
-        if (cleanKey.includes('__collision_')) {
-          cleanKey = cleanKey.split('__collision_')[0].trim();
-        }
-        cleanedHeaders[cleanKey] = value;
-      }
-
-      return {
-        ...server,
-        headers: Object.keys(cleanedHeaders).length > 0 ? cleanedHeaders : undefined,
-      };
+    // Separate headers from server configs
+    const publicConfigs = state.mcpServers.map((server) => {
+      const { headers, ...publicConfig } = server;
+      return publicConfig; // No headers in jsonData
     });
+
+    // Build secureJsonData with headers
+    const secureData: Record<string, string> = {};
+    for (const server of state.mcpServers) {
+      if (server.headers && Object.keys(server.headers).length > 0) {
+        secureData[`${server.id}__headers`] = JSON.stringify(server.headers);
+      }
+    }
 
     updatePluginAndReload(plugin.meta.id, {
       enabled,
       pinned,
       jsonData: {
         ...jsonData,
-        mcpServers: cleanedServers,
+        mcpServers: publicConfigs,
       },
+      secureJsonData: secureData,
     });
   }
 
@@ -519,183 +424,100 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
           .
         </p>
 
-        {state.mcpServers.map((server) => (
-          <div
-            key={server.id}
-            data-testid={testIds.appConfig.mcpServerCard(server.id)}
-            className="p-4 mb-3 rounded border border-medium bg-secondary"
-          >
-            <div className="flex items-center justify-between mb-3">
-              <div className="flex items-center gap-2">
-                <Icon name="plug" />
-                <span className="font-medium">{server.name || 'Unnamed Server'}</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <Switch
-                  value={server.enabled}
-                  onChange={(e) => updateMCPServer(server.id, { enabled: e.currentTarget.checked })}
-                />
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  icon="trash-alt"
-                  onClick={() => removeMCPServer(server.id)}
-                  data-testid={testIds.appConfig.mcpServerRemoveButton(server.id)}
-                >
-                  Remove
-                </Button>
-              </div>
-            </div>
+        {state.mcpServers.length > 0 && (
+          <div className="mb-3">
+            <table className="w-full border-collapse" style={{ width: '100%' }}>
+              <thead>
+                <tr className="border-b border-medium">
+                  <th className="text-left py-2 px-2 text-sm font-medium" style={{ width: '80px' }}>
+                    Status
+                  </th>
+                  <th className="text-left py-2 px-2 text-sm font-medium" style={{ width: '200px' }}>
+                    Name
+                  </th>
+                  <th className="text-left py-2 px-2 text-sm font-medium">URL</th>
+                  <th className="text-left py-2 px-2 text-sm font-medium" style={{ width: '150px' }}>
+                    Type
+                  </th>
+                  <th className="text-left py-2 px-2 text-sm font-medium" style={{ width: '150px' }}>
+                    Actions
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {state.mcpServers.map((server) => {
+                  const hasHeaders = server.headers && Object.keys(server.headers).length > 0;
+                  const truncatedUrl = server.url.length > 50 ? `${server.url.substring(0, 47)}...` : server.url;
 
-            <Field
-              label="Server Name"
-              invalid={!!validationErrors.mcpServers[server.id]?.name}
-              error={validationErrors.mcpServers[server.id]?.name}
-            >
-              <Input
-                width={60}
-                value={server.name}
-                placeholder="My MCP Server"
-                onChange={(e) => updateMCPServer(server.id, { name: e.currentTarget.value })}
-                invalid={!!validationErrors.mcpServers[server.id]?.name}
-                data-testid={testIds.appConfig.mcpServerNameInput(server.id)}
-              />
-            </Field>
-
-            <Field
-              label="Server URL"
-              className="mt-2"
-              invalid={!!validationErrors.mcpServers[server.id]?.url}
-              error={validationErrors.mcpServers[server.id]?.url}
-            >
-              <Input
-                width={60}
-                value={server.url}
-                placeholder="https://mcp-server.example.com"
-                onChange={(e) => updateMCPServer(server.id, { url: e.currentTarget.value })}
-                invalid={!!validationErrors.mcpServers[server.id]?.url}
-                data-testid={testIds.appConfig.mcpServerUrlInput(server.id)}
-              />
-            </Field>
-
-            <Field label="Type" className="mt-2">
-              <select
-                className="gf-form-input"
-                value={server.type || 'openapi'}
-                onChange={(e) =>
-                  updateMCPServer(server.id, {
-                    type: e.target.value as 'openapi' | 'standard' | 'sse' | 'streamable-http',
-                  })
-                }
-                style={{ width: '240px', height: '32px' }}
-              >
-                <option value="openapi">OpenAPI</option>
-                <option value="standard">Standard MCP</option>
-                <option value="sse">SSE</option>
-                <option value="streamable-http">Streamable HTTP</option>
-              </select>
-            </Field>
-
-            <div className="mt-3">
-              <button
-                type="button"
-                onClick={() => toggleAdvancedOptions(server.id)}
-                className="flex items-center gap-1 text-sm text-link cursor-pointer bg-transparent border-none p-0"
-                data-testid={testIds.appConfig.mcpServerAdvancedToggle(server.id)}
-              >
-                <Icon name={state.expandedAdvanced.has(server.id) ? 'angle-down' : 'angle-right'} />
-                Advanced Options
-                {server.headers && Object.keys(server.headers).length > 0 && (
-                  <span className="ml-1 text-xs text-secondary">
-                    ({Object.keys(server.headers).length} header{Object.keys(server.headers).length !== 1 ? 's' : ''})
-                  </span>
-                )}
-              </button>
-            </div>
-
-            {state.expandedAdvanced.has(server.id) && (
-              <div className="mt-2 p-3 rounded bg-canvas border border-weak">
-                <div className="flex items-center justify-between mb-2">
-                  <span className="text-sm font-medium">Custom Headers</span>
-                  <span className="text-xs text-secondary">
-                    {Object.keys(server.headers || {}).length}/10
-                  </span>
-                </div>
-                <p className="text-xs text-secondary mb-2">
-                  Add custom HTTP headers to include with every request to this MCP server.
-                </p>
-
-                {Object.entries(server.headers || {}).map(([key, value], index) => {
-                  let displayKey = key;
-                  if (key.startsWith('__new_header_')) {
-                    displayKey = '';
-                  } else if (key.includes('__collision_')) {
-                    displayKey = key.split('__collision_')[0];
-                  }
-                  const hasCollision = key.includes('__collision_');
                   return (
-                    <div key={`${server.id}-header-${index}`} className="mb-2">
-                      <div className="flex items-center gap-2">
-                        <Input
-                          width={20}
-                          value={displayKey}
-                          placeholder="Header key"
-                          onChange={(e) => updateHeader(server.id, key, e.currentTarget.value, value)}
-                          data-testid={testIds.appConfig.mcpServerHeaderKeyInput(server.id, index)}
-                          invalid={hasCollision}
+                    <tr key={server.id} className="border-b border-weak" data-testid={testIds.appConfig.mcpServerCard(server.id)}>
+                      <td className="py-2 px-2">
+                        <Switch
+                          value={server.enabled}
+                          onChange={(e) => updateMCPServer(server.id, { enabled: e.currentTarget.checked })}
+                          data-testid={`mcp-server-status-${server.id}`}
                         />
-                        <Input
-                          width={30}
-                          value={value}
-                          placeholder="Header value"
-                          onChange={(e) => updateHeader(server.id, key, key, e.currentTarget.value)}
-                          data-testid={testIds.appConfig.mcpServerHeaderValueInput(server.id, index)}
-                        />
-                        <Button
-                          variant="secondary"
-                          size="sm"
-                          icon="times"
-                          onClick={() => removeHeader(server.id, key)}
-                          data-testid={testIds.appConfig.mcpServerHeaderRemoveButton(server.id, index)}
-                          aria-label="Remove header"
-                        />
-                      </div>
-                      {hasCollision && (
-                        <span className="text-xs text-error mt-1 block">
-                          Duplicate key name
-                        </span>
-                      )}
-                    </div>
+                      </td>
+                      <td className="py-2 px-2 text-sm">
+                        <div className="flex items-center gap-1">
+                          <Icon name="plug" size="sm" />
+                          <span>{server.name || 'Unnamed Server'}</span>
+                        </div>
+                      </td>
+                      <td className="py-2 px-2 text-sm">
+                        <Tooltip content={server.url}>
+                          <span>{truncatedUrl}</span>
+                        </Tooltip>
+                      </td>
+                      <td className="py-2 px-2 text-sm">{server.type || 'openapi'}</td>
+                      <td className="py-2 px-2">
+                        <div className="flex items-center gap-1">
+                          <Button
+                            variant="secondary"
+                            size="sm"
+                            onClick={() => openEditModal(server)}
+                            data-testid={`mcp-server-edit-${server.id}`}
+                          >
+                            Edit
+                          </Button>
+                          {hasHeaders && (
+                            <Tooltip content="This server has headers configured">
+                              <Icon name="lock" size="sm" className="text-warning" />
+                            </Tooltip>
+                          )}
+                          <Button
+                            variant="secondary"
+                            size="sm"
+                            icon="trash-alt"
+                            onClick={() => removeMCPServer(server.id)}
+                            data-testid={testIds.appConfig.mcpServerRemoveButton(server.id)}
+                            aria-label="Remove server"
+                          />
+                        </div>
+                      </td>
+                    </tr>
                   );
                 })}
-
-                {Object.keys(server.headers || {}).length < 10 && (
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    icon="plus"
-                    onClick={() => addHeader(server.id)}
-                    disabled={Object.keys(server.headers || {}).some(
-                      (key) => key.startsWith('__new_header_') || !key.trim() || key.includes('__collision_')
-                    )}
-                    data-testid={testIds.appConfig.mcpServerAddHeaderButton(server.id)}
-                  >
-                    Add Header
-                  </Button>
-                )}
-              </div>
-            )}
+              </tbody>
+            </table>
           </div>
-        ))}
+        )}
 
         <Button
           variant="secondary"
           icon="plus"
-          onClick={addMCPServer}
+          onClick={openAddModal}
           data-testid={testIds.appConfig.addMcpServerButton}
         >
           Add MCP Server
         </Button>
+
+        <MCPServerModal
+          server={state.editingServer}
+          isOpen={state.isModalOpen}
+          onClose={closeModal}
+          onSave={handleSaveServer}
+        />
 
         <div className="mt-3">
           {Object.keys(validationErrors.mcpServers).length > 0 && (
