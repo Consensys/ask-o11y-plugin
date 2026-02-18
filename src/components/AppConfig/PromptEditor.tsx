@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { Button, Modal, TextArea } from '@grafana/ui';
 
 interface PromptEditorProps {
@@ -11,6 +11,29 @@ interface PromptEditorProps {
 }
 
 const MAX_PROMPT_LENGTH = 15000;
+
+const BLOCKED_TEMPLATE_ACTIONS = /\{\{\s*(call|template|define|block)\b/;
+
+function validateTemplateSyntax(text: string): string | null {
+  const blocked = text.match(BLOCKED_TEMPLATE_ACTIONS);
+  if (blocked) {
+    return `Forbidden template action: ${blocked[1]}`;
+  }
+  let depth = 0;
+  for (let i = 0; i < text.length - 1; i++) {
+    if (text[i] === '{' && text[i + 1] === '{') {
+      depth++;
+      i++;
+    } else if (text[i] === '}' && text[i + 1] === '}') {
+      depth--;
+      i++;
+      if (depth < 0) {
+        return 'Unexpected closing }}';
+      }
+    }
+  }
+  return depth !== 0 ? 'Unmatched {{ in template' : null;
+}
 
 export function PromptEditor({
   label,
@@ -29,13 +52,15 @@ export function PromptEditor({
   }
 
   function handleSave() {
-    onSave(draft);
+    onSave(draft === defaultValue ? '' : draft);
     setIsOpen(false);
   }
 
   const isOverLimit = draft.length > MAX_PROMPT_LENGTH;
+  const templateError = useMemo(() => validateTemplateSyntax(draft), [draft]);
   const isDefault = draft === defaultValue;
   const hasChanges = draft !== currentValue;
+  const canSave = hasChanges && !isOverLimit && !templateError;
 
   return (
     <>
@@ -63,7 +88,7 @@ export function PromptEditor({
             onChange={(e) => setDraft(e.currentTarget.value)}
             rows={16}
             data-testid={`${testIdPrefix}-textarea`}
-            invalid={isOverLimit}
+            invalid={isOverLimit || !!templateError}
             style={{ fontFamily: 'monospace', fontSize: '13px' }}
           />
 
@@ -71,6 +96,7 @@ export function PromptEditor({
             <span className="text-xs text-secondary">
               {draft.length} / {MAX_PROMPT_LENGTH} characters
               {isOverLimit && <span className="text-error ml-1">(over limit)</span>}
+              {templateError && <span className="text-error ml-1">({templateError})</span>}
             </span>
             {isDefault && <span className="text-xs text-secondary">Using default template</span>}
           </div>
@@ -87,7 +113,7 @@ export function PromptEditor({
             <Button
               variant="primary"
               onClick={handleSave}
-              disabled={isOverLimit || !hasChanges}
+              disabled={!canSave}
               data-testid={`${testIdPrefix}-save-button`}
             >
               Save

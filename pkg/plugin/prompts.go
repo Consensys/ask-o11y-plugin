@@ -64,17 +64,15 @@ func parseTemplateWithFallback(name, custom, fallback string) *template.Template
 }
 
 func (r *PromptRegistry) BuildSystemPrompt(ctx PromptContext) (string, error) {
-	var buf bytes.Buffer
-
-	if err := r.systemTemplate.Execute(&buf, ctx); err != nil {
-		return "", fmt.Errorf("failed to render system prompt: %w", err)
+	system, err := renderTemplate(r.systemTemplate, "system prompt", ctx)
+	if err != nil {
+		return "", err
 	}
-
-	if err := r.toolInstructionsTemplate.Execute(&buf, ctx); err != nil {
-		return "", fmt.Errorf("failed to render tool instructions: %w", err)
+	tools, err := renderTemplate(r.toolInstructionsTemplate, "tool instructions", ctx)
+	if err != nil {
+		return "", err
 	}
-
-	return buf.String(), nil
+	return system + tools, nil
 }
 
 func (r *PromptRegistry) BuildUserPrompt(convType, message string, ctx PromptContext) (string, error) {
@@ -101,10 +99,16 @@ func (r *PromptRegistry) BuildUserPrompt(convType, message string, ctx PromptCon
 	}
 }
 
-func renderTemplate(t *template.Template, name string, data interface{}) (string, error) {
+func renderTemplate(t *template.Template, name string, data interface{}) (result string, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			result = ""
+			err = fmt.Errorf("template panic in %s: %v", name, r)
+		}
+	}()
 	var buf bytes.Buffer
-	if err := t.Execute(&buf, data); err != nil {
-		return "", fmt.Errorf("failed to render %s: %w", name, err)
+	if execErr := t.Execute(&buf, data); execErr != nil {
+		return "", fmt.Errorf("failed to render %s: %w", name, execErr)
 	}
 	return buf.String(), nil
 }
