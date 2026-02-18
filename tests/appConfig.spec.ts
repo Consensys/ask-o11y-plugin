@@ -1,4 +1,5 @@
 import { test, expect } from './fixtures';
+import type { Page } from '@playwright/test';
 
 test.describe('LLM Settings', () => {
   test('should save valid config and reject invalid token limits', async ({ appConfigPage, page }) => {
@@ -22,23 +23,27 @@ test.describe('LLM Settings', () => {
 });
 
 test.describe('MCP Server Management', () => {
+  const openAddServerModal = async (page: Page) => {
+    const addButton = page.getByTestId('data-testid ac-add-mcp-server');
+    await expect(addButton).toBeVisible();
+    await addButton.click();
+    await expect(page.getByRole('heading', { name: 'Add MCP Server' })).toBeVisible();
+  };
+
   test('should add, configure, and remove MCP servers via modal', async ({ appConfigPage, page }) => {
     void appConfigPage;
-
-    const addButton = page.locator('[data-testid="data-testid ac-add-mcp-server"]');
-    await expect(addButton).toBeVisible();
 
     // Count initial table rows
     const tableRows = page.locator('table tbody tr');
     const initialCount = await tableRows.count();
+    const serverName = `E2E Test Server ${Date.now()}`;
 
     // Add a server - should open modal
-    await addButton.click();
-    await expect(page.getByText('Add MCP Server')).toBeVisible();
+    await openAddServerModal(page);
 
     // Fill in server details in modal
     const nameInput = page.getByTestId('mcp-modal-name-input');
-    await nameInput.fill('E2E Test Server');
+    await nameInput.fill(serverName);
 
     const urlInput = page.getByTestId('mcp-modal-url-input');
     await urlInput.fill('https://test-mcp.example.com');
@@ -55,48 +60,52 @@ test.describe('MCP Server Management', () => {
     await saveButton.click();
 
     // Modal should close and server should appear in table
-    await expect(page.getByText('Add MCP Server')).not.toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Add MCP Server' })).not.toBeVisible();
     await expect(tableRows).toHaveCount(initialCount + 1);
-    await expect(page.getByText('E2E Test Server')).toBeVisible();
+    const serverRow = page.locator('table tbody tr', { hasText: serverName });
+    await expect(serverRow).toBeVisible();
 
-    // Remove the server via icon button in table
-    const removeButtons = page.getByRole('button', { name: /Remove server/i });
-    await removeButtons.last().click();
+    // Remove the server using its row action
+    await serverRow.getByRole('button', { name: /Remove server/i }).click();
+    await expect(serverRow).toBeHidden();
     await expect(tableRows).toHaveCount(initialCount);
   });
 
   test('should edit existing server via modal', async ({ appConfigPage, page }) => {
     void appConfigPage;
+    const initialName = `Editable Server ${Date.now()}`;
+    const updatedName = `${initialName} Updated`;
 
     // Add a server first
-    const addButton = page.locator('[data-testid="data-testid ac-add-mcp-server"]');
-    await addButton.click();
-    await page.getByTestId('mcp-modal-name-input').fill('Test Server');
+    await openAddServerModal(page);
+    await page.getByTestId('mcp-modal-name-input').fill(initialName);
     await page.getByTestId('mcp-modal-url-input').fill('https://test.example.com');
     await page.getByTestId('mcp-modal-save-button').click();
 
     // Wait for modal to close
-    await expect(page.getByText('Add MCP Server')).not.toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Add MCP Server' })).not.toBeVisible();
 
-    // Click Edit button
-    const editButtons = page.locator('button:has-text("Edit")');
-    await editButtons.last().click();
+    // Edit the server from its row
+    const serverRow = page.locator('table tbody tr', { hasText: initialName });
+    await expect(serverRow).toBeVisible();
+    await serverRow.getByRole('button', { name: 'Edit' }).click();
 
     // Modal should open in edit mode
-    await expect(page.getByText('Edit MCP Server')).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Edit MCP Server' })).toBeVisible();
     const nameInput = page.getByTestId('mcp-modal-name-input');
-    await expect(nameInput).toHaveValue('Test Server');
+    await expect(nameInput).toHaveValue(initialName);
 
     // Change the name
     await nameInput.clear();
-    await nameInput.fill('Updated Server');
+    await nameInput.fill(updatedName);
 
     // Save changes
     await page.getByTestId('mcp-modal-save-button').click();
 
     // Modal should close and changes should be visible
-    await expect(page.getByText('Edit MCP Server')).not.toBeVisible();
-    await expect(page.getByText('Updated Server')).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Edit MCP Server' })).not.toBeVisible();
+    const updatedRow = page.locator('table tbody tr', { hasText: updatedName });
+    await expect(updatedRow).toBeVisible();
   });
 });
 
