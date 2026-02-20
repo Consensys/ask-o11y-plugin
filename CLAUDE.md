@@ -589,6 +589,7 @@ One-click RCA from alert notifications. URL params trigger auto-send of investig
 
 **Implementation:**
 - `src/hooks/useAlertInvestigation.ts` - Parses URL, validates alert name, builds RCA prompt
+- `pkg/plugin/prompt_defaults.go` - Investigation prompt template with runbook annotation support
 - `src/pages/Home.tsx` - Renders loading/error states, passes initialMessage to Chat
 - `src/components/Chat/hooks/useChat.ts` - Auto-send state machine (idle → creating-session → ready-to-send → sent)
 
@@ -597,6 +598,9 @@ One-click RCA from alert notifications. URL params trigger auto-send of investig
 2. `useAlertInvestigation` parses `alertName` from URL, validates format
 3. Creates new session titled "Alert Investigation: {alertName}"
 4. Auto-sends RCA prompt to AI
+
+**Runbook Integration:**
+The investigation prompt instructs the agent to check for a `runbook_url` annotation when retrieving the alert. If present, the agent fetches and reads the runbook content before proceeding with the investigation, using it to guide the analysis and remediation steps.
 
 **Slack/Alertmanager Template:**
 ```go
