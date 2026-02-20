@@ -423,6 +423,7 @@ export function useChat(
   };
 
   const clearChat = (): void => {
+    stopGeneration();
     setChatHistory([]);
     setCurrentInput('');
     setToolCalls(new Map());
