@@ -1,4 +1,4 @@
-import { runAgentDetached, reconnectToAgentRun, AgentCallbacks, AgentRunRequest } from '../agentClient';
+import { runAgentDetached, reconnectToAgentRun, readSSEStream, AgentCallbacks, AgentRunRequest } from '../agentClient';
 
 function createMockBody(lines: string[]) {
   const encoder = new TextEncoder();
@@ -208,5 +208,48 @@ describe('reconnectToAgentRun', () => {
 
     const [, fetchOptions] = mockFetch.mock.calls[0];
     expect(fetchOptions.headers).toEqual({ 'X-Grafana-Org-Id': '42' });
+  });
+
+  it('should return false on SSE idle timeout', async () => {
+    const callbacks = createMockCallbacks();
+    const hangingBody = {
+      getReader: () => ({
+        read: () => new Promise<never>(() => {}),
+        releaseLock: jest.fn(),
+      }),
+    } as unknown as ReadableStream<Uint8Array>;
+
+    const result = await readSSEStream(hangingBody, callbacks, { idleTimeoutMs: 100 });
+
+    expect(result).toBe(false);
+  });
+
+  it('should not timeout when data arrives before idle deadline', async () => {
+    const callbacks = createMockCallbacks();
+    const encoder = new TextEncoder();
+
+    let readCount = 0;
+    const chunkedBody = {
+      getReader: () => ({
+        read: async () => {
+          readCount++;
+          if (readCount === 1) {
+            return { done: false, value: encoder.encode('data: {"type":"content","data":{"content":"chunk1"},"sequence":1}\n\n') };
+          }
+          if (readCount === 2) {
+            await new Promise((resolve) => setTimeout(resolve, 50));
+            return { done: false, value: encoder.encode('data: {"type":"done","data":{"totalIterations":1},"sequence":2}\n\n') };
+          }
+          return { done: true, value: undefined };
+        },
+        releaseLock: jest.fn(),
+      }),
+    } as unknown as ReadableStream<Uint8Array>;
+
+    const result = await readSSEStream(chunkedBody, callbacks, { idleTimeoutMs: 200 });
+
+    expect(result).toBe(true);
+    expect(callbacks.onContent).toHaveBeenCalledWith({ content: 'chunk1' });
+    expect(callbacks.onDone).toHaveBeenCalled();
   });
 });

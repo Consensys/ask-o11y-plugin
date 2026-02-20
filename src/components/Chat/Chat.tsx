@@ -128,7 +128,7 @@ function ChatComponent({
       chatContainerRef,
       chatInputRef,
       bottomSpacerRef,
-      leftSlot: hasMessages ? <NewChatButton onConfirm={clearChat} disabled={isGenerating} /> : undefined,
+      leftSlot: hasMessages ? <NewChatButton onConfirm={clearChat} isGenerating={isGenerating} /> : undefined,
       rightSlot: <HistoryButton onClick={openHistory} sessionCount={sessionManager.sessions.length} />,
       readOnly,
       onSuggestionClick: handleSuggestionClick,

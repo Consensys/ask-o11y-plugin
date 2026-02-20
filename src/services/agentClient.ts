@@ -70,6 +70,8 @@ export interface AgentRunStatus {
 const AGENT_RUN_URL = '/api/plugins/consensys-asko11y-app/resources/api/agent/run';
 const AGENT_RUNS_URL = '/api/plugins/consensys-asko11y-app/resources/api/agent/runs';
 
+export const SSE_IDLE_TIMEOUT_MS = 60_000;
+
 function orgIdHeaders(orgId?: string): Record<string, string> {
   if (orgId) {
     return { 'X-Grafana-Org-Id': orgId };
@@ -81,9 +83,17 @@ interface ReadSSEStreamOptions {
   warnOnMalformedJSON?: boolean;
   abortSignal?: AbortSignal;
   lastSeenSequence?: number;
+  idleTimeoutMs?: number;
 }
 
-async function readSSEStream(
+class SSEIdleTimeoutError extends Error {
+  constructor() {
+    super('SSE idle timeout');
+    this.name = 'SSEIdleTimeoutError';
+  }
+}
+
+export async function readSSEStream(
   body: ReadableStream<Uint8Array>,
   callbacks: AgentCallbacks,
   options: ReadSSEStreamOptions = {}
@@ -93,10 +103,22 @@ async function readSSEStream(
   let buffer = '';
   let receivedTerminalEvent = false;
   let lastSeenSequence = options.lastSeenSequence ?? -1;
+  const idleTimeout = options.idleTimeoutMs ?? SSE_IDLE_TIMEOUT_MS;
+  let idleTimeoutId: ReturnType<typeof setTimeout>;
+
+  function readWithTimeout(): Promise<ReadableStreamReadResult<Uint8Array>> {
+    return Promise.race([
+      reader.read(),
+      new Promise<never>((_, reject) => {
+        idleTimeoutId = setTimeout(() => reject(new SSEIdleTimeoutError()), idleTimeout);
+      }),
+    ]);
+  }
 
   try {
     while (true) {
-      const { done, value } = await reader.read();
+      const { done, value } = await readWithTimeout();
+      clearTimeout(idleTimeoutId!);
       if (done) {
         break;
       }
@@ -138,8 +160,12 @@ async function readSSEStream(
       }
     }
   } catch (err) {
+    clearTimeout(idleTimeoutId!);
     if (err instanceof DOMException && err.name === 'AbortError') {
       return true;
+    }
+    if (err instanceof SSEIdleTimeoutError) {
+      return false;
     }
     throw err;
   } finally {
