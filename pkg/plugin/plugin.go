@@ -142,6 +142,28 @@ func NewPlugin(ctx context.Context, settings backend.AppInstanceSettings) (insta
 		}
 	}
 
+	// Merge secure headers from DecryptedSecureJSONData into server configs
+	if settings.DecryptedSecureJSONData != nil {
+		for i := range pluginSettings.MCPServers {
+			serverID := pluginSettings.MCPServers[i].ID
+			headerKey := serverID + "__headers"
+
+			if headersJSON, exists := settings.DecryptedSecureJSONData[headerKey]; exists {
+				var headers map[string]string
+				if err := json.Unmarshal([]byte(headersJSON), &headers); err != nil {
+					logger.Warn("Failed to parse headers for MCP server",
+						"serverID", serverID,
+						"error", err)
+				} else {
+					pluginSettings.MCPServers[i].Headers = headers
+					logger.Debug("Loaded secure headers for MCP server",
+						"serverID", serverID,
+						"headerCount", len(headers))
+				}
+			}
+		}
+	}
+
 	if pluginSettings.MaxTotalTokens <= 0 {
 		pluginSettings.MaxTotalTokens = 180000
 	}
