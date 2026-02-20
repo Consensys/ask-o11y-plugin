@@ -2,6 +2,7 @@ package plugin
 
 import (
 	"testing"
+	"time"
 
 	"github.com/grafana/grafana-plugin-sdk-go/backend/log"
 )
@@ -14,7 +15,7 @@ func TestSessionStore_CreateAndGet(t *testing.T) {
 	store := newTestSessionStore()
 
 	msgs := []SessionMessage{{Role: "user", Content: "hello"}}
-	session, err := store.CreateSession(1, 1, "", msgs)
+	session, err := store.CreateSession(1, 1, "", msgs, 90*24*time.Hour)
 	if err != nil {
 		t.Fatalf("CreateSession failed: %v", err)
 	}
@@ -41,7 +42,7 @@ func TestSessionStore_UserIsolation(t *testing.T) {
 	store := newTestSessionStore()
 
 	msgs := []SessionMessage{{Role: "user", Content: "hello"}}
-	session, _ := store.CreateSession(1, 1, "", msgs)
+	session, _ := store.CreateSession(1, 1, "", msgs, 90*24*time.Hour)
 
 	_, err := store.GetSession(session.ID, 2, 1)
 	if err == nil {
@@ -53,7 +54,7 @@ func TestSessionStore_OrgIsolation(t *testing.T) {
 	store := newTestSessionStore()
 
 	msgs := []SessionMessage{{Role: "user", Content: "hello"}}
-	session, _ := store.CreateSession(1, 1, "", msgs)
+	session, _ := store.CreateSession(1, 1, "", msgs, 90*24*time.Hour)
 
 	_, err := store.GetSession(session.ID, 1, 2)
 	if err == nil {
@@ -64,9 +65,9 @@ func TestSessionStore_OrgIsolation(t *testing.T) {
 func TestSessionStore_ListSessions(t *testing.T) {
 	store := newTestSessionStore()
 
-	store.CreateSession(1, 1, "first", []SessionMessage{{Role: "user", Content: "a"}})
-	store.CreateSession(1, 1, "second", []SessionMessage{{Role: "user", Content: "b"}})
-	store.CreateSession(2, 1, "other user", []SessionMessage{{Role: "user", Content: "c"}})
+	store.CreateSession(1, 1, "first", []SessionMessage{{Role: "user", Content: "a"}}, 90*24*time.Hour)
+	store.CreateSession(1, 1, "second", []SessionMessage{{Role: "user", Content: "b"}}, 90*24*time.Hour)
+	store.CreateSession(2, 1, "other user", []SessionMessage{{Role: "user", Content: "c"}}, 90*24*time.Hour)
 
 	sessions, err := store.ListSessions(1, 1)
 	if err != nil {
@@ -85,7 +86,7 @@ func TestSessionStore_UpdateSession(t *testing.T) {
 	store := newTestSessionStore()
 
 	msgs := []SessionMessage{{Role: "user", Content: "hello"}}
-	session, _ := store.CreateSession(1, 1, "", msgs)
+	session, _ := store.CreateSession(1, 1, "", msgs, 90*24*time.Hour)
 
 	newTitle := "updated title"
 	newSummary := "a summary"
@@ -117,7 +118,7 @@ func TestSessionStore_AppendMessages(t *testing.T) {
 	store := newTestSessionStore()
 
 	msgs := []SessionMessage{{Role: "user", Content: "hello"}}
-	session, _ := store.CreateSession(1, 1, "", msgs)
+	session, _ := store.CreateSession(1, 1, "", msgs, 90*24*time.Hour)
 
 	err := store.AppendMessages(session.ID, 1, 1, []SessionMessage{
 		{Role: "assistant", Content: "hi"},
@@ -136,7 +137,7 @@ func TestSessionStore_DeleteSession(t *testing.T) {
 	store := newTestSessionStore()
 
 	msgs := []SessionMessage{{Role: "user", Content: "hello"}}
-	session, _ := store.CreateSession(1, 1, "", msgs)
+	session, _ := store.CreateSession(1, 1, "", msgs, 90*24*time.Hour)
 
 	err := store.DeleteSession(session.ID, 1, 1)
 	if err != nil {
@@ -152,8 +153,8 @@ func TestSessionStore_DeleteSession(t *testing.T) {
 func TestSessionStore_DeleteAllSessions(t *testing.T) {
 	store := newTestSessionStore()
 
-	store.CreateSession(1, 1, "a", []SessionMessage{{Role: "user", Content: "a"}})
-	store.CreateSession(1, 1, "b", []SessionMessage{{Role: "user", Content: "b"}})
+	store.CreateSession(1, 1, "a", []SessionMessage{{Role: "user", Content: "a"}}, 90*24*time.Hour)
+	store.CreateSession(1, 1, "b", []SessionMessage{{Role: "user", Content: "b"}}, 90*24*time.Hour)
 
 	err := store.DeleteAllSessions(1, 1)
 	if err != nil {
@@ -170,7 +171,7 @@ func TestSessionStore_MaxSessionsEviction(t *testing.T) {
 	store := newTestSessionStore()
 
 	for i := 0; i < SessionMaxPerUserOrg; i++ {
-		store.CreateSession(1, 1, "", []SessionMessage{{Role: "user", Content: "msg"}})
+		store.CreateSession(1, 1, "", []SessionMessage{{Role: "user", Content: "msg"}}, 90*24*time.Hour)
 	}
 
 	sessions, _ := store.ListSessions(1, 1)
@@ -179,7 +180,7 @@ func TestSessionStore_MaxSessionsEviction(t *testing.T) {
 	}
 
 	// One more should evict the oldest
-	store.CreateSession(1, 1, "newest", []SessionMessage{{Role: "user", Content: "new"}})
+	store.CreateSession(1, 1, "newest", []SessionMessage{{Role: "user", Content: "new"}}, 90*24*time.Hour)
 
 	sessions, _ = store.ListSessions(1, 1)
 	if len(sessions) != SessionMaxPerUserOrg {
@@ -190,7 +191,7 @@ func TestSessionStore_MaxSessionsEviction(t *testing.T) {
 func TestSessionStore_CurrentSession(t *testing.T) {
 	store := newTestSessionStore()
 
-	session, _ := store.CreateSession(1, 1, "", []SessionMessage{{Role: "user", Content: "hello"}})
+	session, _ := store.CreateSession(1, 1, "", []SessionMessage{{Role: "user", Content: "hello"}}, 90*24*time.Hour)
 
 	id, _ := store.GetCurrentSessionID(1, 1)
 	if id != "" {
@@ -217,7 +218,7 @@ func TestSessionStore_CurrentSession(t *testing.T) {
 func TestSessionStore_ActiveRunID(t *testing.T) {
 	store := newTestSessionStore()
 
-	session, _ := store.CreateSession(1, 1, "", []SessionMessage{{Role: "user", Content: "hello"}})
+	session, _ := store.CreateSession(1, 1, "", []SessionMessage{{Role: "user", Content: "hello"}}, 90*24*time.Hour)
 
 	err := store.SetActiveRunID(session.ID, 1, 1, "run-123")
 	if err != nil {
@@ -246,7 +247,7 @@ func TestSessionStore_TitleGeneration(t *testing.T) {
 	session, _ := store.CreateSession(1, 1, "", []SessionMessage{
 		{Role: "assistant", Content: "welcome"},
 		{Role: "user", Content: "What is the meaning of life?"},
-	})
+	}, 90*24*time.Hour)
 
 	if session.Title != "What is the meaning of life?" {
 		t.Fatalf("expected title from first user message, got %q", session.Title)
@@ -258,7 +259,7 @@ func TestSessionStore_ExplicitTitle(t *testing.T) {
 
 	session, _ := store.CreateSession(1, 1, "My Title", []SessionMessage{
 		{Role: "user", Content: "hello"},
-	})
+	}, 90*24*time.Hour)
 
 	if session.Title != "My Title" {
 		t.Fatalf("expected explicit title, got %q", session.Title)
@@ -268,7 +269,7 @@ func TestSessionStore_ExplicitTitle(t *testing.T) {
 func TestSessionStore_DeleteClearsCurrentSession(t *testing.T) {
 	store := newTestSessionStore()
 
-	session, _ := store.CreateSession(1, 1, "", []SessionMessage{{Role: "user", Content: "hello"}})
+	session, _ := store.CreateSession(1, 1, "", []SessionMessage{{Role: "user", Content: "hello"}}, 90*24*time.Hour)
 	store.SetCurrentSessionID(1, 1, session.ID)
 
 	store.DeleteSession(session.ID, 1, 1)

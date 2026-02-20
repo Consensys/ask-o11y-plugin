@@ -27,6 +27,7 @@ type redisSession struct {
 	Summary      string           `json:"summary,omitempty"`
 	CreatedAt    time.Time        `json:"createdAt"`
 	UpdatedAt    time.Time        `json:"updatedAt"`
+	ExpiresAt    *time.Time       `json:"expiresAt,omitempty"`
 	MessageCount int              `json:"messageCount"`
 	ActiveRunID  string           `json:"activeRunId,omitempty"`
 	UserID       int64            `json:"userId"`
@@ -37,7 +38,7 @@ func toRedis(s *ChatSession) *redisSession {
 	return &redisSession{
 		ID: s.ID, Title: s.Title, Messages: s.Messages,
 		Summary: s.Summary, CreatedAt: s.CreatedAt, UpdatedAt: s.UpdatedAt,
-		MessageCount: s.MessageCount, ActiveRunID: s.ActiveRunID,
+		ExpiresAt: s.ExpiresAt, MessageCount: s.MessageCount, ActiveRunID: s.ActiveRunID,
 		UserID: s.UserID, OrgID: s.OrgID,
 	}
 }
@@ -46,7 +47,7 @@ func fromRedis(rs *redisSession) *ChatSession {
 	return &ChatSession{
 		ID: rs.ID, Title: rs.Title, Messages: rs.Messages,
 		Summary: rs.Summary, CreatedAt: rs.CreatedAt, UpdatedAt: rs.UpdatedAt,
-		MessageCount: rs.MessageCount, ActiveRunID: rs.ActiveRunID,
+		ExpiresAt: rs.ExpiresAt, MessageCount: rs.MessageCount, ActiveRunID: rs.ActiveRunID,
 		UserID: rs.UserID, OrgID: rs.OrgID,
 	}
 }
@@ -60,7 +61,7 @@ func NewRedisSessionStore(client *redis.Client, logger log.Logger) *RedisSession
 	return &RedisSessionStore{client: client, logger: logger}
 }
 
-func (s *RedisSessionStore) CreateSession(userID, orgID int64, title string, messages []SessionMessage) (*ChatSession, error) {
+func (s *RedisSessionStore) CreateSession(userID, orgID int64, title string, messages []SessionMessage, ttl time.Duration) (*ChatSession, error) {
 	idxKey := sessionUserIdxKey(userID, orgID)
 
 	ctx, cancel := getContextWithTimeout(RedisOpTimeout)
@@ -85,9 +86,10 @@ func (s *RedisSessionStore) CreateSession(userID, orgID int64, title string, mes
 	}
 
 	now := time.Now()
+	expiresAt := now.Add(ttl)
 	session := &ChatSession{
 		ID: id, Title: title, Messages: messages,
-		CreatedAt: now, UpdatedAt: now, MessageCount: len(messages),
+		CreatedAt: now, UpdatedAt: now, ExpiresAt: &expiresAt, MessageCount: len(messages),
 		UserID: userID, OrgID: orgID,
 	}
 
@@ -98,7 +100,7 @@ func (s *RedisSessionStore) CreateSession(userID, orgID int64, title string, mes
 
 	ctx2, cancel2 := getContextWithTimeout(RedisOpTimeout)
 	defer cancel2()
-	if err := s.client.Set(ctx2, sessionKey(id), data, 0).Err(); err != nil {
+	if err := s.client.Set(ctx2, sessionKey(id), data, ttl).Err(); err != nil {
 		return nil, fmt.Errorf("failed to store session: %w", err)
 	}
 
@@ -145,9 +147,18 @@ func (s *RedisSessionStore) saveSession(session *ChatSession) error {
 	if err != nil {
 		return fmt.Errorf("failed to marshal session: %w", err)
 	}
+
+	var ttl time.Duration
+	if session.ExpiresAt != nil {
+		ttl = time.Until(*session.ExpiresAt)
+		if ttl <= 0 {
+			return fmt.Errorf("session already expired")
+		}
+	}
+
 	ctx, cancel := getContextWithTimeout(RedisOpTimeout)
 	defer cancel()
-	return s.client.Set(ctx, sessionKey(session.ID), data, 0).Err()
+	return s.client.Set(ctx, sessionKey(session.ID), data, ttl).Err()
 }
 
 func (s *RedisSessionStore) GetSession(sessionID string, userID, orgID int64) (*ChatSession, error) {
@@ -158,6 +169,21 @@ func (s *RedisSessionStore) GetSession(sessionID string, userID, orgID int64) (*
 	if rs.UserID != userID || rs.OrgID != orgID {
 		return nil, fmt.Errorf("session not found")
 	}
+
+	if rs.ExpiresAt != nil && rs.ExpiresAt.Before(time.Now()) {
+		ctx, cancel := getContextWithTimeout(RedisOpTimeout)
+		defer cancel()
+		s.client.Del(ctx, sessionKey(sessionID))
+		s.client.SRem(ctx, sessionUserIdxKey(userID, orgID), sessionID)
+
+		curKey := sessionCurrentKey(userID, orgID)
+		cur, err := s.client.Get(ctx, curKey).Result()
+		if err == nil && cur == sessionID {
+			s.client.Del(ctx, curKey)
+		}
+		return nil, fmt.Errorf("session expired")
+	}
+
 	return fromRedis(rs), nil
 }
 
@@ -188,6 +214,7 @@ func (s *RedisSessionStore) ListSessions(userID, orgID int64) ([]SessionMetadata
 	}
 
 	result := make([]SessionMetadata, 0, len(values))
+	now := time.Now()
 	for i, val := range values {
 		if val == nil {
 			// Stale index entry — remove it
@@ -205,9 +232,12 @@ func (s *RedisSessionStore) ListSessions(userID, orgID int64) ([]SessionMetadata
 			s.logger.Warn("Failed to unmarshal session", "error", err, "id", ids[i])
 			continue
 		}
+		if rs.ExpiresAt != nil && rs.ExpiresAt.Before(now) {
+			continue
+		}
 		result = append(result, SessionMetadata{
 			ID: rs.ID, Title: rs.Title, CreatedAt: rs.CreatedAt,
-			UpdatedAt: rs.UpdatedAt, MessageCount: rs.MessageCount,
+			UpdatedAt: rs.UpdatedAt, ExpiresAt: rs.ExpiresAt, MessageCount: rs.MessageCount,
 			ActiveRunID: rs.ActiveRunID,
 		})
 	}
@@ -380,6 +410,6 @@ func (s *RedisSessionStore) ClearActiveRunID(sessionID string, userID, orgID int
 	return s.saveSession(session)
 }
 
-func (s *RedisSessionStore) CleanupOld() {
-	// Redis sessions are persistent — no periodic cleanup needed.
+func (s *RedisSessionStore) CleanupExpired() {
+	// Redis TTL automatically handles expiration — no periodic cleanup needed.
 }

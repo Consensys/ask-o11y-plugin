@@ -5,9 +5,11 @@ import "time"
 const (
 	ShareRateLimitPerHour = 50
 	ShareRateLimitWindow  = 1 * time.Hour
-	DefaultShareMaxTTL    = 365 * 24 * time.Hour
 	ShareIDBytes          = 32
 	ShareCleanupInterval  = 1 * time.Hour
+	DefaultSessionTTLDays = 90
+	DefaultShareTTLDays   = 90
+	SessionCleanupInterval = 1 * time.Hour
 )
 
 const (

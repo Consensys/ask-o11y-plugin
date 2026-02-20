@@ -21,7 +21,7 @@ type ShareMetadata struct {
 
 // ShareStoreInterface defines the interface for share storage implementations
 type ShareStoreInterface interface {
-	CreateShare(sessionID string, sessionData []byte, orgID, userID int64, expiresInHours *int) (*ShareMetadata, error)
+	CreateShare(sessionID string, sessionData []byte, orgID, userID int64, expiresInHours *int, defaultTTL time.Duration) (*ShareMetadata, error)
 	GetShare(shareID string) (*ShareMetadata, error)
 	DeleteShare(shareID string) error
 	GetSharesBySession(sessionID string) []*ShareMetadata
@@ -46,7 +46,7 @@ func NewShareStore(logger log.Logger, rateLimiter RateLimiter) *ShareStore {
 }
 
 // CreateShare creates a new share and returns the share metadata
-func (s *ShareStore) CreateShare(sessionID string, sessionData []byte, orgID, userID int64, expiresInHours *int) (*ShareMetadata, error) {
+func (s *ShareStore) CreateShare(sessionID string, sessionData []byte, orgID, userID int64, expiresInHours *int, defaultTTL time.Duration) (*ShareMetadata, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -62,7 +62,7 @@ func (s *ShareStore) CreateShare(sessionID string, sessionData []byte, orgID, us
 	}
 
 	// Calculate expiration
-	expiresAt, _ := CalculateExpiration(expiresInHours)
+	expiresAt, _ := CalculateExpiration(expiresInHours, defaultTTL)
 
 	share := &ShareMetadata{
 		ShareID:    shareID,

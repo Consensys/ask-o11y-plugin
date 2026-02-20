@@ -24,6 +24,7 @@ type ChatSession struct {
 	Summary      string           `json:"summary,omitempty"`
 	CreatedAt    time.Time        `json:"createdAt"`
 	UpdatedAt    time.Time        `json:"updatedAt"`
+	ExpiresAt    *time.Time       `json:"expiresAt,omitempty"`
 	MessageCount int              `json:"messageCount"`
 	ActiveRunID  string           `json:"activeRunId,omitempty"`
 	UserID       int64            `json:"-"`
@@ -31,12 +32,13 @@ type ChatSession struct {
 }
 
 type SessionMetadata struct {
-	ID           string    `json:"id"`
-	Title        string    `json:"title"`
-	CreatedAt    time.Time `json:"createdAt"`
-	UpdatedAt    time.Time `json:"updatedAt"`
-	MessageCount int       `json:"messageCount"`
-	ActiveRunID  string    `json:"activeRunId,omitempty"`
+	ID           string     `json:"id"`
+	Title        string     `json:"title"`
+	CreatedAt    time.Time  `json:"createdAt"`
+	UpdatedAt    time.Time  `json:"updatedAt"`
+	ExpiresAt    *time.Time `json:"expiresAt,omitempty"`
+	MessageCount int        `json:"messageCount"`
+	ActiveRunID  string     `json:"activeRunId,omitempty"`
 }
 
 type SessionUpdate struct {
@@ -46,7 +48,7 @@ type SessionUpdate struct {
 }
 
 type SessionStoreInterface interface {
-	CreateSession(userID, orgID int64, title string, messages []SessionMessage) (*ChatSession, error)
+	CreateSession(userID, orgID int64, title string, messages []SessionMessage, ttl time.Duration) (*ChatSession, error)
 	GetSession(sessionID string, userID, orgID int64) (*ChatSession, error)
 	ListSessions(userID, orgID int64) ([]SessionMetadata, error)
 	UpdateSession(sessionID string, userID, orgID int64, update SessionUpdate) error
@@ -58,6 +60,7 @@ type SessionStoreInterface interface {
 	ClearCurrentSessionID(userID, orgID int64) error
 	SetActiveRunID(sessionID string, userID, orgID int64, runID string) error
 	ClearActiveRunID(sessionID string, userID, orgID int64) error
+	CleanupExpired()
 }
 
 func sessionOwnerKey(userID, orgID int64) string {
@@ -94,7 +97,7 @@ func NewSessionStore(logger log.Logger) *SessionStore {
 	}
 }
 
-func (s *SessionStore) CreateSession(userID, orgID int64, title string, messages []SessionMessage) (*ChatSession, error) {
+func (s *SessionStore) CreateSession(userID, orgID int64, title string, messages []SessionMessage, ttl time.Duration) (*ChatSession, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -114,6 +117,7 @@ func (s *SessionStore) CreateSession(userID, orgID int64, title string, messages
 	}
 
 	now := time.Now()
+	expiresAt := now.Add(ttl)
 	session := &ChatSession{
 		ID:           id,
 		Title:        title,
@@ -121,6 +125,7 @@ func (s *SessionStore) CreateSession(userID, orgID int64, title string, messages
 		Summary:      "",
 		CreatedAt:    now,
 		UpdatedAt:    now,
+		ExpiresAt:    &expiresAt,
 		MessageCount: len(messages),
 		UserID:       userID,
 		OrgID:        orgID,
@@ -162,8 +167,8 @@ func (s *SessionStore) evictOldest(ownerKey string) {
 }
 
 func (s *SessionStore) GetSession(sessionID string, userID, orgID int64) (*ChatSession, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
 
 	session, exists := s.sessions[sessionID]
 	if !exists {
@@ -171,6 +176,16 @@ func (s *SessionStore) GetSession(sessionID string, userID, orgID int64) (*ChatS
 	}
 	if session.UserID != userID || session.OrgID != orgID {
 		return nil, fmt.Errorf("session not found")
+	}
+
+	if session.ExpiresAt != nil && session.ExpiresAt.Before(time.Now()) {
+		ownerKey := sessionOwnerKey(userID, orgID)
+		delete(s.sessions, sessionID)
+		delete(s.userIdx[ownerKey], sessionID)
+		if s.current[ownerKey] == sessionID {
+			delete(s.current, ownerKey)
+		}
+		return nil, fmt.Errorf("session expired")
 	}
 
 	copied := *session
@@ -185,6 +200,7 @@ func (s *SessionStore) ListSessions(userID, orgID int64) ([]SessionMetadata, err
 
 	ownerKey := sessionOwnerKey(userID, orgID)
 	idx := s.userIdx[ownerKey]
+	now := time.Now()
 
 	result := make([]SessionMetadata, 0, len(idx))
 	for id := range idx {
@@ -192,11 +208,15 @@ func (s *SessionStore) ListSessions(userID, orgID int64) ([]SessionMetadata, err
 		if sess == nil {
 			continue
 		}
+		if sess.ExpiresAt != nil && sess.ExpiresAt.Before(now) {
+			continue
+		}
 		result = append(result, SessionMetadata{
 			ID:           sess.ID,
 			Title:        sess.Title,
 			CreatedAt:    sess.CreatedAt,
 			UpdatedAt:    sess.UpdatedAt,
+			ExpiresAt:    sess.ExpiresAt,
 			MessageCount: sess.MessageCount,
 			ActiveRunID:  sess.ActiveRunID,
 		})
@@ -362,6 +382,28 @@ func (s *SessionStore) ClearActiveRunID(sessionID string, userID, orgID int64) e
 	return nil
 }
 
-func (s *SessionStore) CleanupOld() {
-	// In-memory store doesn't need periodic cleanup — sessions are persistent.
+func (s *SessionStore) CleanupExpired() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	now := time.Now()
+	count := 0
+
+	for sessionID, session := range s.sessions {
+		if session.ExpiresAt != nil && session.ExpiresAt.Before(now) {
+			ownerKey := sessionOwnerKey(session.UserID, session.OrgID)
+			delete(s.sessions, sessionID)
+			if idx, ok := s.userIdx[ownerKey]; ok {
+				delete(idx, sessionID)
+			}
+			if s.current[ownerKey] == sessionID {
+				delete(s.current, ownerKey)
+			}
+			count++
+		}
+	}
+
+	if count > 0 {
+		s.logger.Info("Cleaned up expired sessions", "count", count)
+	}
 }

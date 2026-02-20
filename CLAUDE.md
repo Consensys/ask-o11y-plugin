@@ -788,6 +788,68 @@ docker compose exec grafana curl http://mcp-grafana:8000/mcp
 # Sessions are stored via Grafana's UserStorage API
 ```
 
+## Session and Share Expiration
+
+The plugin automatically expires sessions and shares based on configurable TTL (Time-To-Live) values.
+
+### Environment Variables
+
+**Session TTL:**
+- `GF_PLUGIN_ASKO11Y_SESSION_TTL_DAYS` - Session expiration in days (default: 90)
+- Sessions older than this are automatically deleted
+- Applies to both in-memory and Redis storage
+- Set to desired number of days (must be positive integer)
+
+**Share TTL:**
+- `GF_PLUGIN_ASKO11Y_SHARE_TTL_DAYS` - Default share expiration in days (default: 90)
+- Used when creating shares without explicit expiration
+- Per-share expiration overrides still supported (1h, 1d, 7d, 30d, 90d, never)
+- Explicit "never" expiration uses this default as TTL
+
+**Example Configuration:**
+```bash
+export GF_PLUGIN_ASKO11Y_SESSION_TTL_DAYS=30
+export GF_PLUGIN_ASKO11Y_SHARE_TTL_DAYS=60
+```
+
+### Cleanup Behavior
+
+**In-memory Storage:**
+- Sessions: Periodic cleanup every 1 hour (configurable via `SessionCleanupInterval`)
+- Shares: Periodic cleanup every 1 hour (configurable via `ShareCleanupInterval`)
+- Expired data checked on access (returns "expired" error)
+- Cleanup goroutines remove expired sessions/shares proactively
+
+**Redis Storage:**
+- Native TTL expiration (automatic, no cleanup ticker needed)
+- Keys automatically removed when TTL expires
+- Expired data checked on access for double-verification
+- Recommended for production deployments
+
+### Data Structure
+
+All sessions include an `expiresAt` field (nullable timestamp):
+- New sessions: Set to `now + sessionTTL`
+- Existing sessions without `expiresAt`: Treated as non-expiring (backward compatibility)
+- Updates don't change expiration time
+
+All shares include an `expiresAt` field (nullable timestamp):
+- Explicit expiration: Set by user request
+- No explicit expiration: Uses `shareTTL` as default
+- Per-share overrides respected
+
+### API Behavior
+
+**Session Endpoints:**
+- `POST /api/sessions` - Creates session with TTL
+- `GET /api/sessions/{id}` - Returns 404 if expired
+- `GET /api/sessions` - Filters out expired sessions from list
+- Response includes `expiresAt` field (ISO 8601 timestamp)
+
+**Share Endpoints:**
+- `POST /api/sessions/share` - Creates share with default or explicit TTL
+- `GET /api/sessions/shared/{shareId}` - Returns 404 if expired
+
 ## Configuration Files
 
 - `provisioning/plugins/app.yaml` - Plugin & MCP server config (single-org, default)
