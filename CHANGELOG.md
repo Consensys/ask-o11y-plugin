@@ -5,6 +5,13 @@ All notable changes to the Ask O11y Grafana plugin will be documented in this fi
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.9](https://github.com/Consensys/ask-o11y-plugin/compare/v0.2.8...v0.2.9) (2026-02-20)
+
+
+### Features
+
+* **agent:** use alert runbook annotation during investigation ([#57](https://github.com/Consensys/ask-o11y-plugin/issues/57)) ([3f1bc5d](https://github.com/Consensys/ask-o11y-plugin/commit/3f1bc5d7b695a2b7033d9a32d79c1bb3f7df29a4))
+
 ## [0.2.8](https://github.com/Consensys/ask-o11y-plugin/compare/v0.2.7...v0.2.8) (2026-02-18)
 
 
