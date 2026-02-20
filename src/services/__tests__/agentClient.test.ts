@@ -13,6 +13,7 @@ function createMockBody(lines: string[]) {
         }
         return { done: true, value: undefined };
       },
+      cancel: jest.fn().mockResolvedValue(undefined),
       releaseLock: () => {},
     }),
   };
@@ -212,16 +213,22 @@ describe('reconnectToAgentRun', () => {
 
   it('should return false on SSE idle timeout', async () => {
     const callbacks = createMockCallbacks();
+    const cancel = jest.fn().mockResolvedValue(undefined);
+    const releaseLock = jest.fn();
     const hangingBody = {
       getReader: () => ({
         read: () => new Promise<never>(() => {}),
-        releaseLock: jest.fn(),
+        cancel,
+        releaseLock,
       }),
     } as unknown as ReadableStream<Uint8Array>;
 
     const result = await readSSEStream(hangingBody, callbacks, { idleTimeoutMs: 100 });
 
     expect(result).toBe(false);
+    expect(cancel).toHaveBeenCalledWith(expect.any(Error));
+    expect(releaseLock).toHaveBeenCalledTimes(1);
+    expect(cancel.mock.invocationCallOrder[0]).toBeLessThan(releaseLock.mock.invocationCallOrder[0]);
   });
 
   it('should not timeout when data arrives before idle deadline', async () => {

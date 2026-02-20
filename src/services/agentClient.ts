@@ -165,6 +165,7 @@ export async function readSSEStream(
       return true;
     }
     if (err instanceof SSEIdleTimeoutError) {
+      await reader.cancel(err);
       return false;
     }
     throw err;
