@@ -44,16 +44,23 @@ This project uses the following Claude Code plugins. They are configured in `.cl
 - Check `typescript-lsp` diagnostics for any TypeScript files you modified in `src/`
 - **Fix ALL critical, major, and medium severity issues** before proceeding
 
-#### Step 2: Code Review
+#### Step 2: OpenAPI Spec Validation (if API endpoints changed)
+- **REQUIRED if you modified any HTTP endpoints in `pkg/plugin/plugin.go`**
+- Update `pkg/plugin/openapi/openapi.json` to reflect endpoint changes
+- Run `nvm use 22 && npm run validate:openapi` to validate the spec
+- **Spec validation MUST pass before proceeding**
+- See [API Documentation](#api-documentation) section for detailed maintenance guidelines
+
+#### Step 3: Code Review
 - Run the `code-review` skill (via Skill tool with `skill: "code-review"`) on your changes
 - **Fix ALL critical, major, and medium severity issues** reported by the reviewer
 - Only low/info severity issues may be left as-is with justification
 
-#### Step 3: Code Simplification
+#### Step 4: Code Simplification
 - Run the `code-simplifier` agent (via Task tool with `subagent_type: "pr-review-toolkit:code-simplifier"`) on modified code
 - Apply simplifications that improve clarity without changing behavior
 
-#### Step 4: Remove AI Slop & Excessive Comments
+#### Step 5: Remove AI Slop & Excessive Comments
 - Review all modified code for AI-generated noise: remove unnecessary comments, redundant docstrings, and obvious explanations
 - Delete comments that merely restate the code (e.g., `// increment counter` above `counter++`)
 - Remove filler phrases in comments like "Note:", "Important:", "This function...", "Helper to..."
@@ -61,14 +68,15 @@ This project uses the following Claude Code plugins. They are configured in `.cl
 - Do NOT add comments, docstrings, or type annotations to code you didn't change
 - Only keep comments where the **why** is non-obvious — never comment the **what**
 
-#### Step 5: Tests & Lint
+#### Step 6: Tests & Lint
 - Run `nvm use 22 && npm run test:ci` (frontend unit tests)
 - Run `go test ./pkg/...` (backend tests)
 - Run `nvm use 22 && npm run lint` (linting)
 - Run `nvm use 22 && npm run typecheck` (type checking)
+- Run `nvm use 22 && npm run validate:openapi` (OpenAPI spec validation)
 - **Fix any failures** - iterate until all pass
 
-#### Step 6: PR Review (before commit/PR)
+#### Step 7: PR Review (before commit/PR)
 - Run the full `pr-review-toolkit:review-pr` and the skill for comprehensive analysis
 - Fix critical/major/medium issues from: code-reviewer, silent-failure-hunter, type-design-analyzer
 
@@ -755,6 +763,11 @@ RBAC checking pattern:
 1. Extract role from `req.Context()`
 2. Call `canAccessTool(role, toolName)`
 3. Return 403 if unauthorized
+
+**CRITICAL: After modifying routes:**
+1. Update `pkg/plugin/openapi/openapi.json` to reflect endpoint changes
+2. Run `nvm use 22 && npm run validate:openapi` to validate the spec
+3. Follow the complete quality workflow (see [Mandatory Quality Workflow](#mandatory-quality-workflow))
 
 ### Debugging Common Issues
 
