@@ -133,9 +133,8 @@ func (hm *HealthMonitor) checkServer(serverID string, client *Client) {
 		// Server failed
 		health.ErrorCount++
 		health.ConsecutiveFailures++
-		health.LastError = err.Error()
+		health.LastError = sanitizeError(err)
 
-		// Determine status based on consecutive failures
 		if health.ConsecutiveFailures >= 5 {
 			health.Status = StatusDisconnected
 		} else if health.ConsecutiveFailures >= 3 {
@@ -146,7 +145,7 @@ func (hm *HealthMonitor) checkServer(serverID string, client *Client) {
 
 		hm.logger.Warn("Health check failed",
 			"server", health.Name,
-			"error", err,
+			"error", health.LastError,
 			"consecutiveFailures", health.ConsecutiveFailures)
 
 	} else {

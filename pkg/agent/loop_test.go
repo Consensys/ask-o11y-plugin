@@ -28,7 +28,7 @@ func setupTestLoop(t *testing.T, llmResponses []ChatCompletionResponse) (*AgentL
 	}))
 
 	llmClient := NewLLMClient(log.DefaultLogger)
-	mcpProxy := mcp.NewProxy(log.DefaultLogger)
+	mcpProxy := mcp.NewProxy(context.Background(), log.DefaultLogger)
 	loop := NewAgentLoop(llmClient, mcpProxy, log.DefaultLogger)
 
 	return loop, llmServer.URL, llmServer.Close
@@ -270,7 +270,7 @@ func TestAgentLoop_ContextCancellation(t *testing.T) {
 	defer slowServer.Close()
 
 	llmClient := NewLLMClient(log.DefaultLogger)
-	mcpProxy := mcp.NewProxy(log.DefaultLogger)
+	mcpProxy := mcp.NewProxy(context.Background(), log.DefaultLogger)
 	loop := NewAgentLoop(llmClient, mcpProxy, log.DefaultLogger)
 
 	ctx, cancel := context.WithCancel(context.Background())

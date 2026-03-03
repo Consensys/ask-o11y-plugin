@@ -1,6 +1,7 @@
 package mcp
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -16,13 +17,15 @@ type Proxy struct {
 	logger        log.Logger
 	mu            sync.RWMutex
 	healthMonitor *HealthMonitor
+	ctx           context.Context
 }
 
 // NewProxy creates a new MCP proxy
-func NewProxy(logger log.Logger) *Proxy {
+func NewProxy(ctx context.Context, logger log.Logger) *Proxy {
 	p := &Proxy{
 		clients: make(map[string]*Client),
 		logger:  logger,
+		ctx:     ctx,
 	}
 	p.healthMonitor = NewHealthMonitor(p, logger)
 	return p
@@ -45,10 +48,6 @@ func (p *Proxy) GetHealthMonitor() *HealthMonitor {
 
 // UpdateConfig updates the proxy configuration with new server configs
 func (p *Proxy) UpdateConfig(configs []ServerConfig) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-
-	// Create a map of new configs
 	newConfigs := make(map[string]ServerConfig)
 	for _, config := range configs {
 		if config.Enabled {
@@ -56,19 +55,29 @@ func (p *Proxy) UpdateConfig(configs []ServerConfig) {
 		}
 	}
 
-	// Remove clients that are no longer in config
+	// Collect stale clients under lock, then close outside the lock
+	// to avoid holding mu while blocking on network I/O.
+	var stale []*Client
+
+	p.mu.Lock()
 	for id := range p.clients {
 		if _, exists := newConfigs[id]; !exists {
+			stale = append(stale, p.clients[id])
 			delete(p.clients, id)
 			p.logger.Info("Removed MCP client", "id", id)
 		}
 	}
-
-	// Add or update clients
 	for id, config := range newConfigs {
 		if _, exists := p.clients[id]; !exists {
-			p.clients[id] = NewClient(config, p.logger)
+			p.clients[id] = NewClient(p.ctx, config, p.logger)
 			p.logger.Info("Added MCP client", "id", id, "url", config.URL, "type", config.Type)
+		}
+	}
+	p.mu.Unlock()
+
+	for _, c := range stale {
+		if err := c.Close(); err != nil {
+			p.logger.Warn("Failed to close removed MCP client", "error", err)
 		}
 	}
 }
@@ -107,8 +116,8 @@ func (p *Proxy) ListTools() ([]Tool, error) {
 	for i := 0; i < len(clients); i++ {
 		res := <-results
 		if res.err != nil {
-			errors = append(errors, res.err.Error())
-			p.logger.Warn("Failed to list tools from server", "error", res.err)
+			errors = append(errors, sanitizeError(res.err))
+			p.logger.Warn("Failed to list tools from server", "error", sanitizeError(res.err))
 		} else {
 			allTools = append(allTools, res.tools...)
 		}
@@ -198,7 +207,7 @@ func (p *Proxy) handleInitialize(req MCPRequest) ([]byte, error) {
 func (p *Proxy) handleListTools(req MCPRequest) ([]byte, error) {
 	tools, err := p.ListTools()
 	if err != nil {
-		return p.errorResponse(req.ID, -32603, "Internal error", err.Error())
+		return p.errorResponse(req.ID, -32603, "Internal error", sanitizeError(err))
 	}
 
 	result := ListToolsResult{
@@ -216,7 +225,7 @@ func (p *Proxy) handleCallTool(req MCPRequest) ([]byte, error) {
 
 	result, err := p.CallTool(params.Name, params.Arguments)
 	if err != nil {
-		return p.errorResponse(req.ID, -32603, "Internal error", err.Error())
+		return p.errorResponse(req.ID, -32603, "Internal error", sanitizeError(err))
 	}
 
 	return p.successResponse(req.ID, result)
@@ -269,19 +278,46 @@ func (p *Proxy) GetServerCount() int {
 	return len(p.clients)
 }
 
-func (p *Proxy) EnsureServer(config ServerConfig) {
+// Close closes all MCP client connections managed by this proxy.
+func (p *Proxy) Close() {
 	p.mu.Lock()
-	defer p.mu.Unlock()
+	clients := make([]*Client, 0, len(p.clients))
+	for _, c := range p.clients {
+		clients = append(clients, c)
+	}
+	p.mu.Unlock()
 
+	for _, c := range clients {
+		if err := c.Close(); err != nil {
+			p.logger.Warn("Failed to close MCP client", "error", err)
+		}
+	}
+}
+
+func (p *Proxy) EnsureServer(config ServerConfig) {
+	// Capture replaced client under lock, then close it outside the lock
+	// to avoid holding mu while blocking on network I/O.
+	var replaced *Client
+
+	p.mu.Lock()
 	if existing, ok := p.clients[config.ID]; ok {
 		if existing.config.URL == config.URL && headersEqual(existing.config.Headers, config.Headers) {
+			p.mu.Unlock()
 			return
 		}
-		existing.Close()
+		replaced = existing
 		p.logger.Debug("Replacing MCP client", "id", config.ID)
 	}
 
-	p.clients[config.ID] = NewClient(config, p.logger)
+	p.clients[config.ID] = NewClient(p.ctx, config, p.logger)
+	p.mu.Unlock()
+
+	if replaced != nil {
+		if err := replaced.Close(); err != nil {
+			p.logger.Warn("Failed to close replaced MCP client", "id", config.ID, "error", err)
+		}
+	}
+
 	p.logger.Info("Ensured MCP client", "id", config.ID, "url", config.URL, "type", config.Type)
 }
 
