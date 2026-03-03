@@ -155,7 +155,12 @@ func NewPlugin(ctx context.Context, settings backend.AppInstanceSettings) (insta
 		promptRegistry, _ = NewPromptRegistry(PluginSettings{})
 	}
 
-	mcpProxy := mcp.NewProxy(logger)
+	// Use a standalone context instead of the SDK-provided ctx.
+	// The SDK ctx is scoped to the factory call and gets cancelled
+	// after NewPlugin returns, which would cancel all child contexts.
+	pluginCtx, cancel := context.WithCancel(context.Background())
+
+	mcpProxy := mcp.NewProxy(pluginCtx, logger)
 	mcpProxy.UpdateConfig(pluginSettings.MCPServers)
 
 	mcpProxy.StartHealthMonitoring(MCPHealthMonitoringInterval)
@@ -166,20 +171,21 @@ func NewPlugin(ctx context.Context, settings backend.AppInstanceSettings) (insta
 
 	redisClient, redisErr := createRedisClient(logger)
 	if redisErr == nil {
-		ctx, cancel := context.WithTimeout(context.Background(), RedisConnectionTimeout)
-		defer cancel()
-		if err := redisClient.Ping(ctx).Err(); err == nil {
-			rateLimiter := NewRedisRateLimiter(redisClient, logger)
-			shareStore = NewRedisShareStore(redisClient, logger, rateLimiter)
+		pingCtx, pingCancel := context.WithTimeout(pluginCtx, RedisConnectionTimeout)
+		pingErr := redisClient.Ping(pingCtx).Err()
+		pingCancel()
+		if pingErr == nil {
+			rateLimiter := NewRedisRateLimiter(pluginCtx, redisClient, logger)
+			shareStore = NewRedisShareStore(pluginCtx, redisClient, logger, rateLimiter)
 			usingRedis = true
 			logger.Info("Using Redis for session sharing", "redisAddr", getRedisAddr())
 		} else {
-			logger.Warn("Redis connection test failed, falling back to in-memory storage", "error", err)
+			logger.Warn("Redis connection test failed, falling back to in-memory storage", "error", pingErr.Error())
 			redisClient.Close()
 			redisClient = nil
 		}
 	} else {
-		logger.Warn("Failed to create Redis client, falling back to in-memory storage", "error", redisErr)
+		logger.Warn("Failed to create Redis client, falling back to in-memory storage", "error", redisErr.Error())
 	}
 
 	var runStore RunStoreInterface
@@ -191,11 +197,9 @@ func NewPlugin(ctx context.Context, settings backend.AppInstanceSettings) (insta
 		sessionStore = NewSessionStore(logger)
 		logger.Info("Using in-memory storage (not suitable for multi-replica deployments)")
 	} else {
-		runStore = NewRedisRunStore(redisClient, logger)
-		sessionStore = NewRedisSessionStore(redisClient, logger)
+		runStore = NewRedisRunStore(pluginCtx, redisClient, logger)
+		sessionStore = NewRedisSessionStore(pluginCtx, redisClient, logger)
 	}
-
-	pluginCtx, cancel := context.WithCancel(context.Background())
 
 	llmClient := agent.NewLLMClient(logger)
 	agentLoop := agent.NewAgentLoop(llmClient, mcpProxy, logger)
@@ -264,14 +268,18 @@ func (p *Plugin) Dispose() {
 	p.runCancels = nil
 	p.runCancelsMu.Unlock()
 
-	if p.cancel != nil {
-		p.cancel()
-	}
+	// Close proxy and Redis before cancelling context so that
+	// graceful shutdown I/O can still use the plugin context.
 	p.mcpProxy.StopHealthMonitoring()
+	p.mcpProxy.Close()
 	if p.redisClient != nil {
 		if err := p.redisClient.Close(); err != nil {
 			p.logger.Warn("Failed to close Redis client", "error", err)
 		}
+	}
+
+	if p.cancel != nil {
+		p.cancel()
 	}
 	p.logger.Info("Plugin disposed")
 }
@@ -391,7 +399,7 @@ func (p *Plugin) handleMCP(w http.ResponseWriter, r *http.Request) {
 	response, err := p.mcpProxy.HandleMCPRequest(body)
 	if err != nil {
 		p.logger.Error("Failed to handle MCP request", "error", err)
-		http.Error(w, fmt.Sprintf("Internal error: %v", err), http.StatusInternalServerError)
+		http.Error(w, "Internal error", http.StatusInternalServerError)
 		return
 	}
 
@@ -406,7 +414,7 @@ func (p *Plugin) handleMCPTools(w http.ResponseWriter, r *http.Request) {
 	tools, err := p.mcpProxy.ListTools()
 	if err != nil {
 		p.logger.Error("Failed to list tools", "error", err)
-		http.Error(w, fmt.Sprintf("Failed to list tools: %v", err), http.StatusInternalServerError)
+		http.Error(w, "Failed to list tools", http.StatusInternalServerError)
 		return
 	}
 
@@ -471,7 +479,7 @@ func (p *Plugin) handleMCPCallTool(w http.ResponseWriter, r *http.Request) {
 	result, err := p.mcpProxy.CallToolWithContext(req.Name, req.Arguments, orgID, req.OrgName, req.ScopeOrgId)
 	if err != nil {
 		p.logger.Error("Failed to call tool", "error", err)
-		http.Error(w, fmt.Sprintf("Failed to call tool: %v", err), http.StatusInternalServerError)
+		http.Error(w, "Failed to call tool", http.StatusInternalServerError)
 		return
 	}
 
@@ -565,14 +573,14 @@ func (p *Plugin) handleAgentRun(w http.ResponseWriter, r *http.Request) {
 	systemPrompt, err := p.promptRegistry.BuildSystemPrompt(toolCtx)
 	if err != nil {
 		p.logger.Error("Failed to build system prompt", "error", err)
-		http.Error(w, fmt.Sprintf("Failed to build system prompt: %v", err), http.StatusInternalServerError)
+		http.Error(w, "Failed to build system prompt", http.StatusInternalServerError)
 		return
 	}
 
 	userPrompt, err := p.promptRegistry.BuildUserPrompt(req.Type, req.Message, toolCtx)
 	if err != nil {
 		p.logger.Error("Failed to build user prompt", "error", err, "type", req.Type)
-		http.Error(w, fmt.Sprintf("Failed to build user prompt: %v", err), http.StatusBadRequest)
+		http.Error(w, "Failed to build user prompt", http.StatusBadRequest)
 		return
 	}
 
@@ -1006,7 +1014,7 @@ func (p *Plugin) handleCreateShare(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		p.logger.Error("Failed to create share", "error", err)
-		http.Error(w, fmt.Sprintf("Failed to create share: %v", err), http.StatusInternalServerError)
+		http.Error(w, "Failed to create share", http.StatusInternalServerError)
 		return
 	}
 
