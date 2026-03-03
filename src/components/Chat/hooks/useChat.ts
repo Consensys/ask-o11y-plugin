@@ -78,9 +78,11 @@ export function useChat(
   const [retryCount, setRetryCount] = useState(0);
   const [toolCalls, setToolCalls] = useState<Map<string, RenderedToolCall>>(new Map());
   const [messageQueue, setMessageQueue] = useState<string[]>([]);
+  const queuedForSessionRef = useRef<string | null>(null);
 
   const abortControllerRef = useRef<AbortController | null>(null);
   const activeRunIdRef = useRef<string | null>(null);
+  const activeSessionIdRef = useRef<string | null>(null);
 
   const sessionManager = useSessionManager(
     orgId,
@@ -103,21 +105,50 @@ export function useChat(
   }, [sessionIdFromUrl, readOnly, initialMessage]);
 
   useEffect(() => {
-    if (isAutoScroll && bottomSpacerRef.current) {
-      bottomSpacerRef.current.scrollIntoView({ block: 'end', behavior: 'auto' });
+    if (!isAutoScroll) {
+      return;
     }
+    const frame = requestAnimationFrame(() => {
+      chatContainerRef.current?.scrollTo(0, chatContainerRef.current.scrollHeight);
+    });
+    return () => cancelAnimationFrame(frame);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [chatHistory]);
+  }, [chatHistory, isGenerating, toolCalls]);
 
+  // The scroll container lives inside a Grafana Scenes subtree and may not be
+  // mounted when this effect first runs. Poll via rAF until it appears, then
+  // attach a scroll listener to toggle auto-scroll based on proximity to bottom.
+  const hasMessages = chatHistory.length > 0;
   useEffect(() => {
     const SCROLL_THRESHOLD = 50;
+    let frameId: number;
+    let boundContainer: HTMLDivElement | null = null;
+
     function handleScroll(): void {
-      const atBottom = window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - SCROLL_THRESHOLD;
+      const c = chatContainerRef.current;
+      if (!c) {
+        return;
+      }
+      const atBottom = c.scrollHeight - c.scrollTop - c.clientHeight < SCROLL_THRESHOLD;
       setIsAutoScroll(atBottom);
     }
-    window.addEventListener('scroll', handleScroll, { passive: true });
-    return () => window.removeEventListener('scroll', handleScroll);
-  }, []);
+
+    function pollForContainer(): void {
+      const container = chatContainerRef.current;
+      if (!container) {
+        frameId = requestAnimationFrame(pollForContainer);
+        return;
+      }
+      boundContainer = container;
+      container.addEventListener('scroll', handleScroll, { passive: true });
+    }
+
+    pollForContainer();
+    return () => {
+      cancelAnimationFrame(frameId);
+      boundContainer?.removeEventListener('scroll', handleScroll);
+    };
+  }, [hasMessages]);
 
   useEffect(() => {
     return () => {
@@ -222,7 +253,11 @@ export function useChat(
     }
 
     if (isGenerating) {
-      setMessageQueue((prev) => [...prev, validatedInput]);
+      // Only queue messages for the current session to prevent chat leaking
+      if (!queuedForSessionRef.current || queuedForSessionRef.current === sessionManager.currentSessionId) {
+        setMessageQueue((prev) => [...prev, validatedInput]);
+        queuedForSessionRef.current = sessionManager.currentSessionId;
+      }
       setCurrentInput('');
       return;
     }
@@ -408,12 +443,40 @@ export function useChat(
   // Drain queued messages after generation completes.
   useEffect(() => {
     if (!isGenerating && messageQueue.length > 0) {
-      const [nextMessage, ...remaining] = messageQueue;
-      setMessageQueue(remaining);
-      sendMessage(nextMessage);
+      // Only process queued messages if they belong to the current session
+      if (queuedForSessionRef.current === sessionManager.currentSessionId) {
+        const [nextMessage, ...remaining] = messageQueue;
+        setMessageQueue(remaining);
+        sendMessage(nextMessage);
+      } else {
+        // Clear queue if session changed to prevent chat leaking
+        setMessageQueue([]);
+        queuedForSessionRef.current = null;
+      }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isGenerating, messageQueue.length]);
+  }, [isGenerating, messageQueue.length, sessionManager.currentSessionId]);
+
+  // Abort active generation and clear queue when switching sessions to prevent chat leaking
+  useEffect(() => {
+    const prevSessionId = activeSessionIdRef.current;
+    activeSessionIdRef.current = sessionManager.currentSessionId;
+
+    if (prevSessionId !== null && prevSessionId !== sessionManager.currentSessionId) {
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+        abortControllerRef.current = null;
+      }
+      if (activeRunIdRef.current) {
+        cancelAgentRun(activeRunIdRef.current, orgId).catch(() => {});
+        activeRunIdRef.current = null;
+      }
+      setIsGenerating(false);
+      setToolCalls(new Map());
+      setMessageQueue([]);
+      queuedForSessionRef.current = null;
+    }
+  }, [sessionManager.currentSessionId, orgId]);
 
   const handleKeyPress = (e: React.KeyboardEvent): void => {
     if (e.key === 'Enter' && !e.shiftKey) {

@@ -1,8 +1,4 @@
-/**
- * Input Validation Service
- * Provides comprehensive validation and sanitization for user inputs
- * to prevent XSS, injection attacks, and other security vulnerabilities
- */
+import DOMPurify from 'dompurify';
 
 export class ValidationService {
   // Maximum allowed input length to prevent DoS
@@ -156,7 +152,7 @@ export class ValidationService {
   }
 
   /**
-   * Sanitizes message content for safe display
+   * Sanitizes message content for safe display using DOMPurify
    * @param content Message content
    * @returns Sanitized content
    */
@@ -165,18 +161,10 @@ export class ValidationService {
       return '';
     }
 
-    // Remove potentially dangerous HTML tags
-    const sanitized = content
-      .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
-      .replace(/<iframe\b[^<]*(?:(?!<\/iframe>)<[^<]*)*<\/iframe>/gi, '')
-      .replace(/<object\b[^<]*(?:(?!<\/object>)<[^<]*)*<\/object>/gi, '')
-      .replace(/<embed\b[^<]*(?:(?!<\/embed>)<[^<]*)*<\/embed>/gi, '')
-      .replace(/<link\b[^>]*>/gi, '')
-      .replace(/<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi, '');
-
-    // Remove event handlers
-    const eventHandlerPattern = /\s*on\w+\s*=\s*["']?[^"']*["']?/gi;
-    return sanitized.replace(eventHandlerPattern, '');
+    return DOMPurify.sanitize(content, {
+      ALLOWED_TAGS: ['b', 'i', 'em', 'strong', 'code', 'pre', 'br', 'p', 'ul', 'ol', 'li', 'a'],
+      ALLOWED_ATTR: ['href', 'target', 'rel'],
+    });
   }
 
   /**
@@ -185,9 +173,7 @@ export class ValidationService {
    * @returns Escaped text
    */
   static escapeHTML(text: string): string {
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
+    return DOMPurify.sanitize(text, { ALLOWED_TAGS: [] });
   }
 
   /**
@@ -283,19 +269,13 @@ export class ValidationService {
   }
 
   /**
-   * Sanitize HTML content
+   * Sanitize HTML content using DOMPurify
    */
   static sanitizeHTML(html: string): string {
-    const replacements: { [key: string]: string } = {
-      '&': '&amp;',
-      '<': '&lt;',
-      '>': '&gt;',
-      '"': '&quot;',
-      "'": '&#x27;',
-      '/': '&#x2F;',
-    };
-
-    return html.replace(/[&<>"'\/]/g, (char) => replacements[char]);
+    return DOMPurify.sanitize(html, {
+      ALLOWED_TAGS: ['b', 'i', 'em', 'strong', 'code', 'pre', 'br', 'p', 'ul', 'ol', 'li', 'a', 'span', 'div'],
+      ALLOWED_ATTR: ['href', 'target', 'rel'],
+    });
   }
 
   /**

@@ -1,4 +1,5 @@
 import { useMemo } from 'react';
+import { useLocation } from 'react-router-dom';
 
 export interface UseAlertInvestigationResult {
   error: string | null;
@@ -18,8 +19,10 @@ const INACTIVE: UseAlertInvestigationResult = {
 };
 
 export function useAlertInvestigation(): UseAlertInvestigationResult {
+  const location = useLocation();
+
   return useMemo(() => {
-    const searchParams = new URLSearchParams(window.location.search);
+    const searchParams = new URLSearchParams(location.search);
     const type = searchParams.get('type');
     const alertName = searchParams.get('alertName');
 
@@ -42,5 +45,5 @@ export function useAlertInvestigation(): UseAlertInvestigationResult {
       initialMessageType: 'investigation',
       isInvestigationMode: true,
     };
-  }, []);
+  }, [location.search]);
 }

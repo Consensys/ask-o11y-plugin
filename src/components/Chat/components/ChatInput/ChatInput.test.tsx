@@ -246,7 +246,7 @@ describe('ChatInput', () => {
       render(<ChatInput {...defaultProps} queuedMessageCount={2} />);
 
       expect(screen.getByTestId('chat-queue-indicator')).toBeInTheDocument();
-      expect(screen.getByText('2 queued')).toBeInTheDocument();
+      expect(screen.getByText(/2 queued/)).toBeInTheDocument();
     });
 
     it('should hide queue indicator when no messages queued', () => {

@@ -350,24 +350,24 @@ describe('ValidationService', () => {
   });
 
   describe('sanitizeHTML', () => {
-    it('should escape ampersand', () => {
-      expect(ValidationService.sanitizeHTML('a & b')).toBe('a &amp; b');
+    it('should pass through plain text unchanged', () => {
+      expect(ValidationService.sanitizeHTML('a & b')).toBe('a & b');
     });
 
-    it('should escape less than', () => {
-      expect(ValidationService.sanitizeHTML('<tag>')).toBe('&lt;tag&gt;');
+    it('should remove dangerous script tags', () => {
+      expect(ValidationService.sanitizeHTML('<script>alert(1)</script>hello')).not.toContain('<script>');
     });
 
-    it('should escape quotes', () => {
-      expect(ValidationService.sanitizeHTML('"test"')).toBe('&quot;test&quot;');
+    it('should allow safe HTML tags', () => {
+      expect(ValidationService.sanitizeHTML('<b>bold</b>')).toBe('<b>bold</b>');
     });
 
-    it('should escape single quotes', () => {
-      expect(ValidationService.sanitizeHTML("it's")).toBe('it&#x27;s');
+    it('should remove event handler attributes', () => {
+      expect(ValidationService.sanitizeHTML('<div onclick="evil()">click</div>')).not.toContain('onclick');
     });
 
-    it('should escape forward slash', () => {
-      expect(ValidationService.sanitizeHTML('a/b')).toBe('a&#x2F;b');
+    it('should pass through forward slash in plain text', () => {
+      expect(ValidationService.sanitizeHTML('a/b')).toBe('a/b');
     });
   });
 

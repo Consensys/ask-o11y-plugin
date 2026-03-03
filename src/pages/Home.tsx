@@ -1,4 +1,5 @@
 import React, { useCallback } from 'react';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { Alert, Button, Spinner } from '@grafana/ui';
 import { testIds } from '../components/testIds';
 import { Chat } from '../components/Chat';
@@ -12,14 +13,15 @@ interface HomeProps {
 
 const CONTAINER_STYLE = { height: '100%', maxHeight: '100vh' };
 
-function handleStartNormalChat(): void {
-  window.history.replaceState({}, '', window.location.pathname);
-  window.location.reload();
-}
-
 function Home({ pluginSettings }: HomeProps): React.ReactElement {
+  const navigate = useNavigate();
+  const location = useLocation();
   const investigation = useAlertInvestigation();
   const { sessionIdFromUrl, updateUrlWithSession, clearUrlSession, isValidated } = useSessionUrl();
+
+  const handleStartNormalChat = useCallback(() => {
+    navigate(location.pathname, { replace: true });
+  }, [navigate, location.pathname]);
 
   const handleSessionIdChange = useCallback(
     (newSessionId: string | null) => {
