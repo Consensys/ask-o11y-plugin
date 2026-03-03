@@ -76,8 +76,8 @@ func (t *customRoundTripper) RoundTrip(req *http.Request) (*http.Response, error
 }
 
 // NewClient creates a new MCP client
-func NewClient(config ServerConfig, logger log.Logger) *Client {
-	ctx, cancel := context.WithCancel(context.Background())
+func NewClient(parent context.Context, config ServerConfig, logger log.Logger) *Client {
+	ctx, cancel := context.WithCancel(parent)
 
 	return &Client{
 		config:            config,
@@ -340,8 +340,7 @@ func (c *Client) listMCPTools() ([]Tool, error) {
 		return nil, err
 	}
 
-	// Use a fresh background context with timeout for listing tools
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(c.ctx, 10*time.Second)
 	defer cancel()
 
 	result, err := c.session.ListTools(ctx, &mcpsdk.ListToolsParams{})
@@ -424,7 +423,7 @@ func (c *Client) callMCPToolWithContext(toolName string, arguments map[string]in
 		c.logger.Debug("Calling tool with org context", "server", c.config.ID, "tool", toolName, "orgID", orgID, "orgName", orgName, "scopeOrgId", scopeOrgId)
 
 		if err := c.connectMCPWithOrgContext(orgID, orgName, scopeOrgId); err != nil {
-			c.logger.Error("Failed to connect to server with org context", "server", c.config.ID, "error", err, "orgID", orgID, "orgName", orgName, "scopeOrgId", scopeOrgId)
+			c.logger.Error("Failed to connect to server with org context", "server", c.config.ID, "error", sanitizeError(err))
 			return nil, err
 		}
 	} else {
@@ -444,9 +443,7 @@ func (c *Client) callMCPToolWithContext(toolName string, arguments map[string]in
 		return nil, fmt.Errorf("session not established for tool call")
 	}
 
-	// Use a fresh background context with timeout for tool calls
-	// This prevents issues with connection reuse and canceled parent contexts
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(c.ctx, 30*time.Second)
 	defer cancel()
 
 	result, err := session.CallTool(ctx, &mcpsdk.CallToolParams{
@@ -456,7 +453,7 @@ func (c *Client) callMCPToolWithContext(toolName string, arguments map[string]in
 	if err != nil {
 		// If the call failed due to connection issues, try to reconnect once
 		if strings.Contains(err.Error(), "connection closed") || strings.Contains(err.Error(), "client is closing") {
-			c.logger.Warn("Connection closed, attempting to reconnect", "error", err, "server", c.config.ID)
+			c.logger.Warn("Connection closed, attempting to reconnect", "error", sanitizeError(err), "server", c.config.ID)
 
 			// Try to reconnect - use the same connection method as the original call
 			// to preserve org context headers if they were used
@@ -476,7 +473,7 @@ func (c *Client) callMCPToolWithContext(toolName string, arguments map[string]in
 			}
 
 			if reconnectErr != nil {
-				c.logger.Error("Failed to reconnect after connection closed", "error", reconnectErr, "server", c.config.ID)
+				c.logger.Error("Failed to reconnect after connection closed", "error", sanitizeError(reconnectErr), "server", c.config.ID)
 				return nil, fmt.Errorf("failed to reconnect: %w", reconnectErr)
 			}
 
@@ -489,8 +486,7 @@ func (c *Client) callMCPToolWithContext(toolName string, arguments map[string]in
 				return nil, fmt.Errorf("session not established after reconnection")
 			}
 
-			// Retry the tool call with a fresh context
-			retryCtx, retryCancel := context.WithTimeout(context.Background(), 30*time.Second)
+			retryCtx, retryCancel := context.WithTimeout(c.ctx, 30*time.Second)
 			defer retryCancel()
 
 			result, err = session.CallTool(retryCtx, &mcpsdk.CallToolParams{
@@ -498,11 +494,11 @@ func (c *Client) callMCPToolWithContext(toolName string, arguments map[string]in
 				Arguments: arguments,
 			})
 			if err != nil {
-				c.logger.Error("Failed to call tool after reconnection", "error", err, "server", c.config.ID, "tool", toolName)
+				c.logger.Error("Failed to call tool after reconnection", "error", sanitizeError(err), "server", c.config.ID, "tool", toolName)
 				return nil, fmt.Errorf("failed to call tool after reconnection: %w", err)
 			}
 		} else {
-			c.logger.Error("Failed to call tool", "error", err, "server", c.config.ID, "tool", toolName)
+			c.logger.Error("Failed to call tool", "error", sanitizeError(err), "server", c.config.ID, "tool", toolName)
 			return nil, fmt.Errorf("failed to call tool: %w", err)
 		}
 	}
@@ -583,8 +579,8 @@ func (c *Client) listOpenAPITools() ([]Tool, error) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("failed to fetch OpenAPI spec: status %d, body: %s", resp.StatusCode, string(body))
+		io.Copy(io.Discard, resp.Body)
+		return nil, fmt.Errorf("failed to fetch OpenAPI spec: status %d", resp.StatusCode)
 	}
 
 	var spec map[string]interface{}
@@ -761,8 +757,8 @@ func (c *Client) listStandardTools() ([]Tool, error) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("failed to list tools: status %d, body: %s", resp.StatusCode, string(body))
+		io.Copy(io.Discard, resp.Body)
+		return nil, fmt.Errorf("failed to list tools: status %d", resp.StatusCode)
 	}
 
 	var result struct {
@@ -1010,7 +1006,7 @@ func (c *Client) callOpenAPIToolWithContext(toolName string, arguments map[strin
 			Content: []ContentBlock{
 				{
 					Type: "text",
-					Text: fmt.Sprintf("Error: %s", string(respBody)),
+					Text: fmt.Sprintf("Tool call failed with status: %d", resp.StatusCode),
 				},
 			},
 			IsError: true,
@@ -1079,12 +1075,12 @@ func (c *Client) callStandardTool(toolName string, arguments map[string]interfac
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
+		io.Copy(io.Discard, resp.Body)
 		return &CallToolResult{
 			Content: []ContentBlock{
 				{
 					Type: "text",
-					Text: fmt.Sprintf("Error: %s", string(body)),
+					Text: fmt.Sprintf("Tool call failed with status: %d", resp.StatusCode),
 				},
 			},
 			IsError: true,
@@ -1097,6 +1093,22 @@ func (c *Client) callStandardTool(toolName string, arguments map[string]interfac
 	}
 
 	return &result, nil
+}
+
+const maxErrorLen = 512
+
+// sanitizeError returns a truncated error string safe for logging.
+// Uses rune-safe slicing to avoid cutting multi-byte characters.
+func sanitizeError(err error) string {
+	if err == nil {
+		return ""
+	}
+	msg := err.Error()
+	runes := []rune(msg)
+	if len(runes) > maxErrorLen {
+		return string(runes[:maxErrorLen]) + "...(truncated)"
+	}
+	return msg
 }
 
 // isHTTPMethod checks if the given string is a valid HTTP method

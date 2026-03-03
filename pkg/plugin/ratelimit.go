@@ -67,13 +67,15 @@ func (r *InMemoryRateLimiter) CheckLimit(userID int64) bool {
 type RedisRateLimiter struct {
 	client *redis.Client
 	logger log.Logger
+	ctx    context.Context
 }
 
 // NewRedisRateLimiter creates a new Redis-backed rate limiter
-func NewRedisRateLimiter(client *redis.Client, logger log.Logger) *RedisRateLimiter {
+func NewRedisRateLimiter(ctx context.Context, client *redis.Client, logger log.Logger) *RedisRateLimiter {
 	return &RedisRateLimiter{
 		client: client,
 		logger: logger,
+		ctx:    ctx,
 	}
 }
 
@@ -81,8 +83,7 @@ func NewRedisRateLimiter(client *redis.Client, logger log.Logger) *RedisRateLimi
 func (r *RedisRateLimiter) CheckLimit(userID int64) bool {
 	rateLimitKey := fmt.Sprintf("ratelimit:%d", userID)
 
-	// Increment counter
-	ctx, cancel := getContextWithTimeout(RedisOpTimeout)
+	ctx, cancel := context.WithTimeout(r.ctx, RedisOpTimeout)
 	defer cancel()
 	count, err := r.client.Incr(ctx, rateLimitKey).Result()
 	if err != nil {
@@ -93,7 +94,7 @@ func (r *RedisRateLimiter) CheckLimit(userID int64) bool {
 
 	// Set TTL on first increment
 	if count == 1 {
-		ctx2, cancel2 := getContextWithTimeout(RedisOpTimeout)
+		ctx2, cancel2 := context.WithTimeout(r.ctx, RedisOpTimeout)
 		defer cancel2()
 		if err := r.client.Expire(ctx2, rateLimitKey, ShareRateLimitWindow).Err(); err != nil {
 			r.logger.Warn("Failed to set rate limit TTL", "error", err, "userId", userID)
@@ -108,6 +109,6 @@ func (r *RedisRateLimiter) CheckLimit(userID int64) bool {
 	return true
 }
 
-func getContextWithTimeout(timeout time.Duration) (context.Context, context.CancelFunc) {
-	return context.WithTimeout(context.Background(), timeout)
+func redisContext(parent context.Context, timeout time.Duration) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(parent, timeout)
 }

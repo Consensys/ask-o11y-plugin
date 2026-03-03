@@ -81,7 +81,7 @@ func (c *LLMClient) ChatCompletion(ctx context.Context, req ChatCompletionReques
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("LLM returned status %d: %s", resp.StatusCode, string(respBody))
+		return nil, fmt.Errorf("LLM returned status %d", resp.StatusCode)
 	}
 
 	var result ChatCompletionResponse
