@@ -36,6 +36,7 @@ jobs:
             viz
             backend
             ui
+            frontend
             deps
             release
             ci

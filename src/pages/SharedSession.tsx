@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useMemo } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { Alert, Button } from '@grafana/ui';
 import { sessionShareService, SharedSession as SharedSessionType } from '../services/sessionShare';
 import { Chat } from '../components/Chat';
@@ -32,27 +32,21 @@ function getErrorMessage(err: unknown): string {
   return 'Failed to load shared session. Please try again later.';
 }
 
-function getBasePath(): string {
-  const currentPath = window.location.pathname;
-  if (currentPath.includes('/shared/')) {
-    return currentPath.split('/shared/')[0];
-  }
-  return currentPath.replace(/\/shared\/.*$/, '');
-}
-
 function noop(): void {}
 
 export function SharedSession(): React.ReactElement {
   const { shareId } = useParams<{ shareId: string }>();
   const navigate = useNavigate();
+  const location = useLocation();
   const [sharedSession, setSharedSession] = useState<SharedSessionType | null>(null);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [importError, setImportError] = useState<string | null>(null);
   const [importing, setImporting] = useState(false);
 
   useEffect(() => {
     if (!shareId) {
-      setError('Share ID is required');
+      setLoadError('Share ID is required');
       setLoading(false);
       return;
     }
@@ -63,14 +57,14 @@ export function SharedSession(): React.ReactElement {
 
         if (!session.messages || session.messages.length === 0) {
           console.error('[SharedSession] Shared session has no messages');
-          setError('This shared session has no messages.');
+          setLoadError('This shared session has no messages.');
           return;
         }
 
         setSharedSession(session);
       } catch (err) {
         console.error('[SharedSession] Failed to load shared session:', err);
-        setError(getErrorMessage(err));
+        setLoadError(getErrorMessage(err));
       } finally {
         setLoading(false);
       }
@@ -84,6 +78,7 @@ export function SharedSession(): React.ReactElement {
       return;
     }
 
+    setImportError(null);
     setImporting(true);
     try {
       const messages = convertToMessages(sharedSession.messages);
@@ -91,11 +86,12 @@ export function SharedSession(): React.ReactElement {
 
       await new Promise((resolve) => setTimeout(resolve, NAVIGATION_DELAY_MS));
 
-      const basePath = getBasePath();
-      window.location.href = `${window.location.origin}${basePath || '/'}?sessionId=${newSession.id}`;
+      // Navigate back to the plugin root, stripping the /shared/:shareId suffix
+      const basePath = location.pathname.replace(/\/shared\/[^/]+$/, '');
+      navigate({ pathname: basePath || '/', search: `?sessionId=${newSession.id}` }, { replace: true });
     } catch (err) {
       console.error('[SharedSession] Failed to import session:', err);
-      alert('Failed to import session. Please try again.');
+      setImportError('Failed to import session. Please try again.');
     } finally {
       setImporting(false);
     }
@@ -122,12 +118,12 @@ export function SharedSession(): React.ReactElement {
     );
   }
 
-  if (error || !session) {
+  if (loadError || !session) {
     return (
       <div className="min-h-full w-full flex items-center justify-center p-4">
         <div className="max-w-md w-full">
           <Alert title="Error" severity="error">
-            {error || 'Failed to load shared session'}
+            {loadError || 'Failed to load shared session'}
           </Alert>
           <div className="mt-4">
             <Button variant="primary" onClick={() => navigate('/')}>
@@ -156,6 +152,13 @@ export function SharedSession(): React.ReactElement {
           </div>
         </div>
       </div>
+      {importError && (
+        <div className="px-3 pt-2 flex-shrink-0">
+          <Alert title="Import failed" severity="error">
+            {importError}
+          </Alert>
+        </div>
+      )}
       <div className="flex-1 flex flex-col min-h-0">
         <Chat
           pluginSettings={EMPTY_PLUGIN_SETTINGS}

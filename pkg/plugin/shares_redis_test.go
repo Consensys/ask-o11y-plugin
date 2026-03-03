@@ -33,7 +33,8 @@ func TestRedisShareStore_CreateShare(t *testing.T) {
 	client := createTestRedisClient(t)
 	defer client.Close()
 
-	store := NewRedisShareStore(client, log.DefaultLogger, NewRedisRateLimiter(client, log.DefaultLogger))
+	ctx := context.Background()
+	store := NewRedisShareStore(ctx, client, log.DefaultLogger, NewRedisRateLimiter(ctx, client, log.DefaultLogger))
 	sessionData := []byte(`{"id":"session-123","messages":[{"role":"user","content":"test"}]}`)
 
 	expiresInHours := 7 * 24 // 7 days in hours
@@ -66,7 +67,8 @@ func TestRedisShareStore_GetShare(t *testing.T) {
 	client := createTestRedisClient(t)
 	defer client.Close()
 
-	store := NewRedisShareStore(client, log.DefaultLogger, NewRedisRateLimiter(client, log.DefaultLogger))
+	ctx := context.Background()
+	store := NewRedisShareStore(ctx, client, log.DefaultLogger, NewRedisRateLimiter(ctx, client, log.DefaultLogger))
 	sessionData := []byte(`{"id":"session-123","messages":[{"role":"user","content":"test"}]}`)
 
 	share, err := store.CreateShare("session-123", sessionData, 1, 100, nil)
@@ -91,7 +93,8 @@ func TestRedisShareStore_GetShare_NotFound(t *testing.T) {
 	client := createTestRedisClient(t)
 	defer client.Close()
 
-	store := NewRedisShareStore(client, log.DefaultLogger, NewRedisRateLimiter(client, log.DefaultLogger))
+	ctx := context.Background()
+	store := NewRedisShareStore(ctx, client, log.DefaultLogger, NewRedisRateLimiter(ctx, client, log.DefaultLogger))
 
 	_, err := store.GetShare("non-existent")
 	if err == nil {
@@ -106,7 +109,8 @@ func TestRedisShareStore_DeleteShare(t *testing.T) {
 	client := createTestRedisClient(t)
 	defer client.Close()
 
-	store := NewRedisShareStore(client, log.DefaultLogger, NewRedisRateLimiter(client, log.DefaultLogger))
+	ctx := context.Background()
+	store := NewRedisShareStore(ctx, client, log.DefaultLogger, NewRedisRateLimiter(ctx, client, log.DefaultLogger))
 	sessionData := []byte(`{"id":"session-123","messages":[{"role":"user","content":"test"}]}`)
 
 	share, err := store.CreateShare("session-123", sessionData, 1, 100, nil)
@@ -129,7 +133,8 @@ func TestRedisShareStore_GetSharesBySession(t *testing.T) {
 	client := createTestRedisClient(t)
 	defer client.Close()
 
-	store := NewRedisShareStore(client, log.DefaultLogger, NewRedisRateLimiter(client, log.DefaultLogger))
+	ctx := context.Background()
+	store := NewRedisShareStore(ctx, client, log.DefaultLogger, NewRedisRateLimiter(ctx, client, log.DefaultLogger))
 	sessionData := []byte(`{"id":"session-123","messages":[{"role":"user","content":"test"}]}`)
 
 	// Create multiple shares for the same session
@@ -155,7 +160,8 @@ func TestRedisShareStore_RateLimit(t *testing.T) {
 	client := createTestRedisClient(t)
 	defer client.Close()
 
-	store := NewRedisShareStore(client, log.DefaultLogger, NewRedisRateLimiter(client, log.DefaultLogger))
+	ctx := context.Background()
+	store := NewRedisShareStore(ctx, client, log.DefaultLogger, NewRedisRateLimiter(ctx, client, log.DefaultLogger))
 	sessionData := []byte(`{"id":"session-123","messages":[{"role":"user","content":"test"}]}`)
 
 	// Create 50 shares (should succeed)
@@ -180,7 +186,8 @@ func TestRedisShareStore_RateLimit_ResetsAfterHour(t *testing.T) {
 	client := createTestRedisClient(t)
 	defer client.Close()
 
-	store := NewRedisShareStore(client, log.DefaultLogger, NewRedisRateLimiter(client, log.DefaultLogger))
+	ctx := context.Background()
+	store := NewRedisShareStore(ctx, client, log.DefaultLogger, NewRedisRateLimiter(ctx, client, log.DefaultLogger))
 	sessionData := []byte(`{"id":"session-123","messages":[{"role":"user","content":"test"}]}`)
 
 	// Create 50 shares
@@ -198,7 +205,6 @@ func TestRedisShareStore_RateLimit_ResetsAfterHour(t *testing.T) {
 	}
 
 	// Manually expire the rate limit key to simulate time passing
-	ctx := context.Background()
 	rateLimitKey := "ratelimit:100"
 	client.Del(ctx, rateLimitKey)
 
@@ -213,7 +219,8 @@ func TestRedisShareStore_Expiration(t *testing.T) {
 	client := createTestRedisClient(t)
 	defer client.Close()
 
-	store := NewRedisShareStore(client, log.DefaultLogger, NewRedisRateLimiter(client, log.DefaultLogger))
+	ctx := context.Background()
+	store := NewRedisShareStore(ctx, client, log.DefaultLogger, NewRedisRateLimiter(ctx, client, log.DefaultLogger))
 	sessionData := []byte(`{"id":"session-123","messages":[{"role":"user","content":"test"}]}`)
 
 	// Create share with 1 day expiration (24 hours)
@@ -230,7 +237,6 @@ func TestRedisShareStore_Expiration(t *testing.T) {
 	}
 
 	// Check that TTL is set (should be approximately 24 hours)
-	ctx := context.Background()
 	shareKey := "share:" + share.ShareID
 	ttl := client.TTL(ctx, shareKey).Val()
 	if ttl <= 0 {

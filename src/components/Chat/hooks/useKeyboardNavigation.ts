@@ -1,39 +1,19 @@
-/**
- * Keyboard Navigation Hook
- * Provides keyboard shortcuts and navigation support for the chat interface
- */
+import { useEffect, useCallback, RefObject } from 'react';
 
-import { useEffect, useCallback } from 'react';
-
-interface KeyboardShortcuts {
-  onNewChat?: () => void;
-  onClearChat?: () => void;
-  onOpenHistory?: () => void;
-  onFocusInput?: () => void;
-  onToggleTheme?: () => void;
-  onSearch?: () => void;
-}
-
-export function useKeyboardNavigation({
-  onNewChat,
-  onClearChat,
-  onOpenHistory,
-  onFocusInput,
-  onToggleTheme,
-  onSearch,
-}: KeyboardShortcuts) {
+export function useKeyboardNavigation(containerRef: RefObject<HTMLElement>) {
   const handleKeyDown = useCallback(
     (event: KeyboardEvent) => {
-      // Check if user is typing in an input/textarea
+      if (containerRef.current && !containerRef.current.contains(event.target as Node)) {
+        return;
+      }
+
       const isInputActive =
         document.activeElement?.tagName === 'INPUT' ||
         document.activeElement?.tagName === 'TEXTAREA' ||
         document.activeElement?.getAttribute('contenteditable') === 'true';
 
-      // Global shortcuts (work even in inputs)
       if (event.key === 'Escape') {
-        // Close any open modals or dialogs
-        const modal = document.querySelector('[role="dialog"]');
+        const modal = containerRef.current?.querySelector('[role="dialog"]');
         if (modal) {
           const closeButton = modal.querySelector('[aria-label*="Close"]') as HTMLElement;
           closeButton?.click();
@@ -41,70 +21,8 @@ export function useKeyboardNavigation({
         return;
       }
 
-      // Don't trigger shortcuts when typing
-      if (isInputActive && !event.metaKey && !event.ctrlKey) {
-        return;
-      }
-
-      // Cmd/Ctrl + K: Focus chat input
-      if ((event.metaKey || event.ctrlKey) && event.key === 'k') {
-        event.preventDefault();
-        onFocusInput?.();
-        return;
-      }
-
-      // Cmd/Ctrl + N: New chat
-      if ((event.metaKey || event.ctrlKey) && event.key === 'n') {
-        event.preventDefault();
-        onNewChat?.();
-        return;
-      }
-
-      // Cmd/Ctrl + Shift + Delete: Clear chat
-      if ((event.metaKey || event.ctrlKey) && event.shiftKey && event.key === 'Delete') {
-        event.preventDefault();
-        onClearChat?.();
-        return;
-      }
-
-      // Cmd/Ctrl + H: Open history
-      if ((event.metaKey || event.ctrlKey) && event.key === 'h') {
-        event.preventDefault();
-        onOpenHistory?.();
-        return;
-      }
-
-      // Cmd/Ctrl + F: Search in chat
-      if ((event.metaKey || event.ctrlKey) && event.key === 'f') {
-        event.preventDefault();
-        onSearch?.();
-        return;
-      }
-
-      // Cmd/Ctrl + Shift + T: Toggle theme (if available)
-      if ((event.metaKey || event.ctrlKey) && event.shiftKey && event.key === 'T') {
-        event.preventDefault();
-        onToggleTheme?.();
-        return;
-      }
-
-      // Tab navigation for message list
-      if (event.key === 'Tab' && !event.shiftKey && !isInputActive) {
-        const focusableElements = document.querySelectorAll(
-          'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
-        );
-
-        if (focusableElements.length > 0) {
-          const currentIndex = Array.from(focusableElements).indexOf(document.activeElement as Element);
-          const nextIndex = (currentIndex + 1) % focusableElements.length;
-          (focusableElements[nextIndex] as HTMLElement).focus();
-          event.preventDefault();
-        }
-      }
-
-      // Arrow key navigation for message list
-      if ((event.key === 'ArrowUp' || event.key === 'ArrowDown') && !isInputActive) {
-        const messages = document.querySelectorAll('[role="article"]');
+      if ((event.key === 'ArrowUp' || event.key === 'ArrowDown') && !isInputActive && containerRef.current) {
+        const messages = containerRef.current.querySelectorAll('[role="article"]');
         if (messages.length > 0) {
           const currentFocused = document.activeElement;
           const currentIndex = Array.from(messages).indexOf(currentFocused as Element);
@@ -121,35 +39,23 @@ export function useKeyboardNavigation({
         }
       }
     },
-    [onNewChat, onClearChat, onOpenHistory, onFocusInput, onToggleTheme, onSearch]
+    [containerRef]
   );
 
   useEffect(() => {
-    window.addEventListener('keydown', handleKeyDown);
-    return () => {
-      window.removeEventListener('keydown', handleKeyDown);
-    };
-  }, [handleKeyDown]);
+    const container = containerRef.current;
+    if (!container) {
+      return;
+    }
 
-  // Return keyboard shortcut info for display
-  return {
-    shortcuts: [
-      { keys: ['⌘', 'K'], description: 'Focus chat input', windows: ['Ctrl', 'K'] },
-      { keys: ['⌘', 'N'], description: 'New chat', windows: ['Ctrl', 'N'] },
-      { keys: ['⌘', 'H'], description: 'Open history', windows: ['Ctrl', 'H'] },
-      { keys: ['⌘', 'F'], description: 'Search in chat', windows: ['Ctrl', 'F'] },
-      { keys: ['⌘', '⇧', 'Delete'], description: 'Clear chat', windows: ['Ctrl', 'Shift', 'Delete'] },
-      { keys: ['Esc'], description: 'Close dialog', windows: ['Esc'] },
-      { keys: ['Tab'], description: 'Navigate elements', windows: ['Tab'] },
-      { keys: ['↑', '↓'], description: 'Navigate messages', windows: ['↑', '↓'] },
-    ],
-  };
+    container.addEventListener('keydown', handleKeyDown);
+    return () => {
+      container.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [containerRef, handleKeyDown]);
 }
 
-/**
- * Hook for managing focus trap within a container
- */
-export function useFocusTrap(containerRef: React.RefObject<HTMLElement>, isActive = true) {
+export function useFocusTrap(containerRef: RefObject<HTMLElement>, isActive = true) {
   useEffect(() => {
     if (!isActive || !containerRef.current) {
       return;
@@ -173,13 +79,11 @@ export function useFocusTrap(containerRef: React.RefObject<HTMLElement>, isActiv
       }
 
       if (e.shiftKey) {
-        // Shift + Tab
         if (document.activeElement === firstElement) {
           lastElement.focus();
           e.preventDefault();
         }
       } else {
-        // Tab
         if (document.activeElement === lastElement) {
           firstElement.focus();
           e.preventDefault();
@@ -188,8 +92,6 @@ export function useFocusTrap(containerRef: React.RefObject<HTMLElement>, isActiv
     };
 
     container.addEventListener('keydown', handleTabKey);
-
-    // Focus first element
     firstElement.focus();
 
     return () => {
@@ -198,28 +100,3 @@ export function useFocusTrap(containerRef: React.RefObject<HTMLElement>, isActiv
   }, [containerRef, isActive]);
 }
 
-/**
- * Hook for announcing changes to screen readers
- */
-export function useAnnounce() {
-  const announce = useCallback((message: string, priority: 'polite' | 'assertive' = 'polite') => {
-    const announcement = document.createElement('div');
-    announcement.setAttribute('role', 'status');
-    announcement.setAttribute('aria-live', priority);
-    announcement.setAttribute('aria-atomic', 'true');
-    announcement.style.position = 'absolute';
-    announcement.style.left = '-10000px';
-    announcement.style.width = '1px';
-    announcement.style.height = '1px';
-    announcement.style.overflow = 'hidden';
-    announcement.textContent = message;
-
-    document.body.appendChild(announcement);
-
-    setTimeout(() => {
-      document.body.removeChild(announcement);
-    }, 1000);
-  }, []);
-
-  return announce;
-}
