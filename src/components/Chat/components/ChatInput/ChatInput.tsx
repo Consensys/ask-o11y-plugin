@@ -173,11 +173,12 @@ export const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(
 
                 {queuedMessageCount > 0 && (
                   <div
-                    className="flex items-center text-xs px-2 py-0.5 rounded-full bg-surface text-secondary"
-                    aria-label={`${queuedMessageCount} message${queuedMessageCount > 1 ? 's' : ''} queued`}
+                    className="flex items-center text-xs px-2 py-1 rounded-full border border-weak bg-surface"
+                    aria-label={`${queuedMessageCount} message${queuedMessageCount > 1 ? 's' : ''} queued — will be sent after current response completes`}
                     data-testid="chat-queue-indicator"
                   >
-                    <span>{queuedMessageCount} queued</span>
+                    <Icon name="clock-nine" size="xs" className="mr-1" />
+                    <span>{queuedMessageCount} queued — will send after response</span>
                   </div>
                 )}
               </div>

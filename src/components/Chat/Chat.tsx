@@ -2,7 +2,7 @@ import React, { useRef, useState, useCallback, useMemo } from 'react';
 import { useTheme2 } from '@grafana/ui';
 
 import { useChat } from './hooks/useChat';
-import { useKeyboardNavigation, useAnnounce } from './hooks/useKeyboardNavigation';
+import { useKeyboardNavigation } from './hooks/useKeyboardNavigation';
 import { useEmbeddingAllowed } from './hooks/useEmbeddingAllowed';
 import { useChatScene } from './hooks/useChatScene';
 import { useSidePanelState } from './hooks/useSidePanelState';
@@ -36,7 +36,6 @@ function ChatComponent({
 }: ChatProps): React.ReactElement | null {
   const theme = useTheme2();
   const allowEmbedding = useEmbeddingAllowed();
-  const announce = useAnnounce();
 
   const kioskModeEnabled = pluginSettings?.kioskModeEnabled ?? true;
   const chatPanelPosition = pluginSettings?.chatPanelPosition || 'right';
@@ -79,38 +78,20 @@ function ChatComponent({
     allowEmbedding,
   });
 
-  const focusChatInput = useCallback(() => {
-    chatInputRef.current?.focus();
-    announce('Chat input focused');
-  }, [announce]);
+  const containerRef = useRef<HTMLDivElement>(null);
 
   const openHistory = useCallback(() => {
     setIsHistoryOpen(true);
-    announce('Chat history opened');
-  }, [announce]);
+  }, []);
 
-  useKeyboardNavigation({
-    onNewChat: () => {
-      sessionManager.createNewSession();
-      announce('New chat created');
-    },
-    onClearChat: () => {
-      if (window.confirm('Are you sure you want to clear the current chat?')) {
-        clearChat();
-        announce('Chat cleared');
-      }
-    },
-    onOpenHistory: openHistory,
-    onFocusInput: focusChatInput,
-  });
+  useKeyboardNavigation(containerRef);
 
   const handleSuggestionClick = useCallback((message: string) => {
     setCurrentInput(message);
     setTimeout(() => {
       chatInputRef.current?.focus();
     }, 100);
-    announce(`Suggestion selected: ${message.substring(0, 50)}...`);
-  }, [setCurrentInput, announce]);
+  }, [setCurrentInput]);
 
   const currentSession = sessionManager.sessions.find((s: SessionMetadata) => s.id === sessionManager.currentSessionId);
   const currentSessionTitle = currentSession?.title;
@@ -172,6 +153,7 @@ function ChatComponent({
 
   return (
     <div
+      ref={containerRef}
       className="w-full h-full flex"
       role="main"
       aria-label="Chat interface"

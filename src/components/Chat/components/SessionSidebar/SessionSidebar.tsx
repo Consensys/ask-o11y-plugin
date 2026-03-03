@@ -349,7 +349,7 @@ function SessionItem({
       onClick={isLoading ? undefined : onLoad}
       className={`p-1.5 rounded group transition-colors relative ${
         isActive
-          ? 'bg-surface border border-primary'
+          ? 'bg-primary/10 border-l-2 border border-primary'
           : 'hover:bg-secondary border border-weak'
       } ${isLoading ? 'cursor-wait' : 'cursor-pointer'}`}
     >
@@ -361,7 +361,10 @@ function SessionItem({
 
       <div className="flex items-start justify-between gap-1.5">
         <div className="flex-1 min-w-0">
-          <h3 className="font-medium text-xs truncate text-primary">{session.title}</h3>
+          <div className="flex items-center gap-1">
+            {isActive && <Icon name="arrow-right" size="xs" className="text-primary flex-shrink-0" />}
+            <h3 className={`font-medium text-xs truncate ${isActive ? 'text-primary font-semibold' : 'text-primary'}`}>{session.title}</h3>
+          </div>
           <div className="flex items-center gap-1.5 mt-0.5 text-xs text-secondary">
             <span>{formatDate(session.updatedAt)}</span>
             <span>•</span>

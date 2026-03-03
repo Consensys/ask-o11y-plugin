@@ -1,7 +1,5 @@
 import React, { useState, useEffect } from 'react';
-// Note: Select is deprecated but used for compatibility. Consider migrating to Combobox in future.
-
-import { Modal, Button, Select, Input, ClipboardButton } from '@grafana/ui';
+import { Modal, Button, Select, Input, ClipboardButton, Alert } from '@grafana/ui';
 import { sessionShareService, CreateShareResponse } from '../../../../services/sessionShare';
 import { ChatMessage } from '../../types';
 import {
@@ -37,6 +35,7 @@ export function ShareDialog({ sessionId, session, onClose, existingShares = [], 
   const [createdShare, setCreatedShare] = useState<CreateShareResponse | null>(null);
   const [shares, setShares] = useState<CreateShareResponse[]>(existingShares);
   const [revokingShareId, setRevokingShareId] = useState<string | null>(null);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   useEffect(() => {
     // Load existing shares if not provided
@@ -58,6 +57,7 @@ export function ShareDialog({ sessionId, session, onClose, existingShares = [], 
 
   const handleCreateShare = async () => {
     setIsCreating(true);
+    setErrorMessage(null);
     try {
       const expiryOption = findExpiryOptionByKey(selectedExpiryKey);
       if (!expiryOption) {
@@ -81,7 +81,7 @@ export function ShareDialog({ sessionId, session, onClose, existingShares = [], 
       onSharesChanged?.(updatedShares);
     } catch (error) {
       console.error('[ShareDialog] Failed to create share:', error);
-      alert('Failed to create share. Please try again.');
+      setErrorMessage('Failed to create share. Please try again.');
     } finally {
       setIsCreating(false);
     }
@@ -89,6 +89,7 @@ export function ShareDialog({ sessionId, session, onClose, existingShares = [], 
 
   const handleRevokeShare = async (shareId: string) => {
     setRevokingShareId(shareId);
+    setErrorMessage(null);
     try {
       await sessionShareService.revokeShare(shareId);
       const updatedShares = shares.filter((s) => s.shareId !== shareId);
@@ -99,7 +100,7 @@ export function ShareDialog({ sessionId, session, onClose, existingShares = [], 
       }
     } catch (error) {
       console.error('[ShareDialog] Failed to revoke share:', error);
-      alert('Failed to revoke share. Please try again.');
+      setErrorMessage('Failed to revoke share. Please try again.');
     } finally {
       setRevokingShareId(null);
     }
@@ -109,6 +110,11 @@ export function ShareDialog({ sessionId, session, onClose, existingShares = [], 
   return (
     <Modal title="Share Session" isOpen={true} onDismiss={onClose}>
       <div className="min-w-[400px]">
+        {errorMessage && (
+          <Alert severity="error" title="Error" className="mb-3">
+            {errorMessage}
+          </Alert>
+        )}
         {createdShare ? (
           <div className="space-y-3">
             <p className="text-sm text-primary">Share link created successfully!</p>
