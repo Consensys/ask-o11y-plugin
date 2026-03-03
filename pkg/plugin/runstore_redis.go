@@ -2,6 +2,7 @@ package plugin
 
 import (
 	"consensys-asko11y-app/pkg/agent"
+	"context"
 	"encoding/json"
 	"fmt"
 	"sync"
@@ -16,17 +17,19 @@ type RedisRunStore struct {
 	logger       log.Logger
 	mu           sync.RWMutex
 	broadcasters map[string]*RunBroadcaster
+	ctx          context.Context
 }
 
 func runKey(runID string) string     { return fmt.Sprintf("run:%s", runID) }
 func eventsKey(runID string) string  { return fmt.Sprintf("run:%s:events", runID) }
 func sequenceKey(runID string) string { return fmt.Sprintf("run:%s:sequence", runID) }
 
-func NewRedisRunStore(client *redis.Client, logger log.Logger) *RedisRunStore {
+func NewRedisRunStore(ctx context.Context, client *redis.Client, logger log.Logger) *RedisRunStore {
 	return &RedisRunStore{
 		client:       client,
 		logger:       logger,
 		broadcasters: make(map[string]*RunBroadcaster),
+		ctx:          ctx,
 	}
 }
 
@@ -48,7 +51,7 @@ func (s *RedisRunStore) CreateRun(runID string, userID, orgID int64) *AgentRun {
 		return run
 	}
 
-	ctx, cancel := getContextWithTimeout(RedisOpTimeout)
+	ctx, cancel := redisContext(s.ctx, RedisOpTimeout)
 	defer cancel()
 	if err := s.client.Set(ctx, runKey(runID), runJSON, RunMaxAge).Err(); err != nil {
 		s.logger.Error("Failed to store run in Redis", "error", err, "runId", runID)
@@ -62,7 +65,7 @@ func (s *RedisRunStore) CreateRun(runID string, userID, orgID int64) *AgentRun {
 }
 
 func (s *RedisRunStore) AppendEvent(runID string, event agent.SSEEvent) {
-	seqCtx, seqCancel := getContextWithTimeout(RedisOpTimeout)
+	seqCtx, seqCancel := redisContext(s.ctx, RedisOpTimeout)
 	defer seqCancel()
 
 	seq, err := s.client.Incr(seqCtx, sequenceKey(runID)).Result()
@@ -79,7 +82,7 @@ func (s *RedisRunStore) AppendEvent(runID string, event agent.SSEEvent) {
 	}
 
 	ek := eventsKey(runID)
-	pushCtx, pushCancel := getContextWithTimeout(RedisOpTimeout)
+	pushCtx, pushCancel := redisContext(s.ctx, RedisOpTimeout)
 	defer pushCancel()
 
 	listLen, err := s.client.RPush(pushCtx, ek, eventJSON).Result()
@@ -89,7 +92,7 @@ func (s *RedisRunStore) AppendEvent(runID string, event agent.SSEEvent) {
 	}
 
 	if listLen > int64(RunMaxEventsPerRun) {
-		ctx, cancel := getContextWithTimeout(RedisOpTimeout)
+		ctx, cancel := redisContext(s.ctx, RedisOpTimeout)
 		defer cancel()
 		s.client.LTrim(ctx, ek, -int64(RunMaxEventsPerRun), -1)
 	}
@@ -105,7 +108,7 @@ func (s *RedisRunStore) AppendEvent(runID string, event agent.SSEEvent) {
 }
 
 func (s *RedisRunStore) FinishRun(runID string, status RunStatus, errMsg string) {
-	ctx, cancel := getContextWithTimeout(RedisOpTimeout)
+	ctx, cancel := redisContext(s.ctx, RedisOpTimeout)
 	defer cancel()
 
 	runJSON, err := s.client.Get(ctx, runKey(runID)).Result()
@@ -130,7 +133,7 @@ func (s *RedisRunStore) FinishRun(runID string, status RunStatus, errMsg string)
 		return
 	}
 
-	ctx2, cancel2 := getContextWithTimeout(RedisOpTimeout)
+	ctx2, cancel2 := redisContext(s.ctx, RedisOpTimeout)
 	defer cancel2()
 	s.client.Set(ctx2, runKey(runID), updatedJSON, RunMaxAge)
 	s.client.Expire(ctx2, eventsKey(runID), RunMaxAge)
@@ -147,7 +150,7 @@ func (s *RedisRunStore) FinishRun(runID string, status RunStatus, errMsg string)
 }
 
 func (s *RedisRunStore) GetRun(runID string) (*AgentRun, error) {
-	ctx, cancel := getContextWithTimeout(RedisOpTimeout)
+	ctx, cancel := redisContext(s.ctx, RedisOpTimeout)
 	defer cancel()
 
 	runJSON, err := s.client.Get(ctx, runKey(runID)).Result()
@@ -163,7 +166,7 @@ func (s *RedisRunStore) GetRun(runID string) (*AgentRun, error) {
 		return nil, fmt.Errorf("failed to unmarshal run: %w", err)
 	}
 
-	ctx2, cancel2 := getContextWithTimeout(RedisBulkOpTimeout)
+	ctx2, cancel2 := redisContext(s.ctx, RedisBulkOpTimeout)
 	defer cancel2()
 
 	eventStrings, err := s.client.LRange(ctx2, eventsKey(runID), 0, -1).Result()
@@ -232,7 +235,7 @@ func (s *RedisRunStore) CleanupOld() {
 }
 
 func (s *RedisRunStore) touchRun(runID string) {
-	ctx, cancel := getContextWithTimeout(RedisOpTimeout)
+	ctx, cancel := redisContext(s.ctx, RedisOpTimeout)
 	defer cancel()
 	s.client.Expire(ctx, runKey(runID), RunMaxAge)
 	s.client.Expire(ctx, eventsKey(runID), RunMaxAge)

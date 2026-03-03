@@ -54,16 +54,17 @@ func fromRedis(rs *redisSession) *ChatSession {
 type RedisSessionStore struct {
 	client *redis.Client
 	logger log.Logger
+	ctx    context.Context
 }
 
-func NewRedisSessionStore(client *redis.Client, logger log.Logger) *RedisSessionStore {
-	return &RedisSessionStore{client: client, logger: logger}
+func NewRedisSessionStore(ctx context.Context, client *redis.Client, logger log.Logger) *RedisSessionStore {
+	return &RedisSessionStore{client: client, logger: logger, ctx: ctx}
 }
 
 func (s *RedisSessionStore) CreateSession(userID, orgID int64, title string, messages []SessionMessage) (*ChatSession, error) {
 	idxKey := sessionUserIdxKey(userID, orgID)
 
-	ctx, cancel := getContextWithTimeout(RedisOpTimeout)
+	ctx, cancel := redisContext(s.ctx, RedisOpTimeout)
 	defer cancel()
 	count, err := s.client.SCard(ctx, idxKey).Result()
 	if err != nil && err != redis.Nil {
@@ -96,16 +97,18 @@ func (s *RedisSessionStore) CreateSession(userID, orgID int64, title string, mes
 		return nil, fmt.Errorf("failed to marshal session: %w", err)
 	}
 
-	ctx2, cancel2 := getContextWithTimeout(RedisOpTimeout)
+	ctx2, cancel2 := redisContext(s.ctx, RedisOpTimeout)
 	defer cancel2()
 	if err := s.client.Set(ctx2, sessionKey(id), data, 0).Err(); err != nil {
 		return nil, fmt.Errorf("failed to store session: %w", err)
 	}
 
-	ctx3, cancel3 := getContextWithTimeout(RedisOpTimeout)
+	ctx3, cancel3 := redisContext(s.ctx, RedisOpTimeout)
 	defer cancel3()
 	if err := s.client.SAdd(ctx3, idxKey, id).Err(); err != nil {
-		s.client.Del(context.Background(), sessionKey(id))
+		delCtx, delCancel := redisContext(s.ctx, RedisOpTimeout)
+		defer delCancel()
+		s.client.Del(delCtx, sessionKey(id))
 		return nil, fmt.Errorf("failed to index session: %w", err)
 	}
 
@@ -123,7 +126,7 @@ func (s *RedisSessionStore) evictOldest(userID, orgID int64) error {
 }
 
 func (s *RedisSessionStore) getSessionRaw(sessionID string) (*redisSession, error) {
-	ctx, cancel := getContextWithTimeout(RedisOpTimeout)
+	ctx, cancel := redisContext(s.ctx, RedisOpTimeout)
 	defer cancel()
 	data, err := s.client.Get(ctx, sessionKey(sessionID)).Result()
 	if err == redis.Nil {
@@ -145,7 +148,7 @@ func (s *RedisSessionStore) saveSession(session *ChatSession) error {
 	if err != nil {
 		return fmt.Errorf("failed to marshal session: %w", err)
 	}
-	ctx, cancel := getContextWithTimeout(RedisOpTimeout)
+	ctx, cancel := redisContext(s.ctx, RedisOpTimeout)
 	defer cancel()
 	return s.client.Set(ctx, sessionKey(session.ID), data, 0).Err()
 }
@@ -164,7 +167,7 @@ func (s *RedisSessionStore) GetSession(sessionID string, userID, orgID int64) (*
 func (s *RedisSessionStore) ListSessions(userID, orgID int64) ([]SessionMetadata, error) {
 	idxKey := sessionUserIdxKey(userID, orgID)
 
-	ctx, cancel := getContextWithTimeout(RedisBulkOpTimeout)
+	ctx, cancel := redisContext(s.ctx, RedisBulkOpTimeout)
 	defer cancel()
 	ids, err := s.client.SMembers(ctx, idxKey).Result()
 	if err != nil && err != redis.Nil {
@@ -180,7 +183,7 @@ func (s *RedisSessionStore) ListSessions(userID, orgID int64) ([]SessionMetadata
 		keys[i] = sessionKey(id)
 	}
 
-	ctx2, cancel2 := getContextWithTimeout(RedisBulkOpTimeout)
+	ctx2, cancel2 := redisContext(s.ctx, RedisBulkOpTimeout)
 	defer cancel2()
 	values, err := s.client.MGet(ctx2, keys...).Result()
 	if err != nil {
@@ -191,7 +194,7 @@ func (s *RedisSessionStore) ListSessions(userID, orgID int64) ([]SessionMetadata
 	for i, val := range values {
 		if val == nil {
 			// Stale index entry — remove it
-			ctx3, cancel3 := getContextWithTimeout(RedisOpTimeout)
+			ctx3, cancel3 := redisContext(s.ctx, RedisOpTimeout)
 			s.client.SRem(ctx3, idxKey, ids[i])
 			cancel3()
 			continue
@@ -270,20 +273,20 @@ func (s *RedisSessionStore) DeleteSession(sessionID string, userID, orgID int64)
 		return fmt.Errorf("session not found")
 	}
 
-	ctx, cancel := getContextWithTimeout(RedisOpTimeout)
+	ctx, cancel := redisContext(s.ctx, RedisOpTimeout)
 	defer cancel()
 	s.client.Del(ctx, sessionKey(sessionID))
 
-	ctx2, cancel2 := getContextWithTimeout(RedisOpTimeout)
+	ctx2, cancel2 := redisContext(s.ctx, RedisOpTimeout)
 	defer cancel2()
 	s.client.SRem(ctx2, sessionUserIdxKey(userID, orgID), sessionID)
 
 	curKey := sessionCurrentKey(userID, orgID)
-	ctx3, cancel3 := getContextWithTimeout(RedisOpTimeout)
+	ctx3, cancel3 := redisContext(s.ctx, RedisOpTimeout)
 	defer cancel3()
 	cur, err := s.client.Get(ctx3, curKey).Result()
 	if err == nil && cur == sessionID {
-		ctx4, cancel4 := getContextWithTimeout(RedisOpTimeout)
+		ctx4, cancel4 := redisContext(s.ctx, RedisOpTimeout)
 		defer cancel4()
 		s.client.Del(ctx4, curKey)
 	}
@@ -294,7 +297,7 @@ func (s *RedisSessionStore) DeleteSession(sessionID string, userID, orgID int64)
 func (s *RedisSessionStore) DeleteAllSessions(userID, orgID int64) error {
 	idxKey := sessionUserIdxKey(userID, orgID)
 
-	ctx, cancel := getContextWithTimeout(RedisBulkOpTimeout)
+	ctx, cancel := redisContext(s.ctx, RedisBulkOpTimeout)
 	defer cancel()
 	ids, err := s.client.SMembers(ctx, idxKey).Result()
 	if err != nil && err != redis.Nil {
@@ -302,16 +305,16 @@ func (s *RedisSessionStore) DeleteAllSessions(userID, orgID int64) error {
 	}
 
 	for _, id := range ids {
-		ctx2, cancel2 := getContextWithTimeout(RedisOpTimeout)
+		ctx2, cancel2 := redisContext(s.ctx, RedisOpTimeout)
 		s.client.Del(ctx2, sessionKey(id))
 		cancel2()
 	}
 
-	ctx3, cancel3 := getContextWithTimeout(RedisOpTimeout)
+	ctx3, cancel3 := redisContext(s.ctx, RedisOpTimeout)
 	defer cancel3()
 	s.client.Del(ctx3, idxKey)
 
-	ctx4, cancel4 := getContextWithTimeout(RedisOpTimeout)
+	ctx4, cancel4 := redisContext(s.ctx, RedisOpTimeout)
 	defer cancel4()
 	s.client.Del(ctx4, sessionCurrentKey(userID, orgID))
 
@@ -319,7 +322,7 @@ func (s *RedisSessionStore) DeleteAllSessions(userID, orgID int64) error {
 }
 
 func (s *RedisSessionStore) GetCurrentSessionID(userID, orgID int64) (string, error) {
-	ctx, cancel := getContextWithTimeout(RedisOpTimeout)
+	ctx, cancel := redisContext(s.ctx, RedisOpTimeout)
 	defer cancel()
 	id, err := s.client.Get(ctx, sessionCurrentKey(userID, orgID)).Result()
 	if err == redis.Nil {
@@ -340,13 +343,13 @@ func (s *RedisSessionStore) SetCurrentSessionID(userID, orgID int64, sessionID s
 		return fmt.Errorf("session not found")
 	}
 
-	ctx, cancel := getContextWithTimeout(RedisOpTimeout)
+	ctx, cancel := redisContext(s.ctx, RedisOpTimeout)
 	defer cancel()
 	return s.client.Set(ctx, sessionCurrentKey(userID, orgID), sessionID, 0).Err()
 }
 
 func (s *RedisSessionStore) ClearCurrentSessionID(userID, orgID int64) error {
-	ctx, cancel := getContextWithTimeout(RedisOpTimeout)
+	ctx, cancel := redisContext(s.ctx, RedisOpTimeout)
 	defer cancel()
 	return s.client.Del(ctx, sessionCurrentKey(userID, orgID)).Err()
 }
