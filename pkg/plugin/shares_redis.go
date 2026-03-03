@@ -26,7 +26,7 @@ func NewRedisShareStore(client *redis.Client, logger log.Logger, rateLimiter Rat
 }
 
 // CreateShare creates a new share and returns the share metadata
-func (s *RedisShareStore) CreateShare(sessionID string, sessionData []byte, orgID, userID int64, expiresInHours *int) (*ShareMetadata, error) {
+func (s *RedisShareStore) CreateShare(sessionID string, sessionData []byte, orgID, userID int64, expiresInHours *int, defaultTTL time.Duration) (*ShareMetadata, error) {
 	// Check rate limit
 	if !s.rateLimiter.CheckLimit(userID) {
 		return nil, fmt.Errorf("rate limit exceeded: too many share requests")
@@ -39,7 +39,7 @@ func (s *RedisShareStore) CreateShare(sessionID string, sessionData []byte, orgI
 	}
 
 	// Calculate expiration
-	expiresAt, ttl := CalculateExpiration(expiresInHours)
+	expiresAt, ttl := CalculateExpiration(expiresInHours, defaultTTL)
 
 	share := &ShareMetadata{
 		ShareID:    shareID,

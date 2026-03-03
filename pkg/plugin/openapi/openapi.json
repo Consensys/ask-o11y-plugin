@@ -2003,6 +2003,11 @@
             "type": "string",
             "format": "date-time"
           },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Expiration timestamp (session will be auto-deleted after this time)"
+          },
           "messageCount": {
             "type": "integer",
             "description": "Total number of messages"
@@ -2033,6 +2038,11 @@
           "updatedAt": {
             "type": "string",
             "format": "date-time"
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Expiration timestamp (session will be auto-deleted after this time)"
           },
           "messageCount": {
             "type": "integer",
