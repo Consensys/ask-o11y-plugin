@@ -442,8 +442,6 @@ The plugin supports OAuth 2.0 authentication flows for MCP servers that require 
 
 **Configuration:**
 - OAuth server config in MCP server settings
-- Encryption key via `MCP_OAUTH_ENCRYPTION_KEY` env var
-- Generate key: `npm run generate:oauth-key`
 
 ### MCP Configuration Modes
 

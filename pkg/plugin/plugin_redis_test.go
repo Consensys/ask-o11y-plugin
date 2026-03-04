@@ -2,7 +2,6 @@ package plugin
 
 import (
 	"context"
-	"os"
 	"testing"
 
 	"github.com/grafana/grafana-plugin-sdk-go/backend"
@@ -10,31 +9,9 @@ import (
 )
 
 func TestNewPlugin_RedisFallback(t *testing.T) {
-	// Save original environment
-	originalRedisURL := os.Getenv("GF_PLUGIN_ASKO11Y_REDIS")
-	originalRedisAddr := os.Getenv("GF_PLUGIN_ASKO11Y_REDIS_ADDR")
-
-	// Clean up after test
-	defer func() {
-		if originalRedisURL != "" {
-			os.Setenv("GF_PLUGIN_ASKO11Y_REDIS", originalRedisURL)
-		} else {
-			os.Unsetenv("GF_PLUGIN_ASKO11Y_REDIS")
-		}
-		if originalRedisAddr != "" {
-			os.Setenv("GF_PLUGIN_ASKO11Y_REDIS_ADDR", originalRedisAddr)
-		} else {
-			os.Unsetenv("GF_PLUGIN_ASKO11Y_REDIS_ADDR")
-		}
-	}()
-
-	// Test 1: Redis unavailable - should fallback to in-memory
-	os.Unsetenv("GF_PLUGIN_ASKO11Y_REDIS")
-	os.Unsetenv("GF_PLUGIN_ASKO11Y_REDIS_ADDR")
-	os.Setenv("GF_PLUGIN_ASKO11Y_REDIS_ADDR", "localhost:9999") // Non-existent Redis
-
+	// Point at a non-existent Redis to verify in-memory fallback.
 	settings := backend.AppInstanceSettings{
-		JSONData: []byte(`{"mcpServers":[]}`),
+		JSONData: []byte(`{"mcpServers":[],"redisURL":"redis://localhost:9999/0"}`),
 	}
 
 	ctx := context.Background()
@@ -51,98 +28,78 @@ func TestNewPlugin_RedisFallback(t *testing.T) {
 		t.Error("ShareStore should be created (in-memory fallback)")
 	}
 
-	// Test 2: Redis available - should use Redis
-	// This test requires Redis to be running, so we'll skip if not available
-	os.Setenv("GF_PLUGIN_ASKO11Y_REDIS_ADDR", "localhost:6379")
-	os.Setenv("GF_PLUGIN_ASKO11Y_REDIS_DB", "15") // Use test database
-
-	plugin2, err := NewPlugin(ctx, settings)
-	if err != nil {
-		t.Fatalf("Failed to create plugin: %v", err)
-	}
-
-	p2 := plugin2.(*Plugin)
-	// If Redis is available, it should use it; if not, it will fallback
-	// We just verify the plugin initializes successfully in both cases
-	if p2.shareStore == nil {
-		t.Error("ShareStore should be created")
-	}
-
-	// Cleanup
-	if p2.redisClient != nil {
-		p2.redisClient.Close()
-	}
 	if p.redisClient != nil {
 		p.redisClient.Close()
 	}
 }
 
-func TestCreateRedisClient_FromURL(t *testing.T) {
-	originalRedisURL := os.Getenv("GF_PLUGIN_ASKO11Y_REDIS")
+func TestNewPlugin_RedisSuccess(t *testing.T) {
+	// Skip if Redis is not available locally.
+	probe, err := createRedisClient(log.DefaultLogger, PluginSettings{RedisURL: "redis://localhost:6379/15"})
+	if err != nil {
+		t.Skipf("Redis not available: %v", err)
+	}
+	if pingErr := probe.Ping(context.Background()).Err(); pingErr != nil {
+		probe.Close()
+		t.Skipf("Redis not available: %v", pingErr)
+	}
+	probe.Close()
+
+	settings := backend.AppInstanceSettings{
+		JSONData: []byte(`{"mcpServers":[],"redisURL":"redis://localhost:6379/15"}`),
+	}
+	plugin, err := NewPlugin(context.Background(), settings)
+	if err != nil {
+		t.Fatalf("Failed to create plugin: %v", err)
+	}
+	p := plugin.(*Plugin)
 	defer func() {
-		if originalRedisURL != "" {
-			os.Setenv("GF_PLUGIN_ASKO11Y_REDIS", originalRedisURL)
-		} else {
-			os.Unsetenv("GF_PLUGIN_ASKO11Y_REDIS")
+		if p.redisClient != nil {
+			p.redisClient.Close()
 		}
 	}()
 
-	// Test with GF_PLUGIN_ASKO11Y_REDIS
-	os.Setenv("GF_PLUGIN_ASKO11Y_REDIS", "redis://localhost:6379/15")
-	os.Unsetenv("GF_PLUGIN_ASKO11Y_REDIS_ADDR")
-	os.Unsetenv("GF_PLUGIN_ASKO11Y_REDIS_PASSWORD")
-	os.Unsetenv("GF_PLUGIN_ASKO11Y_REDIS_DB")
+	if !p.usingRedis {
+		t.Error("Should be using Redis when connection succeeds")
+	}
+	if p.shareStore == nil {
+		t.Error("ShareStore should be non-nil when using Redis")
+	}
+}
 
-	client, err := createRedisClient(log.DefaultLogger)
+func TestCreateRedisClient_FromPluginSettings(t *testing.T) {
+	settings := PluginSettings{RedisURL: "redis://localhost:6379/15"}
+	client, err := createRedisClient(log.DefaultLogger, settings)
 	if err != nil {
 		t.Skipf("Redis not available for testing: %v", err)
 	}
 	defer client.Close()
 
-	// Test connection
 	ctx := context.Background()
 	if err := client.Ping(ctx).Err(); err != nil {
 		t.Skipf("Redis not available for testing: %v", err)
 	}
 }
 
-func TestCreateRedisClient_FromIndividualVars(t *testing.T) {
-	originalRedisURL := os.Getenv("GF_PLUGIN_ASKO11Y_REDIS")
-	originalRedisAddr := os.Getenv("GF_PLUGIN_ASKO11Y_REDIS_ADDR")
-	originalRedisDB := os.Getenv("GF_PLUGIN_ASKO11Y_REDIS_DB")
-
-	defer func() {
-		if originalRedisURL != "" {
-			os.Setenv("GF_PLUGIN_ASKO11Y_REDIS", originalRedisURL)
-		} else {
-			os.Unsetenv("GF_PLUGIN_ASKO11Y_REDIS")
-		}
-		if originalRedisAddr != "" {
-			os.Setenv("GF_PLUGIN_ASKO11Y_REDIS_ADDR", originalRedisAddr)
-		} else {
-			os.Unsetenv("GF_PLUGIN_ASKO11Y_REDIS_ADDR")
-		}
-		if originalRedisDB != "" {
-			os.Setenv("GF_PLUGIN_ASKO11Y_REDIS_DB", originalRedisDB)
-		} else {
-			os.Unsetenv("GF_PLUGIN_ASKO11Y_REDIS_DB")
-		}
-	}()
-
-	// Test with individual environment variables
-	os.Unsetenv("GF_PLUGIN_ASKO11Y_REDIS")
-	os.Setenv("GF_PLUGIN_ASKO11Y_REDIS_ADDR", "localhost:6379")
-	os.Setenv("GF_PLUGIN_ASKO11Y_REDIS_DB", "15")
-
-	client, err := createRedisClient(log.DefaultLogger)
+func TestCreateRedisClient_DefaultURL(t *testing.T) {
+	client, err := createRedisClient(log.DefaultLogger, PluginSettings{})
 	if err != nil {
-		t.Skipf("Redis not available for testing: %v", err)
+		t.Fatalf("Expected client creation to succeed: %v", err)
 	}
 	defer client.Close()
 
-	// Test connection
-	ctx := context.Background()
-	if err := client.Ping(ctx).Err(); err != nil {
-		t.Skipf("Redis not available for testing: %v", err)
+	if client.Options().Addr != "localhost:6379" {
+		t.Errorf("Expected default addr localhost:6379, got %s", client.Options().Addr)
+	}
+	if client.Options().DB != 0 {
+		t.Errorf("Expected default DB 0, got %d", client.Options().DB)
+	}
+}
+
+func TestCreateRedisClient_InvalidURL(t *testing.T) {
+	settings := PluginSettings{RedisURL: "not-a-valid-url"}
+	_, err := createRedisClient(log.DefaultLogger, settings)
+	if err == nil {
+		t.Fatal("Expected error for invalid URL")
 	}
 }
