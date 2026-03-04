@@ -38,7 +38,7 @@ func builtInMCPBaseURL(settings PluginSettings) string {
 	return "http://localhost:3000"
 }
 
-const defaultRedisURL = "redis://redis:6379/0"
+const defaultRedisURL = "redis://localhost:6379/0"
 
 func createRedisClient(logger log.Logger, settings PluginSettings) (*redis.Client, error) {
 	redisURL := settings.RedisURL

@@ -42,6 +42,9 @@ func TestNewPlugin_RedisFallback(t *testing.T) {
 	if p2.shareStore == nil {
 		t.Error("ShareStore should be created")
 	}
+	if p2.redisClient != nil && !p2.usingRedis {
+		t.Error("Should be using Redis when connection succeeds")
+	}
 
 	if p2.redisClient != nil {
 		p2.redisClient.Close()
@@ -72,8 +75,8 @@ func TestCreateRedisClient_DefaultURL(t *testing.T) {
 	}
 	defer client.Close()
 
-	if client.Options().Addr != "redis:6379" {
-		t.Errorf("Expected default addr redis:6379, got %s", client.Options().Addr)
+	if client.Options().Addr != "localhost:6379" {
+		t.Errorf("Expected default addr localhost:6379, got %s", client.Options().Addr)
 	}
 	if client.Options().DB != 0 {
 		t.Errorf("Expected default DB 0, got %d", client.Options().DB)
