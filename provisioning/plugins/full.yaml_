@@ -16,6 +16,7 @@ apps:
   - type: consensys-asko11y-app
     org_id: 1
     jsonData:
+      redisURL: 'redis://redis:6379/0'
       maxTotalTokens: 180000
       mcpServers:
         - id: 'time'
@@ -53,6 +54,7 @@ apps:
   - type: consensys-asko11y-app
     org_id: 2
     jsonData:
+      redisURL: 'redis://redis:6379/0'
       maxTotalTokens: 180000
       mcpServers:
         - id: 'time'

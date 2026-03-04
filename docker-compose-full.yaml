@@ -12,7 +12,6 @@ services:
       GF_FEATURE_TOGGLES_ENABLE: 'externalServiceAccounts'
       GF_AUTH_MANAGED_SERVICE_ACCOUNTS_ENABLED: 'true'
       LLM_API_KEY: ${LLM_API_KEY:-}
-      GF_PLUGIN_ASKO11Y_REDIS: ${GF_PLUGIN_ASKO11Y_REDIS:-redis://redis:6379/0}
     depends_on:
       redis:
         condition: service_healthy

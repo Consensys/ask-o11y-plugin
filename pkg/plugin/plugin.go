@@ -11,7 +11,7 @@ import (
 	"hash/fnv"
 	"io"
 	"net/http"
-	"os"
+	"net/url"
 	"strconv"
 	"strings"
 	"sync"
@@ -32,70 +32,26 @@ var (
 	_ backend.CheckHealthHandler    = (*Plugin)(nil)
 )
 
-type RedisConfig struct {
-	Addr     string
-	Password string
-	DB       int
+func builtInMCPBaseURL(settings PluginSettings) string {
+	if settings.BuiltInMCPBaseURL != "" {
+		return strings.TrimRight(settings.BuiltInMCPBaseURL, "/")
+	}
+	return "http://localhost:3000"
 }
 
-func getRedisAddr() string {
-	if addr := os.Getenv("GF_PLUGIN_ASKO11Y_REDIS_ADDR"); addr != "" {
-		return addr
+const defaultRedisURL = "redis://localhost:6379/0"
+
+func createRedisClient(logger log.Logger, settings PluginSettings) (*redis.Client, error) {
+	redisURL := settings.RedisURL
+	if redisURL == "" {
+		logger.Info("No redisURL configured, attempting default", "defaultURL", defaultRedisURL)
+		redisURL = defaultRedisURL
 	}
-	return "localhost:6379"
-}
-
-// builtInMCPBaseURL returns the localhost base URL for communicating with
-// plugins in the same Grafana instance. Uses localhost to avoid hairpin
-// routing through external proxies/CDN that cfg.AppURL() may point to.
-func builtInMCPBaseURL() string {
-	if override := os.Getenv("GF_PLUGIN_ASKO11Y_BUILTIN_MCP_BASE_URL"); override != "" {
-		return strings.TrimRight(override, "/")
+	opt, err := redis.ParseURL(redisURL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse redisURL %q: %w", redisURL, err)
 	}
-	port := os.Getenv("GF_PLUGIN_ASKO11Y_SERVER_HTTP_PORT")
-	if port == "" {
-		port = "3000"
-	}
-	return "http://localhost:" + port
-}
-
-func createRedisClient(logger log.Logger) (*redis.Client, error) {
-	// Try GF_PLUGIN_ASKO11Y_REDIS first (full connection string)
-	redisURL := os.Getenv("GF_PLUGIN_ASKO11Y_REDIS")
-	if redisURL != "" {
-		opt, err := redis.ParseURL(redisURL)
-		if err != nil {
-			return nil, fmt.Errorf("failed to parse GF_PLUGIN_ASKO11Y_REDIS: %w", err)
-		}
-		logger.Info("Using Redis connection from GF_PLUGIN_ASKO11Y_REDIS")
-		return redis.NewClient(opt), nil
-	}
-
-	// Fall back to individual environment variables
-	addr := getRedisAddr()
-	password := os.Getenv("GF_PLUGIN_ASKO11Y_REDIS_PASSWORD")
-
-	db := 0
-	if dbStr := os.Getenv("GF_PLUGIN_ASKO11Y_REDIS_DB"); dbStr != "" {
-		var err error
-		db, err = strconv.Atoi(dbStr)
-		if err != nil {
-			logger.Warn("Invalid GF_PLUGIN_ASKO11Y_REDIS_DB value, using default 0", "value", dbStr, "error", err)
-			db = 0
-		}
-	}
-
-	opt := &redis.Options{
-		Addr:     addr,
-		Password: password,
-		DB:       db,
-	}
-
-	logger.Info("Using Redis connection from individual environment variables",
-		"addr", addr,
-		"db", db,
-		"hasPassword", password != "")
-
+	logger.Info("Using Redis connection", "addr", opt.Addr, "db", opt.DB)
 	return redis.NewClient(opt), nil
 }
 
@@ -109,6 +65,9 @@ type PluginSettings struct {
 
 	MaxTotalTokens     int `json:"maxTotalTokens,omitempty"`
 	RecentMessageCount int `json:"recentMessageCount,omitempty"`
+
+	RedisURL          string `json:"redisURL,omitempty"`
+	BuiltInMCPBaseURL string `json:"builtInMCPBaseURL,omitempty"`
 }
 
 type Plugin struct {
@@ -136,7 +95,7 @@ func NewPlugin(ctx context.Context, settings backend.AppInstanceSettings) (insta
 
 	var pluginSettings PluginSettings
 	if err := json.Unmarshal(settings.JSONData, &pluginSettings); err != nil {
-		logger.Warn("Failed to parse plugin settings, using empty config", "error", err)
+		logger.Error("Failed to parse plugin settings, using empty config", "error", err)
 		pluginSettings = PluginSettings{
 			MCPServers: []mcp.ServerConfig{},
 		}
@@ -147,6 +106,16 @@ func NewPlugin(ctx context.Context, settings backend.AppInstanceSettings) (insta
 	}
 	if pluginSettings.RecentMessageCount <= 0 {
 		pluginSettings.RecentMessageCount = 10
+	}
+	if pluginSettings.BuiltInMCPBaseURL != "" {
+		if _, err := url.ParseRequestURI(pluginSettings.BuiltInMCPBaseURL); err != nil {
+			logger.Error("builtInMCPBaseURL is not a valid URL, falling back to default",
+				"configured", pluginSettings.BuiltInMCPBaseURL,
+				"error", err,
+				"fallback", "http://localhost:3000",
+			)
+			pluginSettings.BuiltInMCPBaseURL = ""
+		}
 	}
 
 	promptRegistry, err := NewPromptRegistry(pluginSettings)
@@ -169,7 +138,7 @@ func NewPlugin(ctx context.Context, settings backend.AppInstanceSettings) (insta
 	var redisClient *redis.Client
 	usingRedis := false
 
-	redisClient, redisErr := createRedisClient(logger)
+	redisClient, redisErr := createRedisClient(logger, pluginSettings)
 	if redisErr == nil {
 		pingCtx, pingCancel := context.WithTimeout(pluginCtx, RedisConnectionTimeout)
 		pingErr := redisClient.Ping(pingCtx).Err()
@@ -178,7 +147,7 @@ func NewPlugin(ctx context.Context, settings backend.AppInstanceSettings) (insta
 			rateLimiter := NewRedisRateLimiter(pluginCtx, redisClient, logger)
 			shareStore = NewRedisShareStore(pluginCtx, redisClient, logger, rateLimiter)
 			usingRedis = true
-			logger.Info("Using Redis for session sharing", "redisAddr", getRedisAddr())
+			logger.Info("Using Redis for session sharing")
 		} else {
 			logger.Warn("Redis connection test failed, falling back to in-memory storage", "error", pingErr.Error())
 			redisClient.Close()
@@ -546,7 +515,7 @@ func (p *Plugin) handleAgentRun(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if p.useBuiltInMCP {
-		builtInURL := builtInMCPBaseURL() + "/api/plugins/grafana-llm-app/resources/mcp/grafana"
+		builtInURL := builtInMCPBaseURL(p.settings) + "/api/plugins/grafana-llm-app/resources/mcp/grafana"
 		p.mcpProxy.EnsureServer(mcp.ServerConfig{
 			ID:      "mcp-grafana",
 			Name:    "Grafana Built-in MCP",
@@ -659,7 +628,7 @@ func (p *Plugin) handleAgentRun(w http.ResponseWriter, r *http.Request) {
 		MaxTotalTokens:     p.settings.MaxTotalTokens,
 		RecentMessageCount: p.settings.RecentMessageCount,
 		MaxIterations:      AgentMaxIterations,
-		GrafanaURL:         builtInMCPBaseURL(),
+		GrafanaURL:         builtInMCPBaseURL(p.settings),
 		AuthToken:          saToken,
 		UserRole:           userRole,
 		OrgID:              orgID,
