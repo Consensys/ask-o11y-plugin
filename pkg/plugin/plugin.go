@@ -59,8 +59,20 @@ func builtInMCPBaseURL() string {
 	return "http://localhost:" + port
 }
 
-func createRedisClient(logger log.Logger) (*redis.Client, error) {
-	// Try GF_PLUGIN_ASKO11Y_REDIS first (full connection string)
+func createRedisClient(logger log.Logger, settings PluginSettings) (*redis.Client, error) {
+	// 1. Try redisURL from plugin jsonData (provisioning / Grafana UI).
+	//    This is the recommended approach because Grafana 12+ no longer
+	//    forwards host env vars to plugin subprocesses (go-plugin SkipHostEnv).
+	if settings.RedisURL != "" {
+		opt, err := redis.ParseURL(settings.RedisURL)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse redisURL from plugin settings: %w", err)
+		}
+		logger.Info("Using Redis connection from plugin settings (jsonData.redisURL)")
+		return redis.NewClient(opt), nil
+	}
+
+	// 2. Try GF_PLUGIN_ASKO11Y_REDIS env var (works on Grafana < 12).
 	redisURL := os.Getenv("GF_PLUGIN_ASKO11Y_REDIS")
 	if redisURL != "" {
 		opt, err := redis.ParseURL(redisURL)
@@ -71,7 +83,7 @@ func createRedisClient(logger log.Logger) (*redis.Client, error) {
 		return redis.NewClient(opt), nil
 	}
 
-	// Fall back to individual environment variables
+	// 3. Fall back to individual environment variables.
 	addr := getRedisAddr()
 	password := os.Getenv("GF_PLUGIN_ASKO11Y_REDIS_PASSWORD")
 
@@ -109,6 +121,8 @@ type PluginSettings struct {
 
 	MaxTotalTokens     int `json:"maxTotalTokens,omitempty"`
 	RecentMessageCount int `json:"recentMessageCount,omitempty"`
+
+	RedisURL string `json:"redisURL,omitempty"`
 }
 
 type Plugin struct {
@@ -169,7 +183,7 @@ func NewPlugin(ctx context.Context, settings backend.AppInstanceSettings) (insta
 	var redisClient *redis.Client
 	usingRedis := false
 
-	redisClient, redisErr := createRedisClient(logger)
+	redisClient, redisErr := createRedisClient(logger, pluginSettings)
 	if redisErr == nil {
 		pingCtx, pingCancel := context.WithTimeout(pluginCtx, RedisConnectionTimeout)
 		pingErr := redisClient.Ping(pingCtx).Err()

@@ -77,6 +77,43 @@ func TestNewPlugin_RedisFallback(t *testing.T) {
 	}
 }
 
+func TestCreateRedisClient_FromPluginSettings(t *testing.T) {
+	os.Unsetenv("GF_PLUGIN_ASKO11Y_REDIS")
+	os.Unsetenv("GF_PLUGIN_ASKO11Y_REDIS_ADDR")
+
+	settings := PluginSettings{RedisURL: "redis://localhost:6379/15"}
+	client, err := createRedisClient(log.DefaultLogger, settings)
+	if err != nil {
+		t.Skipf("Redis not available for testing: %v", err)
+	}
+	defer client.Close()
+
+	ctx := context.Background()
+	if err := client.Ping(ctx).Err(); err != nil {
+		t.Skipf("Redis not available for testing: %v", err)
+	}
+}
+
+func TestCreateRedisClient_PluginSettingsTakesPrecedence(t *testing.T) {
+	os.Setenv("GF_PLUGIN_ASKO11Y_REDIS", "redis://wrong-host:6379/0")
+	defer os.Unsetenv("GF_PLUGIN_ASKO11Y_REDIS")
+
+	settings := PluginSettings{RedisURL: "redis://localhost:6379/15"}
+	client, err := createRedisClient(log.DefaultLogger, settings)
+	if err != nil {
+		t.Fatalf("Expected client creation to succeed: %v", err)
+	}
+	defer client.Close()
+
+	// The client should use the settings URL (localhost), not the env var (wrong-host)
+	if client.Options().Addr != "localhost:6379" {
+		t.Errorf("Expected addr localhost:6379, got %s", client.Options().Addr)
+	}
+	if client.Options().DB != 15 {
+		t.Errorf("Expected DB 15, got %d", client.Options().DB)
+	}
+}
+
 func TestCreateRedisClient_FromURL(t *testing.T) {
 	originalRedisURL := os.Getenv("GF_PLUGIN_ASKO11Y_REDIS")
 	defer func() {
@@ -93,7 +130,7 @@ func TestCreateRedisClient_FromURL(t *testing.T) {
 	os.Unsetenv("GF_PLUGIN_ASKO11Y_REDIS_PASSWORD")
 	os.Unsetenv("GF_PLUGIN_ASKO11Y_REDIS_DB")
 
-	client, err := createRedisClient(log.DefaultLogger)
+	client, err := createRedisClient(log.DefaultLogger, PluginSettings{})
 	if err != nil {
 		t.Skipf("Redis not available for testing: %v", err)
 	}
@@ -134,7 +171,7 @@ func TestCreateRedisClient_FromIndividualVars(t *testing.T) {
 	os.Setenv("GF_PLUGIN_ASKO11Y_REDIS_ADDR", "localhost:6379")
 	os.Setenv("GF_PLUGIN_ASKO11Y_REDIS_DB", "15")
 
-	client, err := createRedisClient(log.DefaultLogger)
+	client, err := createRedisClient(log.DefaultLogger, PluginSettings{})
 	if err != nil {
 		t.Skipf("Redis not available for testing: %v", err)
 	}
