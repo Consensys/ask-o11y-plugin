@@ -11,6 +11,7 @@ import (
 	"hash/fnv"
 	"io"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"sync"
@@ -43,6 +44,7 @@ const defaultRedisURL = "redis://localhost:6379/0"
 func createRedisClient(logger log.Logger, settings PluginSettings) (*redis.Client, error) {
 	redisURL := settings.RedisURL
 	if redisURL == "" {
+		logger.Info("No redisURL configured, attempting default", "defaultURL", defaultRedisURL)
 		redisURL = defaultRedisURL
 	}
 	opt, err := redis.ParseURL(redisURL)
@@ -93,7 +95,7 @@ func NewPlugin(ctx context.Context, settings backend.AppInstanceSettings) (insta
 
 	var pluginSettings PluginSettings
 	if err := json.Unmarshal(settings.JSONData, &pluginSettings); err != nil {
-		logger.Warn("Failed to parse plugin settings, using empty config", "error", err)
+		logger.Error("Failed to parse plugin settings, using empty config", "error", err)
 		pluginSettings = PluginSettings{
 			MCPServers: []mcp.ServerConfig{},
 		}
@@ -104,6 +106,16 @@ func NewPlugin(ctx context.Context, settings backend.AppInstanceSettings) (insta
 	}
 	if pluginSettings.RecentMessageCount <= 0 {
 		pluginSettings.RecentMessageCount = 10
+	}
+	if pluginSettings.BuiltInMCPBaseURL != "" {
+		if _, err := url.ParseRequestURI(pluginSettings.BuiltInMCPBaseURL); err != nil {
+			logger.Error("builtInMCPBaseURL is not a valid URL, falling back to default",
+				"configured", pluginSettings.BuiltInMCPBaseURL,
+				"error", err,
+				"fallback", "http://localhost:3000",
+			)
+			pluginSettings.BuiltInMCPBaseURL = ""
+		}
 	}
 
 	promptRegistry, err := NewPromptRegistry(pluginSettings)
