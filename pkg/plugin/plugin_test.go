@@ -5,51 +5,28 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"testing"
 
 	"github.com/grafana/grafana-plugin-sdk-go/backend/log"
 )
 
 func TestBuiltInMCPBaseURL(t *testing.T) {
-	// Save and restore env vars
-	origOverride := os.Getenv("GF_PLUGIN_ASKO11Y_BUILTIN_MCP_BASE_URL")
-	origPort := os.Getenv("GF_PLUGIN_ASKO11Y_SERVER_HTTP_PORT")
-	defer func() {
-		os.Setenv("GF_PLUGIN_ASKO11Y_BUILTIN_MCP_BASE_URL", origOverride)
-		os.Setenv("GF_PLUGIN_ASKO11Y_SERVER_HTTP_PORT", origPort)
-	}()
-
 	t.Run("default returns localhost:3000", func(t *testing.T) {
-		os.Unsetenv("GF_PLUGIN_ASKO11Y_BUILTIN_MCP_BASE_URL")
-		os.Unsetenv("GF_PLUGIN_ASKO11Y_SERVER_HTTP_PORT")
-		got := builtInMCPBaseURL()
+		got := builtInMCPBaseURL(PluginSettings{})
 		if got != "http://localhost:3000" {
 			t.Errorf("builtInMCPBaseURL() = %q, want %q", got, "http://localhost:3000")
 		}
 	})
 
-	t.Run("respects GF_PLUGIN_ASKO11Y_SERVER_HTTP_PORT", func(t *testing.T) {
-		os.Unsetenv("GF_PLUGIN_ASKO11Y_BUILTIN_MCP_BASE_URL")
-		os.Setenv("GF_PLUGIN_ASKO11Y_SERVER_HTTP_PORT", "8080")
-		got := builtInMCPBaseURL()
-		if got != "http://localhost:8080" {
-			t.Errorf("builtInMCPBaseURL() = %q, want %q", got, "http://localhost:8080")
-		}
-	})
-
-	t.Run("override takes precedence", func(t *testing.T) {
-		os.Setenv("GF_PLUGIN_ASKO11Y_BUILTIN_MCP_BASE_URL", "http://grafana.svc:3000")
-		os.Setenv("GF_PLUGIN_ASKO11Y_SERVER_HTTP_PORT", "8080")
-		got := builtInMCPBaseURL()
+	t.Run("respects setting", func(t *testing.T) {
+		got := builtInMCPBaseURL(PluginSettings{BuiltInMCPBaseURL: "http://grafana.svc:3000"})
 		if got != "http://grafana.svc:3000" {
 			t.Errorf("builtInMCPBaseURL() = %q, want %q", got, "http://grafana.svc:3000")
 		}
 	})
 
-	t.Run("override strips trailing slash", func(t *testing.T) {
-		os.Setenv("GF_PLUGIN_ASKO11Y_BUILTIN_MCP_BASE_URL", "http://grafana.svc:3000/")
-		got := builtInMCPBaseURL()
+	t.Run("strips trailing slash", func(t *testing.T) {
+		got := builtInMCPBaseURL(PluginSettings{BuiltInMCPBaseURL: "http://grafana.svc:3000/"})
 		if got != "http://grafana.svc:3000" {
 			t.Errorf("builtInMCPBaseURL() = %q, want %q", got, "http://grafana.svc:3000")
 		}
