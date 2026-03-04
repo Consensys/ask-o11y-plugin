@@ -205,7 +205,7 @@ test.describe('Session Sharing', () => {
       );
 
       // Navigate to the shared session
-      await page.goto(fullUrl, { waitUntil: 'networkidle', timeout: 30000 });
+      await page.goto(fullUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
 
       // Wait for API to return shared session data
       await apiResponsePromise;
