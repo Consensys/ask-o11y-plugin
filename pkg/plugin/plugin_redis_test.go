@@ -28,29 +28,42 @@ func TestNewPlugin_RedisFallback(t *testing.T) {
 		t.Error("ShareStore should be created (in-memory fallback)")
 	}
 
-	// If Redis IS running locally, verify the plugin can use it.
-	settings2 := backend.AppInstanceSettings{
+	if p.redisClient != nil {
+		p.redisClient.Close()
+	}
+}
+
+func TestNewPlugin_RedisSuccess(t *testing.T) {
+	// Skip if Redis is not available locally.
+	probe, err := createRedisClient(log.DefaultLogger, PluginSettings{RedisURL: "redis://localhost:6379/15"})
+	if err != nil {
+		t.Skipf("Redis not available: %v", err)
+	}
+	if pingErr := probe.Ping(context.Background()).Err(); pingErr != nil {
+		probe.Close()
+		t.Skipf("Redis not available: %v", pingErr)
+	}
+	probe.Close()
+
+	settings := backend.AppInstanceSettings{
 		JSONData: []byte(`{"mcpServers":[],"redisURL":"redis://localhost:6379/15"}`),
 	}
-
-	plugin2, err := NewPlugin(ctx, settings2)
+	plugin, err := NewPlugin(context.Background(), settings)
 	if err != nil {
 		t.Fatalf("Failed to create plugin: %v", err)
 	}
+	p := plugin.(*Plugin)
+	defer func() {
+		if p.redisClient != nil {
+			p.redisClient.Close()
+		}
+	}()
 
-	p2 := plugin2.(*Plugin)
-	if p2.shareStore == nil {
-		t.Error("ShareStore should be created")
-	}
-	if p2.redisClient != nil && !p2.usingRedis {
+	if !p.usingRedis {
 		t.Error("Should be using Redis when connection succeeds")
 	}
-
-	if p2.redisClient != nil {
-		p2.redisClient.Close()
-	}
-	if p.redisClient != nil {
-		p.redisClient.Close()
+	if p.shareStore == nil {
+		t.Error("ShareStore should be non-nil when using Redis")
 	}
 }
 
