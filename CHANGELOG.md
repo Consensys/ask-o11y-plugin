@@ -5,6 +5,18 @@ All notable changes to the Ask O11y Grafana plugin will be documented in this fi
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.11](https://github.com/Consensys/ask-o11y-plugin/compare/v0.2.10...v0.2.11) (2026-03-06)
+
+
+### Bug Fixes
+
+* **build:** filter node_modules from Go manifest ([#71](https://github.com/Consensys/ask-o11y-plugin/issues/71)) ([881d928](https://github.com/Consensys/ask-o11y-plugin/commit/881d928b104eb666558187d3ef4fb38f6a422ea4))
+
+
+### Reverts
+
+* restore skip-github-release in release-please config ([#73](https://github.com/Consensys/ask-o11y-plugin/issues/73)) ([911b72f](https://github.com/Consensys/ask-o11y-plugin/commit/911b72f4812feb42fc4d765ea20fb5d103637f3e))
+
 ## [0.2.10](https://github.com/Consensys/ask-o11y-plugin/compare/v0.2.9...v0.2.10) (2026-03-04)
 
 
