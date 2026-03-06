@@ -122,6 +122,8 @@
   },
   "packageManager": "npm@11.5.1",
   "overrides": {
-    "serialize-javascript": "^7.0.4"
+    "serialize-javascript": "^7.0.4",
+    "hono": "^4.12.5",
+    "@hono/node-server": "^1.19.11"
   }
 }
