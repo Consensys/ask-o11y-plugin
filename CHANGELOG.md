@@ -5,6 +5,13 @@ All notable changes to the Ask O11y Grafana plugin will be documented in this fi
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.12](https://github.com/Consensys/ask-o11y-plugin/compare/v0.2.11...v0.2.12) (2026-03-06)
+
+
+### Bug Fixes
+
+* **deps:** pin flatted to 3.3.3 to exclude Go files from manifest ([#75](https://github.com/Consensys/ask-o11y-plugin/issues/75)) ([c458ef4](https://github.com/Consensys/ask-o11y-plugin/commit/c458ef4))
+
 ## [0.2.11](https://github.com/Consensys/ask-o11y-plugin/compare/v0.2.10...v0.2.11) (2026-03-06)
 
 
