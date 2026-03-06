@@ -17,3 +17,15 @@ apps:
     org_id: 1
     jsonData:
         useBuiltInMCP: true
+        # Example external MCP server configuration:
+        # mcpServers:
+        #   - id: 'mcp-grafana'
+        #     name: 'Grafana MCP'
+        #     url: 'http://mcp-grafana:8000/mcp'
+        #     enabled: true
+        #     type: 'streamable-http'
+        # Note: Headers are NOT stored here for security reasons
+    # secureJsonData:
+      # Format: {serverID}__headers -> JSON string of headers
+      # Example:
+      # mcp-grafana__headers: '{"Authorization":"Bearer $GRAFANA_TOKEN","X-API-Key":"$MCP_API_KEY"}'

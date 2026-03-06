@@ -5,6 +5,7 @@ export interface MCPServerConfig {
   enabled: boolean;
   type?: 'openapi' | 'standard' | 'sse' | 'streamable-http';
   headers?: Record<string, string>;
+  hasSecureHeaders?: boolean;
 }
 
 export type AppPluginSettings = {
