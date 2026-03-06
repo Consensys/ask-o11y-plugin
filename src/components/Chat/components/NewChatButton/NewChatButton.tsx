@@ -3,10 +3,10 @@ import { useTheme2 } from '@grafana/ui';
 
 interface NewChatButtonProps {
   onConfirm: () => void;
-  disabled: boolean;
+  isGenerating?: boolean;
 }
 
-export function NewChatButton({ onConfirm, disabled }: NewChatButtonProps): React.ReactElement {
+export function NewChatButton({ onConfirm, isGenerating }: NewChatButtonProps): React.ReactElement {
   const theme = useTheme2();
   const [isOpen, setIsOpen] = useState(false);
   const popupRef = useRef<HTMLDivElement>(null);
@@ -37,8 +37,7 @@ export function NewChatButton({ onConfirm, disabled }: NewChatButtonProps): Reac
     <div className="relative">
       <button
         onClick={() => setIsOpen(!isOpen)}
-        disabled={disabled}
-        className="p-2 rounded-md hover:bg-white/10 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+        className="p-2 rounded-md hover:bg-white/10 transition-colors"
         aria-label="New chat"
         title="New chat"
         style={{ color: theme.colors.text.secondary }}
@@ -68,7 +67,7 @@ export function NewChatButton({ onConfirm, disabled }: NewChatButtonProps): Reac
           }}
         >
           <p className="text-xs font-medium mb-1" style={{ color: theme.colors.text.primary }}>
-            Start a new chat?
+            {isGenerating ? 'This will stop the current response. Start a new chat?' : 'Start a new chat?'}
           </p>
           <div className="flex gap-2">
             <button
