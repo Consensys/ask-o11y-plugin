@@ -5,6 +5,14 @@ All notable changes to the Ask O11y Grafana plugin will be documented in this fi
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.13](https://github.com/Consensys/ask-o11y-plugin/compare/v0.2.12...v0.2.13) (2026-03-09)
+
+
+### Bug Fixes
+
+* **chat:** fix autoscroll not triggering after user scrolls up ([#78](https://github.com/Consensys/ask-o11y-plugin/issues/78)) ([4d4c618](https://github.com/Consensys/ask-o11y-plugin/commit/4d4c618cc964e682f9d1a292655e95017f3bb21b))
+* **side-panel:** open panel when links appear after session load or hard refresh ([#79](https://github.com/Consensys/ask-o11y-plugin/issues/79)) ([fb4d87d](https://github.com/Consensys/ask-o11y-plugin/commit/fb4d87ded77a702e5d55dff1290228f4a9a67204))
+
 ## [0.2.12](https://github.com/Consensys/ask-o11y-plugin/compare/v0.2.11...v0.2.12) (2026-03-06)
 
 
