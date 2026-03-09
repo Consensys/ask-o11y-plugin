@@ -125,6 +125,13 @@
     "serialize-javascript": "^7.0.4",
     "hono": "^4.12.5",
     "@hono/node-server": "^1.19.11",
-    "flatted": "3.3.3"
+    "flatted": "3.3.3",
+    "express-rate-limit": "^8.3.0",
+    "sass": {
+      "immutable": "^5.1.5"
+    },
+    "@grafana/data": {
+      "dompurify": "^3.3.2"
+    }
   }
 }
