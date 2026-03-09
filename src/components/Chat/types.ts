@@ -60,6 +60,7 @@ export interface ChatInterfaceProps {
   sendMessage: () => void;
   handleKeyPress: (e: React.KeyboardEvent) => void;
   chatContainerRef: React.RefObject<HTMLDivElement>;
+  scrollContainerRef: React.RefObject<HTMLDivElement>;
   chatInputRef: React.RefObject<{ focus: () => void; clear: () => void }>;
   bottomSpacerRef: React.RefObject<HTMLDivElement>;
   leftSlot?: React.ReactNode;

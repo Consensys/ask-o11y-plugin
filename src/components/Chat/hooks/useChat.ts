@@ -93,6 +93,7 @@ export function useChat(
   const [isGenerating, setIsGenerating] = useState(false);
   const [isReconnecting, setIsReconnecting] = useState(false);
   const chatContainerRef = useRef<HTMLDivElement>(null);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
   const bottomSpacerRef = useRef<HTMLDivElement>(null);
   const [isAutoScroll, setIsAutoScroll] = useState(true);
   const [retryCount, setRetryCount] = useState(0);
@@ -131,21 +132,26 @@ export function useChat(
   }, [sessionIdFromUrl, readOnly, initialMessage]);
 
   useEffect(() => {
-    if (isAutoScroll && bottomSpacerRef.current) {
-      bottomSpacerRef.current.scrollIntoView({ block: 'end', behavior: 'auto' });
+    if (isAutoScroll && scrollContainerRef.current) {
+      scrollContainerRef.current.scrollTop = scrollContainerRef.current.scrollHeight;
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [chatHistory]);
 
   useEffect(() => {
+    const container = scrollContainerRef.current;
+    if (!container) {
+      return;
+    }
     const SCROLL_THRESHOLD = 50;
     function handleScroll(): void {
-      const atBottom = window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - SCROLL_THRESHOLD;
+      const atBottom = container!.scrollHeight - container!.scrollTop - container!.clientHeight <= SCROLL_THRESHOLD;
       setIsAutoScroll(atBottom);
     }
-    window.addEventListener('scroll', handleScroll, { passive: true });
-    return () => window.removeEventListener('scroll', handleScroll);
-  }, []);
+    container.addEventListener('scroll', handleScroll, { passive: true });
+    return () => container.removeEventListener('scroll', handleScroll);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scrollContainerRef.current]);
 
   useEffect(() => {
     return () => {
@@ -260,6 +266,9 @@ export function useChat(
     }
 
     setIsAutoScroll(true);
+    if (scrollContainerRef.current) {
+      scrollContainerRef.current.scrollTop = scrollContainerRef.current.scrollHeight;
+    }
 
     let validatedInput: string;
     try {
@@ -566,6 +575,7 @@ export function useChat(
     isGenerating,
     isReconnecting,
     chatContainerRef,
+    scrollContainerRef,
     toolCalls,
     setCurrentInput,
     sendMessage,

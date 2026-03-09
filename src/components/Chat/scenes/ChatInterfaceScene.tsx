@@ -25,6 +25,7 @@ function useChatInterface(model: ChatInterfaceScene): ChatInterfaceProps {
     sendMessage: state.sendMessage,
     handleKeyPress: state.handleKeyPress,
     chatContainerRef: state.chatContainerRef,
+    scrollContainerRef: state.scrollContainerRef,
     chatInputRef: state.chatInputRef,
     bottomSpacerRef: state.bottomSpacerRef,
     leftSlot: state.leftSlot,
@@ -59,6 +60,7 @@ function ChatInterfaceRenderer({ model }: SceneComponentProps<ChatInterfaceScene
     sendMessage,
     handleKeyPress,
     chatContainerRef,
+    scrollContainerRef,
     chatInputRef,
     bottomSpacerRef,
     leftSlot,
@@ -76,7 +78,7 @@ function ChatInterfaceRenderer({ model }: SceneComponentProps<ChatInterfaceScene
       {hasMessages ? (
         <>
           {/* Scrollable chat history area */}
-          <div className="chat-interface-scroll-container w-full px-4 max-w-4xl mx-auto" style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, overflow: 'auto' }}>
+          <div ref={scrollContainerRef} className="chat-interface-scroll-container w-full px-4 max-w-4xl mx-auto" style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, overflow: 'auto' }}>
             {/* Header - only show when there are messages */}
             <ChatHeader isGenerating={isGenerating} currentSessionTitle={currentSessionTitle} />
 
