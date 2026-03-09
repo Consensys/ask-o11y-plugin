@@ -138,6 +138,7 @@ export function useChat(
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [chatHistory]);
 
+  const hasMessages = chatHistory.length > 0;
   useEffect(() => {
     const container = scrollContainerRef.current;
     if (!container) {
@@ -150,8 +151,7 @@ export function useChat(
     }
     container.addEventListener('scroll', handleScroll, { passive: true });
     return () => container.removeEventListener('scroll', handleScroll);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [scrollContainerRef.current]);
+  }, [hasMessages]);
 
   useEffect(() => {
     return () => {
