@@ -24,6 +24,7 @@ export function useSidePanelState({
   const [removedTabUrls, setRemovedTabUrls] = useState<Set<string>>(new Set());
   const prevSourceMessageIndexRef = useRef<number | null>(null);
   const prevSessionIdRef = useRef<string | null>(null);
+  const prevRefsLengthRef = useRef<number>(0);
 
   const visiblePageRefs = detectedPageRefs
     .filter((ref) => !removedTabUrls.has(ref.url))
@@ -50,6 +51,9 @@ export function useSidePanelState({
 
     const sessionChanged = currentSessionId !== prevSessionId;
     const messageIndexChanged = currentSourceIndex !== null && currentSourceIndex !== prevSourceIndex;
+    // Refs populated after session load: same session, was empty, now has links
+    const refsAppearedAfterLoad =
+      !sessionChanged && prevRefsLengthRef.current === 0 && detectedPageRefs.length > 0;
 
     if (sessionChanged) {
       setRemovedTabUrls(new Set());
@@ -59,10 +63,13 @@ export function useSidePanelState({
     } else if (messageIndexChanged) {
       setIsOpen(true);
       setRemovedTabUrls(new Set());
+    } else if (refsAppearedAfterLoad) {
+      setIsOpen(true);
     }
 
     prevSourceMessageIndexRef.current = currentSourceIndex;
     prevSessionIdRef.current = currentSessionId;
+    prevRefsLengthRef.current = detectedPageRefs.length;
   }, [detectedPageRefs, currentSessionId]);
 
   const showSidePanel = isOpen && visiblePageRefs.length > 0 && allowEmbedding === true;
