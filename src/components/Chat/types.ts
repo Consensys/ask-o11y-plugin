@@ -56,7 +56,7 @@ export interface ChatInterfaceProps {
   setCurrentInput: (value: string) => void;
   sendMessage: () => void;
   handleKeyPress: (e: React.KeyboardEvent) => void;
-  chatContainerRef: React.RefObject<HTMLDivElement>;
+  chatContainerRef: React.RefObject<HTMLDivElement> | React.RefCallback<HTMLDivElement>;
   chatInputRef: React.RefObject<{ focus: () => void; clear: () => void }>;
   bottomSpacerRef: React.RefObject<HTMLDivElement>;
   leftSlot?: React.ReactNode;
