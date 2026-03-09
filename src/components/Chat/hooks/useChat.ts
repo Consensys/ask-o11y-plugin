@@ -75,6 +75,7 @@ export function useChat(
   const chatContainerRef = useRef<HTMLDivElement>(null);
   const bottomSpacerRef = useRef<HTMLDivElement>(null);
   const [isAutoScroll, setIsAutoScroll] = useState(true);
+  const isAutoScrollRef = useRef(true);
   const [retryCount, setRetryCount] = useState(0);
   const [toolCalls, setToolCalls] = useState<Map<string, RenderedToolCall>>(new Map());
   const [messageQueue, setMessageQueue] = useState<string[]>([]);
@@ -105,32 +106,40 @@ export function useChat(
   }, [sessionIdFromUrl, readOnly, initialMessage]);
 
   useEffect(() => {
-    if (!isAutoScroll) {
+    if (!isAutoScrollRef.current) {
       return;
     }
-    const frame = requestAnimationFrame(() => {
-      chatContainerRef.current?.scrollTo(0, chatContainerRef.current.scrollHeight);
-    });
-    return () => cancelAnimationFrame(frame);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    bottomSpacerRef.current?.scrollIntoView({ behavior: 'instant', block: 'end' });
   }, [chatHistory, isGenerating, toolCalls]);
 
-  // The scroll container lives inside a Grafana Scenes subtree and may not be
-  // mounted when this effect first runs. Poll via rAF until it appears, then
-  // attach a scroll listener to toggle auto-scroll based on proximity to bottom.
+  // Attach a scroll listener to detect when the user scrolls up (disables autoscroll)
+  // or back to the bottom (re-enables it). Direction-aware: only upward scrolls disable
+  // autoscroll, so programmatic downward scrolls from scrollIntoView never interfere.
   const hasMessages = chatHistory.length > 0;
   useEffect(() => {
     const SCROLL_THRESHOLD = 50;
     let frameId: number;
     let boundContainer: HTMLDivElement | null = null;
+    let lastScrollTop = 0;
 
     function handleScroll(): void {
       const c = chatContainerRef.current;
       if (!c) {
         return;
       }
-      const atBottom = c.scrollHeight - c.scrollTop - c.clientHeight < SCROLL_THRESHOLD;
-      setIsAutoScroll(atBottom);
+      const currentScrollTop = c.scrollTop;
+      const scrolledUp = currentScrollTop < lastScrollTop;
+      lastScrollTop = currentScrollTop;
+      if (scrolledUp) {
+        isAutoScrollRef.current = false;
+        setIsAutoScroll(false);
+      } else {
+        const atBottom = c.scrollHeight - currentScrollTop - c.clientHeight < SCROLL_THRESHOLD;
+        if (atBottom) {
+          isAutoScrollRef.current = true;
+          setIsAutoScroll(true);
+        }
+      }
     }
 
     function pollForContainer(): void {
@@ -139,6 +148,7 @@ export function useChat(
         frameId = requestAnimationFrame(pollForContainer);
         return;
       }
+      lastScrollTop = container.scrollTop;
       boundContainer = container;
       container.addEventListener('scroll', handleScroll, { passive: true });
     }
@@ -241,6 +251,7 @@ export function useChat(
       return;
     }
 
+    isAutoScrollRef.current = true;
     setIsAutoScroll(true);
 
     let validatedInput: string;
@@ -550,7 +561,6 @@ export function useChat(
     clearChat,
     getRunningToolCallsCount,
     isAutoScroll,
-    setIsAutoScroll,
     sessionManager,
     retryCount,
     bottomSpacerRef: bottomSpacerRef as React.RefObject<HTMLDivElement>,
