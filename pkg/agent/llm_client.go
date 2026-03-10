@@ -42,12 +42,14 @@ func (c *LLMClient) ChatCompletion(ctx context.Context, req ChatCompletionReques
 
 	body, err := json.Marshal(req)
 	if err != nil {
+		tracing.Error(span, err)
 		return nil, fmt.Errorf("marshal request: %w", err)
 	}
 
 	url := strings.TrimRight(grafanaURL, "/") + llmEndpoint
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
+		tracing.Error(span, err)
 		return nil, fmt.Errorf("create request: %w", err)
 	}
 
@@ -84,20 +86,26 @@ func (c *LLMClient) ChatCompletion(ctx context.Context, req ChatCompletionReques
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
+		tracing.Error(span, err)
 		return nil, fmt.Errorf("read response: %w", err)
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("LLM returned status %d", resp.StatusCode)
+		err := fmt.Errorf("LLM returned status %d", resp.StatusCode)
+		tracing.Error(span, err)
+		return nil, err
 	}
 
 	var result ChatCompletionResponse
 	if err := json.Unmarshal(respBody, &result); err != nil {
+		tracing.Error(span, err)
 		return nil, fmt.Errorf("decode response: %w", err)
 	}
 
 	if len(result.Choices) == 0 {
-		return nil, fmt.Errorf("LLM returned no choices")
+		err := fmt.Errorf("LLM returned no choices")
+		tracing.Error(span, err)
+		return nil, err
 	}
 
 	if result.Usage != nil {
