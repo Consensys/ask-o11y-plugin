@@ -6,7 +6,7 @@
 [![Grafana](https://img.shields.io/badge/Grafana-%3E%3D12.1.1-orange.svg)](https://grafana.com)
 [![CI](https://github.com/Consensys/ask-o11y-plugin/actions/workflows/ci.yml/badge.svg)](https://github.com/Consensys/ask-o11y-plugin/actions/workflows/ci.yml)
 [![GitHub release](https://img.shields.io/github/v/release/Consensys/ask-o11y-plugin)](https://github.com/Consensys/ask-o11y-plugin/releases)
-
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/Consensys/ask-o11y-plugin)
 ---
 
 ## Prerequisites
