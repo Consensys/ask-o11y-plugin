@@ -483,6 +483,7 @@ func (p *Plugin) handleAgentRun(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ctx, span := tracing.DefaultTracer().Start(r.Context(), "agent_run")
+	defer span.End()
 	r = r.WithContext(ctx)
 
 	userRole := getUserRole(r)
@@ -648,7 +649,8 @@ func (p *Plugin) handleAgentRun(w http.ResponseWriter, r *http.Request) {
 		ScopeOrgID:         req.ScopeOrgID,
 	}
 
-	runCtx, runCancel := context.WithCancel(ctx)
+	detachedCtx := context.WithoutCancel(ctx)
+	runCtx, runCancel := context.WithCancel(detachedCtx)
 
 	p.runCancelsMu.Lock()
 	p.runCancels[runID] = runCancel
@@ -657,7 +659,6 @@ func (p *Plugin) handleAgentRun(w http.ResponseWriter, r *http.Request) {
 	go p.agentLoop.Run(runCtx, loopReq, eventCh)
 	go func() {
 		p.consumeAgentEvents(runID, sessionID, userID, numericOrgID, eventCh)
-		span.End()
 		runCancel()
 		p.runCancelsMu.Lock()
 		delete(p.runCancels, runID)
