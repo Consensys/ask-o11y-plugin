@@ -10,7 +10,10 @@ import (
 	"strings"
 	"time"
 
+	"go.opentelemetry.io/otel/attribute"
+
 	"github.com/grafana/grafana-plugin-sdk-go/backend/log"
+	"github.com/grafana/grafana-plugin-sdk-go/backend/tracing"
 )
 
 const (
@@ -32,6 +35,9 @@ func NewLLMClient(logger log.Logger) *LLMClient {
 }
 
 func (c *LLMClient) ChatCompletion(ctx context.Context, req ChatCompletionRequest, grafanaURL, authToken, orgID string) (*ChatCompletionResponse, error) {
+	ctx, span := tracing.DefaultTracer().Start(ctx, "llm_call")
+	defer span.End()
+
 	req.Model = llmModel
 
 	body, err := json.Marshal(req)
@@ -71,6 +77,7 @@ func (c *LLMClient) ChatCompletion(ctx context.Context, req ChatCompletionReques
 
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
+		tracing.Error(span, err)
 		return nil, fmt.Errorf("LLM request failed: %w", err)
 	}
 	defer resp.Body.Close()
@@ -91,6 +98,13 @@ func (c *LLMClient) ChatCompletion(ctx context.Context, req ChatCompletionReques
 
 	if len(result.Choices) == 0 {
 		return nil, fmt.Errorf("LLM returned no choices")
+	}
+
+	if result.Usage != nil {
+		span.SetAttributes(
+			attribute.Int("llm.prompt_tokens", result.Usage.PromptTokens),
+			attribute.Int("llm.completion_tokens", result.Usage.CompletionTokens),
+		)
 	}
 
 	return &result, nil

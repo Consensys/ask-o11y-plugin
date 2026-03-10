@@ -17,10 +17,13 @@ import (
 	"sync"
 	"time"
 
+	"go.opentelemetry.io/otel/attribute"
+
 	"github.com/grafana/grafana-plugin-sdk-go/backend"
 	"github.com/grafana/grafana-plugin-sdk-go/backend/instancemgmt"
 	"github.com/grafana/grafana-plugin-sdk-go/backend/log"
 	"github.com/grafana/grafana-plugin-sdk-go/backend/resource/httpadapter"
+	"github.com/grafana/grafana-plugin-sdk-go/backend/tracing"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -479,6 +482,10 @@ func (p *Plugin) handleAgentRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	ctx, span := tracing.DefaultTracer().Start(r.Context(), "agent_run")
+	defer span.End()
+	r = r.WithContext(ctx)
+
 	userRole := getUserRole(r)
 	userID := getUserID(r)
 	orgID := r.Header.Get("X-Grafana-Org-Id")
@@ -618,6 +625,12 @@ func (p *Plugin) handleAgentRun(w http.ResponseWriter, r *http.Request) {
 		"sessionId", sessionID,
 		"messageCount", len(messages),
 		"type", req.Type,
+	)
+
+	span.SetAttributes(
+		attribute.String("org_id", orgID),
+		attribute.String("user_role", string(userRole)),
+		attribute.String("session_id", sessionID),
 	)
 
 	eventCh := make(chan agent.SSEEvent, 16)
