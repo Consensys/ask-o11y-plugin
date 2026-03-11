@@ -45,13 +45,15 @@ test.describe('MCP Server Management', () => {
     const urlInput = page.locator('[data-testid^="data-testid ac-mcp-server-url-"]').last();
     await urlInput.fill('https://test-mcp.example.com');
 
-    // Change server type
-    const typeDropdown = page.locator('select.gf-form-input').last();
-    await expect(typeDropdown).toHaveValue('openapi');
-    await typeDropdown.selectOption('sse');
-    await expect(typeDropdown).toHaveValue('sse');
-    await typeDropdown.selectOption('streamable-http');
-    await expect(typeDropdown).toHaveValue('streamable-http');
+    // Change server type (Grafana Select component)
+    const typeSelect = page.getByRole('combobox').last();
+    await expect(typeSelect).toHaveValue('OpenAPI');
+    await typeSelect.click();
+    await page.getByText('SSE', { exact: true }).click();
+    await expect(typeSelect).toHaveValue('SSE');
+    await typeSelect.click();
+    await page.getByText('Streamable HTTP', { exact: true }).click();
+    await expect(typeSelect).toHaveValue('Streamable HTTP');
 
     // Save button should be enabled
     const saveMcpButton = page.locator('[data-testid="data-testid ac-save-mcp-servers"]');
