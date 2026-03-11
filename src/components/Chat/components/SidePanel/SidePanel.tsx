@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { Icon, useStyles2, useTheme2 } from '@grafana/ui';
-import { css, cx } from '@emotion/css';
+import { cx } from '@emotion/css';
 import { GrafanaTheme2 } from '@grafana/data';
+import { getHoverButtonStyle } from '../../../../theme';
 import { GrafanaPageRef } from '../../types';
 import { TabCloseButton } from './TabCloseButton';
 import { useEmbeddingAllowed } from '../../hooks/useEmbeddingAllowed';
@@ -146,9 +147,5 @@ export const SidePanel: React.FC<SidePanelProps> = ({ isOpen, onClose, pageRefs,
 };
 
 const getStyles = (theme: GrafanaTheme2) => ({
-  hoverButton: css({
-    '&:hover': {
-      backgroundColor: theme.colors.action.hover,
-    },
-  }),
+  hoverButton: getHoverButtonStyle(theme),
 });

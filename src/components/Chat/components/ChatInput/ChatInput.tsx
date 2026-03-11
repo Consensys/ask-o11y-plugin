@@ -3,6 +3,7 @@ import { Icon, Alert, useStyles2, useTheme2 } from '@grafana/ui';
 import { css, cx, keyframes } from '@emotion/css';
 import { GrafanaTheme2 } from '@grafana/data';
 import { ValidationService } from '../../../../services/validation';
+import { getHoverButtonStyle } from '../../../../theme';
 
 interface ChatInputProps {
   currentInput: string;
@@ -227,11 +228,13 @@ const getStyles = (theme: GrafanaTheme2) => {
   });
 
   const gradient = `linear-gradient(90deg, ${theme.colors.primary.main}, ${theme.colors.error.main}, ${theme.colors.warning.main}, ${theme.colors.error.main}, ${theme.colors.primary.main})`;
+  // Concentric radii: wrapper (base), glow (base + 2px outset), inner (base - 2px inset)
+  const r = theme.shape.radius.default;
 
   return {
     gradientWrapper: css({
       position: 'relative',
-      borderRadius: theme.shape.radius.default,
+      borderRadius: r,
       padding: 2,
       background: gradient,
       backgroundSize: '200% 100%',
@@ -242,7 +245,7 @@ const getStyles = (theme: GrafanaTheme2) => {
         content: '""',
         position: 'absolute',
         inset: -2,
-        borderRadius: theme.shape.radius.default,
+        borderRadius: `calc(${r} + 2px)`,
         background: gradient,
         backgroundSize: '200% 100%',
         animation: `${gradientShift} 4s ease infinite`,
@@ -253,14 +256,10 @@ const getStyles = (theme: GrafanaTheme2) => {
     }),
     gradientInner: css({
       backgroundColor: theme.colors.background.canvas,
-      borderRadius: theme.shape.radius.default,
+      borderRadius: `calc(${r} - 2px)`,
       position: 'relative',
       zIndex: 1,
     }),
-    hoverButton: css({
-      '&:hover': {
-        backgroundColor: theme.colors.action.hover,
-      },
-    }),
+    hoverButton: getHoverButtonStyle(theme),
   };
 };

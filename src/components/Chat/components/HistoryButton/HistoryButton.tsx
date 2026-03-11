@@ -1,7 +1,8 @@
 import React from 'react';
 import { useStyles2, useTheme2 } from '@grafana/ui';
-import { css, cx } from '@emotion/css';
+import { cx } from '@emotion/css';
 import { GrafanaTheme2 } from '@grafana/data';
+import { getHoverButtonStyle } from '../../../../theme';
 
 interface HistoryButtonProps {
   onClick: () => void;
@@ -39,9 +40,5 @@ export function HistoryButton({ onClick, sessionCount }: HistoryButtonProps): Re
 }
 
 const getStyles = (theme: GrafanaTheme2) => ({
-  hoverButton: css({
-    '&:hover': {
-      backgroundColor: theme.colors.action.hover,
-    },
-  }),
+  hoverButton: getHoverButtonStyle(theme),
 });
