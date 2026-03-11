@@ -54,6 +54,8 @@ const PROMPT_DEFAULTS_URL = '/api/plugins/consensys-asko11y-app/resources/api/pr
 
 const AppConfig = ({ plugin }: AppConfigProps) => {
   const { enabled, pinned, jsonData } = plugin.meta;
+  const secureJsonFields: Record<string, boolean> =
+    (plugin.meta as unknown as { secureJsonFields?: Record<string, boolean> }).secureJsonFields || {};
   const [promptDefaults, setPromptDefaults] = useState<PromptDefaults | null>(null);
   const [state, setState] = useState<State>({
     maxTotalTokens: jsonData?.maxTotalTokens || 180000,
@@ -70,6 +72,8 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
   const [validationErrors, setValidationErrors] = useState<ValidationErrors>({
     mcpServers: {},
   });
+  const [resetSecureKeys, setResetSecureKeys] = useState<Set<string>>(new Set());
+  const [deletedSecureKeys, setDeletedSecureKeys] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     const init = async () => {
@@ -180,9 +184,20 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
   }
 
   function removeMCPServer(id: string) {
+    const server = state.mcpServers.find((s) => s.id === id);
+    if (server?.headers) {
+      const keysToDelete = new Set(deletedSecureKeys);
+      for (const headerKey of Object.keys(server.headers)) {
+        const cleanKey = normalizeHeaderKey(headerKey);
+        if (cleanKey && !cleanKey.startsWith('__new_header_')) {
+          keysToDelete.add(`mcpServerHeader.${id}.${cleanKey}`);
+        }
+      }
+      setDeletedSecureKeys(keysToDelete);
+    }
     setState({
       ...state,
-      mcpServers: state.mcpServers.filter((server) => server.id !== id),
+      mcpServers: state.mcpServers.filter((s) => s.id !== id),
     });
   }
 
@@ -232,6 +247,16 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
 
     const finalKey = computeFinalHeaderKey(oldKey, newKey, keyOrder);
 
+    if (oldKey !== finalKey) {
+      const oldCleanKey = normalizeHeaderKey(oldKey);
+      if (oldCleanKey && !oldCleanKey.startsWith('__new_header_')) {
+        const oldSecureKey = `mcpServerHeader.${serverId}.${oldCleanKey}`;
+        if (secureJsonFields[oldSecureKey]) {
+          setDeletedSecureKeys((prev) => new Set(prev).add(oldSecureKey));
+        }
+      }
+    }
+
     const newHeaders: Record<string, string> = {};
     for (const k of keyOrder) {
       if (k === oldKey) {
@@ -280,6 +305,12 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
     const server = state.mcpServers.find((s) => s.id === serverId);
     if (!server) {
       return;
+    }
+
+    const cleanKey = normalizeHeaderKey(key);
+    const secureKey = `mcpServerHeader.${serverId}.${cleanKey}`;
+    if (secureJsonFields[secureKey]) {
+      setDeletedSecureKeys((prev) => new Set(prev).add(secureKey));
     }
 
     const currentHeaders = { ...(server.headers || {}) };
@@ -376,12 +407,14 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
       return;
     }
 
+    const secureJsonData: Record<string, string> = {};
+
     const cleanedServers = state.mcpServers.map((server) => {
       if (!server.headers) {
         return server;
       }
 
-      const cleanedHeaders: Record<string, string> = {};
+      const headerKeys: Record<string, string> = {};
       for (const [key, value] of Object.entries(server.headers)) {
         let cleanKey = key.trim();
         if (!cleanKey || cleanKey.startsWith('__new_header_')) {
@@ -390,15 +423,28 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
         if (cleanKey.includes('__collision_')) {
           cleanKey = cleanKey.split('__collision_')[0].trim();
         }
-        cleanedHeaders[cleanKey] = value;
+        headerKeys[cleanKey] = '';
+        const secureKey = `mcpServerHeader.${server.id}.${cleanKey}`;
+        if (value) {
+          secureJsonData[secureKey] = value;
+        } else if (resetSecureKeys.has(secureKey)) {
+          secureJsonData[secureKey] = '';
+        }
       }
 
       return {
         ...server,
-        headers: Object.keys(cleanedHeaders).length > 0 ? cleanedHeaders : undefined,
+        headers: Object.keys(headerKeys).length > 0 ? headerKeys : undefined,
       };
     });
 
+    for (const key of deletedSecureKeys) {
+      if (!(key in secureJsonData)) {
+        secureJsonData[key] = '';
+      }
+    }
+
+    const hasSecureChanges = Object.keys(secureJsonData).length > 0;
     updatePluginAndReload(plugin.meta.id, {
       enabled,
       pinned,
@@ -406,6 +452,7 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
         ...jsonData,
         mcpServers: cleanedServers,
       },
+      ...(hasSecureChanges ? { secureJsonData } : {}),
     });
   }
 
@@ -633,6 +680,10 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
                     displayKey = key.split('__collision_')[0];
                   }
                   const hasCollision = key.includes('__collision_');
+                  const cleanKey = normalizeHeaderKey(key);
+                  const secureKey = `mcpServerHeader.${server.id}.${cleanKey}`;
+                  const isConfigured =
+                    secureJsonFields[secureKey] && !resetSecureKeys.has(secureKey) && !value;
                   return (
                     <div key={`${server.id}-header-${index}`} className="mb-2">
                       <div className="flex items-center gap-2">
@@ -644,13 +695,36 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
                           data-testid={testIds.appConfig.mcpServerHeaderKeyInput(server.id, index)}
                           invalid={hasCollision}
                         />
-                        <Input
-                          width={30}
-                          value={value}
-                          placeholder="Header value"
-                          onChange={(e) => updateHeader(server.id, key, key, e.currentTarget.value)}
-                          data-testid={testIds.appConfig.mcpServerHeaderValueInput(server.id, index)}
-                        />
+                        {isConfigured ? (
+                          <>
+                            <Input
+                              width={30}
+                              value=""
+                              placeholder="Configured"
+                              disabled
+                              type="password"
+                              data-testid={testIds.appConfig.mcpServerHeaderValueInput(server.id, index)}
+                            />
+                            <Button
+                              variant="secondary"
+                              size="sm"
+                              icon="edit"
+                              onClick={() =>
+                                setResetSecureKeys((prev) => new Set(prev).add(secureKey))
+                              }
+                              aria-label="Reset header value"
+                            />
+                          </>
+                        ) : (
+                          <Input
+                            width={30}
+                            value={value}
+                            placeholder="Header value"
+                            type="password"
+                            onChange={(e) => updateHeader(server.id, key, key, e.currentTarget.value)}
+                            data-testid={testIds.appConfig.mcpServerHeaderValueInput(server.id, index)}
+                          />
+                        )}
                         <Button
                           variant="secondary"
                           size="sm"
@@ -804,7 +878,11 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
 
 export default AppConfig;
 
-const updatePluginAndReload = async (pluginId: string, data: Partial<PluginMeta<AppPluginSettings>>) => {
+interface PluginUpdatePayload extends Partial<PluginMeta<AppPluginSettings>> {
+  secureJsonData?: Record<string, string>;
+}
+
+const updatePluginAndReload = async (pluginId: string, data: PluginUpdatePayload) => {
   try {
     await updatePlugin(pluginId, data);
     window.location.reload();
@@ -813,7 +891,7 @@ const updatePluginAndReload = async (pluginId: string, data: Partial<PluginMeta<
   }
 };
 
-const updatePlugin = async (pluginId: string, data: Partial<PluginMeta>) => {
+const updatePlugin = async (pluginId: string, data: PluginUpdatePayload) => {
   const response = await getBackendSrv().fetch({
     url: `/api/plugins/${pluginId}/settings`,
     method: 'POST',

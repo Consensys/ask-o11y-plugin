@@ -44,15 +44,14 @@ func builtInMCPBaseURL(settings PluginSettings) string {
 
 const defaultRedisURL = "redis://localhost:6379/0"
 
-func createRedisClient(logger log.Logger, settings PluginSettings) (*redis.Client, error) {
-	redisURL := settings.RedisURL
+func createRedisClient(logger log.Logger, redisURL string) (*redis.Client, error) {
 	if redisURL == "" {
 		logger.Info("No redisURL configured, attempting default", "defaultURL", defaultRedisURL)
 		redisURL = defaultRedisURL
 	}
 	opt, err := redis.ParseURL(redisURL)
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse redisURL %q: %w", redisURL, err)
+		return nil, fmt.Errorf("failed to parse redisURL: %w", err)
 	}
 	logger.Info("Using Redis connection", "addr", opt.Addr, "db", opt.DB)
 	return redis.NewClient(opt), nil
@@ -69,8 +68,35 @@ type PluginSettings struct {
 	MaxTotalTokens     int `json:"maxTotalTokens,omitempty"`
 	RecentMessageCount int `json:"recentMessageCount,omitempty"`
 
-	RedisURL          string `json:"redisURL,omitempty"`
 	BuiltInMCPBaseURL string `json:"builtInMCPBaseURL,omitempty"`
+}
+
+const mcpServerHeaderPrefix = "mcpServerHeader."
+
+func applySecureHeaders(servers []mcp.ServerConfig, secure map[string]string) {
+	for key, value := range secure {
+		if !strings.HasPrefix(key, mcpServerHeaderPrefix) {
+			continue
+		}
+		rest := key[len(mcpServerHeaderPrefix):]
+		dotIdx := strings.Index(rest, ".")
+		if dotIdx < 0 {
+			continue
+		}
+		serverID, headerName := rest[:dotIdx], rest[dotIdx+1:]
+		if serverID == "" || headerName == "" {
+			continue
+		}
+		for i := range servers {
+			if servers[i].ID == serverID {
+				if servers[i].Headers == nil {
+					servers[i].Headers = make(map[string]string)
+				}
+				servers[i].Headers[headerName] = value
+				break
+			}
+		}
+	}
 }
 
 type Plugin struct {
@@ -103,6 +129,8 @@ func NewPlugin(ctx context.Context, settings backend.AppInstanceSettings) (insta
 			MCPServers: []mcp.ServerConfig{},
 		}
 	}
+
+	applySecureHeaders(pluginSettings.MCPServers, settings.DecryptedSecureJSONData)
 
 	if pluginSettings.MaxTotalTokens <= 0 {
 		pluginSettings.MaxTotalTokens = 180000
@@ -141,7 +169,7 @@ func NewPlugin(ctx context.Context, settings backend.AppInstanceSettings) (insta
 	var redisClient *redis.Client
 	usingRedis := false
 
-	redisClient, redisErr := createRedisClient(logger, pluginSettings)
+	redisClient, redisErr := createRedisClient(logger, settings.DecryptedSecureJSONData["redisURL"])
 	if redisErr == nil {
 		pingCtx, pingCancel := context.WithTimeout(pluginCtx, RedisConnectionTimeout)
 		pingErr := redisClient.Ping(pingCtx).Err()
