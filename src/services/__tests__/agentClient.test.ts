@@ -215,6 +215,7 @@ describe('reconnectToAgentRun', () => {
     const hangingBody = {
       getReader: () => ({
         read: () => new Promise<never>(() => {}),
+        cancel: jest.fn().mockResolvedValue(undefined),
         releaseLock: jest.fn(),
       }),
     } as unknown as ReadableStream<Uint8Array>;
