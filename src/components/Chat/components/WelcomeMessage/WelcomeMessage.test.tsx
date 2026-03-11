@@ -14,6 +14,9 @@ jest.mock('@grafana/ui', () => ({
         primary: '#000',
         secondary: '#666',
       },
+      warning: {
+        main: '#ff9830',
+      },
     },
   }),
 }));

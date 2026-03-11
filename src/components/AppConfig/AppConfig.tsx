@@ -2,7 +2,7 @@ import React, { ChangeEvent, useEffect, useRef, useState } from 'react';
 import { lastValueFrom } from 'rxjs';
 import { AppPluginMeta, PluginConfigPageProps, PluginMeta } from '@grafana/data';
 import { getBackendSrv } from '@grafana/runtime';
-import { Button, Field, FieldSet, Input, Icon, Switch, Alert, RadioButtonGroup } from '@grafana/ui';
+import { Button, Field, FieldSet, Input, Icon, Switch, Alert, RadioButtonGroup, Select } from '@grafana/ui';
 import { mcp } from '@grafana/llm';
 import { testIds } from '../testIds';
 import { ValidationService } from '../../services/validation';
@@ -579,21 +579,21 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
             </Field>
 
             <Field label="Type" className="mt-2">
-              <select
-                className="gf-form-input"
+              <Select
                 value={server.type || 'openapi'}
-                onChange={(e) =>
+                onChange={(v) =>
                   updateMCPServer(server.id, {
-                    type: e.target.value as 'openapi' | 'standard' | 'sse' | 'streamable-http',
+                    type: v.value as 'openapi' | 'standard' | 'sse' | 'streamable-http',
                   })
                 }
-                style={{ width: '240px', height: '32px' }}
-              >
-                <option value="openapi">OpenAPI</option>
-                <option value="standard">Standard MCP</option>
-                <option value="sse">SSE</option>
-                <option value="streamable-http">Streamable HTTP</option>
-              </select>
+                options={[
+                  { label: 'OpenAPI', value: 'openapi' },
+                  { label: 'Standard MCP', value: 'standard' },
+                  { label: 'SSE', value: 'sse' },
+                  { label: 'Streamable HTTP', value: 'streamable-http' },
+                ]}
+                width={30}
+              />
             </Field>
 
             <div className="mt-3">

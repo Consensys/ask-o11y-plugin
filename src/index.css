@@ -129,47 +129,6 @@
   animation: scaleIn 0.2s ease-out;
 }
 
-/* Gradient border effect for chat input - Grafana Assistant style */
-.gradient-border-wrapper {
-  position: relative;
-  border-radius: 12px;
-  padding: 2px;
-  background: linear-gradient(90deg, #8b5cf6, #ec4899, #f97316, #ec4899, #8b5cf6);
-  background-size: 200% 100%;
-  animation: gradient-shift 4s ease infinite;
-}
-
-.gradient-border-wrapper::before {
-  content: '';
-  position: absolute;
-  inset: -2px;
-  border-radius: 14px;
-  background: linear-gradient(90deg, #8b5cf6, #ec4899, #f97316, #ec4899, #8b5cf6);
-  background-size: 200% 100%;
-  animation: gradient-shift 4s ease infinite;
-  filter: blur(8px);
-  opacity: 0.5;
-  z-index: -1;
-}
-
-.gradient-border-inner {
-  background: var(--grafana-color-background-primary);
-  border-radius: 10px;
-  position: relative;
-  z-index: 1;
-}
-
-@keyframes gradient-shift {
-  0% {
-    background-position: 0% 50%;
-  }
-  50% {
-    background-position: 100% 50%;
-  }
-  100% {
-    background-position: 0% 50%;
-  }
-}
 
 /* Sparkle icon animation */
 @keyframes sparkle {
@@ -209,19 +168,6 @@
   transform: translateY(-1px);
 }
 
-/* Assistant badge styling */
-.assistant-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 12px;
-  border-radius: 6px;
-  font-size: 14px;
-  font-weight: 500;
-  background: rgba(139, 92, 246, 0.15);
-  color: #a78bfa;
-  border: 1px solid rgba(139, 92, 246, 0.3);
-}
 
 /* Streamdown code block fix - force visibility regardless of system dark mode preference
  * Streamdown renders two code blocks (light/dark) that toggle via Tailwind's dark: variant.

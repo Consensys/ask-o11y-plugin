@@ -1,5 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { Icon, useTheme2 } from '@grafana/ui';
+import { Icon, useStyles2, useTheme2 } from '@grafana/ui';
+import { cx } from '@emotion/css';
+import { GrafanaTheme2 } from '@grafana/data';
+import { getHoverButtonStyle } from '../../../../theme';
 import { GrafanaPageRef } from '../../types';
 import { TabCloseButton } from './TabCloseButton';
 import { useEmbeddingAllowed } from '../../hooks/useEmbeddingAllowed';
@@ -16,6 +19,7 @@ export interface SidePanelProps {
 
 export const SidePanel: React.FC<SidePanelProps> = ({ isOpen, onClose, pageRefs, onRemoveTab, embedded = false, kioskModeEnabled = true }) => {
   const theme = useTheme2();
+  const styles = useStyles2(getStyles);
   const [activeIndex, setActiveIndex] = useState(0);
   const allowEmbedding = useEmbeddingAllowed();
 
@@ -49,9 +53,7 @@ export const SidePanel: React.FC<SidePanelProps> = ({ isOpen, onClose, pageRefs,
         borderColor: theme.colors.border.weak,
       }
     : {
-        width: '800px',
-        minWidth: '400px',
-        maxWidth: '65%',
+        width: 'clamp(400px, 50vw, 65%)',
         backgroundColor: theme.colors.background.primary,
         borderColor: theme.colors.border.weak,
       };
@@ -79,7 +81,7 @@ export const SidePanel: React.FC<SidePanelProps> = ({ isOpen, onClose, pageRefs,
         </div>
         <button
           onClick={onClose}
-          className="p-1.5 rounded-md hover:bg-white/10 transition-colors text-secondary"
+          className={cx('p-1.5 rounded-md transition-colors text-secondary', styles.hoverButton)}
           aria-label="Close panel"
           title="Close panel"
         >
@@ -105,9 +107,7 @@ export const SidePanel: React.FC<SidePanelProps> = ({ isOpen, onClose, pageRefs,
                 backgroundColor:
                   idx === safeActiveIndex
                     ? theme.colors.primary.main
-                    : theme.isDark
-                    ? 'rgba(255,255,255,0.05)'
-                    : 'rgba(0,0,0,0.05)',
+                    : theme.colors.action.hover,
               }}
               role="tab"
               aria-selected={idx === safeActiveIndex}
@@ -145,3 +145,7 @@ export const SidePanel: React.FC<SidePanelProps> = ({ isOpen, onClose, pageRefs,
     </div>
   );
 };
+
+const getStyles = (theme: GrafanaTheme2) => ({
+  hoverButton: getHoverButtonStyle(theme),
+});

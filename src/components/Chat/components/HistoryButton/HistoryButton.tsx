@@ -1,5 +1,8 @@
 import React from 'react';
-import { useTheme2 } from '@grafana/ui';
+import { useStyles2, useTheme2 } from '@grafana/ui';
+import { cx } from '@emotion/css';
+import { GrafanaTheme2 } from '@grafana/data';
+import { getHoverButtonStyle } from '../../../../theme';
 
 interface HistoryButtonProps {
   onClick: () => void;
@@ -8,11 +11,12 @@ interface HistoryButtonProps {
 
 export function HistoryButton({ onClick, sessionCount }: HistoryButtonProps): React.ReactElement {
   const theme = useTheme2();
+  const styles = useStyles2(getStyles);
 
   return (
     <button
       onClick={onClick}
-      className="flex items-center gap-2 px-2 py-1 text-xs font-medium rounded-md hover:bg-white/10 transition-colors"
+      className={cx('flex items-center gap-2 px-2 py-1 text-xs font-medium rounded-md transition-colors', styles.hoverButton)}
       aria-label="Chat history"
       title="View chat history"
       style={{ color: theme.colors.text.secondary }}
@@ -34,3 +38,7 @@ export function HistoryButton({ onClick, sessionCount }: HistoryButtonProps): Re
     </button>
   );
 }
+
+const getStyles = (theme: GrafanaTheme2) => ({
+  hoverButton: getHoverButtonStyle(theme),
+});
