@@ -381,7 +381,7 @@ func (p *Plugin) handleMCP(w http.ResponseWriter, r *http.Request) {
 
 func (p *Plugin) handleMCPTools(w http.ResponseWriter, r *http.Request) {
 	userRole := getUserRole(r)
-	p.logger.Info("MCP tools request", "method", r.Method, "role", userRole)
+	p.logger.Debug("MCP tools request", "method", r.Method, "role", userRole)
 
 	tools, err := p.mcpProxy.ListTools()
 	if err != nil {
@@ -422,7 +422,7 @@ func (p *Plugin) handleMCPCallTool(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	p.logger.Info("MCP call tool request", "tool", req.Name, "role", userRole)
+	p.logger.Debug("MCP call tool request", "tool", req.Name, "role", userRole)
 
 	tool, found := p.mcpProxy.FindToolByName(req.Name)
 	if !found {
@@ -460,7 +460,7 @@ func (p *Plugin) handleMCPCallTool(w http.ResponseWriter, r *http.Request) {
 }
 
 func (p *Plugin) handleMCPServers(w http.ResponseWriter, r *http.Request) {
-	p.logger.Info("MCP servers status request", "method", r.Method)
+	p.logger.Debug("MCP servers status request", "method", r.Method)
 
 	healthMonitor := p.mcpProxy.GetHealthMonitor()
 	serversHealth := healthMonitor.GetAllHealth()
