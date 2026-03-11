@@ -9,9 +9,9 @@ import (
 )
 
 func TestNewPlugin_RedisFallback(t *testing.T) {
-	// Point at a non-existent Redis to verify in-memory fallback.
 	settings := backend.AppInstanceSettings{
-		JSONData: []byte(`{"mcpServers":[],"redisURL":"redis://localhost:9999/0"}`),
+		JSONData:               []byte(`{"mcpServers":[]}`),
+		DecryptedSecureJSONData: map[string]string{"redisURL": "redis://localhost:9999/0"},
 	}
 
 	ctx := context.Background()
@@ -34,8 +34,7 @@ func TestNewPlugin_RedisFallback(t *testing.T) {
 }
 
 func TestNewPlugin_RedisSuccess(t *testing.T) {
-	// Skip if Redis is not available locally.
-	probe, err := createRedisClient(log.DefaultLogger, PluginSettings{RedisURL: "redis://localhost:6379/15"})
+	probe, err := createRedisClient(log.DefaultLogger, "redis://localhost:6379/15")
 	if err != nil {
 		t.Skipf("Redis not available: %v", err)
 	}
@@ -46,7 +45,8 @@ func TestNewPlugin_RedisSuccess(t *testing.T) {
 	probe.Close()
 
 	settings := backend.AppInstanceSettings{
-		JSONData: []byte(`{"mcpServers":[],"redisURL":"redis://localhost:6379/15"}`),
+		JSONData:               []byte(`{"mcpServers":[]}`),
+		DecryptedSecureJSONData: map[string]string{"redisURL": "redis://localhost:6379/15"},
 	}
 	plugin, err := NewPlugin(context.Background(), settings)
 	if err != nil {
@@ -67,9 +67,8 @@ func TestNewPlugin_RedisSuccess(t *testing.T) {
 	}
 }
 
-func TestCreateRedisClient_FromPluginSettings(t *testing.T) {
-	settings := PluginSettings{RedisURL: "redis://localhost:6379/15"}
-	client, err := createRedisClient(log.DefaultLogger, settings)
+func TestCreateRedisClient_WithURL(t *testing.T) {
+	client, err := createRedisClient(log.DefaultLogger, "redis://localhost:6379/15")
 	if err != nil {
 		t.Skipf("Redis not available for testing: %v", err)
 	}
@@ -82,7 +81,7 @@ func TestCreateRedisClient_FromPluginSettings(t *testing.T) {
 }
 
 func TestCreateRedisClient_DefaultURL(t *testing.T) {
-	client, err := createRedisClient(log.DefaultLogger, PluginSettings{})
+	client, err := createRedisClient(log.DefaultLogger, "")
 	if err != nil {
 		t.Fatalf("Expected client creation to succeed: %v", err)
 	}
@@ -97,8 +96,7 @@ func TestCreateRedisClient_DefaultURL(t *testing.T) {
 }
 
 func TestCreateRedisClient_InvalidURL(t *testing.T) {
-	settings := PluginSettings{RedisURL: "not-a-valid-url"}
-	_, err := createRedisClient(log.DefaultLogger, settings)
+	_, err := createRedisClient(log.DefaultLogger, "not-a-valid-url")
 	if err == nil {
 		t.Fatal("Expected error for invalid URL")
 	}
