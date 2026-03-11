@@ -23,3 +23,9 @@ datasources:
     basicAuthUser: $O11Y_USER
     secureJsonData:
       basicAuthPassword: $O11Y_PWD
+  - name: Tempo
+    type: tempo
+    uid: tempo
+    access: proxy
+    isDefault: false
+    url: http://tempo:3200

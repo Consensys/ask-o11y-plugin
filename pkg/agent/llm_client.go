@@ -10,7 +10,10 @@ import (
 	"strings"
 	"time"
 
+	"go.opentelemetry.io/otel/attribute"
+
 	"github.com/grafana/grafana-plugin-sdk-go/backend/log"
+	"github.com/grafana/grafana-plugin-sdk-go/backend/tracing"
 )
 
 const (
@@ -32,16 +35,21 @@ func NewLLMClient(logger log.Logger) *LLMClient {
 }
 
 func (c *LLMClient) ChatCompletion(ctx context.Context, req ChatCompletionRequest, grafanaURL, authToken, orgID string) (*ChatCompletionResponse, error) {
+	ctx, span := tracing.DefaultTracer().Start(ctx, "llm_call")
+	defer span.End()
+
 	req.Model = llmModel
 
 	body, err := json.Marshal(req)
 	if err != nil {
+		tracing.Error(span, err)
 		return nil, fmt.Errorf("marshal request: %w", err)
 	}
 
 	url := strings.TrimRight(grafanaURL, "/") + llmEndpoint
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
+		tracing.Error(span, err)
 		return nil, fmt.Errorf("create request: %w", err)
 	}
 
@@ -71,26 +79,40 @@ func (c *LLMClient) ChatCompletion(ctx context.Context, req ChatCompletionReques
 
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
+		tracing.Error(span, err)
 		return nil, fmt.Errorf("LLM request failed: %w", err)
 	}
 	defer resp.Body.Close()
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
+		tracing.Error(span, err)
 		return nil, fmt.Errorf("read response: %w", err)
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("LLM returned status %d", resp.StatusCode)
+		err := fmt.Errorf("LLM returned status %d", resp.StatusCode)
+		tracing.Error(span, err)
+		return nil, err
 	}
 
 	var result ChatCompletionResponse
 	if err := json.Unmarshal(respBody, &result); err != nil {
+		tracing.Error(span, err)
 		return nil, fmt.Errorf("decode response: %w", err)
 	}
 
 	if len(result.Choices) == 0 {
-		return nil, fmt.Errorf("LLM returned no choices")
+		err := fmt.Errorf("LLM returned no choices")
+		tracing.Error(span, err)
+		return nil, err
+	}
+
+	if result.Usage != nil {
+		span.SetAttributes(
+			attribute.Int("llm.prompt_tokens", result.Usage.PromptTokens),
+			attribute.Int("llm.completion_tokens", result.Usage.CompletionTokens),
+		)
 	}
 
 	return &result, nil

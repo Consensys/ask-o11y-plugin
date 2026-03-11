@@ -7,7 +7,11 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
+
 	"github.com/grafana/grafana-plugin-sdk-go/backend/log"
+	"github.com/grafana/grafana-plugin-sdk-go/backend/tracing"
 )
 
 const defaultMaxIterations = 25
@@ -126,7 +130,7 @@ func (a *AgentLoop) Run(ctx context.Context, req LoopRequest, eventCh chan<- SSE
 				},
 			})
 
-			toolContent, isError := a.executeTool(tc, req)
+			toolContent, isError := a.executeTool(ctx, tc, req)
 
 			a.send(ctx, eventCh, SSEEvent{
 				Type: "tool_call_result",
@@ -152,7 +156,13 @@ func (a *AgentLoop) Run(ctx context.Context, req LoopRequest, eventCh chan<- SSE
 	})
 }
 
-func (a *AgentLoop) executeTool(tc ToolCall, req LoopRequest) (content string, isError bool) {
+func (a *AgentLoop) executeTool(ctx context.Context, tc ToolCall, req LoopRequest) (content string, isError bool) {
+	_, span := tracing.DefaultTracer().Start(ctx, "mcp_tool_call",
+		trace.WithAttributes(attribute.String("mcp.tool_name", tc.Function.Name)))
+	defer func() {
+		span.SetAttributes(attribute.Bool("mcp.is_error", isError))
+		span.End()
+	}()
 	tool, found := a.mcpProxy.FindToolByName(tc.Function.Name)
 	if !found {
 		return fmt.Sprintf("Unknown tool: %s", tc.Function.Name), true
