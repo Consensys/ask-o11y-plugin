@@ -27,9 +27,9 @@ type LLMClient struct {
 	logger     log.Logger
 }
 
-func NewLLMClient(logger log.Logger) *LLMClient {
+func NewLLMClient(logger log.Logger, httpClient *http.Client) *LLMClient {
 	return &LLMClient{
-		httpClient: &http.Client{Timeout: llmTimeout},
+		httpClient: httpClient,
 		logger:     logger,
 	}
 }

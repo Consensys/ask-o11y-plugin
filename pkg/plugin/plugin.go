@@ -20,6 +20,7 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 
 	"github.com/grafana/grafana-plugin-sdk-go/backend"
+	"github.com/grafana/grafana-plugin-sdk-go/backend/httpclient"
 	"github.com/grafana/grafana-plugin-sdk-go/backend/instancemgmt"
 	"github.com/grafana/grafana-plugin-sdk-go/backend/log"
 	"github.com/grafana/grafana-plugin-sdk-go/backend/resource/httpadapter"
@@ -173,7 +174,17 @@ func NewPlugin(ctx context.Context, settings backend.AppInstanceSettings) (insta
 		sessionStore = NewRedisSessionStore(pluginCtx, redisClient, logger)
 	}
 
-	llmClient := agent.NewLLMClient(logger)
+	llmHTTPClient, err := httpclient.New(httpclient.Options{
+		Timeouts: &httpclient.TimeoutOptions{
+			Timeout:     120 * time.Second,
+			DialTimeout: 10 * time.Second,
+		},
+	})
+	if err != nil {
+		logger.Error("Failed to create SDK HTTP client for LLM, using default", "error", err)
+		llmHTTPClient = &http.Client{Timeout: 120 * time.Second}
+	}
+	llmClient := agent.NewLLMClient(logger, llmHTTPClient)
 	agentLoop := agent.NewAgentLoop(llmClient, mcpProxy, logger)
 
 	p := &Plugin{
