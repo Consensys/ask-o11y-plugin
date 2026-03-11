@@ -5,6 +5,22 @@ All notable changes to the Ask O11y Grafana plugin will be documented in this fi
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.14](https://github.com/Consensys/ask-o11y-plugin/compare/v0.2.13...v0.2.14) (2026-03-11)
+
+
+### Features
+
+* **chat:** add OTEL tracing and Tempo to the agent loop ([#82](https://github.com/Consensys/ask-o11y-plugin/issues/82)) ([4037b68](https://github.com/Consensys/ask-o11y-plugin/commit/4037b68f5a9221e1f2c0f2ba365b59f740d80a07))
+* **config:** store MCP server headers and Redis URL in secureJsonData ([#86](https://github.com/Consensys/ask-o11y-plugin/issues/86)) ([1038a49](https://github.com/Consensys/ask-o11y-plugin/commit/1038a499e05810b217fe651d78bf9a92244056a9))
+
+
+### Bug Fixes
+
+* **chat:** add SSE idle timeout and allow new chat during generation ([#62](https://github.com/Consensys/ask-o11y-plugin/issues/62)) ([954437c](https://github.com/Consensys/ask-o11y-plugin/commit/954437c26fa8eff6e6040233739f6a6f55b5db72))
+* **mcp:** namespace mcp-tool-settings localStorage key with plugin ID ([#83](https://github.com/Consensys/ask-o11y-plugin/issues/83)) ([a1e8eef](https://github.com/Consensys/ask-o11y-plugin/commit/a1e8eef582a3e942a63ad6a86f26551f74a44a7a))
+* **plugin:** change per-request MCP log statements from Info to Debug ([#84](https://github.com/Consensys/ask-o11y-plugin/issues/84)) ([dd8f4a3](https://github.com/Consensys/ask-o11y-plugin/commit/dd8f4a3270d44b713d2b4d40b1bca14fac56bc36))
+* **ui:** replace hardcoded colors and fixed pixel widths with Grafana theme abstractions ([#87](https://github.com/Consensys/ask-o11y-plugin/issues/87)) ([5f64b38](https://github.com/Consensys/ask-o11y-plugin/commit/5f64b3840a0f18b55f85500eb1ca94d107595c94))
+
 ## [0.2.13](https://github.com/Consensys/ask-o11y-plugin/compare/v0.2.12...v0.2.13) (2026-03-09)
 
 
