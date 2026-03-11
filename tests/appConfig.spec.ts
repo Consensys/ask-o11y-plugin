@@ -46,14 +46,17 @@ test.describe('MCP Server Management', () => {
     await urlInput.fill('https://test-mcp.example.com');
 
     // Change server type (Grafana Select component)
-    const typeSelect = page.getByRole('combobox').last();
-    await expect(typeSelect).toHaveValue('OpenAPI');
-    await typeSelect.click();
-    await page.getByText('SSE', { exact: true }).click();
-    await expect(typeSelect).toHaveValue('SSE');
-    await typeSelect.click();
-    await page.getByText('Streamable HTTP', { exact: true }).click();
-    await expect(typeSelect).toHaveValue('Streamable HTTP');
+    // Grafana Select renders the selected label in div[class*="-singleValue"].
+    // Menu options are portaled to the page root as role="option".
+    const typeCombobox = page.getByRole('combobox').last();
+    const typeContainer = page.locator('div[class*="-singleValue"]').last();
+    await expect(typeContainer).toHaveText('OpenAPI');
+    await typeCombobox.click();
+    await page.getByRole('option', { name: 'SSE', exact: true }).click();
+    await expect(typeContainer).toHaveText('SSE');
+    await typeCombobox.click();
+    await page.getByRole('option', { name: 'Streamable HTTP', exact: true }).click();
+    await expect(typeContainer).toHaveText('Streamable HTTP');
 
     // Save button should be enabled
     const saveMcpButton = page.locator('[data-testid="data-testid ac-save-mcp-servers"]');
