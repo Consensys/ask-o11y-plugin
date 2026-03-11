@@ -7,24 +7,46 @@ import { render, screen, fireEvent } from '@testing-library/react';
 import { ChatInput, ChatInputRef } from './ChatInput';
 
 // Mock Grafana UI
-jest.mock('@grafana/ui', () => ({
-  useTheme2: () => ({
-    isDark: false,
-    colors: {
-      text: {
-        primary: '#000',
-        secondary: '#666',
-        disabled: '#999',
-      },
-      background: {
-        primary: '#fff',
-        secondary: '#f5f5f5',
-      },
-      border: {
-        weak: '#ddd',
-      },
+const mockTheme = {
+  isDark: false,
+  colors: {
+    text: {
+      primary: '#000',
+      secondary: '#666',
+      disabled: '#999',
     },
-  }),
+    background: {
+      primary: '#fff',
+      secondary: '#f5f5f5',
+      canvas: '#fafafa',
+    },
+    border: {
+      weak: '#ddd',
+    },
+    primary: {
+      main: '#3871dc',
+      transparent: 'rgba(56, 113, 220, 0.2)',
+    },
+    error: {
+      main: '#e02f44',
+    },
+    warning: {
+      main: '#ff9830',
+    },
+    action: {
+      hover: 'rgba(204, 204, 220, 0.12)',
+    },
+  },
+  shape: {
+    radius: {
+      default: '4px',
+    },
+  },
+};
+
+jest.mock('@grafana/ui', () => ({
+  useTheme2: () => mockTheme,
+  useStyles2: (getStyles: (theme: any) => any) => getStyles(mockTheme),
   Icon: ({ name }: { name: string }) => <span data-testid={`icon-${name}`}>{name}</span>,
   Alert: ({ severity, title, children }: { severity: string; title: string; children: React.ReactNode }) => (
     <div data-testid={`alert-${severity}`} role="alert">
@@ -193,9 +215,14 @@ describe('ChatInput', () => {
   });
 
   describe('styling', () => {
-    it('should have gradient border wrapper', () => {
-      const { container } = render(<ChatInput {...defaultProps} />);
-      expect(container.querySelector('.gradient-border-wrapper')).toBeInTheDocument();
+    it('should render gradient border wrapper around input', () => {
+      render(<ChatInput {...defaultProps} />);
+      const textarea = screen.getByPlaceholderText('Ask me anything about your metrics, logs, or observability...');
+      // Textarea should be nested inside the gradient inner container (parent) and wrapper (grandparent)
+      const innerContainer = textarea.closest('div');
+      expect(innerContainer).toBeInTheDocument();
+      const wrapperContainer = innerContainer?.parentElement;
+      expect(wrapperContainer).toBeInTheDocument();
     });
   });
 

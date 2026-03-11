@@ -23,7 +23,7 @@ export const WelcomeMessage: React.FC = () => {
       {/* Description with highlighted text */}
       <p className="text-lg max-w-2xl mx-auto leading-relaxed" style={{ color: theme.colors.text.secondary }}>
         An{' '}
-        <span className="font-medium" style={{ color: '#f97316' }}>
+        <span className="font-medium" style={{ color: theme.colors.warning.main }}>
           agentic LLM assistant
         </span>{' '}
         for Grafana that helps you query data, investigate issues, manage dashboards, and more through natural language.

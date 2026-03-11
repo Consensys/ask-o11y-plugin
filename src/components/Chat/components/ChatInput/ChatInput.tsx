@@ -1,5 +1,7 @@
 import React, { forwardRef, useImperativeHandle, useRef, useEffect, useState } from 'react';
-import { Icon, Alert, useTheme2 } from '@grafana/ui';
+import { Icon, Alert, useStyles2, useTheme2 } from '@grafana/ui';
+import { css, cx, keyframes } from '@emotion/css';
+import { GrafanaTheme2 } from '@grafana/data';
 import { ValidationService } from '../../../../services/validation';
 
 interface ChatInputProps {
@@ -27,6 +29,7 @@ export const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(
     const textareaRef = useRef<HTMLTextAreaElement>(null);
     const [validationError, setValidationError] = useState<string | null>(null);
     const theme = useTheme2();
+    const styles = useStyles2(getStyles);
     const isComposingRef = useRef(false);
 
     useImperativeHandle(ref, () => ({
@@ -114,13 +117,8 @@ export const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(
         )}
 
         {/* Gradient border wrapper */}
-        <div className={`gradient-border-wrapper ${validationError ? 'opacity-50' : ''}`}>
-          <div
-            className="gradient-border-inner px-5 py-4"
-            style={{
-              backgroundColor: theme.isDark ? '#1a1a1a' : theme.colors.background.primary,
-            }}
-          >
+        <div className={cx(styles.gradientWrapper, styles.gradientGlow, validationError && 'opacity-50')}>
+          <div className={cx(styles.gradientInner, 'px-5 py-4')}>
             <textarea
               ref={textareaRef}
               defaultValue={currentInput}
@@ -190,7 +188,7 @@ export const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(
                 {isGenerating && onStopGeneration && (
                   <button
                     onClick={onStopGeneration}
-                    className="p-2 rounded-md hover:bg-white/10 transition-colors"
+                    className={cx('p-2 rounded-md transition-colors', styles.hoverButton)}
                     aria-label="Stop generating"
                     title="Stop generating"
                     data-testid="chat-stop-button"
@@ -204,7 +202,7 @@ export const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(
                 <button
                   onClick={handleSendClick}
                   disabled={!currentInput.trim() || !!validationError}
-                  className="p-2 rounded-md hover:bg-white/10 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                  className={cx('p-2 rounded-md transition-colors disabled:opacity-30 disabled:cursor-not-allowed', styles.hoverButton)}
                   aria-label="Send message (Enter)"
                   style={{ color: theme.colors.text.secondary }}
                 >
@@ -220,3 +218,49 @@ export const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(
 );
 
 ChatInput.displayName = 'ChatInput';
+
+const getStyles = (theme: GrafanaTheme2) => {
+  const gradientShift = keyframes({
+    '0%': { backgroundPosition: '0% 50%' },
+    '50%': { backgroundPosition: '100% 50%' },
+    '100%': { backgroundPosition: '0% 50%' },
+  });
+
+  const gradient = `linear-gradient(90deg, ${theme.colors.primary.main}, ${theme.colors.error.main}, ${theme.colors.warning.main}, ${theme.colors.error.main}, ${theme.colors.primary.main})`;
+
+  return {
+    gradientWrapper: css({
+      position: 'relative',
+      borderRadius: theme.shape.radius.default,
+      padding: 2,
+      background: gradient,
+      backgroundSize: '200% 100%',
+      animation: `${gradientShift} 4s ease infinite`,
+    }),
+    gradientGlow: css({
+      '&::before': {
+        content: '""',
+        position: 'absolute',
+        inset: -2,
+        borderRadius: theme.shape.radius.default,
+        background: gradient,
+        backgroundSize: '200% 100%',
+        animation: `${gradientShift} 4s ease infinite`,
+        filter: 'blur(8px)',
+        opacity: 0.5,
+        zIndex: -1,
+      },
+    }),
+    gradientInner: css({
+      backgroundColor: theme.colors.background.canvas,
+      borderRadius: theme.shape.radius.default,
+      position: 'relative',
+      zIndex: 1,
+    }),
+    hoverButton: css({
+      '&:hover': {
+        backgroundColor: theme.colors.action.hover,
+      },
+    }),
+  };
+};

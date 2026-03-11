@@ -1,5 +1,8 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { useTheme2 } from '@grafana/ui';
+import { useStyles2, useTheme2 } from '@grafana/ui';
+import { cx } from '@emotion/css';
+import { GrafanaTheme2 } from '@grafana/data';
+import { getHoverButtonStyle } from '../../../../theme';
 
 interface NewChatButtonProps {
   onConfirm: () => void;
@@ -8,6 +11,7 @@ interface NewChatButtonProps {
 
 export function NewChatButton({ onConfirm, isGenerating }: NewChatButtonProps): React.ReactElement {
   const theme = useTheme2();
+  const styles = useStyles2(getStyles);
   const [isOpen, setIsOpen] = useState(false);
   const popupRef = useRef<HTMLDivElement>(null);
 
@@ -37,7 +41,7 @@ export function NewChatButton({ onConfirm, isGenerating }: NewChatButtonProps): 
     <div className="relative">
       <button
         onClick={() => setIsOpen(!isOpen)}
-        className="p-2 rounded-md hover:bg-white/10 transition-colors"
+        className={cx('p-2 rounded-md transition-colors', styles.hoverButton)}
         aria-label="New chat"
         title="New chat"
         style={{ color: theme.colors.text.secondary }}
@@ -82,7 +86,7 @@ export function NewChatButton({ onConfirm, isGenerating }: NewChatButtonProps): 
             </button>
             <button
               onClick={() => setIsOpen(false)}
-              className="flex-1 px-2 py-1 text-xs rounded font-medium transition-colors hover:bg-white/10"
+              className={cx('flex-1 px-2 py-1 text-xs rounded font-medium transition-colors', styles.hoverButton)}
               style={{
                 color: theme.colors.text.secondary,
                 border: `1px solid ${theme.colors.border.weak}`,
@@ -96,3 +100,7 @@ export function NewChatButton({ onConfirm, isGenerating }: NewChatButtonProps): 
     </div>
   );
 }
+
+const getStyles = (theme: GrafanaTheme2) => ({
+  hoverButton: getHoverButtonStyle(theme),
+});
