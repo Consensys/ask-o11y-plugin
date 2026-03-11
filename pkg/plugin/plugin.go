@@ -73,6 +73,9 @@ type PluginSettings struct {
 
 const mcpServerHeaderPrefix = "mcpServerHeader."
 
+// applySecureHeaders parses "mcpServerHeader.{serverID}.{headerName}" keys from
+// secureJsonData and populates the corresponding ServerConfig.Headers.
+// Server IDs must not contain dots (the UI auto-generates IDs like "mcp-1234567890").
 func applySecureHeaders(servers []mcp.ServerConfig, secure map[string]string) {
 	for key, value := range secure {
 		if !strings.HasPrefix(key, mcpServerHeaderPrefix) {
