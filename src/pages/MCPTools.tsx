@@ -11,6 +11,8 @@ import { PluginPage, config } from '@grafana/runtime';
 import { css } from '@emotion/css';
 import { backendMCPClient } from '../services/backendMCPClient';
 
+const TOOL_SETTINGS_KEY = 'consensys-asko11y-app:mcp-tool-settings';
+
 interface Tool {
   name: string;
   description?: string;
@@ -47,7 +49,7 @@ export function MCPToolsPage() {
       setTools(fetchedTools);
 
       // Load tool settings from localStorage
-      const savedSettings = localStorage.getItem('mcp-tool-settings');
+      const savedSettings = localStorage.getItem(TOOL_SETTINGS_KEY);
       if (savedSettings) {
         setToolSettings(JSON.parse(savedSettings));
       } else {
@@ -68,7 +70,7 @@ export function MCPToolsPage() {
   // Save settings to localStorage
   const saveSettings = (newSettings: ToolSettings) => {
     setToolSettings(newSettings);
-    localStorage.setItem('mcp-tool-settings', JSON.stringify(newSettings));
+    localStorage.setItem(TOOL_SETTINGS_KEY, JSON.stringify(newSettings));
   };
 
   // Toggle tool enabled state
