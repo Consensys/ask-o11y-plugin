@@ -313,6 +313,11 @@ export function useChat(
         scopeOrgId: config.bootData.user.orgName || '',
       });
 
+      if (abortController.signal.aborted) {
+        cancelAgentRun(result.runId, orgId).catch(() => {});
+        return;
+      }
+
       activeRunIdRef.current = result.runId;
 
       if (result.sessionId && !sessionManager.currentSessionId) {
@@ -509,6 +514,7 @@ export function useChat(
   };
 
   const clearChat = (): void => {
+    stopGeneration();
     setChatHistory([]);
     setCurrentInput('');
     setToolCalls(new Map());
