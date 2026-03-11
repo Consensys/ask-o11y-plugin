@@ -58,7 +58,7 @@ func TestLLMClient_ChatCompletion(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewLLMClient(log.DefaultLogger)
+	client := NewLLMClient(log.DefaultLogger, &http.Client{Timeout: llmTimeout})
 
 	resp, err := client.ChatCompletion(context.Background(), ChatCompletionRequest{
 		Messages: []Message{{Role: "user", Content: "hi"}},
@@ -97,7 +97,7 @@ func TestLLMClient_ChatCompletion_FallbackToToken(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewLLMClient(log.DefaultLogger)
+	client := NewLLMClient(log.DefaultLogger, &http.Client{Timeout: llmTimeout})
 	resp, err := client.ChatCompletion(context.Background(), ChatCompletionRequest{
 		Messages: []Message{{Role: "user", Content: "hi"}},
 	}, server.URL, "sa-token", "1")
@@ -117,7 +117,7 @@ func TestLLMClient_ChatCompletion_Error(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewLLMClient(log.DefaultLogger)
+	client := NewLLMClient(log.DefaultLogger, &http.Client{Timeout: llmTimeout})
 	_, err := client.ChatCompletion(context.Background(), ChatCompletionRequest{
 		Messages: []Message{{Role: "user", Content: "hi"}},
 	}, server.URL, "", "1")
@@ -133,7 +133,7 @@ func TestLLMClient_ChatCompletion_NoChoices(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewLLMClient(log.DefaultLogger)
+	client := NewLLMClient(log.DefaultLogger, &http.Client{Timeout: llmTimeout})
 	_, err := client.ChatCompletion(context.Background(), ChatCompletionRequest{
 		Messages: []Message{{Role: "user", Content: "hi"}},
 	}, server.URL, "", "1")
@@ -150,7 +150,7 @@ func TestLLMClient_ChatCompletion_ContextCancelled(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewLLMClient(log.DefaultLogger)
+	client := NewLLMClient(log.DefaultLogger, &http.Client{Timeout: llmTimeout})
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // Cancel immediately
 

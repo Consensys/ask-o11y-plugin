@@ -4,10 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/grafana/grafana-plugin-sdk-go/backend/httpclient"
 	"github.com/grafana/grafana-plugin-sdk-go/backend/log"
 )
 
@@ -55,6 +57,8 @@ func (p *Proxy) UpdateConfig(configs []ServerConfig) {
 		}
 	}
 
+	transport := p.sdkTransport()
+
 	// Collect stale clients under lock, then close outside the lock
 	// to avoid holding mu while blocking on network I/O.
 	var stale []*Client
@@ -69,7 +73,7 @@ func (p *Proxy) UpdateConfig(configs []ServerConfig) {
 	}
 	for id, config := range newConfigs {
 		if _, exists := p.clients[id]; !exists {
-			p.clients[id] = NewClient(p.ctx, config, p.logger)
+			p.clients[id] = NewClient(p.ctx, config, p.logger, transport)
 			p.logger.Info("Added MCP client", "id", id, "url", config.URL, "type", config.Type)
 		}
 	}
@@ -309,7 +313,7 @@ func (p *Proxy) EnsureServer(config ServerConfig) {
 		p.logger.Debug("Replacing MCP client", "id", config.ID)
 	}
 
-	p.clients[config.ID] = NewClient(p.ctx, config, p.logger)
+	p.clients[config.ID] = NewClient(p.ctx, config, p.logger, p.sdkTransport())
 	p.mu.Unlock()
 
 	if replaced != nil {
@@ -319,6 +323,19 @@ func (p *Proxy) EnsureServer(config ServerConfig) {
 	}
 
 	p.logger.Info("Ensured MCP client", "id", config.ID, "url", config.URL, "type", config.Type)
+}
+
+func (p *Proxy) sdkTransport() http.RoundTripper {
+	transport, err := httpclient.GetTransport(httpclient.Options{
+		Timeouts: &httpclient.TimeoutOptions{
+			DialTimeout: connectDialTimeout,
+		},
+	})
+	if err != nil {
+		p.logger.Error("Failed to create SDK HTTP transport, falling back to default", "error", err)
+		return http.DefaultTransport
+	}
+	return transport
 }
 
 func headersEqual(a, b map[string]string) bool {

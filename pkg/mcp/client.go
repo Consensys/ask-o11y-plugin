@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"strings"
 	"sync"
@@ -75,8 +74,10 @@ func (t *customRoundTripper) RoundTrip(req *http.Request) (*http.Response, error
 	return t.base.RoundTrip(req)
 }
 
-// NewClient creates a new MCP client
-func NewClient(parent context.Context, config ServerConfig, logger log.Logger) *Client {
+// NewClient creates a new MCP client.
+// The baseTransport should be obtained from the Grafana SDK httpclient package
+// to respect proxy configuration, custom CA bundles, and auth middleware.
+func NewClient(parent context.Context, config ServerConfig, logger log.Logger, baseTransport http.RoundTripper) *Client {
 	ctx, cancel := context.WithCancel(parent)
 
 	return &Client{
@@ -85,6 +86,7 @@ func NewClient(parent context.Context, config ServerConfig, logger log.Logger) *
 		operationMetadata: make(map[string]OperationMetadata),
 		ctx:               ctx,
 		cancel:            cancel,
+		httpClient:        &http.Client{Transport: baseTransport, Timeout: 30 * time.Second},
 	}
 }
 
@@ -154,19 +156,14 @@ func (c *Client) connectMCP() error {
 
 const connectDialTimeout = 10 * time.Second
 
-func baseTransport() *http.Transport {
-	t := http.DefaultTransport.(*http.Transport).Clone()
-	t.DialContext = (&net.Dialer{Timeout: connectDialTimeout}).DialContext
-	return t
-}
-
 func (c *Client) httpClientWithHeaders() *http.Client {
+	transport := c.httpClient.Transport
 	if len(c.config.Headers) == 0 {
-		return &http.Client{Transport: baseTransport()}
+		return &http.Client{Transport: transport}
 	}
 	return &http.Client{
 		Transport: &configHeaderRoundTripper{
-			base:    baseTransport(),
+			base:    transport,
 			headers: c.config.Headers,
 		},
 	}
@@ -208,10 +205,9 @@ func (c *Client) connectMCPWithOrgContext(orgID string, orgName string, scopeOrg
 		Version: "1.0.0",
 	}, nil)
 
-	// Create custom HTTP client with customRoundTripper
 	customHTTPClient := &http.Client{
 		Transport: &customRoundTripper{
-			base:       baseTransport(),
+			base:       c.httpClient.Transport,
 			orgID:      orgID,
 			orgName:    orgName,
 			scopeOrgId: scopeOrgId,
@@ -572,7 +568,7 @@ func (c *Client) listOpenAPITools() ([]Tool, error) {
 		req.Header.Set(key, value)
 	}
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := c.httpClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch OpenAPI spec: %w", err)
 	}
@@ -750,7 +746,7 @@ func (c *Client) listStandardTools() ([]Tool, error) {
 		req.Header.Set(key, value)
 	}
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := c.httpClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list tools: %w", err)
 	}
@@ -990,7 +986,7 @@ func (c *Client) callOpenAPIToolWithContext(toolName string, arguments map[strin
 		req.Header.Set(key, value)
 	}
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := c.httpClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to call tool: %w", err)
 	}
@@ -1068,7 +1064,7 @@ func (c *Client) callStandardTool(toolName string, arguments map[string]interfac
 		req.Header.Set(key, value)
 	}
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := c.httpClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to call tool: %w", err)
 	}
