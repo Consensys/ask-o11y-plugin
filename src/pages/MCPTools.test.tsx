@@ -11,34 +11,34 @@ describe('MCPToolsPage utilities', () => {
 
     it('should store tool settings in localStorage', () => {
       const settings = { 'prometheus_query': true, 'loki_query': false };
-      localStorage.setItem('mcp-tool-settings', JSON.stringify(settings));
+      localStorage.setItem('consensys-asko11y-app:mcp-tool-settings', JSON.stringify(settings));
 
-      const stored = localStorage.getItem('mcp-tool-settings');
+      const stored = localStorage.getItem('consensys-asko11y-app:mcp-tool-settings');
       expect(stored).not.toBeNull();
       expect(JSON.parse(stored!)).toEqual(settings);
     });
 
     it('should retrieve tool settings from localStorage', () => {
       const settings = { 'grafana_dashboard_list': true };
-      localStorage.setItem('mcp-tool-settings', JSON.stringify(settings));
+      localStorage.setItem('consensys-asko11y-app:mcp-tool-settings', JSON.stringify(settings));
 
-      const stored = JSON.parse(localStorage.getItem('mcp-tool-settings')!);
+      const stored = JSON.parse(localStorage.getItem('consensys-asko11y-app:mcp-tool-settings')!);
       expect(stored).toHaveProperty('grafana_dashboard_list', true);
     });
 
     it('should handle empty localStorage', () => {
-      const stored = localStorage.getItem('mcp-tool-settings');
+      const stored = localStorage.getItem('consensys-asko11y-app:mcp-tool-settings');
       expect(stored).toBeNull();
     });
 
     it('should allow updating tool settings', () => {
       const settings = { 'tool1': true, 'tool2': true };
-      localStorage.setItem('mcp-tool-settings', JSON.stringify(settings));
+      localStorage.setItem('consensys-asko11y-app:mcp-tool-settings', JSON.stringify(settings));
 
       const updated = { ...settings, 'tool2': false };
-      localStorage.setItem('mcp-tool-settings', JSON.stringify(updated));
+      localStorage.setItem('consensys-asko11y-app:mcp-tool-settings', JSON.stringify(updated));
 
-      const stored = JSON.parse(localStorage.getItem('mcp-tool-settings')!);
+      const stored = JSON.parse(localStorage.getItem('consensys-asko11y-app:mcp-tool-settings')!);
       expect(stored.tool2).toBe(false);
     });
   });
