@@ -886,8 +886,8 @@ const updatePluginAndReload = async (pluginId: string, data: PluginUpdatePayload
   try {
     await updatePlugin(pluginId, data);
     window.location.reload();
-  } catch (e) {
-    console.error('Error while updating the plugin', e);
+  } catch {
+    // Plugin update failed; reload did not occur so the user remains on the config page
   }
 };
 

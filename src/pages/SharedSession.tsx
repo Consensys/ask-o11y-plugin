@@ -56,14 +56,12 @@ export function SharedSession(): React.ReactElement {
         const session = await sessionShareService.getSharedSession(shareId!);
 
         if (!session.messages || session.messages.length === 0) {
-          console.error('[SharedSession] Shared session has no messages');
           setLoadError('This shared session has no messages.');
           return;
         }
 
         setSharedSession(session);
       } catch (err) {
-        console.error('[SharedSession] Failed to load shared session:', err);
         setLoadError(getErrorMessage(err));
       } finally {
         setLoading(false);
@@ -89,8 +87,7 @@ export function SharedSession(): React.ReactElement {
       // Navigate back to the plugin root, stripping the /shared/:shareId suffix
       const basePath = location.pathname.replace(/\/shared\/[^/]+$/, '');
       navigate({ pathname: basePath || '/', search: `?sessionId=${newSession.id}` }, { replace: true });
-    } catch (err) {
-      console.error('[SharedSession] Failed to import session:', err);
+    } catch {
       setImportError('Failed to import session. Please try again.');
     } finally {
       setImporting(false);

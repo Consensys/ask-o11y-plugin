@@ -34,24 +34,12 @@ export class ErrorBoundary extends Component<Props, State> {
   }
 
   componentDidCatch(error: Error, errorInfo: ErrorInfo) {
-    console.error('[ErrorBoundary] Caught error:', error, errorInfo);
-
     this.setState((prevState) => ({
       errorInfo,
       errorCount: prevState.errorCount + 1,
     }));
 
-    if (this.props.logError) {
-      this.props.logError(error, errorInfo);
-    }
-
-    console.error('[ErrorBoundary] Error report:', {
-      message: error.message,
-      stack: error.stack,
-      componentStack: errorInfo.componentStack,
-      timestamp: new Date().toISOString(),
-      errorCount: this.state.errorCount,
-    });
+    this.props.logError?.(error, errorInfo);
   }
 
   componentDidUpdate(prevProps: Props) {
@@ -158,9 +146,7 @@ export class ChatErrorBoundary extends Component<{ children: ReactNode }, State>
     };
   }
 
-  componentDidCatch(error: Error, errorInfo: ErrorInfo) {
-    console.error('[ChatErrorBoundary] Chat component error:', error, errorInfo);
-
+  componentDidCatch(_error: Error, errorInfo: ErrorInfo) {
     this.setState((prevState) => ({
       errorInfo,
       errorCount: prevState.errorCount + 1,

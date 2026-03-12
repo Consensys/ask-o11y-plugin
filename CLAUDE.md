@@ -702,6 +702,18 @@ For now, manual maintenance is pragmatic given the codebase size (23 endpoints) 
 - Strong typing: interfaces, generics, strict null checks
 - No `any` types (use `unknown` if needed)
 
+**Error Handling & Logging (CRITICAL):**
+- **No `console.log`/`console.error`/`console.warn` in shipped code.** These pollute browser devtools and are not captured by Grafana's telemetry pipeline.
+- Use `@grafana/runtime` logging instead:
+  ```tsx
+  import { getAppEvents } from '@grafana/runtime';
+  // For user-visible errors, surface them in the UI (toast, alert, inline message)
+  // For debug-only info, remove it before committing — do not leave console.* behind
+  ```
+- **Catch blocks must handle errors meaningfully** — either surface to the user, retry, or propagate. Never silently swallow errors with empty catch blocks or catch-and-log-only patterns.
+- **Frontend error boundaries:** Wrap major UI sections with React error boundaries so a single component failure doesn't crash the entire plugin.
+- **Backend (Go):** Use the `log` package from Grafana Plugin SDK (`github.com/grafana/grafana-plugin-sdk-go/backend/log`). Never use `fmt.Println` or the standard library `log` package in plugin code.
+
 ## Security Considerations
 
 **Input Validation (CRITICAL):**

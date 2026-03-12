@@ -164,9 +164,7 @@ export function useChat(
   useEffect(() => {
     if (sessionIdFromUrl && !readOnly && !hasLoadedFromUrlRef.current && chatHistory.length === 0 && !initialMessage) {
       hasLoadedFromUrlRef.current = true;
-      sessionManager.loadSession(sessionIdFromUrl).catch((error) => {
-        console.error('[useChat] Failed to load session from URL:', error);
-      });
+      sessionManager.loadSession(sessionIdFromUrl).catch(() => {});
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionIdFromUrl, readOnly, initialMessage]);
@@ -245,7 +243,6 @@ export function useChat(
       },
       onError: (message: string) => {
         hadErrorRef.current = true;
-        console.error('[useChat] Agent error:', message);
         setChatHistory((prev) =>
           updateLastAssistantMessage(prev, (msg) => ({
             ...msg,
@@ -270,7 +267,6 @@ export function useChat(
     try {
       validatedInput = ValidationService.validateChatInput(inputToSend);
     } catch (error) {
-      console.error('[useChat] Input validation failed:', error);
       appendErrorMessage(`Input validation error: ${error instanceof Error ? error.message : 'Invalid input'}`);
       return;
     }
@@ -351,7 +347,6 @@ export function useChat(
         );
         return;
       }
-      console.error('[useChat] Error in agent run:', error);
       setChatHistory((prev) =>
         updateLastAssistantMessage(prev, (msg) => ({
           ...msg,
@@ -382,9 +377,7 @@ export function useChat(
     }
     const runId = activeRunIdRef.current;
     if (runId) {
-      cancelAgentRun(runId, orgId).catch((err) => {
-        console.error('[useChat] Failed to cancel agent run:', err);
-      });
+      cancelAgentRun(runId, orgId).catch(() => {});
       activeRunIdRef.current = null;
     }
     setMessageQueue([]);
@@ -436,7 +429,6 @@ export function useChat(
         await reconnectToAgentRun(activeRunId, callbacks, orgId, abortController.signal);
       } catch (err) {
         if (!cancelled) {
-          console.error('[useChat] Reconnection failed:', err);
           setChatHistory((prev) =>
             updateLastAssistantMessage(prev, (msg) => ({
               ...msg,
