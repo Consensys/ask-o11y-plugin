@@ -5,6 +5,14 @@ All notable changes to the Ask O11y Grafana plugin will be documented in this fi
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.15](https://github.com/Consensys/ask-o11y-plugin/compare/v0.2.14...v0.2.15) (2026-03-12)
+
+
+### Bug Fixes
+
+* **backend:** make SA token fetch non-fatal and sanitize HTTP error messages ([#90](https://github.com/Consensys/ask-o11y-plugin/issues/90)) ([9c14ba6](https://github.com/Consensys/ask-o11y-plugin/commit/9c14ba6944fe44caab576a288b9bfc7b6b1d0a63))
+* **ui:** remove all console.* calls from shipped frontend code ([#91](https://github.com/Consensys/ask-o11y-plugin/issues/91)) ([61f59a1](https://github.com/Consensys/ask-o11y-plugin/commit/61f59a1b340e5f05ecf62726c270b5b5660acd95))
+
 ## [0.2.14](https://github.com/Consensys/ask-o11y-plugin/compare/v0.2.13...v0.2.14) (2026-03-11)
 
 
