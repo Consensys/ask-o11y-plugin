@@ -155,37 +155,9 @@ Customize three prompts: **System Prompt** (base AI instructions), **Investigati
 
 ## REST API
 
-Ask O11y exposes a REST API under `/api/plugins/consensys-asko11y-app/resources/`. All endpoints require Grafana session authentication.
+Ask O11y exposes a REST API for programmatic access. The OpenAPI 3.0.3 spec is served at `/api/plugins/consensys-asko11y-app/resources/openapi.json`.
 
-The full OpenAPI 3.0.3 spec is available at:
-
-```
-/api/plugins/consensys-asko11y-app/resources/openapi.json
-```
-
-Key endpoints:
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| `GET` | `/health` | Plugin and MCP server health status |
-| `POST` | `/api/agent/run` | Start an AI conversation (SSE streaming) |
-| `GET/POST` | `/api/agent/runs/{runId}/events` | Reconnect to an active SSE stream |
-| `POST` | `/api/agent/runs/{runId}/cancel` | Cancel an in-progress run |
-| `GET` | `/api/mcp/tools` | List available MCP tools (RBAC-filtered) |
-| `POST` | `/api/mcp/call-tool` | Execute an MCP tool directly |
-| `GET` | `/api/mcp/servers` | List configured MCP servers and health |
-| `GET` | `/api/sessions` | List your sessions |
-| `GET/PUT/DELETE` | `/api/sessions/{id}` | Get, update, or delete a session |
-| `POST` | `/api/sessions/share` | Create a share link |
-| `GET` | `/api/sessions/shared/{shareId}` | Fetch a shared session (public) |
-| `DELETE` | `/api/sessions/share/{shareId}` | Revoke a share link |
-| `GET` | `/api/sessions/{id}/shares` | List all shares for a session |
-| `GET` | `/api/prompt-defaults` | Get default prompt templates |
-
-**Limits:**
-- Max 50 sessions per user per org (oldest auto-evicted)
-- Max 25 agent iterations per run
-- Max 50 share links created per hour per user
+For the full endpoint reference, see the [REST API Reference](https://github.com/Consensys/ask-o11y-plugin/blob/main/CONTRIBUTING.md#rest-api-reference) in the contributing guide.
 
 ---
 
