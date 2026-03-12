@@ -56,8 +56,8 @@ export function useSessionManager(
     try {
       const loaded = await listSessions();
       setSessions(loaded);
-    } catch (error) {
-      console.error('[SessionManager] Failed to refresh sessions:', error);
+    } catch {
+      // Best-effort refresh — UI stays on stale list
     }
   }, []);
 
@@ -88,9 +88,8 @@ export function useSessionManager(
             }
           }
         }
-      } catch (error) {
+      } catch {
         if (!cancelled) {
-          console.error('[SessionManager] Failed to initialize:', error);
           if (lastInitializedOrgIdRef.current === orgId) {
             lastInitializedOrgIdRef.current = null;
           }
@@ -126,7 +125,6 @@ export function useSessionManager(
         onSessionIdChange(session.id);
         await setCurrentSessionId(session.id);
       } catch (error: unknown) {
-        console.error('[SessionManager] Error loading session:', error);
         const is404 = error instanceof Error && error.message.includes('404');
         if (is404) {
           setCurrentSessionId_(null);
@@ -147,8 +145,8 @@ export function useSessionManager(
         if (sessionId === currentSessionId) {
           createNewSession();
         }
-      } catch (error) {
-        console.error('[SessionManager] Error deleting session:', error);
+      } catch {
+        // Best-effort delete
       }
     },
     [currentSessionId, createNewSession, refreshSessions]
@@ -159,8 +157,8 @@ export function useSessionManager(
       await deleteAllBackendSessions();
       await refreshSessions();
       createNewSession();
-    } catch (error) {
-      console.error('[SessionManager] Error deleting all sessions:', error);
+    } catch {
+      // Best-effort delete all
     }
   }, [createNewSession, refreshSessions]);
 

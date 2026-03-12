@@ -50,8 +50,8 @@ export function ShareDialog({ sessionId, session, onClose, existingShares = [], 
       const loadedShares = await sessionShareService.getSessionShares(sessionId);
       setShares(loadedShares);
       onSharesChanged?.(loadedShares);
-    } catch (error) {
-      console.error('[ShareDialog] Failed to load shares:', error);
+    } catch {
+      // Best-effort share loading
     }
   };
 
@@ -61,7 +61,7 @@ export function ShareDialog({ sessionId, session, onClose, existingShares = [], 
     try {
       const expiryOption = findExpiryOptionByKey(selectedExpiryKey);
       if (!expiryOption) {
-        console.error('[ShareDialog] Invalid expiry option selected');
+        setErrorMessage('Invalid expiry option selected.');
         return;
       }
 
@@ -79,8 +79,7 @@ export function ShareDialog({ sessionId, session, onClose, existingShares = [], 
       const updatedShares = [...shares, share];
       setShares(updatedShares);
       onSharesChanged?.(updatedShares);
-    } catch (error) {
-      console.error('[ShareDialog] Failed to create share:', error);
+    } catch {
       setErrorMessage('Failed to create share. Please try again.');
     } finally {
       setIsCreating(false);
@@ -98,8 +97,7 @@ export function ShareDialog({ sessionId, session, onClose, existingShares = [], 
       if (createdShare?.shareId === shareId) {
         setCreatedShare(null);
       }
-    } catch (error) {
-      console.error('[ShareDialog] Failed to revoke share:', error);
+    } catch {
       setErrorMessage('Failed to revoke share. Please try again.');
     } finally {
       setRevokingShareId(null);

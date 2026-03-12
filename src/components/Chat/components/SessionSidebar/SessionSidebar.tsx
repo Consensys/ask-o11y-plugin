@@ -50,8 +50,8 @@ export function SessionSidebar({ sessionManager, currentSessionId, isOpen, onClo
           try {
             const shares = await sessionShareService.getSessionShares(session.id);
             sharesMap.set(session.id, shares);
-          } catch (error) {
-            console.error(`[SessionSidebar] Failed to load shares for session ${session.id}:`, error);
+          } catch {
+            // Best-effort share loading per session
           }
         }
         setSessionShares(sharesMap);
@@ -151,8 +151,8 @@ export function SessionSidebar({ sessionManager, currentSessionId, isOpen, onClo
                 try {
                   await sessionManager.createNewSession();
                   onClose();
-                } catch (error) {
-                  console.error('[SessionSidebar] Failed to create new session:', error);
+                } catch {
+                  // Session creation is best-effort; UI resets on next interaction
                 } finally {
                   setCreatingSession(false);
                 }
@@ -210,8 +210,8 @@ export function SessionSidebar({ sessionManager, currentSessionId, isOpen, onClo
                 if (confirm('Are you sure you want to delete all conversations? This cannot be undone.')) {
                   try {
                     await sessionManager.deleteAllSessions();
-                  } catch (error) {
-                    console.error('[SessionSidebar] Failed to delete all sessions:', error);
+                  } catch {
+                    // Best-effort delete all
                   }
                 }
               }}
@@ -263,8 +263,8 @@ function ShareDialogWrapper({
       try {
         const loadedSession = await getSession(sessionId);
         setSession(loadedSession);
-      } catch (error) {
-        console.error('[ShareDialogWrapper] Failed to load session:', error);
+      } catch {
+        // Failed to load session for share dialog; loading state handles UI
       } finally {
         setLoading(false);
       }

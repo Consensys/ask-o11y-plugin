@@ -80,7 +80,6 @@ function orgIdHeaders(orgId?: string): Record<string, string> {
 }
 
 interface ReadSSEStreamOptions {
-  warnOnMalformedJSON?: boolean;
   abortSignal?: AbortSignal;
   lastSeenSequence?: number;
   idleTimeoutMs?: number;
@@ -142,10 +141,7 @@ export async function readSSEStream(
         try {
           event = JSON.parse(jsonStr);
         } catch {
-          if (options.warnOnMalformedJSON) {
-            console.warn('[agentClient] Malformed SSE JSON, skipping:', jsonStr);
-          }
-          continue;
+            continue;
         }
 
         if (event.sequence <= lastSeenSequence) {
@@ -197,7 +193,6 @@ function dispatchEvent(event: SSEEvent, callbacks: AgentCallbacks): void {
       callbacks.onRunStarted?.(event.data);
       break;
     default:
-      console.warn(`[agentClient] Unknown SSE event type: ${(event as { type: string }).type}`);
       break;
   }
 }
@@ -267,7 +262,6 @@ export async function reconnectToAgentRun(
     }
 
     if (attempt > 0) {
-      console.log(`[agentClient] SSE stream dropped, reconnecting (attempt ${attempt})`);
       callbacks.onReconnect?.();
       await new Promise((resolve) => setTimeout(resolve, RECONNECT_DELAY_MS));
     }
@@ -289,7 +283,6 @@ export async function reconnectToAgentRun(
     }
 
     const completed = await readSSEStream(resp.body, callbacks, {
-      warnOnMalformedJSON: true,
       abortSignal,
     });
 

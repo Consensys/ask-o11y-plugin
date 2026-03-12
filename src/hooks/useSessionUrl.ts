@@ -39,7 +39,6 @@ export function useSessionUrl(): UseSessionUrlReturn {
     }
 
     if (!isValidSessionId(urlSessionId)) {
-      console.warn('[useSessionUrl] Invalid sessionId format, cleaning URL');
       removeSessionFromUrl();
       setIsValidated(true);
       return;
@@ -50,8 +49,7 @@ export function useSessionUrl(): UseSessionUrlReturn {
         setSessionIdFromUrl(urlSessionId);
         setIsValidated(true);
       })
-      .catch((error) => {
-        console.warn(`[useSessionUrl] Session ${urlSessionId} not found, cleaning URL`, error);
+      .catch(() => {
         removeSessionFromUrl();
         setIsValidated(true);
       });
@@ -59,7 +57,6 @@ export function useSessionUrl(): UseSessionUrlReturn {
 
   const updateUrlWithSession = useCallback((sessionId: string) => {
     if (!isValidSessionId(sessionId)) {
-      console.error('[useSessionUrl] Attempted to set invalid sessionId:', sessionId);
       return;
     }
     const url = new URL(window.location.href);

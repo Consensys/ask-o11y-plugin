@@ -173,7 +173,6 @@ describe('reconnectToAgentRun', () => {
 
   it('should skip malformed SSE lines without crashing', async () => {
     const callbacks = createMockCallbacks();
-    const warnSpy = jest.spyOn(console, 'warn').mockImplementation();
     const sseLines = [
       'data: not-valid-json',
       '',
@@ -190,10 +189,7 @@ describe('reconnectToAgentRun', () => {
 
     await reconnectToAgentRun('run-1', callbacks);
 
-    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('Malformed SSE JSON'), expect.any(String));
     expect(callbacks.onContent).toHaveBeenCalledWith({ content: 'valid' });
-
-    warnSpy.mockRestore();
   });
 
   it('should set X-Grafana-Org-Id header when orgId is provided', async () => {
