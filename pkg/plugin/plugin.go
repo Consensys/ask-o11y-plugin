@@ -460,7 +460,8 @@ func (p *Plugin) handleMCPCallTool(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, fmt.Sprintf("Invalid request: %v", err), http.StatusBadRequest)
+		p.logger.Warn("Invalid MCP call-tool request body", "error", err)
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
 		return
 	}
 
@@ -537,7 +538,8 @@ func (p *Plugin) handleAgentRun(w http.ResponseWriter, r *http.Request) {
 
 	var req agent.RunRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, fmt.Sprintf("Invalid request: %v", err), http.StatusBadRequest)
+		p.logger.Warn("Invalid agent run request body", "error", err)
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
 		return
 	}
 
@@ -558,23 +560,26 @@ func (p *Plugin) handleAgentRun(w http.ResponseWriter, r *http.Request) {
 	}
 	saToken, err := cfg.PluginAppClientSecret()
 	if err != nil {
-		p.logger.Error("Failed to get service account token from context", "error", err)
-		http.Error(w, "Failed to resolve service account token", http.StatusInternalServerError)
-		return
+		p.logger.Warn("Service account token not available; built-in MCP and SA-authenticated LLM calls will not work", "error", err)
+		saToken = ""
 	}
 
 	if p.useBuiltInMCP {
-		builtInURL := builtInMCPBaseURL(p.settings) + "/api/plugins/grafana-llm-app/resources/mcp/grafana"
-		p.mcpProxy.EnsureServer(mcp.ServerConfig{
-			ID:      "mcp-grafana",
-			Name:    "Grafana Built-in MCP",
-			URL:     builtInURL,
-			Type:    "streamable-http",
-			Enabled: true,
-			Headers: map[string]string{
-				"Authorization": "Bearer " + saToken,
-			},
-		})
+		if saToken == "" {
+			p.logger.Warn("Built-in MCP requires a service account token; skipping built-in MCP server registration")
+		} else {
+			builtInURL := builtInMCPBaseURL(p.settings) + "/api/plugins/grafana-llm-app/resources/mcp/grafana"
+			p.mcpProxy.EnsureServer(mcp.ServerConfig{
+				ID:      "mcp-grafana",
+				Name:    "Grafana Built-in MCP",
+				URL:     builtInURL,
+				Type:    "streamable-http",
+				Enabled: true,
+				Headers: map[string]string{
+					"Authorization": "Bearer " + saToken,
+				},
+			})
+		}
 	}
 
 	runID, err := generateShareID()
@@ -995,13 +1000,14 @@ func (p *Plugin) handleCreateShare(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, fmt.Sprintf("Invalid request: %v", err), http.StatusBadRequest)
+		p.logger.Warn("Invalid create-share request body", "error", err)
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
 		return
 	}
 
 	if err := ValidateSessionData(req.SessionData); err != nil {
 		p.logger.Warn("Invalid session data", "error", err)
-		http.Error(w, fmt.Sprintf("Invalid session data: %v", err), http.StatusBadRequest)
+		http.Error(w, "Invalid session data", http.StatusBadRequest)
 		return
 	}
 
@@ -1187,7 +1193,8 @@ func (p *Plugin) handleSessionsRoot(w http.ResponseWriter, r *http.Request) {
 			Messages []SessionMessage `json:"messages"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			http.Error(w, fmt.Sprintf("Invalid request: %v", err), http.StatusBadRequest)
+			p.logger.Warn("Invalid create-session request body", "error", err)
+			http.Error(w, "Invalid request body", http.StatusBadRequest)
 			return
 		}
 		session, err := p.sessionStore.CreateSession(userID, orgID, req.Title, req.Messages)
@@ -1237,7 +1244,8 @@ func (p *Plugin) handleSessionCurrent(w http.ResponseWriter, r *http.Request) {
 			SessionID string `json:"sessionId"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			http.Error(w, fmt.Sprintf("Invalid request: %v", err), http.StatusBadRequest)
+			p.logger.Warn("Invalid set-current-session request body", "error", err)
+			http.Error(w, "Invalid request body", http.StatusBadRequest)
 			return
 		}
 		if req.SessionID == "" {
@@ -1317,7 +1325,8 @@ func (p *Plugin) handleSessionRouter(w http.ResponseWriter, r *http.Request) {
 	case http.MethodPut:
 		var update SessionUpdate
 		if err := json.NewDecoder(r.Body).Decode(&update); err != nil {
-			http.Error(w, fmt.Sprintf("Invalid request: %v", err), http.StatusBadRequest)
+			p.logger.Warn("Invalid update-session request body", "error", err)
+			http.Error(w, "Invalid request body", http.StatusBadRequest)
 			return
 		}
 		if err := p.sessionStore.UpdateSession(sessionID, userID, orgID, update); err != nil {

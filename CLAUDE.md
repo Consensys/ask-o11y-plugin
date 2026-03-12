@@ -725,6 +725,22 @@ For now, manual maintenance is pragmatic given the codebase size (23 endpoints) 
 - 50 shares per hour per user
 - Backpressure handling in MCP proxy
 
+**Error Responses (CRITICAL):**
+- NEVER return raw error details (e.g., `fmt.Sprintf("Invalid request: %v", err)`) in HTTP responses — JSON decode errors can leak request body fragments
+- Return generic error messages to clients (e.g., `"Invalid request body"`) and log the details server-side with `p.logger.Warn()`
+- Example — correct pattern:
+  ```go
+  if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+      p.logger.Warn("Invalid request body", "error", err)
+      http.Error(w, "Invalid request body", http.StatusBadRequest)
+      return
+  }
+  ```
+- Example — WRONG pattern:
+  ```go
+  http.Error(w, fmt.Sprintf("Invalid request: %v", err), http.StatusBadRequest) // leaks internals
+  ```
+
 ## Testing Guidelines
 
 From `.cursor/rules/jest-unit-testing.md`:
