@@ -325,6 +325,22 @@ func (p *Proxy) EnsureServer(config ServerConfig) {
 	p.logger.Info("Ensured MCP client", "id", config.ID, "url", config.URL, "type", config.Type)
 }
 
+func (p *Proxy) RemoveServer(id string) {
+	p.mu.Lock()
+	client, ok := p.clients[id]
+	if ok {
+		delete(p.clients, id)
+	}
+	p.mu.Unlock()
+
+	if ok {
+		if err := client.Close(); err != nil {
+			p.logger.Warn("Failed to close removed MCP client", "id", id, "error", err)
+		}
+		p.logger.Info("Removed MCP client", "id", id)
+	}
+}
+
 func (p *Proxy) sdkTransport() http.RoundTripper {
 	transport, err := httpclient.GetTransport(httpclient.Options{
 		Timeouts: &httpclient.TimeoutOptions{

@@ -567,6 +567,7 @@ func (p *Plugin) handleAgentRun(w http.ResponseWriter, r *http.Request) {
 	if p.useBuiltInMCP {
 		if saToken == "" {
 			p.logger.Warn("Built-in MCP requires a service account token; skipping built-in MCP server registration")
+			p.mcpProxy.RemoveServer("mcp-grafana")
 		} else {
 			builtInURL := builtInMCPBaseURL(p.settings) + "/api/plugins/grafana-llm-app/resources/mcp/grafana"
 			p.mcpProxy.EnsureServer(mcp.ServerConfig{
