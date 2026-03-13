@@ -16,8 +16,6 @@ jobs:
       id-token: write # Required for provenance attestation
       attestations: write # Required for provenance attestation
     runs-on: ubuntu-latest
-    env:
-      GRAFANA_ACCESS_POLICY_TOKEN: ""
     steps:
       - uses: actions/checkout@v4
         with:
