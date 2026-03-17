@@ -1,0 +1,58 @@
+---
+description: Playwright E2E testing conventions and patterns for this project
+globs: tests/**/*.{ts,spec.ts}
+alwaysApply: false
+---
+
+# Playwright E2E Testing
+
+## Focus
+
+Test critical user flows: chat, session management, AppConfig, RBAC roles.
+Limit to **3–5 focused tests per file**.
+
+## Best Practices
+
+1. **Use `data-testid`** selectors from `src/components/testIds.ts` — not CSS or XPath
+2. **Mock external APIs** with `page.route()` for deterministic tests
+3. **Auto-waiting** — use Playwright's built-in waiting, avoid explicit `waitForTimeout`
+4. **Setup in `beforeEach`** — page navigation and route mocking
+5. **Test both success and error scenarios**
+
+## Example
+
+```ts
+import { test, expect } from '@playwright/test';
+
+test.describe('Chat Interface', () => {
+  test.beforeEach(async ({ page }) => {
+    await page.route('/api/plugins/consensys-asko11y-app/resources/api/agent/run', (route) => {
+      route.fulfill({
+        status: 200,
+        contentType: 'text/event-stream',
+        body: 'data: {"type":"content","content":"Hello!"}\n\ndata: {"type":"done"}\n\n',
+      });
+    });
+    await page.goto('/a/consensys-asko11y-app');
+  });
+
+  test('should send a message and receive a response', async ({ page }) => {
+    await page.locator('[data-testid="chat-input"]').fill('What is the current error rate?');
+    await page.locator('[data-testid="chat-send-button"]').click();
+    await expect(page.locator('[data-testid="assistant-message"]')).toBeVisible();
+  });
+});
+```
+
+## Run Tests
+
+```bash
+# Requires running server: nvm use 22 && npm run server
+nvm use 22 && npm run e2e
+nvm use 22 && npm run e2e -- --grep "test name pattern"
+```
+
+## RBAC Testing
+
+Always test with different roles (Admin, Editor, Viewer) to verify tool access restrictions.
+Viewers must not access write tools — verify 403 responses for restricted operations.

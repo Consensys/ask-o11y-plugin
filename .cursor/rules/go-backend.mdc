@@ -1,0 +1,61 @@
+---
+description: Go backend patterns, error handling, and conventions for this plugin
+globs: pkg/**/*.go
+alwaysApply: false
+---
+
+# Go Backend Patterns
+
+## Logging — Never use fmt.Println or stdlib log
+
+```go
+// ✅ CORRECT — use the SDK logger
+p.logger.Warn("Invalid request body", "error", err)
+p.logger.Error("MCP call failed", "tool", toolName, "error", err)
+
+// ❌ WRONG
+fmt.Println("error:", err)
+log.Printf("error: %v", err)
+```
+
+## HTTP Error Responses — Never leak internals
+
+```go
+// ✅ CORRECT — generic message to client, details in log
+if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+    p.logger.Warn("Invalid request body", "error", err)
+    http.Error(w, "Invalid request body", http.StatusBadRequest)
+    return
+}
+
+// ❌ WRONG — leaks request fragments / internal error details
+http.Error(w, fmt.Sprintf("Invalid request: %v", err), http.StatusBadRequest)
+```
+
+## RBAC — Double-check pattern (list AND execute)
+
+1. Extract role from `req.Context()`
+2. Call `canAccessTool(role, toolName)` — return 403 if unauthorized
+3. Enforcement must happen at BOTH tool listing **and** tool execution
+
+## OpenAPI Spec — Update when changing HTTP endpoints
+
+Any change to routes in `pkg/plugin/plugin.go` requires:
+1. Update `pkg/plugin/openapi/openapi.json`
+2. Run `nvm use 22 && npm run validate:openapi`
+
+## Backend Rebuild Cycle
+
+```bash
+nvm use 22 && npm run build:backend
+docker compose restart grafana
+go test ./pkg/...
+docker compose logs -f grafana   # verify no startup errors
+```
+
+## Multi-Org Constraints
+
+- SA token from `backend.GrafanaConfigFromContext()` is **Org 1 only**
+- `useBuiltInMCP: true` only works for Org 1 — never set it in multi-org configs
+- For multi-org: use external `mcp-grafana` sidecar (see `docker-compose-full.yaml`)
+- The LLM client intentionally does **not** send `X-Grafana-Org-Id` when using SA token auth

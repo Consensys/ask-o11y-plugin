@@ -843,11 +843,19 @@ docker compose exec grafana curl http://mcp-grafana:8000/mcp
 
 ## Commit Guidelines
 
-Use conventional commit format:
+**CI-enforced:** PR title (`.github/workflows/pr-title.yml`) and every commit (`.github/workflows/commitlint.yml`) must follow conventional format or CI fails.
+
+**Format:** `type(scope): description` — scope optional. Imperative subject, lowercase, no period.
+
+**Allowed types:** feat, fix, docs, style, refactor, perf, test, build, ci, chore, revert
+
+**Allowed scopes:** chat, mcp, session, config, rbac, oauth, share, viz, backend, ui, frontend, deps, release, ci, main
+
 ```bash
 feat(chat): add message export functionality
 fix(mcp): resolve connection timeout issue
-docs(readme): update installation instructions
+docs: update README
 refactor(session): extract validation logic
 test(chat): add streaming message tests
+chore(deps): update @grafana/ui to 10.4.0
 ```

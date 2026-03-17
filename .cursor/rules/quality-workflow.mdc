@@ -1,0 +1,71 @@
+---
+description: Mandatory quality gates after every code change
+alwaysApply: true
+---
+
+# Quality Workflow
+
+Run these steps after **every** code change before considering work done.
+
+## 1. LSP Diagnostics
+
+- **Go** (`pkg/`): Check the Problems panel for gopls errors — fix ALL errors and warnings
+- **TypeScript** (`src/`): Check the Problems panel — fix ALL errors and warnings
+
+## 2. Code Review
+
+Use the `code-review` skill on modified files. Fix ALL critical, major, and medium severity issues.
+
+## 3. Code Simplification
+
+Use the `code-simplifier` skill. Apply clarity improvements without changing behavior.
+
+## 4. Remove AI Slop
+
+Use the `/remove-ai-code-slop` Cursor command. Remove:
+- Comments that just restate what the code does
+- Empty or catch-and-log-only catch blocks
+- Unnecessary defensive checks in trusted call paths
+- `any` casts used to work around type issues
+
+## 5. Tests & Lint
+
+```bash
+# Always prefix npm commands with nvm use 22 &&
+nvm use 22 && npm run test:ci        # Frontend unit tests
+go test ./pkg/...                    # Backend tests
+nvm use 22 && npm run lint           # ESLint
+nvm use 22 && npm run typecheck      # TypeScript
+nvm use 22 && npm run validate:openapi  # Only if HTTP endpoints changed
+```
+
+Fix every failure — iterate until all pass.
+
+## 6. Pre-PR Review
+
+Before commit, run the `/run-all-tests-and-fix` command, then use the `pr-review-toolkit` skill
+for a comprehensive review. Fix all critical/major/medium issues from code-reviewer,
+silent-failure-hunter, and type-design-analyzer.
+
+## 7. Commit & PR Title Format (CI-enforced)
+
+**PR title** and **every commit** in the branch are validated by GitHub Actions. Use this format or CI fails.
+
+**Format:** `type(scope): description` (scope optional but recommended)
+
+**Allowed types:** `feat` `fix` `docs` `style` `refactor` `perf` `test` `build` `ci` `chore` `revert`
+
+**Allowed scopes:** `chat` `mcp` `session` `config` `rbac` `oauth` `share` `viz` `backend` `ui` `frontend` `deps` `release` `ci` `main`
+
+**Rules:** Imperative subject, lowercase, no period at end. PR title must match exactly (e.g. `docs: add Cursor agent rules`). Unscoped is valid: `docs: update README`.
+
+**Workflows:** `.github/workflows/pr-title.yml` (PR title), `.github/workflows/commitlint.yml` (commits).
+
+## Severity Policy
+
+| Severity | Action |
+|----------|--------|
+| Critical | Fix immediately — security, data loss, crashes |
+| Major | Fix before commit — logic errors, missing error handling, RBAC |
+| Medium | Fix before PR — code smells, missing validation |
+| Low/Info | Fix if trivial, otherwise note as tech debt |

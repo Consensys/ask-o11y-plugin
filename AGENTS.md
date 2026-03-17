@@ -2,6 +2,8 @@
 
 This file provides context and instructions to help AI agents work effectively on this project.
 
+**Cursor users:** Scoped workflow and pattern rules (quality gates, Go/TS conventions, testing) live in `.cursor/rules/*.mdc` and apply automatically when editing matching files. This file remains the full reference (overview, commands, key files, debugging).
+
 ## Mandatory Agent Workflow
 
 **CRITICAL: The following agent workflow is REQUIRED for every code change.**
@@ -490,19 +492,24 @@ docker compose logs -f grafana | grep -i "share\|redis"
 
 ## Commit Guidelines
 
-Use conventional commit format:
+**CI-enforced:** PR title and every commit are validated by GitHub Actions (see `.github/workflows/pr-title.yml` and `.github/workflows/commitlint.yml`). Use the format below or CI fails.
+
+**Format:** `type(scope): description` — scope optional. Imperative subject, lowercase, no period.
+
+**Allowed types:** feat, fix, docs, style, refactor, perf, test, build, ci, chore, revert
+
+**Allowed scopes:** chat, mcp, session, config, rbac, oauth, share, viz, backend, ui, frontend, deps, release, ci, main
 
 ```bash
 feat(chat): add message export functionality
 fix(mcp): resolve connection timeout issue
-docs(readme): update installation instructions
+docs: update README
 refactor(session): extract validation logic
 test(chat): add streaming message tests
 chore(deps): update @grafana/ui to 10.4.0
 ```
 
-- Include scope when relevant
-- Keep commits focused and atomic
+- Include scope when relevant; keep commits focused and atomic
 - Reference issues: `fixes #123`
 
 ## Dependencies Management

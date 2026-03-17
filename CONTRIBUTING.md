@@ -466,14 +466,19 @@ func TestCanAccessTool(t *testing.T) {
 
 ### PR Title Format
 
-Use conventional commit format:
-```
-<type>(<scope>): <description>
+**Enforced by CI** (`.github/workflows/pr-title.yml`). The PR title must follow conventional commit format or the check fails.
 
-Examples:
+**Format:** `type(scope): description` — scope is optional.
+
+**Allowed types:** feat, fix, docs, style, refactor, perf, test, build, ci, chore, revert
+
+**Allowed scopes:** chat, mcp, session, config, rbac, oauth, share, viz, backend, ui, frontend, deps, release, ci, main
+
+**Examples:**
+```
 feat(chat): add message export functionality
 fix(mcp): resolve connection timeout issue
-docs(readme): update installation instructions
+docs: update README
 refactor(session): extract validation logic
 test(chat): add streaming message tests
 ```
@@ -557,7 +562,7 @@ git push origin your-branch-name --force-with-lease
 
 ## Commit Message Guidelines
 
-We use **Conventional Commits** for clear, structured commit history.
+We use **Conventional Commits** for clear, structured commit history. **Every commit in a PR is validated by CI** (`.github/workflows/commitlint.yml`); invalid messages fail the check.
 
 ### Format
 
@@ -571,25 +576,23 @@ We use **Conventional Commits** for clear, structured commit history.
 
 ### Type
 
+Allowed (CI-enforced): **feat**, **fix**, **docs**, **style**, **refactor**, **perf**, **test**, **build**, **ci**, **chore**, **revert**
+
 - **feat**: New feature
 - **fix**: Bug fix
 - **docs**: Documentation changes
 - **style**: Formatting, missing semicolons, etc.
 - **refactor**: Code restructuring without behavior change
-- **test**: Adding or updating tests
-- **chore**: Maintenance tasks, dependency updates
 - **perf**: Performance improvements
+- **test**: Adding or updating tests
+- **build**: Build system or external dependencies
+- **ci**: CI configuration
+- **chore**: Maintenance tasks, dependency updates
+- **revert**: Revert a previous commit
 
 ### Scope
 
-Optional, but recommended. Examples:
-- `chat` - Chat interface components
-- `mcp` - MCP integration
-- `session` - Session management
-- `rbac` - Role-based access control
-- `config` - Configuration
-- `backend` - Backend/Go code
-- `frontend` - Frontend/React code
+Optional but recommended. Allowed (CI-enforced): **chat**, **mcp**, **session**, **config**, **rbac**, **oauth**, **share**, **viz**, **backend**, **ui**, **frontend**, **deps**, **release**, **ci**, **main**
 
 ### Subject
 

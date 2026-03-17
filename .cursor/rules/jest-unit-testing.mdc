@@ -1,0 +1,64 @@
+---
+description: Jest unit testing conventions and patterns for this project
+globs: src/**/*.{test,spec}.{ts,tsx}
+alwaysApply: false
+---
+
+# Jest Unit Testing
+
+## Focus
+
+Test critical functionality: business logic, utility functions, service classes.
+Limit to **3–5 focused tests per file**.
+
+## Best Practices
+
+1. **Mock dependencies before imports** with `jest.mock()`
+2. **Test three scenarios**: valid inputs, invalid inputs, edge cases (null, undefined, unexpected types)
+3. **Descriptive names** — test name should describe expected behavior
+4. **Group** related tests in `describe` blocks
+5. **Clear mocks** in `beforeEach` with `jest.clearAllMocks()`
+
+## TypeScript Example
+
+```ts
+jest.mock('../api/userService', () => ({
+  fetchUser: jest.fn(),
+}));
+
+import { fetchUser } from '../api/userService';
+import { getUserData } from '../utils/userUtils';
+
+describe('getUserData', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  it('should return user data when fetch is successful', async () => {
+    const mockUser = { id: 1, name: 'John Doe', email: 'john@example.com' };
+    (fetchUser as jest.Mock).mockResolvedValue(mockUser);
+
+    const result = await getUserData(1);
+
+    expect(fetchUser).toHaveBeenCalledWith(1);
+    expect(result).toEqual(mockUser);
+  });
+
+  it('should throw when user is not found', async () => {
+    (fetchUser as jest.Mock).mockResolvedValue(null);
+    await expect(getUserData(999)).rejects.toThrow('User not found');
+  });
+
+  it('should handle API errors gracefully', async () => {
+    (fetchUser as jest.Mock).mockRejectedValue(new Error('Network error'));
+    await expect(getUserData(1)).rejects.toThrow('Failed to fetch user: Network error');
+  });
+});
+```
+
+## Run Tests
+
+```bash
+nvm use 22 && npm run test:ci              # CI mode
+nvm use 22 && npm test -- path/to/test.ts  # Single file
+```

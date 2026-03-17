@@ -9,7 +9,7 @@ module.exports = {
     'scope-enum': [
       1, // Warning only - don't block commits with new scopes
       'always',
-      ['chat', 'mcp', 'session', 'config', 'rbac', 'oauth', 'share', 'viz', 'backend', 'ui', 'frontend', 'deps', 'release'],
+      ['chat', 'mcp', 'session', 'config', 'rbac', 'oauth', 'share', 'viz', 'backend', 'ui', 'frontend', 'deps', 'release', 'ci', 'main'],
     ],
   },
 };
