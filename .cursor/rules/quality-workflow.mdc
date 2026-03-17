@@ -47,6 +47,20 @@ Before commit, run the `/run-all-tests-and-fix` command, then use the `pr-review
 for a comprehensive review. Fix all critical/major/medium issues from code-reviewer,
 silent-failure-hunter, and type-design-analyzer.
 
+## 7. Commit & PR Title Format (CI-enforced)
+
+**PR title** and **every commit** in the branch are validated by GitHub Actions. Use this format or CI fails.
+
+**Format:** `type(scope): description` (scope optional but recommended)
+
+**Allowed types:** `feat` `fix` `docs` `style` `refactor` `perf` `test` `build` `ci` `chore` `revert`
+
+**Allowed scopes:** `chat` `mcp` `session` `config` `rbac` `oauth` `share` `viz` `backend` `ui` `frontend` `deps` `release` `ci` `main`
+
+**Rules:** Imperative subject, lowercase, no period at end. PR title must match exactly (e.g. `docs: add Cursor agent rules`). Unscoped is valid: `docs: update README`.
+
+**Workflows:** `.github/workflows/pr-title.yml` (PR title), `.github/workflows/commitlint.yml` (commits).
+
 ## Severity Policy
 
 | Severity | Action |
