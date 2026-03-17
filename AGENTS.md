@@ -2,6 +2,8 @@
 
 This file provides context and instructions to help AI agents work effectively on this project.
 
+**Cursor users:** Scoped workflow and pattern rules (quality gates, Go/TS conventions, testing) live in `.cursor/rules/*.mdc` and apply automatically when editing matching files. This file remains the full reference (overview, commands, key files, debugging).
+
 ## Mandatory Agent Workflow
 
 **CRITICAL: The following agent workflow is REQUIRED for every code change.**
