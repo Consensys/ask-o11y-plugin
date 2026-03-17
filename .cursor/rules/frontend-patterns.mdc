@@ -1,0 +1,67 @@
+---
+description: React/TypeScript patterns, theme integration, and error handling for src/ code
+globs: src/**/*.{ts,tsx}
+alwaysApply: false
+---
+
+# Frontend Patterns
+
+## Theme Integration — NEVER hardcode colors
+
+```tsx
+// ✅ CORRECT — semantic Tailwind classes
+<div className="bg-background text-primary border-weak">
+<span className="text-error">Error occurred</span>
+
+// ❌ WRONG — hardcoded colors break dark/light mode
+<div className="bg-gray-900 text-white border-gray-700">
+```
+
+**Semantic classes:**
+- Backgrounds: `bg-background` `bg-secondary` `bg-surface` `bg-canvas` `bg-elevated`
+- Text: `text-primary` `text-secondary` `text-disabled` `text-link`
+- Borders: `border-weak` `border-medium` `border-strong`
+- Status: `text-success` `text-warning` `text-error` `text-info`
+
+Prefer `@grafana/ui` components over custom implementations.
+
+## Error Handling — No silent failures, no console.*
+
+```tsx
+// ✅ CORRECT — surface errors in the UI
+} catch (err) {
+  setError('Failed to load tools. Please try again.');
+}
+
+// ❌ WRONG — swallowed error, console pollution
+} catch (err) {
+  console.error(err);
+}
+```
+
+No `console.log`, `console.error`, or `console.warn` in shipped code.
+
+## Component Patterns
+
+- Functional components with hooks only — no class components
+- `async/await` not `.then()/.catch()`
+- Custom hooks for reusable business logic (`useChat`, `useSessionManager`)
+- `useMemo` / `useCallback` for performance-sensitive computations
+
+## Testing Selectors
+
+Always use `data-testid` attributes from `src/components/testIds.ts`:
+
+```tsx
+// ✅
+<button data-testid={testIds.chat.sendButton}>Send</button>
+
+// ❌
+<button id="send-btn" className="send-button">Send</button>
+```
+
+## Session & Org Isolation
+
+- All UserStorage keys must include orgId: `grafana-o11y-chat-org-{orgId}-*`
+- Sessions are private per user — never share across users
+- Max 50 sessions per user per org (auto-eviction of oldest)
