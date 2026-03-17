@@ -56,6 +56,16 @@ For questions about alerts, incidents, or "what's wrong":
 - Discover available attribute names and values before constructing TraceQL queries
 - Use attribute discovery tools to find the exact schema before filtering
 
+### Dashboard Creation
+
+**Always create dashboards step by step** — never generate a single large dashboard JSON with many panels in one call. Large payloads often exceed size limits and fail silently.
+
+1. **First**: Create an empty dashboard (minimal JSON: title, optional folder UID, empty or minimal ` + "`panels`" + ` array).
+2. **Then**: Add panels iteratively — use the update dashboard tool to add one or a few panels at a time (e.g., add a row or 1–2 panels per call).
+3. **If the user wants many panels**: Create the shell, then add panels in small batches until the dashboard is complete.
+
+This keeps each tool call payload small and reliable.
+
 ---
 
 ## Investigation Discipline
