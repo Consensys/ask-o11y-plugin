@@ -193,8 +193,8 @@ export class ValidationService {
       },
       tokenLimit: (val) => {
         const num = Number(val);
-        if (isNaN(num) || num < 100 || num > 100000) {
-          throw new Error('Token limit must be between 100 and 100000');
+        if (isNaN(num) || num < 1000 || num > 200000) {
+          throw new Error('Token limit must be between 1000 and 200000');
         }
         return num;
       },
