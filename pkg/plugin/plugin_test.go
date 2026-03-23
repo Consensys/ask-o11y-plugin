@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/grafana/grafana-plugin-sdk-go/backend"
 	"github.com/grafana/grafana-plugin-sdk-go/backend/log"
 )
 
@@ -29,6 +30,52 @@ func TestBuiltInMCPBaseURL(t *testing.T) {
 		got := builtInMCPBaseURL(PluginSettings{BuiltInMCPBaseURL: "http://grafana.svc:3000/"})
 		if got != "http://grafana.svc:3000" {
 			t.Errorf("builtInMCPBaseURL() = %q, want %q", got, "http://grafana.svc:3000")
+		}
+	})
+}
+
+func TestResolveGrafanaURL(t *testing.T) {
+	t.Run("uses AppURL from GrafanaCfg when available", func(t *testing.T) {
+		cfg := backend.NewGrafanaCfg(map[string]string{
+			"GF_APP_URL": "https://mystack.grafana.net/",
+		})
+		url, source := resolveGrafanaURL(PluginSettings{}, cfg)
+		if url != "https://mystack.grafana.net" {
+			t.Errorf("url = %q, want %q", url, "https://mystack.grafana.net")
+		}
+		if source != "GrafanaConfig.AppURL" {
+			t.Errorf("source = %q, want %q", source, "GrafanaConfig.AppURL")
+		}
+	})
+
+	t.Run("falls back to builtInMCPBaseURL when AppURL is empty", func(t *testing.T) {
+		cfg := backend.NewGrafanaCfg(map[string]string{})
+		url, source := resolveGrafanaURL(PluginSettings{BuiltInMCPBaseURL: "http://grafana.svc:3000"}, cfg)
+		if url != "http://grafana.svc:3000" {
+			t.Errorf("url = %q, want %q", url, "http://grafana.svc:3000")
+		}
+		if source != "config-fallback" {
+			t.Errorf("source = %q, want %q", source, "config-fallback")
+		}
+	})
+
+	t.Run("falls back to localhost when cfg is nil", func(t *testing.T) {
+		url, source := resolveGrafanaURL(PluginSettings{}, nil)
+		if url != "http://localhost:3000" {
+			t.Errorf("url = %q, want %q", url, "http://localhost:3000")
+		}
+		if source != "config-fallback" {
+			t.Errorf("source = %q, want %q", source, "config-fallback")
+		}
+	})
+
+	t.Run("AppURL takes precedence over builtInMCPBaseURL setting", func(t *testing.T) {
+		cfg := backend.NewGrafanaCfg(map[string]string{
+			"GF_APP_URL": "https://cloud.grafana.net",
+		})
+		url, _ := resolveGrafanaURL(PluginSettings{BuiltInMCPBaseURL: "http://localhost:3000"}, cfg)
+		if url != "https://cloud.grafana.net" {
+			t.Errorf("url = %q, want %q", url, "https://cloud.grafana.net")
 		}
 	})
 }

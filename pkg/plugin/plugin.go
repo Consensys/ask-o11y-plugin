@@ -43,6 +43,15 @@ func builtInMCPBaseURL(settings PluginSettings) string {
 	return "http://localhost:3000"
 }
 
+func resolveGrafanaURL(settings PluginSettings, cfg *backend.GrafanaCfg) (url, source string) {
+	if cfg != nil {
+		if appURL, err := cfg.AppURL(); err == nil && appURL != "" {
+			return strings.TrimRight(appURL, "/"), "GrafanaConfig.AppURL"
+		}
+	}
+	return builtInMCPBaseURL(settings), "config-fallback"
+}
+
 const defaultRedisURL = "redis://localhost:6379/0"
 
 func createRedisClient(logger log.Logger, redisURL string) (*redis.Client, error) {
@@ -564,12 +573,15 @@ func (p *Plugin) handleAgentRun(w http.ResponseWriter, r *http.Request) {
 		saToken = ""
 	}
 
+	grafanaURL, urlSource := resolveGrafanaURL(p.settings, cfg)
+	p.logger.Debug("Resolved Grafana URL for LLM/MCP calls", "url", grafanaURL, "source", urlSource)
+
 	if p.useBuiltInMCP {
 		if saToken == "" {
 			p.logger.Warn("Built-in MCP requires a service account token; skipping built-in MCP server registration")
 			p.mcpProxy.RemoveServer("mcp-grafana")
 		} else {
-			builtInURL := builtInMCPBaseURL(p.settings) + "/api/plugins/grafana-llm-app/resources/mcp/grafana"
+			builtInURL := grafanaURL + "/api/plugins/grafana-llm-app/resources/mcp/grafana"
 			p.mcpProxy.EnsureServer(mcp.ServerConfig{
 				ID:      "mcp-grafana",
 				Name:    "Grafana Built-in MCP",
@@ -689,7 +701,7 @@ func (p *Plugin) handleAgentRun(w http.ResponseWriter, r *http.Request) {
 		MaxTotalTokens:     p.settings.MaxTotalTokens,
 		RecentMessageCount: p.settings.RecentMessageCount,
 		MaxIterations:      AgentMaxIterations,
-		GrafanaURL:         builtInMCPBaseURL(p.settings),
+		GrafanaURL:         grafanaURL,
 		AuthToken:          saToken,
 		UserRole:           userRole,
 		OrgID:              orgID,
