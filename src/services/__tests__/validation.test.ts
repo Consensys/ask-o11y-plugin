@@ -308,11 +308,22 @@ describe('ValidationService', () => {
 
     it('should validate tokenLimit within range', () => {
       expect(ValidationService.validateConfigValue('tokenLimit', 5000)).toBe(5000);
+      expect(ValidationService.validateConfigValue('tokenLimit', 180000)).toBe(180000);
+      expect(ValidationService.validateConfigValue('tokenLimit', 200000)).toBe(200000);
     });
 
     it('should throw on tokenLimit below minimum', () => {
       expect(() => ValidationService.validateConfigValue('tokenLimit', 50)).toThrow(
-        'Token limit must be between 100 and 100000'
+        'Token limit must be between 1000 and 200000'
+      );
+      expect(() => ValidationService.validateConfigValue('tokenLimit', 999)).toThrow(
+        'Token limit must be between 1000 and 200000'
+      );
+    });
+
+    it('should throw on tokenLimit above maximum', () => {
+      expect(() => ValidationService.validateConfigValue('tokenLimit', 200001)).toThrow(
+        'Token limit must be between 1000 and 200000'
       );
     });
 

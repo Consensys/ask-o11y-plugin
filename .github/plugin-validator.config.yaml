@@ -1,0 +1,11 @@
+# CI: version is bumped by release-please on release; branch/PR builds stay at the
+# last published semver, so the catalog "must be newer" rule does not apply here.
+# See https://github.com/grafana/plugin-validator#using-a-configuration-file
+global:
+  enabled: true
+  jsonOutput: false
+  reportAll: false
+
+analyzers:
+  version:
+    enabled: false
