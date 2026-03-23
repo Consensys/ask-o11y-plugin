@@ -2,6 +2,7 @@
   "name": "Ask O11y",
   "version": "0.2.16",
   "scripts": {
+    "postinstall": "node -e \"const fs=require('fs');const p=require('path');const d=p.join('node_modules','flatted','golang');try{fs.rmSync(d,{recursive:true,force:true});}catch(e){if(e.code!=='ENOENT')throw e;}\"",
     "build": "npm run build:frontend:prod && npm run build:backend:all",
     "build:frontend:prod": "webpack -c ./webpack.config.ts --env production",
     "build:frontend:coverage": "COVERAGE=true webpack -c ./webpack.config.ts --env development --env coverage",
@@ -123,9 +124,12 @@
   "packageManager": "npm@11.5.1",
   "overrides": {
     "serialize-javascript": "^7.0.4",
-    "hono": "^4.12.5",
+    "hono": "^4.12.7",
     "@hono/node-server": "^1.19.11",
-    "flatted": "3.3.3",
+    "flatted": "^3.4.2",
+    "fast-xml-parser": "^5.5.8",
+    "undici": "^6.24.1",
+    "immutable": "^5.1.5",
     "express-rate-limit": "^8.3.0",
     "sass": {
       "immutable": "^5.1.5"
