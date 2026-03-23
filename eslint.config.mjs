@@ -40,6 +40,8 @@ export default defineConfig([
       '**/.env.local',
       '**/.env.development',
       '**/.env.production',
+      'consensys-asko11y-app/',
+      'consensys-asko11y-app.zip',
     ],
   },
   ...baseConfig,
