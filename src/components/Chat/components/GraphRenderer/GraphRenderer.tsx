@@ -9,8 +9,7 @@ import {
   SceneRefreshPicker,
   SceneTimePicker,
 } from '@grafana/scenes';
-import { useTheme2, IconButton, Tooltip, RadioButtonGroup } from '@grafana/ui';
-import { getDataSourceSrv } from '@grafana/runtime';
+import { useTheme2, IconButton, Tooltip, RadioButtonGroup, Alert } from '@grafana/ui';
 import { VizOrientation, VisibilityMode, AxisPlacement } from '@grafana/schema';
 import {
   PieChartType,
@@ -18,6 +17,7 @@ import {
 } from '@grafana/schema/dist/esm/raw/composable/piechart/panelcfg/x/PieChartPanelCfg_types.gen';
 import { HeatmapColorMode } from '@grafana/schema/dist/esm/raw/composable/heatmap/panelcfg/x/HeatmapPanelCfg_types.gen';
 import { PromQLQuery } from '../../utils/promqlParser';
+import { resolveQueryDatasource } from '../../utils/resolveQueryDatasource';
 import { ErrorBoundary } from '../../../ErrorBoundary';
 import { LoadingOverlay } from '../../../LoadingOverlay';
 
@@ -42,6 +42,7 @@ const GraphRendererComponent: React.FC<GraphRendererProps> = ({
   const theme = useTheme2();
   const [scene, setScene] = useState<EmbeddedScene | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [datasourceError, setDatasourceError] = useState<string | null>(null);
   const [currentVizType, setCurrentVizType] = useState(visualizationType);
   const [isExpanded, setIsExpanded] = useState(false);
 
@@ -62,26 +63,23 @@ const GraphRendererComponent: React.FC<GraphRendererProps> = ({
 
   useEffect(() => {
     setIsLoading(true);
+    setDatasourceError(null);
+
+    const dsResult = resolveQueryDatasource('prometheus');
+    if (!dsResult.ok) {
+      setDatasourceError(dsResult.reason);
+      setScene(null);
+      setIsLoading(false);
+      return;
+    }
+
+    const dataSource = dsResult.settings;
 
     // Create a time range
     const timeRange = new SceneTimeRange({
       from: defaultTimeRange.from,
       to: defaultTimeRange.to,
     });
-
-    // Get Prometheus data source
-    let dataSource: any;
-    try {
-      // Try to get the default Prometheus data source
-      const dsService = getDataSourceSrv();
-      dataSource = dsService.getInstanceSettings('Prometheus');
-
-      if (!dataSource) {
-        dataSource = { uid: 'prometheus', type: 'prometheus' };
-      }
-    } catch (error) {
-      dataSource = { uid: 'prometheus', type: 'prometheus' };
-    }
 
     // Create query runner with the PromQL query
     // Note: Don't pass $timeRange here - it will inherit from the EmbeddedScene
@@ -232,6 +230,22 @@ const GraphRendererComponent: React.FC<GraphRendererProps> = ({
     defaultTimeRange.from,
     defaultTimeRange.to,
   ]);
+
+  if (datasourceError) {
+    return (
+      <div
+        className="my-4 rounded-lg overflow-hidden p-4"
+        style={{
+          border: `1px solid ${theme.colors.border.weak}`,
+          backgroundColor: theme.colors.background.primary,
+        }}
+      >
+        <Alert severity="warning" title="Cannot run PromQL query">
+          {datasourceError}
+        </Alert>
+      </div>
+    );
+  }
 
   // Show loading state while scene is being created
   if (!scene) {

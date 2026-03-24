@@ -7,10 +7,10 @@ import {
   SceneTimeRange,
   EmbeddedScene,
 } from '@grafana/scenes';
-import { useTheme2 } from '@grafana/ui';
-import { getDataSourceSrv } from '@grafana/runtime';
+import { useTheme2, Alert } from '@grafana/ui';
 import { LogsDedupStrategy, LogsSortOrder } from '@grafana/data';
 import { Query } from '../../utils/promqlParser';
+import { resolveQueryDatasource } from '../../utils/resolveQueryDatasource';
 
 interface LogsRendererProps {
   query: Query;
@@ -26,24 +26,25 @@ export const LogsRenderer: React.FC<LogsRendererProps> = ({
   // Get Grafana theme for styling
   const theme = useTheme2();
   const [scene, setScene] = useState<EmbeddedScene | null>(null);
+  const [datasourceError, setDatasourceError] = useState<string | null>(null);
 
   useEffect(() => {
+    setDatasourceError(null);
+
+    const dsResult = resolveQueryDatasource('loki');
+    if (!dsResult.ok) {
+      setDatasourceError(dsResult.reason);
+      setScene(null);
+      return;
+    }
+
+    const dataSource = dsResult.settings;
+
     // Create a time range
     const timeRange = new SceneTimeRange({
       from: defaultTimeRange.from,
       to: defaultTimeRange.to,
     });
-
-    // Try to get the default Loki data source
-    let dataSource: { uid?: string; type: string } = { type: 'loki' };
-    try {
-      const ds = getDataSourceSrv().getInstanceSettings('loki');
-      if (ds) {
-        dataSource = { uid: ds.uid, type: 'loki' };
-      }
-    } catch (error) {
-      // Using fallback data source
-    }
 
     // Create a query runner with Loki data source
     // Note: Don't pass $timeRange here - it will inherit from the EmbeddedScene
@@ -107,6 +108,22 @@ export const LogsRenderer: React.FC<LogsRendererProps> = ({
       clearTimeout(activationTimeout);
     };
   }, [query.query, query.title, height, defaultTimeRange.from, defaultTimeRange.to]);
+
+  if (datasourceError) {
+    return (
+      <div
+        className="my-4 rounded-lg overflow-hidden p-4"
+        style={{
+          border: `1px solid ${theme.colors.border.weak}`,
+          backgroundColor: theme.colors.background.primary,
+        }}
+      >
+        <Alert severity="warning" title="Cannot run LogQL query">
+          {datasourceError}
+        </Alert>
+      </div>
+    );
+  }
 
   // Show loading state while scene is being created
   if (!scene) {

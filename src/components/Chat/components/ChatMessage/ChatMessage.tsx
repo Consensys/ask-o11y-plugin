@@ -31,6 +31,10 @@ function QuerySection({ section }: QuerySectionProps): React.ReactElement | null
     return null;
   }
 
+  if (!query.query.trim()) {
+    return null;
+  }
+
   const timeRange = buildTimeRange(query);
 
   if (type === 'promql') {
