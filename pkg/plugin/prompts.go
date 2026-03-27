@@ -19,6 +19,10 @@ type PromptContext struct {
 	AlertName string
 	Target    string
 
+	// ConversationType matches the agent request type: "", chat, investigation, performance.
+	// Used to append mode-specific system instructions (e.g. tighter tool discipline for investigations).
+	ConversationType string
+
 	AvailableTools []ToolInfo
 	DisabledTools  []ToolInfo
 	FailedTools    []ToolInfo
@@ -72,7 +76,11 @@ func (r *PromptRegistry) BuildSystemPrompt(ctx PromptContext) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return system + tools, nil
+	out := system + tools
+	if ctx.ConversationType == "investigation" {
+		out += "\n\n---\n\n" + DefaultInvestigationModeSystemAddendum
+	}
+	return out, nil
 }
 
 func (r *PromptRegistry) BuildUserPrompt(convType, message string, ctx PromptContext) (string, error) {

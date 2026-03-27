@@ -605,6 +605,7 @@ func (p *Plugin) handleAgentRun(w http.ResponseWriter, r *http.Request) {
 	numericOrgID := getOrgID(r)
 
 	toolCtx := BuildToolContext(req.OrgName, userRole)
+	toolCtx.ConversationType = req.Type
 
 	systemPrompt, err := p.promptRegistry.BuildSystemPrompt(toolCtx)
 	if err != nil {
