@@ -1,6 +1,6 @@
 {
   "name": "Ask O11y",
-  "version": "0.2.17",
+  "version": "0.2.18",
   "scripts": {
     "postinstall": "node -e \"const fs=require('fs');const p=require('path');const d=p.join('node_modules','flatted','golang');try{fs.rmSync(d,{recursive:true,force:true});}catch(e){if(e.code!=='ENOENT')throw e;}\"",
     "build": "npm run build:frontend:prod && npm run build:backend:all",
