@@ -178,6 +178,8 @@ your_prometheus_query_here
 
 The title attribute is optional but recommended for clarity. The from and to attributes control the time range displayed in the graph (default: last 1 hour). The viz attribute controls the visualization type (default: timeseries).
 
+**Datasource selection:** Optional attribute ` + "`ds=\"<uid>\"`" + ` on the opening fence line (same UID you get from the datasource listing tools). Omit it to use Grafana's default datasource for that type (Prometheus, Loki, or Tempo). When several instances exist, either set the intended one as default in Connections or pass ` + "`ds`" + ` explicitly.
+
 ### Rendering LogQL Queries as Log Panels
 
 When providing LogQL queries, you can render them as interactive log panels directly in the chat by using this format:

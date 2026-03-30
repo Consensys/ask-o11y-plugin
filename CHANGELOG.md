@@ -5,6 +5,12 @@ All notable changes to the Ask O11y Grafana plugin will be documented in this fi
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+* **viz:** resolve Prometheus, Loki, and Tempo datasources like Grafana defaults (and optional `ds` UID on code fences) instead of hardcoded names ([#104](https://github.com/Consensys/ask-o11y-plugin/issues/104))
+
 ## [0.2.17](https://github.com/Consensys/ask-o11y-plugin/compare/v0.2.16...v0.2.17) (2026-03-13)
 
 

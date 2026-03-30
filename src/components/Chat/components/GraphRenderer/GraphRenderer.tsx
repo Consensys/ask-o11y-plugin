@@ -9,8 +9,8 @@ import {
   SceneRefreshPicker,
   SceneTimePicker,
 } from '@grafana/scenes';
-import { useTheme2, IconButton, Tooltip, RadioButtonGroup } from '@grafana/ui';
-import { getDataSourceSrv } from '@grafana/runtime';
+import { useTheme2, IconButton, Tooltip, RadioButtonGroup, Alert } from '@grafana/ui';
+import { resolveVisualizationDatasource } from '../../utils/resolveVisualizationDatasource';
 import { VizOrientation, VisibilityMode, AxisPlacement } from '@grafana/schema';
 import {
   PieChartType,
@@ -44,6 +44,7 @@ const GraphRendererComponent: React.FC<GraphRendererProps> = ({
   const [isLoading, setIsLoading] = useState(true);
   const [currentVizType, setCurrentVizType] = useState(visualizationType);
   const [isExpanded, setIsExpanded] = useState(false);
+  const [datasourceError, setDatasourceError] = useState<string | null>(null);
 
   const vizTypeOptions = [
     { label: 'Time Series', value: 'timeseries' },
@@ -62,26 +63,22 @@ const GraphRendererComponent: React.FC<GraphRendererProps> = ({
 
   useEffect(() => {
     setIsLoading(true);
+    setDatasourceError(null);
 
-    // Create a time range
+    const resolved = resolveVisualizationDatasource('prometheus', query.datasourceUid);
+    if (!resolved.ok) {
+      setDatasourceError(resolved.error);
+      setScene(null);
+      setIsLoading(false);
+      return;
+    }
+
+    const dataSource = { uid: resolved.settings.uid, type: resolved.settings.type };
+
     const timeRange = new SceneTimeRange({
       from: defaultTimeRange.from,
       to: defaultTimeRange.to,
     });
-
-    // Get Prometheus data source
-    let dataSource: any;
-    try {
-      // Try to get the default Prometheus data source
-      const dsService = getDataSourceSrv();
-      dataSource = dsService.getInstanceSettings('Prometheus');
-
-      if (!dataSource) {
-        dataSource = { uid: 'prometheus', type: 'prometheus' };
-      }
-    } catch (error) {
-      dataSource = { uid: 'prometheus', type: 'prometheus' };
-    }
 
     // Create query runner with the PromQL query
     // Note: Don't pass $timeRange here - it will inherit from the EmbeddedScene
@@ -231,7 +228,18 @@ const GraphRendererComponent: React.FC<GraphRendererProps> = ({
     isExpanded,
     defaultTimeRange.from,
     defaultTimeRange.to,
+    query.datasourceUid,
   ]);
+
+  if (datasourceError) {
+    return (
+      <div className="my-4">
+        <Alert title="Cannot load graph" severity="error">
+          {datasourceError}
+        </Alert>
+      </div>
+    );
+  }
 
   // Show loading state while scene is being created
   if (!scene) {
