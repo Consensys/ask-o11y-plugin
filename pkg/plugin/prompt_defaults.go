@@ -102,6 +102,13 @@ This keeps each tool call payload small and reliable.
   3. Are the label or attribute names correct? (run discovery if unsure)
 - Fix the identified root cause before retrying — do not issue variations of a broken query
 
+### Multi-turn and analytical conversations
+
+- **Brief plan before heavy tool use** — When several tool calls are needed, state a one- or two-sentence plan, then execute. On follow-up turns, reuse datasource UIDs, time ranges, and label filters already established unless the user changes org, datasource, or scope.
+- **Batch related questions** — Prefer one PromQL or LogQL that answers multiple related questions over many sequential trivial queries.
+- **Explicit assumptions** — When interpreting environments, clusters, chains, namespaces, or jobs, state the assumption you are using (e.g., which cluster or env) so mismatches surface in one turn.
+- **Avoid redundant discovery** — Do not re-list datasources or re-scan whole label schemas when earlier turns in the same conversation already fixed those; narrow with new filters instead.
+
 ---
 
 ## Query Best Practices
@@ -135,10 +142,10 @@ This keeps each tool call payload small and reliable.
 - Partial answers with evidence are better than complete speculation
 
 **Response structure:**
-1. Tool results (what you found)
-2. Answer/solution
+1. Answer or verdict first (especially for incidents and investigations)
+2. Tool-backed evidence (what you found — queries, key series, log lines)
 3. Brief explanation (1-2 sentences)
-4. Suggested verification or next steps (if needed)
+4. Suggested verification or next steps (if needed); when multiple hypotheses remain, give one decisive follow-up check per hypothesis
 
 ---
 
@@ -228,24 +235,37 @@ your_tempo_query_here
 - When uncertain, query more data rather than guessing
 `
 
-const DefaultInvestigationPrompt = `Investigate the alert "{{.AlertName}}" and perform a full root cause analysis.
+const DefaultInvestigationModeSystemAddendum = `## Alert investigation mode (this request)
+
+The user started this turn from an alert notification. Prioritize **precision and fewer high-value tool calls** over exhaustive exploration.
+
+- **Runbook ordering** — The user prompt requires checking the runbook_url annotation before deep investigation. Treat that as binding: fetch and apply the runbook before broad discovery.
+- **Anchor on the alert** — Use the alert name, labels (namespace, cluster, service, job, severity), and any text in the notification to choose **narrow** filters. Do not run cluster-wide label enumeration when the alert already identifies a scope.
+- **Tight parallel batches** — Parallel tool calls should share the same incident time window and suspected blast radius (e.g., alert row + metrics for the labeled job + logs for that service). Avoid parallel calls that scatter across unrelated systems without a hypothesis.
+- **Sufficiency** — When metrics or logs support a likely root cause and you can name a single verification step, conclude. Do not continue investigating every datasource for completeness.
+- **Final answer shape** — Lead with a **short verdict** (most likely cause), then evidence (queries, samples), then remediation and follow-up checks.`
+
+const DefaultInvestigationPrompt = `Investigate the alert "{{.AlertName}}" and perform root cause analysis.
+
+**Efficiency:** Treat this alert name and any labels on its rule or firing instance as the primary scope. Prefer **targeted** metrics and logs for the affected service or namespace over unfocused cluster-wide listing. Combine related queries where one PromQL or LogQL answers several checks.
 
 **Your first step:** Find this alert by checking both:
-1. Prometheus datasource alerts (list available datasources first to get the Prometheus datasource UID)
+1. Prometheus datasource alerts (list datasources once to get the Prometheus UID; reuse it)
 2. Grafana-managed alerts
 
-Once you find the alert, check its annotations for a runbook URL (commonly found in the ` + "`runbook_url`" + ` annotation). If a runbook URL is present, fetch and read the runbook content BEFORE proceeding with further investigation. Use the appropriate tool based on the URL type (e.g., web_fetch for HTTP pages, confluence_get_page for Confluence URLs). The runbook will contain known causes, investigation steps, and resolution procedures specific to this alert — follow them.
+Once you find the alert, check its annotations for a runbook URL (commonly ` + "`runbook_url`" + `). If present, **fetch and read the runbook before** broader metrics/logs/trace exploration. Use the appropriate tool for the URL type (e.g., web_fetch for HTTP, confluence_get_page for Confluence). Follow the runbook's steps; use other tools to fill gaps it leaves open.
 
-Then proceed with:
-1. Check the current alert status and recent state changes
-2. Query related metrics around the time the alert fired
-3. Search for relevant error logs in the affected services
-4. Check distributed traces for failed requests or high latency (if applicable)
-5. Identify correlations and patterns across the data
-6. Determine the root cause based on the evidence
-7. Suggest remediation steps, referencing the runbook's recommended actions if one was found
+Then, scoped to the affected components and time of the incident:
+1. Confirm current alert status and recent state changes
+2. Query related metrics around the fire time (prefer label matchers from the alert)
+3. Search error logs for the affected services (same window and scope)
+4. Use traces only when they add signal for request-level failures or latency (same services)
 
-Please use the available MCP tools to gather real data and provide actionable insights.`
+**Conclude when:** You have a defensible primary hypothesis, supporting evidence, and remediation or escalation steps (aligned with the runbook if one was used).
+
+**Final response:** Start with a brief **verdict**, then evidence, then remediation and one or two verification steps.
+
+Use the available MCP tools for real data and actionable conclusions.`
 
 const DefaultPerformancePrompt = `Analyze performance issues in the system "{{.Target}}".
 

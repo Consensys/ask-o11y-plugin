@@ -66,3 +66,6 @@ consensys-asko11y-app.zip
 
 # Claude Code
 .claude/agents/
+
+# Local secrets / prod data extractions (do not commit)
+local/prod-redis-sessions/
