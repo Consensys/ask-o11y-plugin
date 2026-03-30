@@ -85,6 +85,13 @@ describe('promqlParser', () => {
       expect(queries[0].visualization).toBe('gauge');
     });
 
+    it('should extract query with ds (datasource UID) attribute', () => {
+      const content = '```promql title="CPU" ds="prom-abc12"\nup\n```';
+      const queries = extractPromQLQueries(content);
+      expect(queries).toHaveLength(1);
+      expect(queries[0].datasourceUid).toBe('prom-abc12');
+    });
+
     it('should extract query with multiple attributes', () => {
       const content = '```promql title="CPU" from="now-1h" to="now" viz="timeseries"\nprocess_cpu\n```';
       const queries = extractPromQLQueries(content);

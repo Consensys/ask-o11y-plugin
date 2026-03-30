@@ -123,6 +123,7 @@
   },
   "packageManager": "npm@11.5.1",
   "overrides": {
+    "handlebars": ">=4.7.9",
     "serialize-javascript": "^7.0.4",
     "hono": "^4.12.7",
     "@hono/node-server": "^1.19.11",

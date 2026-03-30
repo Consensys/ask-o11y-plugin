@@ -7,8 +7,8 @@ import {
   SceneTimeRange,
   EmbeddedScene,
 } from '@grafana/scenes';
-import { useTheme2 } from '@grafana/ui';
-import { getDataSourceSrv } from '@grafana/runtime';
+import { useTheme2, Alert } from '@grafana/ui';
+import { resolveVisualizationDatasource } from '../../utils/resolveVisualizationDatasource';
 import { LogsDedupStrategy, LogsSortOrder } from '@grafana/data';
 import { Query } from '../../utils/promqlParser';
 
@@ -26,24 +26,24 @@ export const LogsRenderer: React.FC<LogsRendererProps> = ({
   // Get Grafana theme for styling
   const theme = useTheme2();
   const [scene, setScene] = useState<EmbeddedScene | null>(null);
+  const [datasourceError, setDatasourceError] = useState<string | null>(null);
 
   useEffect(() => {
-    // Create a time range
+    setDatasourceError(null);
+
+    const resolved = resolveVisualizationDatasource('loki', query.datasourceUid);
+    if (!resolved.ok) {
+      setDatasourceError(resolved.error);
+      setScene(null);
+      return;
+    }
+
     const timeRange = new SceneTimeRange({
       from: defaultTimeRange.from,
       to: defaultTimeRange.to,
     });
 
-    // Try to get the default Loki data source
-    let dataSource: { uid?: string; type: string } = { type: 'loki' };
-    try {
-      const ds = getDataSourceSrv().getInstanceSettings('loki');
-      if (ds) {
-        dataSource = { uid: ds.uid, type: 'loki' };
-      }
-    } catch (error) {
-      // Using fallback data source
-    }
+    const dataSource = { uid: resolved.settings.uid, type: resolved.settings.type };
 
     // Create a query runner with Loki data source
     // Note: Don't pass $timeRange here - it will inherit from the EmbeddedScene
@@ -106,7 +106,17 @@ export const LogsRenderer: React.FC<LogsRendererProps> = ({
       isCancelled = true;
       clearTimeout(activationTimeout);
     };
-  }, [query.query, query.title, height, defaultTimeRange.from, defaultTimeRange.to]);
+  }, [query.query, query.title, query.datasourceUid, height, defaultTimeRange.from, defaultTimeRange.to]);
+
+  if (datasourceError) {
+    return (
+      <div className="my-4">
+        <Alert title="Cannot load logs panel" severity="error">
+          {datasourceError}
+        </Alert>
+      </div>
+    );
+  }
 
   // Show loading state while scene is being created
   if (!scene) {
