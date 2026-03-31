@@ -140,9 +140,20 @@ export function removePromQLCodeBlocks(content: string): string {
  * Split content into text, PromQL, LogQL, and TraceQL sections
  */
 export function splitContentByPromQL(
-  content: string
-): Array<{ type: 'text' | 'promql' | 'logql' | 'traceql'; content: string; query?: Query }> {
-  const sections: Array<{ type: 'text' | 'promql' | 'logql' | 'traceql'; content: string; query?: Query }> = [];
+  content: string,
+  drilldownCallback?: (type: 'logs' | 'traces', query: string) => void
+): Array<{
+  type: 'text' | 'promql' | 'logql' | 'traceql';
+  content: string;
+  query?: Query;
+  drilldownCallback?: (type: 'logs' | 'traces', query: string) => void;
+}> {
+  const sections: Array<{
+    type: 'text' | 'promql' | 'logql' | 'traceql';
+    content: string;
+    query?: Query;
+    drilldownCallback?: (type: 'logs' | 'traces', query: string) => void;
+  }> = [];
 
   // Captures all attributes as a single group to support title, from, to in any order
   const codeBlockRegex = /```(promql|prometheus|logql|loki|traceql|tempo)([^\n]*)\n([\s\S]*?)```/gi;
@@ -187,6 +198,7 @@ export function splitContentByPromQL(
         visualization: attrs.viz,
         datasourceUid: attrs.datasourceUid,
       },
+      drilldownCallback,
     });
 
     lastIndex = match.index + match[0].length;

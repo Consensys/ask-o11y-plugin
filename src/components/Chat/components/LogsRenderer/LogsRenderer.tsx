@@ -17,7 +17,7 @@ interface LogsRendererProps {
   query: Query;
   height?: number;
   defaultTimeRange?: { from: string; to: string };
-  drilldownCallback?: (filteredQuery: string) => void;
+  drilldownCallback?: (type: 'logs' | 'traces', query: string) => void;
 }
 
 export const LogsRenderer: React.FC<LogsRendererProps> = ({
@@ -36,8 +36,12 @@ export const LogsRenderer: React.FC<LogsRendererProps> = ({
   const handleCopyQuery = useCallback(() => {
     navigator.clipboard.writeText(query.query);
     setIsCopied(true);
-    setTimeout(() => setIsCopied(false), 2000);
-   }, [query.query]);
+      }, [query.query]);
+
+  useEffect(() => {
+    const timer = setTimeout(() => setIsCopied(false), 2000);
+    return () => clearTimeout(timer);
+      }, [isCopied]);
 
   useEffect(() => {
     setDatasourceError(null);
@@ -47,7 +51,7 @@ export const LogsRenderer: React.FC<LogsRendererProps> = ({
       setDatasourceError(resolved.error);
       setScene(null);
       return;
-     }
+      }
 
     const timeRange = new SceneTimeRange({
       from: defaultTimeRange.from,
@@ -65,20 +69,20 @@ export const LogsRenderer: React.FC<LogsRendererProps> = ({
           queryType: 'range',
           },
          ],
-         });
+          });
 
     const panel = PanelBuilders.logs()
-       .setTitle(query.title || 'Logs')
-       .setData(queryRunner)
-       .setOption('showTime', true)
-       .setOption('showLabels', true)
-       .setOption('showCommonLabels', false)
-       .setOption('wrapLogMessage', true)
-       .setOption('prettifyLogMessage', false)
-       .setOption('enableLogDetails', true)
-       .setOption('dedupStrategy', LogsDedupStrategy.none)
-       .setOption('sortOrder', LogsSortOrder.Descending)
-       .build();
+        .setTitle(query.title || 'Logs')
+        .setData(queryRunner)
+        .setOption('showTime', true)
+        .setOption('showLabels', true)
+        .setOption('showCommonLabels', false)
+        .setOption('wrapLogMessage', true)
+        .setOption('prettifyLogMessage', false)
+        .setOption('enableLogDetails', true)
+        .setOption('dedupStrategy', LogsDedupStrategy.none)
+        .setOption('sortOrder', LogsSortOrder.Descending)
+        .build();
 
     const layout = new SceneFlexLayout({
       direction: 'column',
@@ -88,13 +92,13 @@ export const LogsRenderer: React.FC<LogsRendererProps> = ({
           body: panel,
           }),
         ],
-        });
+         });
 
     const embeddedScene = new EmbeddedScene({
-       $timeRange: timeRange,
+         $timeRange: timeRange,
       body: layout,
       controls: [],
-      });
+        });
 
     let isCancelled = false;
 
@@ -102,110 +106,110 @@ export const LogsRenderer: React.FC<LogsRendererProps> = ({
       if (!isCancelled) {
         embeddedScene.activate();
         setScene(embeddedScene);
-         }
-        }, 0);
+          }
+          }, 0);
 
     return () => {
       isCancelled = true;
       clearTimeout(activationTimeout);
-         };
-         }, [query.query, query.title, query.datasourceUid, height, defaultTimeRange.from, defaultTimeRange.to]);
+          };
+          }, [query.query, query.title, query.datasourceUid, height, defaultTimeRange.from, defaultTimeRange.to]);
 
   if (datasourceError) {
     return (
-         <div className="my-4">
-           <Alert title="Cannot load logs panel" severity="error">
-             {datasourceError}
-           </Alert>
-          </div>
-        );
-       }
+           <div className="my-4">
+             <Alert title="Cannot load logs panel" severity="error">
+               {datasourceError}
+             </Alert>
+            </div>
+          );
+         }
 
   if (!scene) {
     return (
-          <div
+            <div
         className="my-4 rounded-lg overflow-hidden p-4"
         style={{
           border: `1px solid ${theme.colors.border.weak}`,
           backgroundColor: theme.colors.background.primary,
-           }}
-          >
-           <div style={{ color: theme.colors.text.secondary }}>Loading logs...</div>
-          </div>
-         );
-         }
+             }}
+            >
+             <div style={{ color: theme.colors.text.secondary }}>Loading logs...</div>
+            </div>
+           );
+           }
 
   return (
-         <div
+           <div
       className="my-4 rounded-lg overflow-hidden"
       style={{
         border: `1px solid ${theme.colors.border.weak}`,
-           }}
-           >
-           <div
+             }}
+             >
+             <div
         className="px-4 py-2 flex items-center justify-between"
         style={{
           backgroundColor: theme.colors.background.secondary,
           borderBottom: `1px solid ${theme.colors.border.weak}`,
-           }}
-           >
-            <div className="flex items-center gap-2">
-              {query.title && (
-                <h4 className="text-sm font-medium" style={{ color: theme.colors.text.primary }}>
-                  {query.title}
-                </h4>
-               )}
-               {analysis.hasAggregation && (
-                   <span
+             }}
+             >
+              <div className="flex items-center gap-2">
+                {query.title && (
+                  <h4 className="text-sm font-medium" style={{ color: theme.colors.text.primary }}>
+                    {query.title}
+                  </h4>
+                 )}
+                 {analysis.hasAggregation && (
+                     <span
                   className="text-xs px-2 py-1 rounded"
                   style={{
                     backgroundColor: theme.colors.primary.main,
                     color: theme.colors.primary.contrastText,
-                     }}
-                    >
-                     {analysis.aggregationType.toUpperCase()} aggregation
-                    </span>
-                   )}
-            </div>
+                       }}
+                      >
+                       {analysis.aggregationType.toUpperCase()} aggregation
+                      </span>
+                     )}
+              </div>
 
-            <div className="flex items-center gap-2">
-              <Tooltip content={isCopied ? 'Copied!' : 'Copy query'}>
-                <IconButton
+              <div className="flex items-center gap-2">
+                <Tooltip content={isCopied ? 'Copied!' : 'Copy query'}>
+                  <IconButton
                 name={isCopied ? 'check' : 'copy'}
                 size="sm"
                 onClick={handleCopyQuery}
                 aria-label="Copy query to clipboard"
-                   />
-              </Tooltip>
-            </div>
-           </div>
+                     />
+                </Tooltip>
+              </div>
+             </div>
 
-           <div
+             <div
         className="p-4"
         data-scene-container="logs"
         style={{
           backgroundColor: theme.colors.background.primary,
-           }}
-           >
-            <scene.Component model={scene} />
-           </div>
+             }}
+             >
+              <scene.Component model={scene} />
+             </div>
 
-           <div
+             <div
         className="px-4 py-2 border-t"
         style={{
           backgroundColor: theme.colors.background.secondary,
           borderTop: `1px solid ${theme.colors.border.weak}`,
-           }}
-           >
-            <div className="flex items-center justify-between">
-              <code className="text-xs flex-1" style={{ color: theme.colors.text.secondary }}>
-                {query.query}
-              </code>
-              <span className="text-xs ml-4" style={{ color: theme.colors.text.secondary }}>
-                {analysis.hasAggregation ? `${analysis.aggregationType} aggregation` : 'Raw logs'}
-              </span>
+             }}
+             >
+              <div className="flex items-center justify-between">
+                <code className="text-xs flex-1" style={{ color: theme.colors.text.secondary }}>
+                  {query.query}
+                </code>
+                <span className="text-xs ml-4" style={{ color: theme.colors.text.secondary }}>
+                  {analysis.hasAggregation ? `${analysis.aggregationType} aggregation` : 'Raw logs'}
+                </span>
+              </div>
+             </div>
             </div>
-           </div>
-          </div>
-         );
+           );
  };

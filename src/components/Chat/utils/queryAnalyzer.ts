@@ -74,7 +74,7 @@ function detectQueryType(query: string): QueryType {
   const logqlPatterns = [
     /count_over_time|rate_over_time|avg_over_time|sum_over_time/i,
     /\{\s*.*\s*=\s*.*\s*\}\s*(!=|~|!~|!=)/,
-    /\|\s*(|log|line|json|patterns|labels|parser)/i,
+    /\|\s*(log|line|json|patterns|labels|parser)/i,
     /\{\s*job\s*=|{\s*instance\s*=|{\s*exported_*\w+\s*=}/i,
   ];
 

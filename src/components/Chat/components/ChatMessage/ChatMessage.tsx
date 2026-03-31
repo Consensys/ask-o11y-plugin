@@ -7,7 +7,6 @@ import { LogsRenderer } from '../LogsRenderer/LogsRenderer';
 import { TracesRenderer } from '../TracesRenderer/TracesRenderer';
 import { ChatMessage as ChatMessageType, ContentSection } from '../../types';
 import { splitContentByPromQL } from '../../utils/promqlParser';
-import { getSuggestedVisualization } from '../../utils/queryAnalyzer';
 
 interface ChatMessageProps {
   message: ChatMessageType;
@@ -34,19 +33,16 @@ function QuerySection({ section }: QuerySectionProps): React.ReactElement | null
   }
 
   const timeRange = buildTimeRange(query);
-
-  // Auto-detect visualization type if not specified
-  const suggestedViz = query.visualization || getSuggestedVisualization(query.query);
-  const visType = suggestedViz as 'timeseries' | 'stat' | 'gauge' | 'table' | 'piechart' | 'barchart' | 'heatmap' | 'histogram' | undefined;
+  const visType = query.visualization as 'timeseries' | 'stat' | 'gauge' | 'table' | 'piechart' | 'barchart' | 'heatmap' | 'histogram' | undefined;
 
   if (type === 'promql') {
     return <GraphRenderer query={query} defaultTimeRange={timeRange} visualizationType={visType} />;
   }
   if (type === 'logql') {
-    return <LogsRenderer query={query} defaultTimeRange={timeRange} />;
+    return <LogsRenderer query={query} defaultTimeRange={timeRange} drilldownCallback={section.drilldownCallback} />;
   }
   if (type === 'traceql') {
-    return <TracesRenderer query={query} defaultTimeRange={timeRange} />;
+    return <TracesRenderer query={query} defaultTimeRange={timeRange} drilldownCallback={section.drilldownCallback} />;
   }
   return null;
 }
@@ -83,7 +79,9 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
      );
   }
 
-  const contentSections = message.content ? splitContentByPromQL(message.content) : [];
+  const contentSections = message.content
+    ? splitContentByPromQL(message.content, drilldownCallback)
+    : [];
 
   return (
     <div className="flex w-full mb-6 animate-fadeIn" role="article" aria-label="Assistant message">

@@ -16,7 +16,7 @@ interface TracesRendererProps {
   query: Query;
   height?: number;
   defaultTimeRange?: { from: string; to: string };
-  drilldownCallback?: (filteredQuery: string) => void;
+  drilldownCallback?: (type: 'logs' | 'traces', query: string) => void;
 }
 
 export const TracesRenderer: React.FC<TracesRendererProps> = ({
@@ -35,8 +35,12 @@ export const TracesRenderer: React.FC<TracesRendererProps> = ({
   const handleCopyQuery = useCallback(() => {
     navigator.clipboard.writeText(query.query);
     setIsCopied(true);
-    setTimeout(() => setIsCopied(false), 2000);
   }, [query.query]);
+
+  useEffect(() => {
+    const timer = setTimeout(() => setIsCopied(false), 2000);
+    return () => clearTimeout(timer);
+  }, [isCopied]);
 
   useEffect(() => {
     setDatasourceError(null);
