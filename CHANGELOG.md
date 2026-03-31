@@ -5,6 +5,18 @@ All notable changes to the Ask O11y Grafana plugin will be documented in this fi
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.18](https://github.com/Consensys/ask-o11y-plugin/compare/v0.2.17...v0.2.18) (2026-03-30)
+
+
+### Features
+
+* **chat:** tighten investigation and multi-turn agent prompts ([#102](https://github.com/Consensys/ask-o11y-plugin/issues/102)) ([f9fd9ab](https://github.com/Consensys/ask-o11y-plugin/commit/f9fd9abd8e38346460f9c2b5805f2a631bc68227))
+
+
+### Bug Fixes
+
+* **viz:** resolve datasources by Grafana default and optional ds uid ([#105](https://github.com/Consensys/ask-o11y-plugin/issues/105)) ([34ef96d](https://github.com/Consensys/ask-o11y-plugin/commit/34ef96d615cb43f517b8cb6ad45b43dd1d9cbfa3))
+
 ## [Unreleased]
 
 ### Fixed
