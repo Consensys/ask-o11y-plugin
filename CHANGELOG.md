@@ -5,6 +5,13 @@ All notable changes to the Ask O11y Grafana plugin will be documented in this fi
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.19](https://github.com/Consensys/ask-o11y-plugin/compare/v0.2.18...v0.2.19) (2026-04-01)
+
+
+### Features
+
+* **viz:** improve visualizations ([#109](https://github.com/Consensys/ask-o11y-plugin/issues/109)) ([fee8e28](https://github.com/Consensys/ask-o11y-plugin/commit/fee8e28e1676b10f45dd8949fc072ceb43fbd445))
+
 ## [0.2.18](https://github.com/Consensys/ask-o11y-plugin/compare/v0.2.17...v0.2.18) (2026-03-30)
 
 
