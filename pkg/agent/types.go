@@ -35,6 +35,7 @@ type ChatCompletionRequest struct {
 	Model    string       `json:"model"`
 	Messages []Message    `json:"messages"`
 	Tools    []OpenAITool `json:"tools,omitempty"`
+	Stream   bool         `json:"stream,omitempty"`
 }
 
 type ChatCompletionResponse struct {

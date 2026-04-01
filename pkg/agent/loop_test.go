@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 
 	"github.com/grafana/grafana-plugin-sdk-go/backend/log"
@@ -12,19 +13,88 @@ import (
 	"consensys-asko11y-app/pkg/mcp"
 )
 
+// respondAsStream writes a ChatCompletionResponse as an OpenAI-compatible SSE stream.
+func respondAsStream(w http.ResponseWriter, resp ChatCompletionResponse) {
+	w.Header().Set("Content-Type", "text/event-stream")
+	enc := json.NewEncoder(w)
+
+	emitChunk := func(chunk streamChunk) {
+		w.Write([]byte("data: ")) //nolint:errcheck
+		enc.Encode(chunk)        //nolint:errcheck
+		w.Write([]byte("\n"))    //nolint:errcheck
+	}
+
+	for _, choice := range resp.Choices {
+		// Role chunk
+		emitChunk(streamChunk{
+			ID: resp.ID,
+			Choices: []streamChoice{{
+				Index: choice.Index,
+				Delta: streamDelta{Role: choice.Message.Role},
+			}},
+		})
+
+		// Content chunk
+		if choice.Message.Content != "" {
+			emitChunk(streamChunk{
+				ID: resp.ID,
+				Choices: []streamChoice{{
+					Index: choice.Index,
+					Delta: streamDelta{Content: choice.Message.Content},
+				}},
+			})
+		}
+
+		// Tool call chunks (one per tool call, full arguments in a single chunk)
+		for i, tc := range choice.Message.ToolCalls {
+			emitChunk(streamChunk{
+				ID: resp.ID,
+				Choices: []streamChoice{{
+					Index: choice.Index,
+					Delta: streamDelta{
+						ToolCalls: []toolCallChunk{{
+							Index: i,
+							ID:    tc.ID,
+							Type:  tc.Type,
+							Function: functionChunk{
+								Name:      tc.Function.Name,
+								Arguments: tc.Function.Arguments,
+							},
+						}},
+					},
+				}},
+			})
+		}
+
+		// Finish reason chunk
+		fr := choice.FinishReason
+		emitChunk(streamChunk{
+			ID: resp.ID,
+			Choices: []streamChoice{{
+				Index:        choice.Index,
+				Delta:        streamDelta{},
+				FinishReason: &fr,
+			}},
+			Usage: resp.Usage,
+		})
+	}
+
+	w.Write([]byte("data: [DONE]\n\n")) //nolint:errcheck
+}
+
 // setupTestLoop creates an AgentLoop backed by a mock LLM server.
 // Returns the loop, the mock server URL (to pass as GrafanaURL in LoopRequest), and a cleanup func.
 func setupTestLoop(t *testing.T, llmResponses []ChatCompletionResponse) (*AgentLoop, string, func()) {
 	t.Helper()
 
-	callIdx := 0
+	var callIdx atomic.Int32
 	llmServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if callIdx >= len(llmResponses) {
-			t.Fatalf("unexpected LLM call #%d (only %d responses configured)", callIdx+1, len(llmResponses))
+		idx := int(callIdx.Add(1)) - 1
+		if idx >= len(llmResponses) {
+			t.Errorf("unexpected LLM call #%d (only %d responses configured)", idx+1, len(llmResponses))
+			return
 		}
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(llmResponses[callIdx])
-		callIdx++
+		respondAsStream(w, llmResponses[idx])
 	}))
 
 	llmClient := NewLLMClient(log.DefaultLogger, &http.Client{Timeout: llmTimeout})
