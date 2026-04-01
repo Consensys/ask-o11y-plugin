@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
@@ -58,73 +59,93 @@ type LLMClient struct {
 }
 
 func NewLLMClient(logger log.Logger, httpClient *http.Client) *LLMClient {
-	return &LLMClient{
-		httpClient: httpClient,
-		logger:     logger,
-	}
+	return &LLMClient{httpClient: httpClient, logger: logger}
 }
 
-func (c *LLMClient) ChatCompletion(ctx context.Context, req ChatCompletionRequest, grafanaURL, authToken, orgID string) (*ChatCompletionResponse, error) {
+func (c *LLMClient) ChatCompletion(ctx context.Context, req ChatCompletionRequest, grafanaURL, authToken, orgID string) (result *ChatCompletionResponse, err error) {
 	ctx, span := tracing.DefaultTracer().Start(ctx, "llm_call")
-	defer span.End()
+	defer func() {
+		if err != nil {
+			tracing.Error(span, err)
+		}
+		span.End()
+	}()
 
 	req.Model = llmModel
 	req.Stream = true
 
 	body, err := json.Marshal(req)
 	if err != nil {
-		tracing.Error(span, err)
 		return nil, fmt.Errorf("marshal request: %w", err)
 	}
 
-	url := strings.TrimRight(grafanaURL, "/") + llmEndpoint
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
+	httpReq, err := c.buildHTTPRequest(ctx, body, grafanaURL, authToken, orgID)
 	if err != nil {
-		tracing.Error(span, err)
-		return nil, fmt.Errorf("create request: %w", err)
+		return nil, err
 	}
 
-	httpReq.Header.Set("Content-Type", "application/json")
-	// Use SA token for LLM authentication.
-	// Note: Grafana 12 strips Cookie headers from backend plugin requests,
-	// so user session cookies cannot be used for auth.
-	authMethod := "none"
-	if authToken != "" {
-		httpReq.Header.Set("Authorization", "Bearer "+authToken)
-		authMethod = "sa-token"
-		if orgID != "" && orgID != "1" {
-			c.logger.Warn("Using SA token for non-Org-1 LLM call; SA token is Org 1 scoped, LLM config may not match requested org", "orgID", orgID)
-		}
-	} else {
-		c.logger.Warn("No authentication available for LLM call; request will likely fail", "url", url, "orgID", orgID)
-	}
-	// Only set X-Grafana-Org-Id with cookie auth. SA token is Org-1-scoped
-	// (grafana/grafana#91844), so pairing it with another org triggers a
-	// 401 from grafana-llm-app. Org isolation is enforced at the MCP
-	// tool-call layer, not here.
-	if authMethod == "cookie" && orgID != "" {
-		httpReq.Header.Set("X-Grafana-Org-Id", orgID)
-	}
-
-	c.logger.Debug("Calling LLM", "url", url, "messageCount", len(req.Messages), "toolCount", len(req.Tools), "authMethod", authMethod, "orgID", orgID)
+	c.logger.Debug("Calling LLM",
+		"url", httpReq.URL.String(),
+		"messageCount", len(req.Messages),
+		"toolCount", len(req.Tools),
+		"orgID", orgID)
 
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
-		tracing.Error(span, err)
 		return nil, fmt.Errorf("LLM request failed: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		err := fmt.Errorf("LLM returned status %d", resp.StatusCode)
-		tracing.Error(span, err)
+		return nil, fmt.Errorf("LLM returned status %d", resp.StatusCode)
+	}
+
+	result, err = parseStream(resp)
+	if err != nil {
 		return nil, err
 	}
 
+	if result.Usage != nil {
+		span.SetAttributes(
+			attribute.Int("llm.prompt_tokens", result.Usage.PromptTokens),
+			attribute.Int("llm.completion_tokens", result.Usage.CompletionTokens),
+		)
+	}
+
+	return result, nil
+}
+
+// buildHTTPRequest constructs the POST request with auth headers set.
+// X-Grafana-Org-Id is intentionally omitted: SA tokens are Org-1-scoped
+// (grafana/grafana#91844), so pairing them with another org causes a 401.
+// Grafana 12 also strips Cookie headers, so SA token is the only auth option.
+// Org isolation is enforced at the MCP tool-call layer instead.
+func (c *LLMClient) buildHTTPRequest(ctx context.Context, body []byte, grafanaURL, authToken, orgID string) (*http.Request, error) {
+	url := strings.TrimRight(grafanaURL, "/") + llmEndpoint
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	if authToken != "" {
+		req.Header.Set("Authorization", "Bearer "+authToken)
+		if orgID != "" && orgID != "1" {
+			c.logger.Warn("SA token is Org 1 scoped; LLM config may not match requested org", "orgID", orgID)
+		}
+	} else {
+		c.logger.Warn("No auth token for LLM call; request will likely fail", "url", url, "orgID", orgID)
+	}
+
+	return req, nil
+}
+
+// parseStream reads an OpenAI-compatible SSE response and assembles a ChatCompletionResponse.
+func parseStream(resp *http.Response) (*ChatCompletionResponse, error) {
 	var (
-		responseID  string
-		contentBuf  strings.Builder
-		toolCallMap = map[int]ToolCall{}
+		responseID   string
+		content      strings.Builder
+		toolCallMap  = map[int]ToolCall{}
 		finishReason string
 		usage        *Usage
 	)
@@ -142,7 +163,6 @@ func (c *LLMClient) ChatCompletion(ctx context.Context, req ChatCompletionReques
 
 		var chunk streamChunk
 		if err := json.Unmarshal([]byte(payload), &chunk); err != nil {
-			tracing.Error(span, err)
 			return nil, fmt.Errorf("decode stream chunk: %w", err)
 		}
 
@@ -157,7 +177,7 @@ func (c *LLMClient) ChatCompletion(ctx context.Context, req ChatCompletionReques
 			if choice.FinishReason != nil && *choice.FinishReason != "" {
 				finishReason = *choice.FinishReason
 			}
-			contentBuf.WriteString(choice.Delta.Content)
+			content.WriteString(choice.Delta.Content)
 			for _, tc := range choice.Delta.ToolCalls {
 				existing := toolCallMap[tc.Index]
 				if tc.ID != "" {
@@ -175,40 +195,23 @@ func (c *LLMClient) ChatCompletion(ctx context.Context, req ChatCompletionReques
 		}
 	}
 	if err := scanner.Err(); err != nil {
-		tracing.Error(span, err)
 		return nil, fmt.Errorf("read stream: %w", err)
 	}
 
-	msg := Message{
-		Role:    "assistant",
-		Content: contentBuf.String(),
+	msg := Message{Role: "assistant", Content: content.String()}
+
+	indices := make([]int, 0, len(toolCallMap))
+	for k := range toolCallMap {
+		indices = append(indices, k)
 	}
-	for i := 0; i < len(toolCallMap); i++ {
+	sort.Ints(indices)
+	for _, i := range indices {
 		msg.ToolCalls = append(msg.ToolCalls, toolCallMap[i])
 	}
 
-	result := &ChatCompletionResponse{
-		ID: responseID,
-		Choices: []Choice{{
-			Index:        0,
-			Message:      msg,
-			FinishReason: finishReason,
-		}},
-		Usage: usage,
-	}
-
-	if len(result.Choices) == 0 {
-		err := fmt.Errorf("LLM returned no choices")
-		tracing.Error(span, err)
-		return nil, err
-	}
-
-	if result.Usage != nil {
-		span.SetAttributes(
-			attribute.Int("llm.prompt_tokens", result.Usage.PromptTokens),
-			attribute.Int("llm.completion_tokens", result.Usage.CompletionTokens),
-		)
-	}
-
-	return result, nil
+	return &ChatCompletionResponse{
+		ID:      responseID,
+		Choices: []Choice{{Message: msg, FinishReason: finishReason}},
+		Usage:   usage,
+	}, nil
 }
