@@ -6,8 +6,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"maps"
 	"net/http"
-	"sort"
+	"slices"
 	"strings"
 	"time"
 
@@ -18,9 +20,10 @@ import (
 )
 
 const (
-	llmEndpoint = "/api/plugins/grafana-llm-app/resources/openai/v1/chat/completions"
-	llmModel    = "large"
-	llmTimeout  = 120 * time.Second
+	llmEndpoint    = "/api/plugins/grafana-llm-app/resources/openai/v1/chat/completions"
+	llmModel       = "large"
+	llmTimeout     = 120 * time.Second
+	maxSSELineSize = 1 * 1024 * 1024 // 1 MB — large tool-call payloads (e.g. dashboard JSON) can exceed bufio's 64 KB default
 )
 
 type streamChunk struct {
@@ -97,6 +100,10 @@ func (c *LLMClient) ChatCompletion(ctx context.Context, req ChatCompletionReques
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
+		errBody, _ := io.ReadAll(io.LimitReader(resp.Body, 512)) // best-effort; status error is returned regardless
+		if len(errBody) > 0 {
+			c.logger.Warn("LLM returned error", "status", resp.StatusCode, "body", string(errBody))
+		}
 		return nil, fmt.Errorf("LLM returned status %d", resp.StatusCode)
 	}
 
@@ -140,7 +147,6 @@ func (c *LLMClient) buildHTTPRequest(ctx context.Context, body []byte, grafanaUR
 	return req, nil
 }
 
-// parseStream reads an OpenAI-compatible SSE response and assembles a ChatCompletionResponse.
 func parseStream(resp *http.Response) (*ChatCompletionResponse, error) {
 	var (
 		responseID   string
@@ -151,12 +157,13 @@ func parseStream(resp *http.Response) (*ChatCompletionResponse, error) {
 	)
 
 	scanner := bufio.NewScanner(resp.Body)
+	scanner.Buffer(make([]byte, 0, 64*1024), maxSSELineSize)
 	for scanner.Scan() {
 		line := scanner.Text()
-		if !strings.HasPrefix(line, "data: ") {
+		payload, ok := strings.CutPrefix(line, "data: ")
+		if !ok {
 			continue
 		}
-		payload := line[len("data: "):]
 		if payload == "[DONE]" {
 			break
 		}
@@ -200,13 +207,8 @@ func parseStream(resp *http.Response) (*ChatCompletionResponse, error) {
 
 	msg := Message{Role: "assistant", Content: content.String()}
 
-	indices := make([]int, 0, len(toolCallMap))
-	for k := range toolCallMap {
-		indices = append(indices, k)
-	}
-	sort.Ints(indices)
-	for _, i := range indices {
-		msg.ToolCalls = append(msg.ToolCalls, toolCallMap[i])
+	for _, k := range slices.Sorted(maps.Keys(toolCallMap)) {
+		msg.ToolCalls = append(msg.ToolCalls, toolCallMap[k])
 	}
 
 	return &ChatCompletionResponse{

@@ -184,3 +184,37 @@ func TestLLMClient_ChatCompletion_ToolCall(t *testing.T) {
 		t.Errorf("unexpected finish reason: %q", resp.Choices[0].FinishReason)
 	}
 }
+
+func TestLLMClient_ChatCompletion_MalformedChunk(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprintf(w, "data: {not valid json}\n\n")
+	}))
+	defer server.Close()
+
+	client := NewLLMClient(log.DefaultLogger, &http.Client{Timeout: llmTimeout})
+	_, err := client.ChatCompletion(context.Background(), ChatCompletionRequest{
+		Messages: []Message{{Role: "user", Content: "hi"}},
+	}, server.URL, "token", "1")
+
+	if err == nil {
+		t.Fatal("expected error for malformed SSE chunk")
+	}
+}
+
+func TestLLMClient_ChatCompletion_ErrorBody(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusTooManyRequests)
+		fmt.Fprintf(w, `{"error":"rate limit exceeded"}`)
+	}))
+	defer server.Close()
+
+	client := NewLLMClient(log.DefaultLogger, &http.Client{Timeout: llmTimeout})
+	_, err := client.ChatCompletion(context.Background(), ChatCompletionRequest{
+		Messages: []Message{{Role: "user", Content: "hi"}},
+	}, server.URL, "token", "1")
+
+	if err == nil {
+		t.Fatal("expected error for 429 response")
+	}
+}

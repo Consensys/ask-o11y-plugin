@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 
 	"github.com/grafana/grafana-plugin-sdk-go/backend/log"
@@ -86,13 +87,14 @@ func respondAsStream(w http.ResponseWriter, resp ChatCompletionResponse) {
 func setupTestLoop(t *testing.T, llmResponses []ChatCompletionResponse) (*AgentLoop, string, func()) {
 	t.Helper()
 
-	callIdx := 0
+	var callIdx atomic.Int32
 	llmServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if callIdx >= len(llmResponses) {
-			t.Fatalf("unexpected LLM call #%d (only %d responses configured)", callIdx+1, len(llmResponses))
+		idx := int(callIdx.Add(1)) - 1
+		if idx >= len(llmResponses) {
+			t.Errorf("unexpected LLM call #%d (only %d responses configured)", idx+1, len(llmResponses))
+			return
 		}
-		respondAsStream(w, llmResponses[callIdx])
-		callIdx++
+		respondAsStream(w, llmResponses[idx])
 	}))
 
 	llmClient := NewLLMClient(log.DefaultLogger, &http.Client{Timeout: llmTimeout})
