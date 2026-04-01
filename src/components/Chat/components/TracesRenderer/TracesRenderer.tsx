@@ -16,28 +16,29 @@ interface TracesRendererProps {
   query: Query;
   height?: number;
   defaultTimeRange?: { from: string; to: string };
-  drilldownCallback?: (type: 'logs' | 'traces', query: string) => void;
 }
 
 export const TracesRenderer: React.FC<TracesRendererProps> = ({
   query,
   height = 400,
   defaultTimeRange = { from: 'now-1h', to: 'now' },
-  drilldownCallback,
 }) => {
   const theme = useTheme2();
   const [scene, setScene] = useState<EmbeddedScene | null>(null);
   const [datasourceError, setDatasourceError] = useState<string | null>(null);
   const [isCopied, setIsCopied] = useState(false);
 
-  const analysis = analyzeQuery(query.query);
+  const analysis = analyzeQuery(query.query, 'traceql');
 
   const handleCopyQuery = useCallback(() => {
-    navigator.clipboard.writeText(query.query);
+    navigator.clipboard.writeText(query.query).catch(() => {});
     setIsCopied(true);
   }, [query.query]);
 
   useEffect(() => {
+    if (!isCopied) {
+      return;
+    }
     const timer = setTimeout(() => setIsCopied(false), 2000);
     return () => clearTimeout(timer);
   }, [isCopied]);
