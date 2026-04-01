@@ -12,7 +12,6 @@ interface ChatMessageProps {
   message: ChatMessageType;
   isGenerating?: boolean;
   isLastMessage?: boolean;
-  drilldownCallback?: (type: 'logs' | 'traces', query: string) => void;
 }
 
 function buildTimeRange(query: ContentSection['query']): { from: string; to: string } | undefined {
@@ -33,16 +32,15 @@ function QuerySection({ section }: QuerySectionProps): React.ReactElement | null
   }
 
   const timeRange = buildTimeRange(query);
-  const visType = query.visualization as 'timeseries' | 'stat' | 'gauge' | 'table' | 'piechart' | 'barchart' | 'heatmap' | 'histogram' | undefined;
 
   if (type === 'promql') {
-    return <GraphRenderer query={query} defaultTimeRange={timeRange} visualizationType={visType} />;
+    return <GraphRenderer query={query} defaultTimeRange={timeRange} visualizationType={query.visualization} />;
   }
   if (type === 'logql') {
-    return <LogsRenderer query={query} defaultTimeRange={timeRange} drilldownCallback={section.drilldownCallback} />;
+    return <LogsRenderer query={query} defaultTimeRange={timeRange} />;
   }
   if (type === 'traceql') {
-    return <TracesRenderer query={query} defaultTimeRange={timeRange} drilldownCallback={section.drilldownCallback} />;
+    return <TracesRenderer query={query} defaultTimeRange={timeRange} />;
   }
   return null;
 }
@@ -51,7 +49,6 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
   message,
   isGenerating = false,
   isLastMessage = false,
-  drilldownCallback,
 }) => {
   const theme = useTheme2();
   const showThinking =
@@ -79,9 +76,7 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
      );
   }
 
-  const contentSections = message.content
-    ? splitContentByPromQL(message.content, drilldownCallback)
-    : [];
+  const contentSections = message.content ? splitContentByPromQL(message.content) : [];
 
   return (
     <div className="flex w-full mb-6 animate-fadeIn" role="article" aria-label="Assistant message">

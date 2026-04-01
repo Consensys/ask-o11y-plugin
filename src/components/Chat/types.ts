@@ -45,7 +45,6 @@ export interface ContentSection {
   type: 'text' | 'promql' | 'logql' | 'traceql';
   content: string;
   query?: Query;
-  drilldownCallback?: (type: 'logs' | 'traces', query: string) => void;
 }
 
 /** Props for the chat interface state */
