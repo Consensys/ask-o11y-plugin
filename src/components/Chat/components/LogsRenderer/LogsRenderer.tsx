@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   SceneFlexLayout,
   SceneFlexItem,
@@ -7,10 +7,11 @@ import {
   SceneTimeRange,
   EmbeddedScene,
 } from '@grafana/scenes';
-import { useTheme2, Alert } from '@grafana/ui';
+import { useTheme2, Alert, IconButton, Tooltip } from '@grafana/ui';
 import { resolveVisualizationDatasource } from '../../utils/resolveVisualizationDatasource';
 import { LogsDedupStrategy, LogsSortOrder } from '@grafana/data';
 import { Query } from '../../utils/promqlParser';
+import { analyzeQuery } from '../../utils/queryAnalyzer';
 
 interface LogsRendererProps {
   query: Query;
@@ -23,10 +24,25 @@ export const LogsRenderer: React.FC<LogsRendererProps> = ({
   height = 400,
   defaultTimeRange = { from: 'now-1h', to: 'now' },
 }) => {
-  // Get Grafana theme for styling
   const theme = useTheme2();
   const [scene, setScene] = useState<EmbeddedScene | null>(null);
   const [datasourceError, setDatasourceError] = useState<string | null>(null);
+  const [isCopied, setIsCopied] = useState(false);
+
+  const analysis = analyzeQuery(query.query, 'logql');
+
+  const handleCopyQuery = useCallback(() => {
+    navigator.clipboard.writeText(query.query).catch(() => {});
+    setIsCopied(true);
+  }, [query.query]);
+
+  useEffect(() => {
+    if (!isCopied) {
+      return;
+    }
+    const timer = setTimeout(() => setIsCopied(false), 2000);
+    return () => clearTimeout(timer);
+  }, [isCopied]);
 
   useEffect(() => {
     setDatasourceError(null);
@@ -45,8 +61,6 @@ export const LogsRenderer: React.FC<LogsRendererProps> = ({
 
     const dataSource = { uid: resolved.settings.uid, type: resolved.settings.type };
 
-    // Create a query runner with Loki data source
-    // Note: Don't pass $timeRange here - it will inherit from the EmbeddedScene
     const queryRunner = new SceneQueryRunner({
       datasource: dataSource,
       queries: [
@@ -58,7 +72,6 @@ export const LogsRenderer: React.FC<LogsRendererProps> = ({
       ],
     });
 
-    // Create a logs panel
     const panel = PanelBuilders.logs()
       .setTitle(query.title || 'Logs')
       .setData(queryRunner)
@@ -72,7 +85,6 @@ export const LogsRenderer: React.FC<LogsRendererProps> = ({
       .setOption('sortOrder', LogsSortOrder.Descending)
       .build();
 
-    // Create a layout with the panel
     const layout = new SceneFlexLayout({
       direction: 'column',
       children: [
@@ -83,17 +95,14 @@ export const LogsRenderer: React.FC<LogsRendererProps> = ({
       ],
     });
 
-    // Create the embedded scene
     const embeddedScene = new EmbeddedScene({
       $timeRange: timeRange,
       body: layout,
       controls: [],
     });
 
-    // Track if this effect instance is still valid (survives React Strict Mode)
     let isCancelled = false;
 
-    // Delay activation to survive React Strict Mode's unmount/remount cycle
     const activationTimeout = setTimeout(() => {
       if (!isCancelled) {
         embeddedScene.activate();
@@ -101,7 +110,6 @@ export const LogsRenderer: React.FC<LogsRendererProps> = ({
       }
     }, 0);
 
-    // Cleanup function
     return () => {
       isCancelled = true;
       clearTimeout(activationTimeout);
@@ -118,7 +126,6 @@ export const LogsRenderer: React.FC<LogsRendererProps> = ({
     );
   }
 
-  // Show loading state while scene is being created
   if (!scene) {
     return (
       <div
@@ -136,42 +143,67 @@ export const LogsRenderer: React.FC<LogsRendererProps> = ({
   return (
     <div
       className="my-4 rounded-lg overflow-hidden"
-      style={{
-        border: `1px solid ${theme.colors.border.weak}`,
-      }}
+      style={{ border: `1px solid ${theme.colors.border.weak}` }}
     >
-      {query.title && (
-        <div
-          className="px-4 py-2"
-          style={{
-            backgroundColor: theme.colors.background.secondary,
-            borderBottom: `1px solid ${theme.colors.border.weak}`,
-          }}
-        >
-          <h4 className="text-sm font-medium" style={{ color: theme.colors.text.primary }}>
-            {query.title}
-          </h4>
+      <div
+        className="px-4 py-2 flex items-center justify-between"
+        style={{
+          backgroundColor: theme.colors.background.secondary,
+          borderBottom: `1px solid ${theme.colors.border.weak}`,
+        }}
+      >
+        <div className="flex items-center gap-2">
+          {query.title && (
+            <h4 className="text-sm font-medium" style={{ color: theme.colors.text.primary }}>
+              {query.title}
+            </h4>
+          )}
+          {analysis.hasAggregation && (
+            <span
+              className="text-xs px-2 py-1 rounded"
+              style={{
+                backgroundColor: theme.colors.primary.main,
+                color: theme.colors.primary.contrastText,
+              }}
+            >
+              {analysis.aggregationType.toUpperCase()} aggregation
+            </span>
+          )}
         </div>
-      )}
+
+        <Tooltip content={isCopied ? 'Copied!' : 'Copy query'}>
+          <IconButton
+            name={isCopied ? 'check' : 'copy'}
+            size="sm"
+            onClick={handleCopyQuery}
+            aria-label="Copy query to clipboard"
+          />
+        </Tooltip>
+      </div>
+
       <div
         className="p-4"
         data-scene-container="logs"
-        style={{
-          backgroundColor: theme.colors.background.primary,
-        }}
+        style={{ backgroundColor: theme.colors.background.primary }}
       >
         <scene.Component model={scene} />
       </div>
+
       <div
-        className="px-4 py-2"
+        className="px-4 py-2 border-t"
         style={{
           backgroundColor: theme.colors.background.secondary,
           borderTop: `1px solid ${theme.colors.border.weak}`,
         }}
       >
-        <code className="text-xs" style={{ color: theme.colors.text.secondary }}>
-          {query.query}
-        </code>
+        <div className="flex items-center justify-between">
+          <code className="text-xs flex-1" style={{ color: theme.colors.text.secondary }}>
+            {query.query}
+          </code>
+          <span className="text-xs ml-4" style={{ color: theme.colors.text.secondary }}>
+            {analysis.hasAggregation ? `${analysis.aggregationType} aggregation` : 'Raw logs'}
+          </span>
+        </div>
       </div>
     </div>
   );

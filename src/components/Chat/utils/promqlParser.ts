@@ -141,8 +141,16 @@ export function removePromQLCodeBlocks(content: string): string {
  */
 export function splitContentByPromQL(
   content: string
-): Array<{ type: 'text' | 'promql' | 'logql' | 'traceql'; content: string; query?: Query }> {
-  const sections: Array<{ type: 'text' | 'promql' | 'logql' | 'traceql'; content: string; query?: Query }> = [];
+): Array<{
+  type: 'text' | 'promql' | 'logql' | 'traceql';
+  content: string;
+  query?: Query;
+}> {
+  const sections: Array<{
+    type: 'text' | 'promql' | 'logql' | 'traceql';
+    content: string;
+    query?: Query;
+  }> = [];
 
   // Captures all attributes as a single group to support title, from, to in any order
   const codeBlockRegex = /```(promql|prometheus|logql|loki|traceql|tempo)([^\n]*)\n([\s\S]*?)```/gi;

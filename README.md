@@ -94,6 +94,31 @@ All endpoints require Grafana session authentication. See the OpenAPI spec for t
 
 ---
 
+## Using ask-o11y as a Remote MCP Server
+
+You can configure ask-o11y as a remote MCP server in your MCP client (e.g., Claude Code) to access all Grafana observability tools:
+
+**Claude Code configuration (`.claude/settings.json`):**
+```json
+"ask-o11y-tools": {
+  "command": "npx",
+  "args": [
+    "-y", "mcp-remote",
+    "https://grafana.o11y.web3factory.consensys.net/api/plugins/consensys-asko11y-app/resources/mcp",
+    "--header", "Authorization: Bearer glsa_XXXXXXXXX"
+  ]
+}
+```
+
+**Requirements:**
+- `mcp-remote` npm package (install via `npm install -g mcp-remote`)
+- Grafana service account token (format: `glsa_XXXXXXXXX`)
+- Token must have permissions to access the ask-o11y plugin
+
+**Token format:** `glsa_` prefix indicates a Grafana service account token. Generate via Grafana UI: **Configuration → Service Accounts → Create Token**.
+
+---
+
 ## Development
 
 ### Prerequisites

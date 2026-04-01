@@ -45,7 +45,11 @@ function QuerySection({ section }: QuerySectionProps): React.ReactElement | null
   return null;
 }
 
-export const ChatMessage: React.FC<ChatMessageProps> = ({ message, isGenerating = false, isLastMessage = false }) => {
+export const ChatMessage: React.FC<ChatMessageProps> = ({
+  message,
+  isGenerating = false,
+  isLastMessage = false,
+}) => {
   const theme = useTheme2();
   const showThinking =
     message.role === 'assistant' && isGenerating && isLastMessage && !message.content;
@@ -63,77 +67,77 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({ message, isGenerating 
             }}
             tabIndex={0}
             aria-live="polite"
-          >
+           >
             <span className="sr-only">User message</span>
             <div className="text-sm leading-relaxed whitespace-pre-wrap break-words">{message.content}</div>
-          </div>
-        </div>
-      </div>
-    );
+           </div>
+         </div>
+       </div>
+     );
   }
 
   const contentSections = message.content ? splitContentByPromQL(message.content) : [];
 
   return (
     <div className="flex w-full mb-6 animate-fadeIn" role="article" aria-label="Assistant message">
-      <div className="w-full max-w-none" tabIndex={0}>
-        <span className="sr-only">Assistant message</span>
-        {message.toolCalls && message.toolCalls.length > 0 && (
-          <div className="mb-4">
-            <ToolCallsSection toolCalls={message.toolCalls} />
-          </div>
-        )}
+       <div className="w-full max-w-none" tabIndex={0}>
+         <span className="sr-only">Assistant message</span>
+         {message.toolCalls && message.toolCalls.length > 0 && (
+           <div className="mb-4">
+             <ToolCallsSection toolCalls={message.toolCalls} />
+           </div>
+         )}
 
-        {showThinking && (
-          <div className="flex items-center gap-3 px-4 py-3 rounded-lg animate-pulse bg-surface text-secondary">
-            <div className="flex gap-1.5">
-              {[0, 150, 300].map((delay) => (
-                <div
-                  key={delay}
-                  className="w-2 h-2 rounded-full animate-pulse"
-                  style={{
-                    backgroundColor: theme.colors.primary.main,
-                    animationDelay: `${delay}ms`,
-                  }}
-                />
-              ))}
-            </div>
-            <span className="text-sm font-medium">Thinking...</span>
-          </div>
-        )}
+         {showThinking && (
+           <div className="flex items-center gap-3 px-4 py-3 rounded-lg animate-pulse bg-surface text-secondary">
+             <div className="flex gap-1.5">
+               {[0, 150, 300].map((delay) => (
+                 <div
+                   key={delay}
+                   className="w-2 h-2 rounded-full animate-pulse"
+                   style={{
+                     backgroundColor: theme.colors.primary.main,
+                     animationDelay: `${delay}ms`,
+                    }}
+                 />
+               ))}
+             </div>
+             <span className="text-sm font-medium">Thinking...</span>
+           </div>
+         )}
 
-        {!showThinking && contentSections.length > 0 && (
-          <div className="text-sm leading-relaxed whitespace-normal break-words text-primary">
-            {contentSections.map((section, index) => {
-              if (section.type === 'text') {
-                return (
-                  <div key={index} className="prose prose-sm max-w-none">
-                    <Streamdown>{section.content}</Streamdown>
-                  </div>
-                );
-              }
+         {!showThinking && contentSections.length > 0 && (
+           <div className="text-sm leading-relaxed whitespace-normal break-words text-primary">
+             {contentSections.map((section, index) => {
+               if (section.type === 'text') {
+                 return (
+                   <div key={index} className="prose prose-sm max-w-none">
+                     <Streamdown>{section.content}</Streamdown>
+                   </div>
+                 );
+               }
 
-              if (section.query) {
-                return (
-                  <div key={index} className="my-3">
-                    <QuerySection section={section} />
-                  </div>
-                );
-              }
+               if (section.query) {
+                 return (
+                   <div key={index} className="my-3">
+                     <QuerySection section={section} />
+                   </div>
+                 );
+               }
 
-              return null;
-            })}
-          </div>
-        )}
+               return null;
+             })}
+           </div>
+         )}
 
-        {!showThinking && contentSections.length === 0 && (
-          <div
+         {!showThinking && contentSections.length === 0 && (
+           <div
             className="text-sm leading-relaxed whitespace-normal break-words prose prose-sm max-w-none text-primary"
-          >
-            <Streamdown>{message.content}</Streamdown>
-          </div>
-        )}
-      </div>
-    </div>
-  );
+           >
+             <Streamdown>{message.content}</Streamdown>
+           </div>
+         )}
+       </div>
+     </div>
+   );
 };
