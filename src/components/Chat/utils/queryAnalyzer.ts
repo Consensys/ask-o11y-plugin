@@ -34,14 +34,11 @@ function detectAggregation(query: string, queryType: 'logql' | 'traceql'): Aggre
       return 'max';
     }
   } else {
-    if (/span:error|status:error/i.test(query)) {
-      return 'count';
-    }
-    if (/span:duration|duration:[><]/i.test(query)) {
-      return 'avg';
-    }
-    if (/span:childCount|span:parentCount/i.test(query)) {
-      return 'count';
+    // TraceQL aggregations are introduced in the pipeline (e.g. {} | count()).
+    // Intrinsics inside span filters (e.g. span:duration, span:status) are not aggregations.
+    const traceqlAggregationMatch = query.match(/\|\s*(count|avg|min|max|sum)\s*\(/i);
+    if (traceqlAggregationMatch) {
+      return traceqlAggregationMatch[1].toLowerCase() as AggregationType;
     }
   }
   return 'none';
