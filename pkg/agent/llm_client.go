@@ -1,11 +1,11 @@
 package agent
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -21,6 +21,36 @@ const (
 	llmModel    = "large"
 	llmTimeout  = 120 * time.Second
 )
+
+type streamChunk struct {
+	ID      string         `json:"id"`
+	Choices []streamChoice `json:"choices"`
+	Usage   *Usage         `json:"usage,omitempty"`
+}
+
+type streamChoice struct {
+	Index        int         `json:"index"`
+	Delta        streamDelta `json:"delta"`
+	FinishReason *string     `json:"finish_reason"`
+}
+
+type streamDelta struct {
+	Role      string          `json:"role,omitempty"`
+	Content   string          `json:"content,omitempty"`
+	ToolCalls []toolCallChunk `json:"tool_calls,omitempty"`
+}
+
+type toolCallChunk struct {
+	Index    int           `json:"index"`
+	ID       string        `json:"id,omitempty"`
+	Type     string        `json:"type,omitempty"`
+	Function functionChunk `json:"function"`
+}
+
+type functionChunk struct {
+	Name      string `json:"name,omitempty"`
+	Arguments string `json:"arguments,omitempty"`
+}
 
 type LLMClient struct {
 	httpClient *http.Client
@@ -39,6 +69,7 @@ func (c *LLMClient) ChatCompletion(ctx context.Context, req ChatCompletionReques
 	defer span.End()
 
 	req.Model = llmModel
+	req.Stream = true
 
 	body, err := json.Marshal(req)
 	if err != nil {
@@ -84,22 +115,86 @@ func (c *LLMClient) ChatCompletion(ctx context.Context, req ChatCompletionReques
 	}
 	defer resp.Body.Close()
 
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		tracing.Error(span, err)
-		return nil, fmt.Errorf("read response: %w", err)
-	}
-
 	if resp.StatusCode != http.StatusOK {
 		err := fmt.Errorf("LLM returned status %d", resp.StatusCode)
 		tracing.Error(span, err)
 		return nil, err
 	}
 
-	var result ChatCompletionResponse
-	if err := json.Unmarshal(respBody, &result); err != nil {
+	var (
+		responseID  string
+		contentBuf  strings.Builder
+		toolCallMap = map[int]ToolCall{}
+		finishReason string
+		usage        *Usage
+	)
+
+	scanner := bufio.NewScanner(resp.Body)
+	for scanner.Scan() {
+		line := scanner.Text()
+		if !strings.HasPrefix(line, "data: ") {
+			continue
+		}
+		payload := line[len("data: "):]
+		if payload == "[DONE]" {
+			break
+		}
+
+		var chunk streamChunk
+		if err := json.Unmarshal([]byte(payload), &chunk); err != nil {
+			tracing.Error(span, err)
+			return nil, fmt.Errorf("decode stream chunk: %w", err)
+		}
+
+		if responseID == "" {
+			responseID = chunk.ID
+		}
+		if chunk.Usage != nil {
+			usage = chunk.Usage
+		}
+
+		for _, choice := range chunk.Choices {
+			if choice.FinishReason != nil && *choice.FinishReason != "" {
+				finishReason = *choice.FinishReason
+			}
+			contentBuf.WriteString(choice.Delta.Content)
+			for _, tc := range choice.Delta.ToolCalls {
+				existing := toolCallMap[tc.Index]
+				if tc.ID != "" {
+					existing.ID = tc.ID
+				}
+				if tc.Type != "" {
+					existing.Type = tc.Type
+				}
+				if tc.Function.Name != "" {
+					existing.Function.Name = tc.Function.Name
+				}
+				existing.Function.Arguments += tc.Function.Arguments
+				toolCallMap[tc.Index] = existing
+			}
+		}
+	}
+	if err := scanner.Err(); err != nil {
 		tracing.Error(span, err)
-		return nil, fmt.Errorf("decode response: %w", err)
+		return nil, fmt.Errorf("read stream: %w", err)
+	}
+
+	msg := Message{
+		Role:    "assistant",
+		Content: contentBuf.String(),
+	}
+	for i := 0; i < len(toolCallMap); i++ {
+		msg.ToolCalls = append(msg.ToolCalls, toolCallMap[i])
+	}
+
+	result := &ChatCompletionResponse{
+		ID: responseID,
+		Choices: []Choice{{
+			Index:        0,
+			Message:      msg,
+			FinishReason: finishReason,
+		}},
+		Usage: usage,
 	}
 
 	if len(result.Choices) == 0 {
@@ -115,5 +210,5 @@ func (c *LLMClient) ChatCompletion(ctx context.Context, req ChatCompletionReques
 		)
 	}
 
-	return &result, nil
+	return result, nil
 }

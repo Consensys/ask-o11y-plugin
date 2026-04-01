@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -10,21 +11,15 @@ import (
 	"github.com/grafana/grafana-plugin-sdk-go/backend/log"
 )
 
-func TestLLMClient_ChatCompletion(t *testing.T) {
-	wantResponse := ChatCompletionResponse{
-		ID: "test-id",
-		Choices: []Choice{
-			{
-				Index: 0,
-				Message: Message{
-					Role:    "assistant",
-					Content: "Hello from the LLM!",
-				},
-				FinishReason: "stop",
-			},
-		},
+func writeSSEChunks(w http.ResponseWriter, chunks ...string) {
+	w.Header().Set("Content-Type", "text/event-stream")
+	for _, c := range chunks {
+		fmt.Fprintf(w, "data: %s\n\n", c)
 	}
+	fmt.Fprintf(w, "data: [DONE]\n\n")
+}
 
+func TestLLMClient_ChatCompletion(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			t.Errorf("expected POST, got %s", r.Method)
@@ -41,7 +36,6 @@ func TestLLMClient_ChatCompletion(t *testing.T) {
 			t.Errorf("expected content-type json, got %q", r.Header.Get("Content-Type"))
 		}
 
-		// Verify request body
 		var req ChatCompletionRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			t.Fatalf("failed to decode request: %v", err)
@@ -49,12 +43,18 @@ func TestLLMClient_ChatCompletion(t *testing.T) {
 		if req.Model != "large" {
 			t.Errorf("expected model 'large', got %q", req.Model)
 		}
+		if !req.Stream {
+			t.Errorf("expected stream=true in request")
+		}
 		if len(req.Messages) != 1 {
 			t.Errorf("expected 1 message, got %d", len(req.Messages))
 		}
 
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(wantResponse)
+		writeSSEChunks(w,
+			`{"id":"test-id","choices":[{"index":0,"delta":{"role":"assistant"},"finish_reason":null}]}`,
+			`{"id":"test-id","choices":[{"index":0,"delta":{"content":"Hello from the LLM!"},"finish_reason":null}]}`,
+			`{"id":"test-id","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`,
+		)
 	}))
 	defer server.Close()
 
@@ -73,14 +73,6 @@ func TestLLMClient_ChatCompletion(t *testing.T) {
 }
 
 func TestLLMClient_ChatCompletion_FallbackToToken(t *testing.T) {
-	wantResponse := ChatCompletionResponse{
-		ID: "test-id",
-		Choices: []Choice{{
-			Message:      Message{Role: "assistant", Content: "ok"},
-			FinishReason: "stop",
-		}},
-	}
-
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Cookie") != "" {
 			t.Errorf("expected no cookie header, got %q", r.Header.Get("Cookie"))
@@ -92,8 +84,10 @@ func TestLLMClient_ChatCompletion_FallbackToToken(t *testing.T) {
 			t.Errorf("expected no org header with SA token fallback, got %q", r.Header.Get("X-Grafana-Org-Id"))
 		}
 
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(wantResponse)
+		writeSSEChunks(w,
+			`{"id":"test-id","choices":[{"index":0,"delta":{"content":"ok"},"finish_reason":null}]}`,
+			`{"id":"test-id","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`,
+		)
 	}))
 	defer server.Close()
 
@@ -127,32 +121,15 @@ func TestLLMClient_ChatCompletion_Error(t *testing.T) {
 	}
 }
 
-func TestLLMClient_ChatCompletion_NoChoices(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		json.NewEncoder(w).Encode(ChatCompletionResponse{ID: "test", Choices: []Choice{}})
-	}))
-	defer server.Close()
-
-	client := NewLLMClient(log.DefaultLogger, &http.Client{Timeout: llmTimeout})
-	_, err := client.ChatCompletion(context.Background(), ChatCompletionRequest{
-		Messages: []Message{{Role: "user", Content: "hi"}},
-	}, server.URL, "", "1")
-
-	if err == nil {
-		t.Fatal("expected error for empty choices")
-	}
-}
-
 func TestLLMClient_ChatCompletion_ContextCancelled(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Slow response — but context will be cancelled
 		<-r.Context().Done()
 	}))
 	defer server.Close()
 
 	client := NewLLMClient(log.DefaultLogger, &http.Client{Timeout: llmTimeout})
 	ctx, cancel := context.WithCancel(context.Background())
-	cancel() // Cancel immediately
+	cancel()
 
 	_, err := client.ChatCompletion(ctx, ChatCompletionRequest{
 		Messages: []Message{{Role: "user", Content: "hi"}},
@@ -160,5 +137,50 @@ func TestLLMClient_ChatCompletion_ContextCancelled(t *testing.T) {
 
 	if err == nil {
 		t.Fatal("expected error for cancelled context")
+	}
+}
+
+func TestLLMClient_ChatCompletion_ToolCall(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req ChatCompletionRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Fatalf("failed to decode request: %v", err)
+		}
+		if !req.Stream {
+			t.Errorf("expected stream=true in request")
+		}
+
+		writeSSEChunks(w,
+			`{"id":"tc-id","choices":[{"index":0,"delta":{"role":"assistant","tool_calls":[{"index":0,"id":"call_abc","type":"function","function":{"name":"search","arguments":""}}]},"finish_reason":null}]}`,
+			`{"id":"tc-id","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\"q\":"}}]},"finish_reason":null}]}`,
+			`{"id":"tc-id","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"\"foo\"}"}}]},"finish_reason":null}]}`,
+			`{"id":"tc-id","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}`,
+		)
+	}))
+	defer server.Close()
+
+	client := NewLLMClient(log.DefaultLogger, &http.Client{Timeout: llmTimeout})
+	resp, err := client.ChatCompletion(context.Background(), ChatCompletionRequest{
+		Messages: []Message{{Role: "user", Content: "search for foo"}},
+	}, server.URL, "token", "1")
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(resp.Choices[0].Message.ToolCalls) != 1 {
+		t.Fatalf("expected 1 tool call, got %d", len(resp.Choices[0].Message.ToolCalls))
+	}
+	tc := resp.Choices[0].Message.ToolCalls[0]
+	if tc.ID != "call_abc" {
+		t.Errorf("unexpected tool call ID: %q", tc.ID)
+	}
+	if tc.Function.Name != "search" {
+		t.Errorf("unexpected tool name: %q", tc.Function.Name)
+	}
+	if tc.Function.Arguments != `{"q":"foo"}` {
+		t.Errorf("unexpected tool arguments: %q", tc.Function.Arguments)
+	}
+	if resp.Choices[0].FinishReason != "tool_calls" {
+		t.Errorf("unexpected finish reason: %q", resp.Choices[0].FinishReason)
 	}
 }
