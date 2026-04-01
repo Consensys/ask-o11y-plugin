@@ -36,9 +36,30 @@ function detectAggregation(query: string, queryType: 'logql' | 'traceql'): Aggre
   } else {
     // TraceQL aggregations are introduced in the pipeline (e.g. {} | count()).
     // Intrinsics inside span filters (e.g. span:duration, span:status) are not aggregations.
-    const traceqlAggregationMatch = query.match(/\|\s*(count|avg|min|max|sum)\s*\(/i);
+    const traceqlAggregationMatch = query.match(
+      /\|\s*(count_over_time|avg_over_time|min_over_time|max_over_time|sum_over_time|count|avg|min|max|sum|rate)\s*\(/i
+    );
     if (traceqlAggregationMatch) {
-      return traceqlAggregationMatch[1].toLowerCase() as AggregationType;
+      const traceqlAggregation = traceqlAggregationMatch[1].toLowerCase();
+
+      if (traceqlAggregation === 'count' || traceqlAggregation === 'count_over_time') {
+        return 'count';
+      }
+      if (traceqlAggregation === 'avg' || traceqlAggregation === 'avg_over_time') {
+        return 'avg';
+      }
+      if (traceqlAggregation === 'min' || traceqlAggregation === 'min_over_time') {
+        return 'min';
+      }
+      if (traceqlAggregation === 'max' || traceqlAggregation === 'max_over_time') {
+        return 'max';
+      }
+      if (traceqlAggregation === 'sum' || traceqlAggregation === 'sum_over_time') {
+        return 'sum';
+      }
+      if (traceqlAggregation === 'rate') {
+        return 'rate';
+      }
     }
   }
   return 'none';

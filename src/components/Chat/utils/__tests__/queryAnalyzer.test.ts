@@ -37,6 +37,24 @@ describe('queryAnalyzer', () => {
         aggregationType: 'avg',
       });
     });
+
+    it('detects rate aggregation in TraceQL pipelines', () => {
+      const analysis = analyzeQuery('{span:status = error} | rate()', 'traceql');
+
+      expect(analysis).toEqual({
+        hasAggregation: true,
+        aggregationType: 'rate',
+      });
+    });
+
+    it('detects count_over_time aggregation in TraceQL pipelines', () => {
+      const analysis = analyzeQuery('{resource.service.name="api"} | count_over_time()', 'traceql');
+
+      expect(analysis).toEqual({
+        hasAggregation: true,
+        aggregationType: 'count',
+      });
+    });
   });
 
   describe('logql aggregation detection', () => {
