@@ -90,7 +90,8 @@ export const TracesRenderer: React.FC<TracesRendererProps> = ({
       })
       .then((res) => {
         if (!cancelled) {
-          setTraces(res.data?.traces ?? []);
+          const body = res.data as { traces?: TraceSearchResult[] };
+          setTraces(body.traces ?? []);
           setLoading(false);
         }
       })

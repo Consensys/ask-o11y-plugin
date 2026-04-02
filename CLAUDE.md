@@ -27,7 +27,6 @@ docker compose restart grafana        # Reload after backend rebuild
 
 ## Quality Gates (after every code change)
 
-1. **LSP diagnostics** — fix all critical/major/medium issues in modified files
 2. **OpenAPI spec** — update `pkg/plugin/openapi/openapi.json` and run `validate:openapi` if routes changed
 3. **Code review** — fix critical/major/medium issues
 4. **Clean AI noise** — remove comments that restate code; only keep non-obvious *why* comments
