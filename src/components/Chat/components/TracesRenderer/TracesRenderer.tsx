@@ -1,16 +1,17 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import {
-  SceneFlexLayout,
-  SceneFlexItem,
-  PanelBuilders,
-  SceneQueryRunner,
-  SceneTimeRange,
-  EmbeddedScene,
-} from '@grafana/scenes';
-import { useTheme2, Alert, IconButton, Tooltip } from '@grafana/ui';
+import { getBackendSrv } from '@grafana/runtime';
+import { useTheme2, Alert, IconButton, Tooltip, Spinner } from '@grafana/ui';
 import { resolveVisualizationDatasource } from '../../utils/resolveVisualizationDatasource';
 import { Query } from '../../utils/promqlParser';
 import { analyzeQuery } from '../../utils/queryAnalyzer';
+
+interface TraceSearchResult {
+  traceID: string;
+  rootServiceName: string;
+  rootTraceName: string;
+  startTimeUnixNano: string;
+  durationMs: number;
+}
 
 interface TracesRendererProps {
   query: Query;
@@ -18,15 +19,34 @@ interface TracesRendererProps {
   defaultTimeRange?: { from: string; to: string };
 }
 
+function parseTimeToUnix(t: string): number {
+  const nowSec = Math.floor(Date.now() / 1000);
+  if (t === 'now') {
+    return nowSec;
+  }
+  const m = t.match(/^now-(\d+)([smhdwMy])$/);
+  if (!m) {
+    return nowSec;
+  }
+  const secs: Record<string, number> = { s: 1, m: 60, h: 3600, d: 86400, w: 604800, M: 2592000, y: 31536000 };
+  return nowSec - parseInt(m[1], 10) * (secs[m[2]] ?? 3600);
+}
+
+function formatTimestamp(nanoStr: string): string {
+  const ms = Number(nanoStr) / 1e6;
+  return new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+}
+
 export const TracesRenderer: React.FC<TracesRendererProps> = ({
   query,
-  height = 400,
   defaultTimeRange = { from: 'now-1h', to: 'now' },
 }) => {
   const theme = useTheme2();
-  const [scene, setScene] = useState<EmbeddedScene | null>(null);
+  const [traces, setTraces] = useState<TraceSearchResult[] | null>(null);
   const [datasourceError, setDatasourceError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
   const [isCopied, setIsCopied] = useState(false);
+  const [datasourceUid, setDatasourceUid] = useState<string | null>(null);
 
   const analysis = analyzeQuery(query.query, 'traceql');
 
@@ -45,88 +65,72 @@ export const TracesRenderer: React.FC<TracesRendererProps> = ({
 
   useEffect(() => {
     setDatasourceError(null);
+    setLoading(true);
+    setTraces(null);
 
     const resolved = resolveVisualizationDatasource('tempo', query.datasourceUid);
     if (!resolved.ok) {
       setDatasourceError(resolved.error);
-      setScene(null);
+      setLoading(false);
       return;
     }
 
-    const timeRange = new SceneTimeRange({
-      from: defaultTimeRange.from,
-      to: defaultTimeRange.to,
-    });
+    const uid = resolved.settings.uid;
+    setDatasourceUid(uid);
 
-    const dataSource = { uid: resolved.settings.uid, type: resolved.settings.type };
+    const start = parseTimeToUnix(defaultTimeRange.from);
+    const end = parseTimeToUnix(defaultTimeRange.to);
 
-    const queryRunner = new SceneQueryRunner({
-      datasource: dataSource,
-      queries: [
-        {
-          refId: 'A',
-          query: query.query,
-          queryType: 'traceql',
-        },
-      ],
-    });
+    let cancelled = false;
 
-    const panel = PanelBuilders.traces()
-      .setTitle(query.title || 'Traces')
-      .setData(queryRunner)
-      .build();
-
-    const layout = new SceneFlexLayout({
-      direction: 'column',
-      children: [
-        new SceneFlexItem({
-          minHeight: height,
-          body: panel,
-        }),
-      ],
-    });
-
-    const embeddedScene = new EmbeddedScene({
-      $timeRange: timeRange,
-      body: layout,
-      controls: [],
-    });
-
-    let isCancelled = false;
-
-    const activationTimeout = setTimeout(() => {
-      if (!isCancelled) {
-        embeddedScene.activate();
-        setScene(embeddedScene);
-      }
-    }, 0);
+    getBackendSrv()
+      .datasourceRequest({
+        url: `/api/datasources/proxy/uid/${uid}/api/search`,
+        params: { q: query.query, limit: 20, spss: 3, start, end },
+      })
+      .then((res) => {
+        if (!cancelled) {
+          setTraces(res.data?.traces ?? []);
+          setLoading(false);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setDatasourceError('Failed to fetch traces from Tempo');
+          setLoading(false);
+        }
+      });
 
     return () => {
-      isCancelled = true;
-      clearTimeout(activationTimeout);
+      cancelled = true;
     };
-  }, [query.query, query.title, query.datasourceUid, height, defaultTimeRange.from, defaultTimeRange.to]);
+  }, [query.query, query.datasourceUid, defaultTimeRange.from, defaultTimeRange.to]);
+
+  const makeExploreUrl = useCallback(
+    (traceId: string) => {
+      const pane = {
+        datasource: datasourceUid ?? 'tempo',
+        queries: [
+          {
+            refId: 'A',
+            queryType: 'traceId',
+            query: traceId,
+            datasource: { type: 'tempo', uid: datasourceUid ?? 'tempo' },
+          },
+        ],
+        range: { from: defaultTimeRange.from, to: defaultTimeRange.to },
+      };
+      return `/explore?schemaVersion=1&panes=${encodeURIComponent(JSON.stringify({ abc: pane }))}`;
+    },
+    [datasourceUid, defaultTimeRange.from, defaultTimeRange.to]
+  );
 
   if (datasourceError) {
     return (
       <div className="my-4">
-        <Alert title="Cannot load traces panel" severity="error">
+        <Alert title="Cannot load traces" severity="error">
           {datasourceError}
         </Alert>
-      </div>
-    );
-  }
-
-  if (!scene) {
-    return (
-      <div
-        className="my-4 rounded-lg overflow-hidden p-4"
-        style={{
-          border: `1px solid ${theme.colors.border.weak}`,
-          backgroundColor: theme.colors.background.primary,
-        }}
-      >
-        <div style={{ color: theme.colors.text.secondary }}>Loading traces...</div>
       </div>
     );
   }
@@ -134,10 +138,9 @@ export const TracesRenderer: React.FC<TracesRendererProps> = ({
   return (
     <div
       className="my-4 rounded-lg overflow-hidden"
-      style={{
-        border: `1px solid ${theme.colors.border.weak}`,
-      }}
+      style={{ border: `1px solid ${theme.colors.border.weak}` }}
     >
+      {/* Header */}
       <div
         className="px-4 py-2 flex items-center justify-between"
         style={{
@@ -163,7 +166,6 @@ export const TracesRenderer: React.FC<TracesRendererProps> = ({
             </span>
           )}
         </div>
-
         <div className="flex items-center gap-2">
           <Tooltip content={isCopied ? 'Copied!' : 'Copy query'}>
             <IconButton
@@ -176,18 +178,75 @@ export const TracesRenderer: React.FC<TracesRendererProps> = ({
         </div>
       </div>
 
-      <div
-        className="p-4"
-        data-scene-container="traces"
-        style={{
-          backgroundColor: theme.colors.background.primary,
-        }}
-      >
-        <scene.Component model={scene} />
+      {/* Body */}
+      <div style={{ backgroundColor: theme.colors.background.primary }}>
+        {loading && (
+          <div className="flex items-center justify-center p-8 gap-2" style={{ color: theme.colors.text.secondary }}>
+            <Spinner size="sm" />
+            <span className="text-sm">Loading traces...</span>
+          </div>
+        )}
+
+        {!loading && traces !== null && traces.length === 0 && (
+          <div className="flex items-center justify-center p-8" style={{ color: theme.colors.text.secondary }}>
+            <span className="text-sm">No traces found</span>
+          </div>
+        )}
+
+        {!loading && traces !== null && traces.length > 0 && (
+          <table className="w-full text-sm" style={{ borderCollapse: 'collapse' }}>
+            <thead>
+              <tr style={{ borderBottom: `1px solid ${theme.colors.border.weak}` }}>
+                {['Trace ID', 'Service', 'Name', 'Start time', 'Duration'].map((col) => (
+                  <th
+                    key={col}
+                    className="px-4 py-2 text-left text-xs font-medium"
+                    style={{ color: theme.colors.text.secondary }}
+                  >
+                    {col}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {traces.map((trace) => (
+                <tr
+                  key={trace.traceID}
+                  style={{ borderBottom: `1px solid ${theme.colors.border.weak}` }}
+                >
+                  <td className="px-4 py-2">
+                    <a
+                      href={makeExploreUrl(trace.traceID)}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="font-mono text-xs"
+                      style={{ color: theme.colors.primary.text }}
+                    >
+                      {trace.traceID.substring(0, 16)}…
+                    </a>
+                  </td>
+                  <td className="px-4 py-2 text-xs" style={{ color: theme.colors.text.primary }}>
+                    {trace.rootServiceName}
+                  </td>
+                  <td className="px-4 py-2 text-xs" style={{ color: theme.colors.text.primary }}>
+                    {trace.rootTraceName}
+                  </td>
+                  <td className="px-4 py-2 text-xs" style={{ color: theme.colors.text.secondary }}>
+                    {formatTimestamp(trace.startTimeUnixNano)}
+                  </td>
+                  <td className="px-4 py-2 text-xs" style={{ color: theme.colors.text.secondary }}>
+                    {trace.durationMs}ms
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
       </div>
 
+      {/* Footer */}
       <div
-        className="px-4 py-2 border-t"
+        className="px-4 py-2"
         style={{
           backgroundColor: theme.colors.background.secondary,
           borderTop: `1px solid ${theme.colors.border.weak}`,
@@ -198,7 +257,7 @@ export const TracesRenderer: React.FC<TracesRendererProps> = ({
             {query.query}
           </code>
           <span className="text-xs ml-4" style={{ color: theme.colors.text.secondary }}>
-            {analysis.hasAggregation ? `${analysis.aggregationType} aggregation` : 'Trace waterfall'}
+            {analysis.hasAggregation ? `${analysis.aggregationType} aggregation` : 'Trace list'}
           </span>
         </div>
       </div>
