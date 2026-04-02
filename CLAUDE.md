@@ -145,11 +145,15 @@ nvm use 22 && npm run server
 # Start multi-org development environment (uses docker-compose-full.yaml + full.yaml_)
 nvm use 22 && npm run server:full
 
+# If Docker reports "network … not found", reset compose networks:
+nvm use 22 && npm run server:full:clean && npm run server:full
+
 # Access: http://localhost:3000 (admin/admin)
 ```
 
 **Multi-org testing (`server:full`):**
 - Swaps `app.yaml` ↔ `full.yaml_` provisioning (with bash trap for cleanup)
+- Runs `scripts/server-full.sh`: checks `docker`/`docker compose`/`curl`/`jq`/`openssl`, runs `npm run build` if `dist/` is incomplete, ensures `SLACK_BRIDGE_SECRET` in `.env`, swaps provisioning to multi-org when needed, then brings up **redis, grafana, mcp-grafana, mcpo** only; creates/verifies `GRAFANA_SERVICE_ACCOUNT_TOKEN` via `create-slack-bridge-grafana-token.sh`, checks `curl … /api/user` with that token, then **`docker compose … up -d --build --force-recreate slack-bridge`** so the bridge never runs with an empty Bearer token; finally `docker compose … logs -f` (exit trap restores provisioning). Use `FORCE_SLACK_BRIDGE_TOKEN=1` to regenerate the Grafana token. If Slack `setup` still returns 401, run `npm run server:full:clean && npm run server:full`.
 - Uses `docker-compose-full.yaml` with external `mcp-grafana` sidecar + Redis + mcpo
 - Provisions two orgs with separate MCP server configs
 - Create Org 2 manually in Grafana UI after startup

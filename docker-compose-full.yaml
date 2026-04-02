@@ -12,9 +12,26 @@ services:
       GF_FEATURE_TOGGLES_ENABLE: 'externalServiceAccounts'
       GF_AUTH_MANAGED_SERVICE_ACCOUNTS_ENABLED: 'true'
       LLM_API_KEY: ${LLM_API_KEY:-}
+      SLACK_BRIDGE_SECRET: ${SLACK_BRIDGE_SECRET:-}
+      PROM_URL: ${PROM_URL:-}
+      O11Y_USER: ${O11Y_USER:-}
+      O11Y_PWD: ${O11Y_PWD:-}
+      GF_TRACING_OPENTELEMETRY_OTLP_ADDRESS: tempo:4317
+      GF_TRACING_OPENTELEMETRY_OTLP_INSECURE: 'true'
     depends_on:
       redis:
         condition: service_healthy
+      tempo:
+        condition: service_started
+
+  tempo:
+    image: grafana/tempo:2.8.1
+    command: -config.file=/etc/tempo.yaml
+    volumes:
+      - ./provisioning/tempo.yaml:/etc/tempo.yaml
+    ports:
+      - '4317:4317'
+      - '3200:3200'
 
   mcp-grafana:
     image: grafana/mcp-grafana
@@ -53,6 +70,26 @@ services:
       --config /mcpo/config.json
     depends_on:
       - mcp-grafana
+
+  slack-bridge:
+    # Pushed by .github/workflows/slack-bridge-ghcr.yml (linux/amd64,linux/arm64).
+    # Replace org/repo if you fork; image must be lowercase for GHCR.
+    image: ghcr.io/consensys/ask-o11y-plugin/slack-bridge:latest
+    build:
+      context: ./slack-bridge
+    restart: unless-stopped
+    environment:
+      SLACK_BOT_TOKEN: ${SLACK_BOT_TOKEN:-}
+      SLACK_APP_TOKEN: ${SLACK_APP_TOKEN:-}
+      SLACK_BRIDGE_SECRET: ${SLACK_BRIDGE_SECRET:-}
+      GRAFANA_URL: http://grafana:3000
+      GRAFANA_APP_URL: ${GRAFANA_APP_URL:-http://localhost:3000}
+      # Basic auth works across all orgs (unlike org-1-scoped SA tokens).
+      GRAFANA_USERNAME: admin
+      GRAFANA_PASSWORD: admin
+    depends_on:
+      grafana:
+        condition: service_started
 
 volumes:
   redis-data:
