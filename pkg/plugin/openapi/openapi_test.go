@@ -105,6 +105,12 @@ func TestSpecHasAllEndpoints(t *testing.T) {
 		"/api/sessions/share",
 		"/api/sessions/shared/{shareId}",
 		"/api/sessions/share/{shareId}",
+		"/api/slack-bridge/pending",
+		"/api/slack-bridge/lookup",
+		"/api/slack-link",
+		"/api/slack-link/confirm",
+		"/api/slack-bridge/agent/run",
+		"/api/slack-bridge/agent/runs/{runId}/events",
 	}
 
 	for _, path := range expectedPaths {

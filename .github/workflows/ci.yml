@@ -25,6 +25,7 @@ jobs:
               - 'src/**'
               - 'pkg/**'
               - 'tests/**'
+              - 'provisioning/**'
               - '*.config.*'
               - 'Magefile.go'
               - 'go.mod'

@@ -40,6 +40,7 @@ apps:
           type: 'streamable-http'
     secureJsonData:
       redisURL: 'redis://redis:6379/0'
+      slackBridgeSecret: $SLACK_BRIDGE_SECRET
   - type: grafana-llm-app
     org_id: 2
     jsonData:
@@ -79,3 +80,4 @@ apps:
           type: 'streamable-http'
     secureJsonData:
       redisURL: 'redis://redis:6379/0'
+      slackBridgeSecret: $SLACK_BRIDGE_SECRET

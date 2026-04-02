@@ -17,14 +17,11 @@ import (
 	"sync"
 	"time"
 
-	"go.opentelemetry.io/otel/attribute"
-
 	"github.com/grafana/grafana-plugin-sdk-go/backend"
 	"github.com/grafana/grafana-plugin-sdk-go/backend/httpclient"
 	"github.com/grafana/grafana-plugin-sdk-go/backend/instancemgmt"
 	"github.com/grafana/grafana-plugin-sdk-go/backend/log"
 	"github.com/grafana/grafana-plugin-sdk-go/backend/resource/httpadapter"
-	"github.com/grafana/grafana-plugin-sdk-go/backend/tracing"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -128,8 +125,11 @@ type Plugin struct {
 	settingsMu     sync.RWMutex
 	ctx            context.Context
 	cancel         context.CancelFunc
-	runCancelsMu   sync.Mutex
-	runCancels     map[string]context.CancelFunc
+	runCancelsMu      sync.Mutex
+	runCancels        map[string]context.CancelFunc
+	slackBridgeSecret string
+	slackLinkStore    slackLinkStore
+	slackBridgeRL     *slackBridgeRL
 }
 
 func NewPlugin(ctx context.Context, settings backend.AppInstanceSettings) (instancemgmt.Instance, error) {
@@ -244,6 +244,19 @@ func NewPlugin(ctx context.Context, settings backend.AppInstanceSettings) (insta
 		runCancels:     make(map[string]context.CancelFunc),
 	}
 
+	slackSecret := strings.TrimSpace(settings.DecryptedSecureJSONData["slackBridgeSecret"])
+	if slackSecret != "" {
+		p.slackBridgeSecret = slackSecret
+		p.slackBridgeRL = newSlackBridgeRL()
+		if usingRedis && redisClient != nil {
+			p.slackLinkStore = newRedisSlackLinkStore(redisClient, logger)
+		} else {
+			p.slackLinkStore = newMemorySlackLinkStore()
+			logger.Warn("Slack bridge link store is in-memory; configure Redis for multi-replica Grafana")
+		}
+		logger.Info("Slack bridge API enabled")
+	}
+
 	if !usingRedis {
 		go func() {
 			ticker := time.NewTicker(ShareCleanupInterval)
@@ -252,6 +265,9 @@ func NewPlugin(ctx context.Context, settings backend.AppInstanceSettings) (insta
 				select {
 				case <-ticker.C:
 					shareStore.CleanupExpired()
+					if p.slackLinkStore != nil {
+						p.slackLinkStore.CleanupExpired()
+					}
 				case <-pluginCtx.Done():
 					return
 				}
@@ -342,6 +358,12 @@ func (p *Plugin) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/mcp/servers", p.handleMCPServers)
 	mux.HandleFunc("/api/agent/run", p.handleAgentRun)
 	mux.HandleFunc("/api/agent/runs/", p.handleAgentRuns)
+	mux.HandleFunc("/api/slack-bridge/pending", p.handleSlackBridgePending)
+	mux.HandleFunc("/api/slack-bridge/lookup", p.handleSlackBridgeLookup)
+	mux.HandleFunc("/api/slack-link/confirm", p.handleSlackLinkConfirm)
+	mux.HandleFunc("/api/slack-link", p.handleSlackLinkRouter)
+	mux.HandleFunc("/api/slack-bridge/agent/run", p.handleSlackBridgeAgentRun)
+	mux.HandleFunc("/api/slack-bridge/agent/runs/", p.handleSlackBridgeAgentRuns)
 	mux.HandleFunc("/api/prompt-defaults", p.handlePromptDefaults)
 
 	// Session CRUD (new) — registered before share routes for specificity
@@ -534,15 +556,9 @@ func (p *Plugin) handleAgentRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ctx, span := tracing.DefaultTracer().Start(r.Context(), "agent_run")
-	defer span.End()
-	r = r.WithContext(ctx)
-
-	userRole := getUserRole(r)
-	userID := getUserID(r)
-	orgID := r.Header.Get("X-Grafana-Org-Id")
-	if orgID == "" {
-		orgID = "1"
+	orgIDStr := r.Header.Get("X-Grafana-Org-Id")
+	if orgIDStr == "" {
+		orgIDStr = "1"
 	}
 
 	var req agent.RunRequest
@@ -553,7 +569,7 @@ func (p *Plugin) handleAgentRun(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if req.OrgName == "" {
-		req.OrgName = "Org" + orgID
+		req.OrgName = "Org" + orgIDStr
 	}
 
 	if req.Message == "" {
@@ -561,177 +577,12 @@ func (p *Plugin) handleAgentRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	cfg := backend.GrafanaConfigFromContext(r.Context())
-	if cfg == nil {
-		p.logger.Error("Grafana configuration not available in request context")
-		http.Error(w, "Grafana configuration not available", http.StatusInternalServerError)
-		return
+	ident := agentRunIdentity{
+		userID:   getUserID(r),
+		orgID:    getOrgID(r),
+		userRole: getUserRole(r),
 	}
-	saToken, err := cfg.PluginAppClientSecret()
-	if err != nil {
-		p.logger.Warn("Service account token not available; built-in MCP and SA-authenticated LLM calls will not work", "error", err)
-		saToken = ""
-	}
-
-	grafanaURL, urlSource := resolveGrafanaURL(p.settings, cfg)
-	p.logger.Debug("Resolved Grafana URL for LLM/MCP calls", "url", grafanaURL, "source", urlSource)
-
-	if p.useBuiltInMCP {
-		if saToken == "" {
-			p.logger.Warn("Built-in MCP requires a service account token; skipping built-in MCP server registration")
-			p.mcpProxy.RemoveServer("mcp-grafana")
-		} else {
-			builtInURL := grafanaURL + "/api/plugins/grafana-llm-app/resources/mcp/grafana"
-			p.mcpProxy.EnsureServer(mcp.ServerConfig{
-				ID:      "mcp-grafana",
-				Name:    "Grafana Built-in MCP",
-				URL:     builtInURL,
-				Type:    "streamable-http",
-				Enabled: true,
-				Headers: map[string]string{
-					"Authorization": "Bearer " + saToken,
-				},
-			})
-		}
-	}
-
-	runID, err := generateShareID()
-	if err != nil {
-		p.logger.Error("Failed to generate run ID", "error", err)
-		http.Error(w, "Failed to generate run ID", http.StatusInternalServerError)
-		return
-	}
-
-	numericOrgID := getOrgID(r)
-
-	toolCtx := BuildToolContext(req.OrgName, userRole)
-	toolCtx.ConversationType = req.Type
-
-	systemPrompt, err := p.promptRegistry.BuildSystemPrompt(toolCtx)
-	if err != nil {
-		p.logger.Error("Failed to build system prompt", "error", err)
-		http.Error(w, "Failed to build system prompt", http.StatusInternalServerError)
-		return
-	}
-
-	userPrompt, err := p.promptRegistry.BuildUserPrompt(req.Type, req.Message, toolCtx)
-	if err != nil {
-		p.logger.Error("Failed to build user prompt", "error", err, "type", req.Type)
-		http.Error(w, "Failed to build user prompt", http.StatusBadRequest)
-		return
-	}
-
-	var messages []agent.Message
-	var sessionID string
-
-	if req.SessionID != "" {
-		session, err := p.sessionStore.GetSession(req.SessionID, userID, numericOrgID)
-		if err != nil {
-			http.Error(w, "Session not found", http.StatusNotFound)
-			return
-		}
-		sessionID = req.SessionID
-
-		for _, msg := range session.Messages {
-			messages = append(messages, agent.Message{
-				Role:    msg.Role,
-				Content: msg.Content,
-			})
-		}
-
-		messages = append(messages, agent.Message{
-			Role:    "user",
-			Content: userPrompt,
-		})
-
-		if err := p.sessionStore.AppendMessages(sessionID, userID, numericOrgID, []SessionMessage{{
-			Role:    "user",
-			Content: userPrompt,
-		}}); err != nil {
-			p.logger.Warn("Failed to append user message", "error", err)
-		}
-	} else {
-		messages = []agent.Message{{
-			Role:    "user",
-			Content: userPrompt,
-		}}
-
-		sessionTitle := generateSessionTitleFromType(req.Type, req.Message)
-
-		session, err := p.sessionStore.CreateSession(userID, numericOrgID, sessionTitle, []SessionMessage{{
-			Role:    "user",
-			Content: userPrompt,
-		}})
-		if err != nil {
-			p.logger.Error("Failed to create session", "error", err)
-			http.Error(w, "Failed to create session", http.StatusInternalServerError)
-			return
-		}
-		sessionID = session.ID
-
-		if err := p.sessionStore.SetCurrentSessionID(userID, numericOrgID, sessionID); err != nil {
-			p.logger.Warn("Failed to set current session ID", "error", err)
-		}
-	}
-
-	if err := p.sessionStore.SetActiveRunID(sessionID, userID, numericOrgID, runID); err != nil {
-		p.logger.Warn("Failed to set active run ID", "error", err)
-	}
-	p.runStore.CreateRun(runID, userID, numericOrgID)
-
-	p.logger.Info("Agent run request",
-		"role", userRole,
-		"orgID", orgID,
-		"runId", runID,
-		"sessionId", sessionID,
-		"messageCount", len(messages),
-		"type", req.Type,
-	)
-
-	span.SetAttributes(
-		attribute.String("org_id", orgID),
-		attribute.String("user_role", string(userRole)),
-		attribute.String("session_id", sessionID),
-	)
-
-	eventCh := make(chan agent.SSEEvent, 16)
-
-	loopReq := agent.LoopRequest{
-		Messages:           messages,
-		SystemPrompt:       systemPrompt,
-		MaxTotalTokens:     p.settings.MaxTotalTokens,
-		RecentMessageCount: p.settings.RecentMessageCount,
-		MaxIterations:      AgentMaxIterations,
-		GrafanaURL:         grafanaURL,
-		AuthToken:          saToken,
-		UserRole:           userRole,
-		OrgID:              orgID,
-		OrgName:            req.OrgName,
-		ScopeOrgID:         req.ScopeOrgID,
-	}
-
-	detachedCtx := context.WithoutCancel(ctx)
-	runCtx, runCancel := context.WithCancel(detachedCtx)
-
-	p.runCancelsMu.Lock()
-	p.runCancels[runID] = runCancel
-	p.runCancelsMu.Unlock()
-
-	go p.agentLoop.Run(runCtx, loopReq, eventCh)
-	go func() {
-		p.consumeAgentEvents(runID, sessionID, userID, numericOrgID, eventCh)
-		runCancel()
-		p.runCancelsMu.Lock()
-		delete(p.runCancels, runID)
-		p.runCancelsMu.Unlock()
-	}()
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
-		"runId":     runID,
-		"sessionId": sessionID,
-		"status":    RunStatusRunning,
-	})
+	p.executeDetachedAgentRun(w, r, orgIDStr, ident, req, "agent_run")
 }
 
 func (p *Plugin) consumeAgentEvents(runID, sessionID string, userID, orgID int64, eventCh <-chan agent.SSEEvent) {
@@ -884,7 +735,10 @@ func (p *Plugin) handleAgentRunEvents(w http.ResponseWriter, r *http.Request, ru
 	if _, ok := p.getAuthorizedRun(w, r, runID); !ok {
 		return
 	}
+	p.streamAgentRunSSE(w, r, runID)
+}
 
+func (p *Plugin) streamAgentRunSSE(w http.ResponseWriter, r *http.Request, runID string) {
 	run, subscriberCh, unsub, err := p.runStore.SubscribeAndSnapshot(runID)
 	if err != nil {
 		http.Error(w, "Run not found", http.StatusNotFound)

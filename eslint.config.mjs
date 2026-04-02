@@ -42,6 +42,7 @@ export default defineConfig([
       '**/.env.production',
       'consensys-asko11y-app/',
       'consensys-asko11y-app.zip',
+      'slack-bridge/**',
     ],
   },
   ...baseConfig,

@@ -51,6 +51,10 @@
     {
       "name": "Configuration",
       "description": "Plugin configuration and defaults"
+    },
+    {
+      "name": "Slack",
+      "description": "Slack bridge: one-time account linking and agent runs (enable via slackBridgeSecret in secure settings)"
     }
   ],
   "paths": {
@@ -690,6 +694,279 @@
           "500": {
             "$ref": "#/components/responses/InternalError"
           }
+        }
+      }
+    },
+    "/api/slack-bridge/pending": {
+      "post": {
+        "summary": "Register Slack link nonce",
+        "description": "Server-to-server: registers a one-time nonce for Slack account linking. Requires header `X-Slack-Bridge-Secret` matching plugin `slackBridgeSecret`. Returns 404 when Slack bridge is not configured.",
+        "operationId": "slackBridgePending",
+        "tags": ["Slack"],
+        "security": [],
+        "parameters": [
+          {
+            "name": "X-Slack-Bridge-Secret",
+            "in": "header",
+            "required": true,
+            "schema": { "type": "string" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["nonce", "teamId", "slackUserId"],
+                "properties": {
+                  "nonce": { "type": "string" },
+                  "teamId": { "type": "string" },
+                  "slackUserId": { "type": "string" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Nonce stored",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": { "status": { "type": "string", "enum": ["ok"] } }
+                }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "500": { "$ref": "#/components/responses/InternalError" }
+        }
+      }
+    },
+    "/api/slack-bridge/lookup": {
+      "post": {
+        "summary": "Resolve Grafana org for linked Slack user",
+        "description": "Server-to-server: returns `orgId` for a linked Slack user. Requires `X-Slack-Bridge-Secret`. Returns 404 when not linked or Slack bridge disabled.",
+        "operationId": "slackBridgeLookup",
+        "tags": ["Slack"],
+        "security": [],
+        "parameters": [
+          {
+            "name": "X-Slack-Bridge-Secret",
+            "in": "header",
+            "required": true,
+            "schema": { "type": "string" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["teamId", "slackUserId"],
+                "properties": {
+                  "teamId": { "type": "string" },
+                  "slackUserId": { "type": "string" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Linked user org",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": { "orgId": { "type": "integer", "format": "int64" } },
+                  "required": ["orgId"]
+                }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "404": { "$ref": "#/components/responses/NotFound" }
+        }
+      }
+    },
+    "/api/slack-link": {
+      "get": {
+        "summary": "Get Slack link status for current user",
+        "description": "Returns whether the current Grafana user has a linked Slack account. Returns 404 if the Slack bridge is not configured.",
+        "operationId": "getSlackLinkStatus",
+        "tags": ["Slack Bridge"],
+        "responses": {
+          "200": {
+            "description": "Link status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "linked": { "type": "boolean" },
+                    "orgId": { "type": "integer", "format": "int64" }
+                  },
+                  "required": ["linked", "orgId"]
+                }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "404": { "description": "Slack bridge not configured" }
+        }
+      },
+      "delete": {
+        "summary": "Unlink Slack account",
+        "description": "Removes the Slack account binding for the current Grafana user.",
+        "operationId": "deleteSlackLink",
+        "tags": ["Slack Bridge"],
+        "responses": {
+          "200": {
+            "description": "Unlinked successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": { "type": "string", "example": "unlinked" }
+                  }
+                }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "404": { "description": "Not linked or Slack bridge not configured" },
+          "500": { "$ref": "#/components/responses/InternalServerError" }
+        }
+      }
+    },
+    "/api/slack-link/confirm": {
+      "post": {
+        "summary": "Confirm Slack account link",
+        "description": "Binds the Grafana user session to a Slack user after opening the one-time link. Consumes the nonce registered via `/api/slack-bridge/pending`. Returns 404 when Slack bridge is not configured.",
+        "operationId": "slackLinkConfirm",
+        "tags": ["Slack"],
+        "parameters": [{ "$ref": "#/components/parameters/X-Grafana-Org-Id" }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["nonce"],
+                "properties": { "nonce": { "type": "string" } }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Linked",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": { "status": { "type": "string", "enum": ["linked"] } }
+                }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "410": { "description": "Invalid or expired nonce" },
+          "500": { "$ref": "#/components/responses/InternalError" }
+        }
+      }
+    },
+    "/api/slack-bridge/agent/run": {
+      "post": {
+        "summary": "Start agent run (Slack bridge)",
+        "description": "Same as `/api/agent/run` but authenticated with `X-Slack-Bridge-Token` (HMAC) for a linked Slack user. Requires Grafana credentials on the request. Returns 404 when Slack bridge is not configured.",
+        "operationId": "slackBridgeAgentRun",
+        "tags": ["Slack", "Agent"],
+        "parameters": [
+          { "$ref": "#/components/parameters/X-Grafana-Org-Id" },
+          {
+            "name": "X-Slack-Bridge-Token",
+            "in": "header",
+            "required": true,
+            "schema": { "type": "string" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/RunRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Run started",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "runId": { "type": "string" },
+                    "sessionId": { "type": "string" },
+                    "status": { "type": "string", "enum": ["running"] }
+                  }
+                }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "500": { "$ref": "#/components/responses/InternalError" }
+        }
+      }
+    },
+    "/api/slack-bridge/agent/runs/{runId}/events": {
+      "get": {
+        "summary": "Stream agent run events (Slack bridge)",
+        "description": "SSE stream for a run started via `/api/slack-bridge/agent/run`. Requires `X-Slack-Bridge-Token`. Returns 404 when Slack bridge is not configured.",
+        "operationId": "slackBridgeAgentRunEvents",
+        "tags": ["Slack", "Agent"],
+        "parameters": [
+          {
+            "name": "runId",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "pattern": "^[A-Za-z0-9_-]{43}$" }
+          },
+          { "$ref": "#/components/parameters/X-Grafana-Org-Id" },
+          {
+            "name": "X-Slack-Bridge-Token",
+            "in": "header",
+            "required": true,
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "SSE stream",
+            "content": {
+              "text/event-stream": {
+                "schema": { "type": "string" }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "500": { "$ref": "#/components/responses/InternalError" }
         }
       }
     },
