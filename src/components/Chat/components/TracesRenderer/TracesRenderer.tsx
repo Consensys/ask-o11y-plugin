@@ -24,12 +24,26 @@ function parseTimeToUnix(t: string): number {
   if (t === 'now') {
     return nowSec;
   }
+  // Relative: now-1h, now-30m, etc.
   const m = t.match(/^now-(\d+)([smhdwMy])$/);
-  if (!m) {
-    return nowSec;
+  if (m) {
+    const secs: Record<string, number> = { s: 1, m: 60, h: 3600, d: 86400, w: 604800, M: 2592000, y: 31536000 };
+    return nowSec - parseInt(m[1], 10) * (secs[m[2]] ?? 3600);
   }
-  const secs: Record<string, number> = { s: 1, m: 60, h: 3600, d: 86400, w: 604800, M: 2592000, y: 31536000 };
-  return nowSec - parseInt(m[1], 10) * (secs[m[2]] ?? 3600);
+  // Epoch milliseconds (13-digit number string)
+  if (/^\d{13,}$/.test(t)) {
+    return Math.floor(Number(t) / 1000);
+  }
+  // Epoch seconds (10-digit number string)
+  if (/^\d{10}$/.test(t)) {
+    return Number(t);
+  }
+  // ISO 8601 or any date string parseable by Date
+  const parsed = Date.parse(t);
+  if (!isNaN(parsed)) {
+    return Math.floor(parsed / 1000);
+  }
+  return nowSec;
 }
 
 function formatTimestamp(nanoStr: string): string {
