@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { getBackendSrv } from '@grafana/runtime';
 import { useTheme2, Alert, IconButton, Tooltip, Spinner } from '@grafana/ui';
+import { firstValueFrom } from 'rxjs';
 import { resolveVisualizationDatasource } from '../../utils/resolveVisualizationDatasource';
 import { Query } from '../../utils/promqlParser';
 import { analyzeQuery } from '../../utils/queryAnalyzer';
@@ -97,24 +98,28 @@ export const TracesRenderer: React.FC<TracesRendererProps> = ({
 
     let cancelled = false;
 
-    getBackendSrv()
-      .datasourceRequest({
-        url: `/api/datasources/proxy/uid/${uid}/api/search`,
-        params: { q: query.query, limit: 20, spss: 3, start, end },
-      })
-      .then((res) => {
+    const loadTraces = async () => {
+      try {
+        const response = await firstValueFrom(
+          getBackendSrv().fetch<{ traces?: TraceSearchResult[] }>({
+            url: `/api/datasources/proxy/uid/${uid}/api/search`,
+            params: { q: query.query, limit: 20, spss: 3, start, end },
+          })
+        );
+
         if (!cancelled) {
-          const body = res.data as { traces?: TraceSearchResult[] };
-          setTraces(body.traces ?? []);
+          setTraces(response.data?.traces ?? []);
           setLoading(false);
         }
-      })
-      .catch(() => {
+      } catch {
         if (!cancelled) {
           setDatasourceError('Failed to fetch traces from Tempo');
           setLoading(false);
         }
-      });
+      }
+    };
+
+    void loadTraces();
 
     return () => {
       cancelled = true;
