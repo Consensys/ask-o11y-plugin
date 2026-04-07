@@ -7,7 +7,7 @@ datasources:
     type: prometheus
     uid: prometheus
     access: proxy
-    isDefault: true
+    isDefault: false
     url: ${PROM_URL}
     basicAuth: true
     basicAuthUser: $O11Y_USER
@@ -27,5 +27,5 @@ datasources:
     type: tempo
     uid: tempo
     access: proxy
-    isDefault: false
+    isDefault: true
     url: http://tempo:3200

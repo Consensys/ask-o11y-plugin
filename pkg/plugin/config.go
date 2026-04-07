@@ -31,3 +31,10 @@ const (
 const (
 	SessionMaxPerUserOrg = 50
 )
+
+const (
+	GraphitiSearchResults        = 10
+	GraphitiDiscoveryMaxIter     = 50
+	GraphitiIngestTimeout        = 5 * time.Minute
+	GraphitiSearchTimeout        = 5 * time.Second
+)

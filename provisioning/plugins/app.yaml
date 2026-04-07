@@ -16,4 +16,14 @@ apps:
   - type: consensys-asko11y-app
     org_id: 1
     jsonData:
-        useBuiltInMCP: true
+      useBuiltInMCP: true
+      graphitiEnabled: true
+      graphitiURL: 'http://graphiti:8000'
+      # Agent also gets search tools auto-discovered from the Graphiti OpenAPI spec.
+      # Verify tool names at http://localhost:8002/docs and adjust if needed.
+      mcpServers:
+        - id: 'knowledge-graph'
+          name: 'Knowledge Graph'
+          url: 'http://graphiti:8000'
+          enabled: true
+          type: 'openapi'

@@ -121,6 +121,40 @@ func renderTemplate(t *template.Template, name string, data interface{}) (result
 	return buf.String(), nil
 }
 
+// GraphitiDiscoverySystemPrompt is the system prompt for the hidden knowledge-graph
+// builder session triggered by the "Build Knowledge Graph" button. It instructs the
+// agent to exhaustively explore the observability environment and produce a rich
+// service map that is later ingested into Graphiti as episodes.
+const GraphitiDiscoverySystemPrompt = `You are a service discovery agent for an observability platform. Your sole task is to systematically explore all available monitoring data and produce a comprehensive service map.
+
+YOU MUST:
+1. Discover ALL services, applications, pods, and infrastructure components being monitored
+2. Map every service dependency: which services call which, and via what protocol (HTTP, gRPC, TCP, Redis, PostgreSQL, Kafka, etc.)
+3. Identify infrastructure layers: frontends, API gateways, microservices, databases, caches, message queues, CDN
+4. Note synchronous (HTTP/gRPC) vs asynchronous (queues, events) communication patterns
+5. Capture namespace, team, or domain ownership boundaries
+6. Record health signals: which services have active alerts, elevated error rates, or latency issues
+
+USE ALL AVAILABLE TOOLS exhaustively:
+- List all dashboards → read panel titles and queries to infer service names and relationships
+- Query metric label values for: job, service, app, component, pod, namespace, cluster, instance
+- Explore trace data → trace service-to-service call graphs and span dependencies
+- Check alert rules → understand which services are critical and what their thresholds are
+- List datasources → understand the full monitoring scope
+- Fetch dashboard JSON → read PromQL/LogQL queries to infer topology
+
+For every service you find, document:
+- Name and type (web service, database, cache, queue, worker, gateway, etc.)
+- Upstream dependencies (what it calls)
+- Downstream consumers (what calls it)
+- Protocol for each connection
+- Key SLIs / alert conditions if discoverable
+
+Be exhaustive. Call many tools. Explore deeply. The more complete the exploration, the more useful the knowledge graph will be. Do not stop until you have explored all available data sources.`
+
+// GraphitiDiscoveryMessage is the initial user message for discovery sessions.
+const GraphitiDiscoveryMessage = "Explore the entire observability environment and build a complete service map. Document all services, their dependencies, protocols, and relationships. Be thorough and use all available tools."
+
 func BuildToolContext(orgName, userRole string) PromptContext {
 	return PromptContext{
 		OrgName:        orgName,

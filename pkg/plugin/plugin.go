@@ -2,6 +2,7 @@ package plugin
 
 import (
 	"consensys-asko11y-app/pkg/agent"
+	"consensys-asko11y-app/pkg/graphiti"
 	"consensys-asko11y-app/pkg/mcp"
 	"consensys-asko11y-app/pkg/plugin/openapi"
 	"consensys-asko11y-app/pkg/rbac"
@@ -79,6 +80,9 @@ type PluginSettings struct {
 	RecentMessageCount int `json:"recentMessageCount,omitempty"`
 
 	BuiltInMCPBaseURL string `json:"builtInMCPBaseURL,omitempty"`
+
+	GraphitiEnabled bool   `json:"graphitiEnabled,omitempty"`
+	GraphitiURL     string `json:"graphitiURL,omitempty"`
 }
 
 const mcpServerHeaderPrefix = "mcpServerHeader."
@@ -117,6 +121,7 @@ type Plugin struct {
 	logger         log.Logger
 	mcpProxy       *mcp.Proxy
 	agentLoop      *agent.AgentLoop
+	graphitiClient *graphiti.Client
 	shareStore     ShareStoreInterface
 	runStore       RunStoreInterface
 	sessionStore   SessionStoreInterface
@@ -227,10 +232,17 @@ func NewPlugin(ctx context.Context, settings backend.AppInstanceSettings) (insta
 	llmClient := agent.NewLLMClient(logger, llmHTTPClient)
 	agentLoop := agent.NewAgentLoop(llmClient, mcpProxy, logger)
 
+	var graphitiClient *graphiti.Client
+	if pluginSettings.GraphitiEnabled && pluginSettings.GraphitiURL != "" {
+		graphitiClient = graphiti.NewClient(pluginSettings.GraphitiURL, logger)
+		logger.Info("Knowledge graph client initialized", "url", pluginSettings.GraphitiURL)
+	}
+
 	p := &Plugin{
 		logger:         logger,
 		mcpProxy:       mcpProxy,
 		agentLoop:      agentLoop,
+		graphitiClient: graphitiClient,
 		shareStore:     shareStore,
 		runStore:       runStore,
 		sessionStore:   sessionStore,
@@ -343,6 +355,8 @@ func (p *Plugin) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/agent/run", p.handleAgentRun)
 	mux.HandleFunc("/api/agent/runs/", p.handleAgentRuns)
 	mux.HandleFunc("/api/prompt-defaults", p.handlePromptDefaults)
+	mux.HandleFunc("/api/graphiti/discover", p.handleGraphitiDiscover)
+	mux.HandleFunc("/api/graphiti/status", p.handleGraphitiStatus)
 
 	// Session CRUD (new) — registered before share routes for specificity
 	mux.HandleFunc("/api/sessions/current", p.handleSessionCurrent)
@@ -612,6 +626,18 @@ func (p *Plugin) handleAgentRun(w http.ResponseWriter, r *http.Request) {
 		p.logger.Error("Failed to build system prompt", "error", err)
 		http.Error(w, "Failed to build system prompt", http.StatusInternalServerError)
 		return
+	}
+
+	if p.graphitiClient != nil {
+		groupID := fmt.Sprintf("org_%d", numericOrgID)
+		searchCtx, searchCancel := context.WithTimeout(ctx, GraphitiSearchTimeout)
+		kgContext, kgErr := p.graphitiClient.SearchContext(searchCtx, groupID, req.Message, GraphitiSearchResults)
+		searchCancel()
+		if kgErr != nil {
+			p.logger.Warn("Failed to fetch knowledge graph context", "error", kgErr)
+		} else if kgContext != "" {
+			systemPrompt += kgContext
+		}
 	}
 
 	userPrompt, err := p.promptRegistry.BuildUserPrompt(req.Type, req.Message, toolCtx)
@@ -984,6 +1010,195 @@ func getUserID(r *http.Request) int64 {
 	}
 
 	return 0
+}
+
+// handleGraphitiStatus returns the knowledge graph connection status.
+func (p *Plugin) handleGraphitiStatus(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	status := map[string]interface{}{
+		"enabled":   p.graphitiClient != nil,
+		"connected": false,
+	}
+
+	if p.graphitiClient != nil {
+		hCtx, cancel := context.WithTimeout(r.Context(), HealthCheckTimeout)
+		defer cancel()
+		if err := p.graphitiClient.Health(hCtx); err != nil {
+			p.logger.Warn("Knowledge graph health check failed", "error", err)
+		} else {
+			status["connected"] = true
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(status)
+}
+
+// handleGraphitiDiscover triggers a hidden discovery agent session that explores
+// the full observability environment and ingests the findings into the knowledge graph.
+func (p *Plugin) handleGraphitiDiscover(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if p.graphitiClient == nil {
+		http.Error(w, "Knowledge graph not configured", http.StatusBadRequest)
+		return
+	}
+
+	cfg := backend.GrafanaConfigFromContext(r.Context())
+	if cfg == nil {
+		p.logger.Error("Grafana configuration not available for discovery run")
+		http.Error(w, "Grafana configuration not available", http.StatusInternalServerError)
+		return
+	}
+	saToken, err := cfg.PluginAppClientSecret()
+	if err != nil {
+		p.logger.Warn("Service account token not available for discovery run", "error", err)
+		saToken = ""
+	}
+
+	grafanaURL, urlSource := resolveGrafanaURL(p.settings, cfg)
+	p.logger.Debug("Resolved Grafana URL for discovery run", "url", grafanaURL, "source", urlSource)
+
+	if p.useBuiltInMCP && saToken != "" {
+		builtInURL := grafanaURL + "/api/plugins/grafana-llm-app/resources/mcp/grafana"
+		p.mcpProxy.EnsureServer(mcp.ServerConfig{
+			ID:      "mcp-grafana",
+			Name:    "Grafana Built-in MCP",
+			URL:     builtInURL,
+			Type:    "streamable-http",
+			Enabled: true,
+			Headers: map[string]string{"Authorization": "Bearer " + saToken},
+		})
+	}
+
+	orgID := getOrgID(r)
+	userID := getUserID(r)
+	userRole := getUserRole(r)
+
+	runID, err := generateShareID()
+	if err != nil {
+		p.logger.Error("Failed to generate discovery run ID", "error", err)
+		http.Error(w, "Failed to generate run ID", http.StatusInternalServerError)
+		return
+	}
+
+	p.runStore.CreateRun(runID, userID, orgID)
+
+	loopReq := agent.LoopRequest{
+		Messages:           []agent.Message{{Role: "user", Content: GraphitiDiscoveryMessage}},
+		SystemPrompt:       GraphitiDiscoverySystemPrompt,
+		MaxTotalTokens:     p.settings.MaxTotalTokens,
+		RecentMessageCount: p.settings.RecentMessageCount,
+		MaxIterations:      GraphitiDiscoveryMaxIter,
+		GrafanaURL:         grafanaURL,
+		AuthToken:          saToken,
+		UserRole:           userRole,
+		OrgID:              strconv.FormatInt(orgID, 10),
+		OrgName:            "Org" + strconv.FormatInt(orgID, 10),
+	}
+
+	eventCh := make(chan agent.SSEEvent, 16)
+	detachedCtx := context.WithoutCancel(r.Context())
+	runCtx, runCancel := context.WithCancel(detachedCtx)
+
+	p.runCancelsMu.Lock()
+	p.runCancels[runID] = runCancel
+	p.runCancelsMu.Unlock()
+
+	go p.agentLoop.Run(runCtx, loopReq, eventCh)
+	go func() {
+		p.consumeDiscoveryEvents(runID, orgID, eventCh)
+		runCancel()
+		p.runCancelsMu.Lock()
+		delete(p.runCancels, runID)
+		p.runCancelsMu.Unlock()
+	}()
+
+	p.logger.Info("Knowledge graph discovery run started", "runId", runID, "orgID", orgID)
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"runId":  runID,
+		"status": RunStatusRunning,
+	})
+}
+
+// consumeDiscoveryEvents drains the agent event channel, finishes the run, and then
+// ingests all tool results into the knowledge graph as episodes.
+func (p *Plugin) consumeDiscoveryEvents(runID string, orgID int64, eventCh <-chan agent.SSEEvent) {
+	var allEvents []agent.SSEEvent
+	var lastEvent agent.SSEEvent
+	for event := range eventCh {
+		p.runStore.AppendEvent(runID, event)
+		allEvents = append(allEvents, event)
+		lastEvent = event
+	}
+
+	switch lastEvent.Type {
+	case "done":
+		p.runStore.FinishRun(runID, RunStatusCompleted, "")
+	case "error":
+		var errMsg string
+		if ee, ok := lastEvent.Data.(agent.ErrorEvent); ok {
+			errMsg = ee.Message
+		}
+		p.runStore.FinishRun(runID, RunStatusFailed, errMsg)
+		p.logger.Warn("Discovery run failed, skipping knowledge graph ingestion", "runId", runID, "error", errMsg)
+		return
+	default:
+		p.runStore.FinishRun(runID, RunStatusCancelled, "")
+		p.logger.Warn("Discovery run cancelled, skipping knowledge graph ingestion", "runId", runID)
+		return
+	}
+
+	episodes := buildDiscoveryEpisodes(allEvents)
+	if len(episodes) == 0 {
+		p.logger.Info("Discovery run produced no episodes to ingest", "runId", runID)
+		return
+	}
+
+	groupID := fmt.Sprintf("org_%d", orgID)
+	ingestCtx, cancel := context.WithTimeout(context.Background(), GraphitiIngestTimeout)
+	defer cancel()
+
+	if err := p.graphitiClient.AddEpisodes(ingestCtx, groupID, episodes); err != nil {
+		p.logger.Error("Failed to ingest discovery results into knowledge graph",
+			"error", err, "orgID", orgID, "episodes", len(episodes))
+	} else {
+		p.logger.Info("Discovery results ingested into knowledge graph",
+			"orgID", orgID, "episodes", len(episodes))
+	}
+}
+
+// buildDiscoveryEpisodes converts successful tool call results into Graphiti episodes.
+func buildDiscoveryEpisodes(events []agent.SSEEvent) []graphiti.Episode {
+	var episodes []graphiti.Episode
+	for _, event := range events {
+		if event.Type != "tool_call_result" {
+			continue
+		}
+		result, ok := event.Data.(agent.ToolCallResultEvent)
+		if !ok || result.IsError || result.Content == "" {
+			continue
+		}
+		source := "text"
+		if json.Valid([]byte(result.Content)) {
+			source = "json"
+		}
+		episodes = append(episodes, graphiti.Episode{
+			Name:              fmt.Sprintf("discovery_%s", result.Name),
+			EpisodeBody:       result.Content,
+			Source:            source,
+			SourceDescription: fmt.Sprintf("Service discovery via %s", result.Name),
+		})
+	}
+	return episodes
 }
 
 func stringPtr(s string) *string {

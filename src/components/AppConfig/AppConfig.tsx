@@ -41,6 +41,10 @@ type State = {
   defaultSystemPrompt: string;
   investigationPrompt: string;
   performancePrompt: string;
+  graphitiEnabled: boolean;
+  graphitiURL: string;
+  graphitiConnected: boolean | null;
+  graphitiDiscovering: boolean;
 };
 
 type ValidationErrors = {
@@ -68,6 +72,10 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
     defaultSystemPrompt: jsonData?.defaultSystemPrompt || '',
     investigationPrompt: jsonData?.investigationPrompt || '',
     performancePrompt: jsonData?.performancePrompt || '',
+    graphitiEnabled: jsonData?.graphitiEnabled ?? false,
+    graphitiURL: jsonData?.graphitiURL || '',
+    graphitiConnected: null,
+    graphitiDiscovering: false,
   });
   const [validationErrors, setValidationErrors] = useState<ValidationErrors>({
     mcpServers: {},
@@ -317,6 +325,47 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
     delete currentHeaders[key];
 
     updateMCPServer(serverId, { headers: currentHeaders });
+  }
+
+  useEffect(() => {
+    if (!state.graphitiEnabled || !state.graphitiURL) {
+      return;
+    }
+    setState((prev) => ({ ...prev, graphitiConnected: null }));
+    lastValueFrom(
+      getBackendSrv().fetch<{ connected: boolean }>({
+        url: `/api/plugins/consensys-asko11y-app/resources/api/graphiti/status`,
+      })
+    )
+      .then((res) => setState((prev) => ({ ...prev, graphitiConnected: res.data.connected })))
+      .catch(() => setState((prev) => ({ ...prev, graphitiConnected: false })));
+  }, [state.graphitiEnabled, state.graphitiURL]);
+
+  function onSubmitGraphitiSettings() {
+    updatePluginAndReload(plugin.meta.id, {
+      enabled,
+      pinned,
+      jsonData: {
+        ...jsonData,
+        graphitiEnabled: state.graphitiEnabled,
+        graphitiURL: state.graphitiURL,
+      },
+    });
+  }
+
+  async function onBuildKnowledgeGraph() {
+    setState((prev) => ({ ...prev, graphitiDiscovering: true }));
+    try {
+      await lastValueFrom(
+        getBackendSrv().fetch({
+          url: `/api/plugins/consensys-asko11y-app/resources/api/graphiti/discover`,
+          method: 'POST',
+          data: {},
+        })
+      );
+    } finally {
+      setState((prev) => ({ ...prev, graphitiDiscovering: false }));
+    }
   }
 
   function savePrompt(field: 'defaultSystemPrompt' | 'investigationPrompt' | 'performancePrompt', value: string) {
@@ -870,6 +919,69 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
           >
             Save Display Settings
           </Button>
+        </div>
+      </FieldSet>
+
+      <FieldSet label="Knowledge Graph" className="mt-4">
+        <p className="text-sm text-secondary mb-3">
+          Connect a Graphiti knowledge graph to enrich agent responses with a live service map. The agent will
+          automatically retrieve relevant service topology before each response.
+        </p>
+
+        <Field label="Enable Knowledge Graph" description="Inject service map context into the agent on every query">
+          <Switch
+            value={state.graphitiEnabled}
+            onChange={(e) => setState({ ...state, graphitiEnabled: e.currentTarget.checked })}
+          />
+        </Field>
+
+        {state.graphitiEnabled && (
+          <>
+            <Field
+              label="Graphiti API URL"
+              description="Base URL of the Graphiti REST API sidecar (e.g. http://graphiti:8001)"
+            >
+              <Input
+                width={60}
+                value={state.graphitiURL}
+                placeholder="http://graphiti:8001"
+                onChange={(e) => setState({ ...state, graphitiURL: e.currentTarget.value })}
+              />
+            </Field>
+
+            <Field label="Status">
+              {state.graphitiConnected === null ? (
+                <span className="text-secondary text-sm">
+                  <Icon name="fa fa-spinner" /> Checking…
+                </span>
+              ) : state.graphitiConnected ? (
+                <span className="text-success text-sm">
+                  <Icon name="check-circle" /> Connected
+                </span>
+              ) : (
+                <span className="text-error text-sm">
+                  <Icon name="exclamation-triangle" /> Unreachable
+                </span>
+              )}
+            </Field>
+          </>
+        )}
+
+        <div className="mt-3 flex gap-2">
+          <Button onClick={onSubmitGraphitiSettings} variant="primary">
+            Save Knowledge Graph settings
+          </Button>
+
+          {state.graphitiEnabled && (
+            <Button
+              onClick={onBuildKnowledgeGraph}
+              variant="secondary"
+              disabled={state.graphitiDiscovering || !state.graphitiConnected}
+              icon={state.graphitiDiscovering ? 'fa fa-spinner' : 'database'}
+            >
+              {state.graphitiDiscovering ? 'Building…' : 'Build Knowledge Graph'}
+            </Button>
+          )}
         </div>
       </FieldSet>
     </div>

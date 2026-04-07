@@ -30,6 +30,33 @@ services:
     depends_on:
       - grafana
 
+  falkordb:
+    image: falkordb/falkordb:latest
+    volumes:
+      - falkordb-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-p", "6379", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # Graphiti REST API for knowledge graph. Shared across all orgs; per-org isolation
+  # is enforced via group_id ("org_1", "org_2", …) set by the Go backend on every call.
+  # Verify endpoint paths at http://localhost:8003/docs after startup.
+  graphiti:
+    image: zepai/graphiti:latest
+    ports:
+      - "127.0.0.1:8003:8000"
+    environment:
+      FALKORDB_URI: redis://falkordb:6379
+      OPENAI_API_KEY: ${LLM_API_KEY:-dummy}
+      OPENAI_BASE_URL: ${GRAPHITI_OPENAI_BASE_URL:-}
+      LLM_MODEL_NAME: ${GRAPHITI_LLM_MODEL:-large}
+      GRAPH_DATABASE_PROVIDER: falkordb
+    depends_on:
+      falkordb:
+        condition: service_healthy
+
   redis:
     image: redis:7-alpine
     ports:
@@ -56,3 +83,4 @@ services:
 
 volumes:
   redis-data:
+  falkordb-data:
