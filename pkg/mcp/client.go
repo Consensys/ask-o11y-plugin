@@ -74,10 +74,7 @@ func (t *customRoundTripper) RoundTrip(req *http.Request) (*http.Response, error
 	return t.base.RoundTrip(req)
 }
 
-// NewClient creates a new MCP client.
-// The baseTransport should be obtained from the Grafana SDK httpclient package
-// to respect proxy configuration, custom CA bundles, and auth middleware.
-func NewClient(parent context.Context, config ServerConfig, logger log.Logger, baseTransport http.RoundTripper) *Client {
+func NewClient(parent context.Context, config ServerConfig, logger log.Logger, httpClient *http.Client) *Client {
 	ctx, cancel := context.WithCancel(parent)
 
 	return &Client{
@@ -86,7 +83,7 @@ func NewClient(parent context.Context, config ServerConfig, logger log.Logger, b
 		operationMetadata: make(map[string]OperationMetadata),
 		ctx:               ctx,
 		cancel:            cancel,
-		httpClient:        &http.Client{Transport: baseTransport, Timeout: 30 * time.Second},
+		httpClient:        httpClient,
 	}
 }
 
@@ -157,15 +154,15 @@ func (c *Client) connectMCP() error {
 const connectDialTimeout = 10 * time.Second
 
 func (c *Client) httpClientWithHeaders() *http.Client {
-	transport := c.httpClient.Transport
 	if len(c.config.Headers) == 0 {
-		return &http.Client{Transport: transport}
+		return c.httpClient
 	}
 	return &http.Client{
 		Transport: &configHeaderRoundTripper{
-			base:    transport,
+			base:    c.httpClient.Transport,
 			headers: c.config.Headers,
 		},
+		Timeout: c.httpClient.Timeout,
 	}
 }
 
@@ -213,6 +210,7 @@ func (c *Client) connectMCPWithOrgContext(orgID string, orgName string, scopeOrg
 			scopeOrgId: scopeOrgId,
 			config:     c.config,
 		},
+		Timeout: c.httpClient.Timeout,
 	}
 
 	var transport mcpsdk.Transport

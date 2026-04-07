@@ -80,6 +80,7 @@ mcpServers:
 - **No hardcoded colors** — use semantic Tailwind: `bg-background`, `text-primary`, `border-weak`, etc.
 - **No `any`** — use `unknown`
 - **No raw errors in HTTP responses** — log server-side, return generic message to client
+- **No `&http.Client{}` direct construction** — always use `github.com/grafana/grafana-plugin-sdk-go/backend/httpclient.New()`. When wrapping for custom headers, copy `.Timeout` from the SDK client into the wrapper. Never create a bare `&http.Client{}` as a fallback — propagate the error instead.
 - Prefer `@grafana/ui` components over custom implementations
 - Catch blocks must handle errors meaningfully — never swallow silently
 

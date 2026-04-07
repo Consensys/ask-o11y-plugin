@@ -49,7 +49,7 @@ func (p *Proxy) GetHealthMonitor() *HealthMonitor {
 }
 
 // UpdateConfig updates the proxy configuration with new server configs
-func (p *Proxy) UpdateConfig(configs []ServerConfig) {
+func (p *Proxy) UpdateConfig(configs []ServerConfig) error {
 	newConfigs := make(map[string]ServerConfig)
 	for _, config := range configs {
 		if config.Enabled {
@@ -57,7 +57,10 @@ func (p *Proxy) UpdateConfig(configs []ServerConfig) {
 		}
 	}
 
-	transport := p.sdkTransport()
+	sdkHTTPClient, err := p.sdkClient()
+	if err != nil {
+		return fmt.Errorf("failed to create SDK HTTP client: %w", err)
+	}
 
 	// Collect stale clients under lock, then close outside the lock
 	// to avoid holding mu while blocking on network I/O.
@@ -73,7 +76,7 @@ func (p *Proxy) UpdateConfig(configs []ServerConfig) {
 	}
 	for id, config := range newConfigs {
 		if _, exists := p.clients[id]; !exists {
-			p.clients[id] = NewClient(p.ctx, config, p.logger, transport)
+			p.clients[id] = NewClient(p.ctx, config, p.logger, sdkHTTPClient)
 			p.logger.Info("Added MCP client", "id", id, "url", config.URL, "type", config.Type)
 		}
 	}
@@ -84,6 +87,7 @@ func (p *Proxy) UpdateConfig(configs []ServerConfig) {
 			p.logger.Warn("Failed to close removed MCP client", "error", err)
 		}
 	}
+	return nil
 }
 
 // ListTools aggregates tools from all configured MCP servers
@@ -298,7 +302,12 @@ func (p *Proxy) Close() {
 	}
 }
 
-func (p *Proxy) EnsureServer(config ServerConfig) {
+func (p *Proxy) EnsureServer(config ServerConfig) error {
+	sdkHTTPClient, err := p.sdkClient()
+	if err != nil {
+		return fmt.Errorf("failed to create SDK HTTP client: %w", err)
+	}
+
 	// Capture replaced client under lock, then close it outside the lock
 	// to avoid holding mu while blocking on network I/O.
 	var replaced *Client
@@ -307,13 +316,13 @@ func (p *Proxy) EnsureServer(config ServerConfig) {
 	if existing, ok := p.clients[config.ID]; ok {
 		if existing.config.URL == config.URL && headersEqual(existing.config.Headers, config.Headers) {
 			p.mu.Unlock()
-			return
+			return nil
 		}
 		replaced = existing
 		p.logger.Debug("Replacing MCP client", "id", config.ID)
 	}
 
-	p.clients[config.ID] = NewClient(p.ctx, config, p.logger, p.sdkTransport())
+	p.clients[config.ID] = NewClient(p.ctx, config, p.logger, sdkHTTPClient)
 	p.mu.Unlock()
 
 	if replaced != nil {
@@ -323,6 +332,7 @@ func (p *Proxy) EnsureServer(config ServerConfig) {
 	}
 
 	p.logger.Info("Ensured MCP client", "id", config.ID, "url", config.URL, "type", config.Type)
+	return nil
 }
 
 func (p *Proxy) RemoveServer(id string) {
@@ -341,17 +351,13 @@ func (p *Proxy) RemoveServer(id string) {
 	}
 }
 
-func (p *Proxy) sdkTransport() http.RoundTripper {
-	transport, err := httpclient.GetTransport(httpclient.Options{
+func (p *Proxy) sdkClient() (*http.Client, error) {
+	return httpclient.New(httpclient.Options{
 		Timeouts: &httpclient.TimeoutOptions{
+			Timeout:     30 * time.Second,
 			DialTimeout: connectDialTimeout,
 		},
 	})
-	if err != nil {
-		p.logger.Error("Failed to create SDK HTTP transport, falling back to default", "error", err)
-		return http.DefaultTransport
-	}
-	return transport
 }
 
 func headersEqual(a, b map[string]string) bool {

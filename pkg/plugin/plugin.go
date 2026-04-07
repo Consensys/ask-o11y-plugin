@@ -174,7 +174,10 @@ func NewPlugin(ctx context.Context, settings backend.AppInstanceSettings) (insta
 	pluginCtx, cancel := context.WithCancel(context.Background())
 
 	mcpProxy := mcp.NewProxy(pluginCtx, logger)
-	mcpProxy.UpdateConfig(pluginSettings.MCPServers)
+	if err := mcpProxy.UpdateConfig(pluginSettings.MCPServers); err != nil {
+		cancel()
+		return nil, fmt.Errorf("failed to configure MCP servers: %w", err)
+	}
 
 	mcpProxy.StartHealthMonitoring(MCPHealthMonitoringInterval)
 
@@ -221,8 +224,8 @@ func NewPlugin(ctx context.Context, settings backend.AppInstanceSettings) (insta
 		},
 	})
 	if err != nil {
-		logger.Error("Failed to create SDK HTTP client for LLM, using default", "error", err)
-		llmHTTPClient = &http.Client{Timeout: 120 * time.Second}
+		cancel()
+		return nil, fmt.Errorf("failed to create SDK HTTP client for LLM: %w", err)
 	}
 	llmClient := agent.NewLLMClient(logger, llmHTTPClient)
 	agentLoop := agent.NewAgentLoop(llmClient, mcpProxy, logger)
@@ -582,7 +585,7 @@ func (p *Plugin) handleAgentRun(w http.ResponseWriter, r *http.Request) {
 			p.mcpProxy.RemoveServer("mcp-grafana")
 		} else {
 			builtInURL := grafanaURL + "/api/plugins/grafana-llm-app/resources/mcp/grafana"
-			p.mcpProxy.EnsureServer(mcp.ServerConfig{
+			if err := p.mcpProxy.EnsureServer(mcp.ServerConfig{
 				ID:      "mcp-grafana",
 				Name:    "Grafana Built-in MCP",
 				URL:     builtInURL,
@@ -591,7 +594,11 @@ func (p *Plugin) handleAgentRun(w http.ResponseWriter, r *http.Request) {
 				Headers: map[string]string{
 					"Authorization": "Bearer " + saToken,
 				},
-			})
+			}); err != nil {
+				p.logger.Error("Failed to register built-in MCP server", "error", err)
+				http.Error(w, "Failed to initialize MCP server", http.StatusInternalServerError)
+				return
+			}
 		}
 	}
 
