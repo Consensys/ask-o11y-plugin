@@ -121,6 +121,83 @@ func (c *Client) SearchContext(ctx context.Context, groupID, query string, numRe
 	return formatSearchResponse(result), nil
 }
 
+// GetMemory retrieves knowledge graph context using multiple conversation
+// messages to build a better composite search query. This calls the Graphiti
+// POST /v1/get-memory endpoint, which is specifically designed for agent memory
+// retrieval — it composes a richer query from the full conversation context
+// rather than searching with a single user message.
+func (c *Client) GetMemory(ctx context.Context, groupID string, messages []Message, maxFacts int) (string, error) {
+	if maxFacts <= 0 {
+		maxFacts = 10
+	}
+	payload := GetMemoryRequest{
+		GroupID:  groupID,
+		Messages: messages,
+		MaxFacts: maxFacts,
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return "", err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/v1/get-memory", bytes.NewReader(body))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	// If the endpoint is not available (404), fall back gracefully.
+	if resp.StatusCode == http.StatusNotFound {
+		return "", nil
+	}
+	if resp.StatusCode >= 400 {
+		return "", fmt.Errorf("get-memory returned HTTP %d", resp.StatusCode)
+	}
+
+	var result GetMemoryResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return "", err
+	}
+	return formatMemoryResponse(result), nil
+}
+
+// AddMessages ingests conversational messages into the knowledge graph.
+// This calls the Graphiti POST /v1/messages endpoint, which is optimized
+// for extracting entities and relationships from conversation turns.
+// Use this for investigation session feedback where causal knowledge
+// (e.g., "service A failed because database B connection pool exhausted")
+// is captured.
+func (c *Client) AddMessages(ctx context.Context, groupID string, messages []Message) error {
+	payload := AddMessagesRequest{
+		GroupID:  groupID,
+		Messages: messages,
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/v1/messages", bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return err
+	}
+	resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		return fmt.Errorf("add messages returned HTTP %d", resp.StatusCode)
+	}
+	return nil
+}
+
 func formatSearchResponse(r SearchResponse) string {
 	if len(r.Edges) == 0 && len(r.Nodes) == 0 {
 		return ""
@@ -129,6 +206,36 @@ func formatSearchResponse(r SearchResponse) string {
 	sb.WriteString("\n\n## Service Map Context\n")
 	sb.WriteString("The following facts about your monitored services are known:\n")
 	for _, edge := range r.Edges {
+		fact := edge.Fact
+		if fact == "" {
+			fact = edge.Name
+		}
+		if fact != "" {
+			sb.WriteString("- ")
+			sb.WriteString(fact)
+			sb.WriteString("\n")
+		}
+	}
+	for _, node := range r.Nodes {
+		if node.Summary != "" {
+			sb.WriteString("- ")
+			sb.WriteString(node.Name)
+			sb.WriteString(": ")
+			sb.WriteString(node.Summary)
+			sb.WriteString("\n")
+		}
+	}
+	return sb.String()
+}
+
+func formatMemoryResponse(r GetMemoryResponse) string {
+	if len(r.Facts) == 0 && len(r.Nodes) == 0 {
+		return ""
+	}
+	var sb strings.Builder
+	sb.WriteString("\n\n## Service Map Context\n")
+	sb.WriteString("The following facts about your monitored services are known:\n")
+	for _, edge := range r.Facts {
 		fact := edge.Fact
 		if fact == "" {
 			fact = edge.Name

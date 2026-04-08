@@ -367,6 +367,7 @@ func (p *Plugin) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/prompt-defaults", p.handlePromptDefaults)
 	mux.HandleFunc("/api/graphiti/discover", p.handleGraphitiDiscover)
 	mux.HandleFunc("/api/graphiti/status", p.handleGraphitiStatus)
+	mux.HandleFunc("/api/graphiti/ingest-session", p.handleGraphitiIngestSession)
 
 	// Session CRUD (new) — registered before share routes for specificity
 	mux.HandleFunc("/api/sessions/current", p.handleSessionCurrent)
@@ -644,7 +645,21 @@ func (p *Plugin) handleAgentRun(w http.ResponseWriter, r *http.Request) {
 	if p.graphitiClient != nil {
 		groupID := fmt.Sprintf("org_%d", numericOrgID)
 		searchCtx, searchCancel := context.WithTimeout(ctx, GraphitiSearchTimeout)
-		kgContext, kgErr := p.graphitiClient.SearchContext(searchCtx, groupID, req.Message, GraphitiSearchResults)
+		// Use GetMemory with the user message as a conversation turn for
+		// richer composite query construction by Graphiti's server.
+		kgMessages := []graphiti.Message{{
+			Content:  req.Message,
+			RoleType: "user",
+			Role:     "user",
+		}}
+		kgContext, kgErr := p.graphitiClient.GetMemory(searchCtx, groupID, kgMessages, GraphitiSearchResults)
+		if kgErr != nil || kgContext == "" {
+			// Fall back to simple search if get-memory is unavailable or returns nothing.
+			if kgErr != nil {
+				p.logger.Debug("GetMemory unavailable, falling back to SearchContext", "error", kgErr)
+			}
+			kgContext, kgErr = p.graphitiClient.SearchContext(searchCtx, groupID, req.Message, GraphitiSearchResults)
+		}
 		searchCancel()
 		if kgErr != nil {
 			p.logger.Warn("Failed to fetch knowledge graph context", "error", kgErr)
@@ -1215,6 +1230,87 @@ func buildDiscoveryEpisodes(events []agent.SSEEvent) []graphiti.Episode {
 		})
 	}
 	return episodes
+}
+
+// ingestSessionRequest is the JSON body for POST /api/graphiti/ingest-session.
+type ingestSessionRequest struct {
+	Messages []ingestSessionMessage `json:"messages"`
+}
+
+type ingestSessionMessage struct {
+	Role    string `json:"role"`    // "user" | "assistant"
+	Content string `json:"content"`
+}
+
+// handleGraphitiIngestSession ingests conversation messages from a completed
+// investigation session into the knowledge graph. This is the "Feed to Knowledge
+// Graph" action — the user opts in to share their investigation findings so
+// future sessions can leverage discovered causal relationships.
+func (p *Plugin) handleGraphitiIngestSession(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if p.graphitiClient == nil {
+		http.Error(w, "Knowledge graph not configured", http.StatusBadRequest)
+		return
+	}
+
+	var req ingestSessionRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+	if len(req.Messages) == 0 {
+		http.Error(w, "No messages provided", http.StatusBadRequest)
+		return
+	}
+
+	orgID := getOrgID(r)
+	groupID := fmt.Sprintf("org_%d", orgID)
+	now := time.Now().UTC().Format(time.RFC3339)
+
+	// Convert to Graphiti message format.
+	msgs := make([]graphiti.Message, 0, len(req.Messages))
+	for _, m := range req.Messages {
+		if strings.TrimSpace(m.Content) == "" {
+			continue
+		}
+		roleType := "user"
+		if m.Role == "assistant" {
+			roleType = "assistant"
+		}
+		msgs = append(msgs, graphiti.Message{
+			Content:           m.Content,
+			RoleType:          roleType,
+			Role:              m.Role,
+			Timestamp:         now,
+			SourceDescription: "Ask O11y investigation session",
+		})
+	}
+
+	if len(msgs) == 0 {
+		http.Error(w, "No non-empty messages provided", http.StatusBadRequest)
+		return
+	}
+
+	ingestCtx, cancel := context.WithTimeout(r.Context(), GraphitiIngestTimeout)
+	defer cancel()
+
+	if err := p.graphitiClient.AddMessages(ingestCtx, groupID, msgs); err != nil {
+		p.logger.Error("Failed to ingest session messages into knowledge graph",
+			"error", err, "orgID", orgID, "messages", len(msgs))
+		http.Error(w, "Failed to ingest session", http.StatusInternalServerError)
+		return
+	}
+
+	p.logger.Info("Session messages ingested into knowledge graph",
+		"orgID", orgID, "messages", len(msgs))
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"ingested": len(msgs),
+	})
 }
 
 func stringPtr(s string) *string {
