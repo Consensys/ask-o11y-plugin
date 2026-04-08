@@ -1,6 +1,7 @@
 package graphiti
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -35,7 +36,7 @@ func TestFormatSearchResponse_WithEdgesAndNodes(t *testing.T) {
 		"API Gateway: Main entry point for API requests",
 	}
 	for _, s := range expected {
-		if !contains(got, s) {
+		if !strings.Contains(got, s) {
 			t.Errorf("expected response to contain %q, got:\n%s", s, got)
 		}
 	}
@@ -67,7 +68,7 @@ func TestFormatMemoryResponse_WithFactsAndNodes(t *testing.T) {
 		"PostgreSQL: Primary database for auth service",
 	}
 	for _, s := range expected {
-		if !contains(got, s) {
+		if !strings.Contains(got, s) {
 			t.Errorf("expected response to contain %q", s)
 		}
 	}
@@ -84,17 +85,4 @@ func TestObservabilityEntityTypes(t *testing.T) {
 			t.Errorf("missing entity type %q", key)
 		}
 	}
-}
-
-func contains(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr || len(s) > 0 && containsSubstring(s, substr))
-}
-
-func containsSubstring(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
 }

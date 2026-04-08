@@ -173,9 +173,9 @@ func hashContent(s string) uint64 {
 	return h.Sum64()
 }
 
-// hasChanged returns true if the tool output differs from the last scavenge
-// cycle. It also updates the stored hash.
-func (j *Janitor) hasChanged(toolName, body string) bool {
+// checkAndUpdateHash returns true if the tool output differs from the last
+// scavenge cycle. It also updates the stored hash for the next comparison.
+func (j *Janitor) checkAndUpdateHash(toolName, body string) bool {
 	newHash := hashContent(body)
 
 	j.prevHashesMu.Lock()
@@ -215,7 +215,7 @@ func (j *Janitor) callAndWrap(tool mcp.Tool, referenceTime string) ([]graphiti.E
 	}
 
 	// Skip ingestion if the output hasn't changed since last scavenge.
-	if !j.hasChanged(tool.Name, body) {
+	if !j.checkAndUpdateHash(tool.Name, body) {
 		return nil, fmt.Errorf("unchanged since last scavenge")
 	}
 

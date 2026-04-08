@@ -648,9 +648,10 @@ func (p *Plugin) handleAgentRun(w http.ResponseWriter, r *http.Request) {
 		// Use GetMemory with the user message as a conversation turn for
 		// richer composite query construction by Graphiti's server.
 		kgMessages := []graphiti.Message{{
-			Content:  req.Message,
-			RoleType: "user",
-			Role:     "user",
+			Content:   req.Message,
+			RoleType:  "user",
+			Role:      "user",
+			Timestamp: time.Now().UTC().Format(time.RFC3339),
 		}}
 		kgContext, kgErr := p.graphitiClient.GetMemory(searchCtx, groupID, kgMessages, GraphitiSearchResults)
 		if kgErr != nil || kgContext == "" {
@@ -1277,8 +1278,11 @@ func (p *Plugin) handleGraphitiIngestSession(w http.ResponseWriter, r *http.Requ
 			continue
 		}
 		roleType := "user"
-		if m.Role == "assistant" {
+		switch m.Role {
+		case "assistant":
 			roleType = "assistant"
+		case "system":
+			roleType = "system"
 		}
 		msgs = append(msgs, graphiti.Message{
 			Content:           m.Content,
