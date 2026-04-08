@@ -19,11 +19,8 @@ apps:
       useBuiltInMCP: true
       graphitiEnabled: true
       graphitiURL: 'http://graphiti:8000'
-      # Agent also gets search tools auto-discovered from the Graphiti OpenAPI spec.
-      # Verify tool names at http://localhost:8002/docs and adjust if needed.
-      mcpServers:
-        - id: 'knowledge-graph'
-          name: 'Knowledge Graph'
-          url: 'http://graphiti:8000'
-          enabled: true
-          type: 'openapi'
+      # Knowledge graph is accessed server-side only (Go backend → /v1/search,
+      # /v1/episodes, /v1/messages). It is NOT exposed as an MCP server to the
+      # agent because the Graphiti OpenAPI surface includes destructive endpoints
+      # (POST /clear, DELETE /group/{id}) that the agent must never call.
+      mcpServers: []

@@ -1192,6 +1192,7 @@ func (p *Plugin) consumeDiscoveryEvents(runID string, orgID int64, eventCh <-cha
 // buildDiscoveryEpisodes converts successful tool call results into Graphiti episodes.
 func buildDiscoveryEpisodes(events []agent.SSEEvent) []graphiti.Episode {
 	var episodes []graphiti.Episode
+	now := time.Now().UTC().Format(time.RFC3339)
 	for _, event := range events {
 		if event.Type != "tool_call_result" {
 			continue
@@ -1209,6 +1210,8 @@ func buildDiscoveryEpisodes(events []agent.SSEEvent) []graphiti.Episode {
 			EpisodeBody:       result.Content,
 			Source:            source,
 			SourceDescription: fmt.Sprintf("Service discovery via %s", result.Name),
+			ReferenceTime:     now,
+			EntityTypes:       graphiti.ObservabilityEntityTypes(),
 		})
 	}
 	return episodes

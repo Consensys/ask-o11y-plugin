@@ -40,11 +40,6 @@ apps:
           url: 'http://mcp-grafana:8000/mcp'
           enabled: true
           type: 'streamable-http'
-        - id: 'knowledge-graph'
-          name: 'Knowledge Graph'
-          url: 'http://graphiti:8000'
-          enabled: true
-          type: 'openapi'
     secureJsonData:
       redisURL: 'redis://redis:6379/0'
   - type: grafana-llm-app
@@ -86,10 +81,5 @@ apps:
           url: 'http://mcp-grafana:8000/mcp'
           enabled: true
           type: 'streamable-http'
-        - id: 'knowledge-graph'
-          name: 'Knowledge Graph'
-          url: 'http://graphiti:8000'
-          enabled: true
-          type: 'openapi'
     secureJsonData:
       redisURL: 'redis://redis:6379/0'

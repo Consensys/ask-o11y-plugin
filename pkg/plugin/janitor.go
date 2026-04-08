@@ -2,6 +2,7 @@ package plugin
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"sync"
@@ -188,11 +189,18 @@ func (j *Janitor) callAndWrap(tool mcp.Tool, referenceTime string) (graphiti.Epi
 		displayName = parts[1]
 	}
 
+	// Graphiti accepts "text", "json", or "message" as source types.
+	source := "text"
+	if json.Valid([]byte(body)) {
+		source = "json"
+	}
+
 	return graphiti.Episode{
 		Name:              fmt.Sprintf("discovery:%s:%s", serverID, displayName),
 		EpisodeBody:       body,
-		Source:            "mcp",
+		Source:            source,
 		SourceDescription: fmt.Sprintf("Janitor discovery via MCP server %q tool %q", serverID, displayName),
 		ReferenceTime:     referenceTime,
+		EntityTypes:       graphiti.ObservabilityEntityTypes(),
 	}, nil
 }
