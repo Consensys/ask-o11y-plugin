@@ -122,6 +122,7 @@ type Plugin struct {
 	mcpProxy       *mcp.Proxy
 	agentLoop      *agent.AgentLoop
 	graphitiClient *graphiti.Client
+	janitor        *Janitor
 	shareStore     ShareStoreInterface
 	runStore       RunStoreInterface
 	sessionStore   SessionStoreInterface
@@ -233,9 +234,12 @@ func NewPlugin(ctx context.Context, settings backend.AppInstanceSettings) (insta
 	agentLoop := agent.NewAgentLoop(llmClient, mcpProxy, logger)
 
 	var graphitiClient *graphiti.Client
+	var janitor *Janitor
 	if pluginSettings.GraphitiEnabled && pluginSettings.GraphitiURL != "" {
 		graphitiClient = graphiti.NewClient(pluginSettings.GraphitiURL, logger)
 		logger.Info("Knowledge graph client initialized", "url", pluginSettings.GraphitiURL)
+		janitor = NewJanitor(pluginCtx, mcpProxy, graphitiClient, logger, JanitorScavengeInterval)
+		go janitor.Start()
 	}
 
 	p := &Plugin{
@@ -243,6 +247,7 @@ func NewPlugin(ctx context.Context, settings backend.AppInstanceSettings) (insta
 		mcpProxy:       mcpProxy,
 		agentLoop:      agentLoop,
 		graphitiClient: graphitiClient,
+		janitor:        janitor,
 		shareStore:     shareStore,
 		runStore:       runStore,
 		sessionStore:   sessionStore,
@@ -302,6 +307,11 @@ func (p *Plugin) Dispose() {
 	}
 	p.runCancels = nil
 	p.runCancelsMu.Unlock()
+
+	// Stop the janitor before closing the proxy so its in-flight scavenge can finish.
+	if p.janitor != nil {
+		p.janitor.Stop()
+	}
 
 	// Close proxy and Redis before cancelling context so that
 	// graceful shutdown I/O can still use the plugin context.
@@ -617,6 +627,9 @@ func (p *Plugin) handleAgentRun(w http.ResponseWriter, r *http.Request) {
 	}
 
 	numericOrgID := getOrgID(r)
+	if p.janitor != nil {
+		p.janitor.SetOrgID(numericOrgID)
+	}
 
 	toolCtx := BuildToolContext(req.OrgName, userRole)
 	toolCtx.ConversationType = req.Type
