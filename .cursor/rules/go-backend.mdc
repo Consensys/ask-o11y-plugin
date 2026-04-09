@@ -1,10 +1,12 @@
 ---
-description: Go backend patterns, error handling, and conventions for this plugin
+description: Go backend patterns and conventions
 globs: pkg/**/*.go
 alwaysApply: false
 ---
 
 # Go Backend Patterns
+
+Reference: [CLAUDE.md](./CLAUDE.md) is the authoritative source.
 
 ## Logging — Never use fmt.Println or stdlib log
 
@@ -44,18 +46,9 @@ Any change to routes in `pkg/plugin/plugin.go` requires:
 1. Update `pkg/plugin/openapi/openapi.json`
 2. Run `nvm use 22 && npm run validate:openapi`
 
-## Backend Rebuild Cycle
-
-```bash
-nvm use 22 && npm run build:backend
-docker compose restart grafana
-go test ./pkg/...
-docker compose logs -f grafana   # verify no startup errors
-```
-
-## Multi-Org Constraints
+## Multi-Org Constraints (CRITICAL)
 
 - SA token from `backend.GrafanaConfigFromContext()` is **Org 1 only**
-- `useBuiltInMCP: true` only works for Org 1 — never set it in multi-org configs
-- For multi-org: use external `mcp-grafana` sidecar (see `docker-compose-full.yaml`)
+- `useBuiltInMCP: true` only works for Org 1 — never set it in `full.yaml_`
+- For multi-org: use external `mcp-grafana` sidecar
 - The LLM client intentionally does **not** send `X-Grafana-Org-Id` when using SA token auth

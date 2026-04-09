@@ -1,10 +1,12 @@
 ---
-description: React/TypeScript patterns, theme integration, and error handling for src/ code
+description: React/TypeScript patterns for src/ code
 globs: src/**/*.{ts,tsx}
 alwaysApply: false
 ---
 
 # Frontend Patterns
+
+Reference: [CLAUDE.md](./CLAUDE.md) is the authoritative source.
 
 ## Theme Integration — NEVER hardcode colors
 
@@ -47,21 +49,3 @@ No `console.log`, `console.error`, or `console.warn` in shipped code.
 - `async/await` not `.then()/.catch()`
 - Custom hooks for reusable business logic (`useChat`, `useSessionManager`)
 - `useMemo` / `useCallback` for performance-sensitive computations
-
-## Testing Selectors
-
-Always use `data-testid` attributes from `src/components/testIds.ts`:
-
-```tsx
-// ✅
-<button data-testid={testIds.chat.sendButton}>Send</button>
-
-// ❌
-<button id="send-btn" className="send-button">Send</button>
-```
-
-## Session & Org Isolation
-
-- All UserStorage keys must include orgId: `grafana-o11y-chat-org-{orgId}-*`
-- Sessions are private per user — never share across users
-- Max 50 sessions per user per org (auto-eviction of oldest)
