@@ -1,10 +1,16 @@
 ---
-description: Playwright E2E testing conventions and patterns for this project
-globs: tests/**/*.{ts,spec.ts}
+description: Playwright E2E testing conventions
+globs: tests/**/*.spec.ts
 alwaysApply: false
 ---
 
 # Playwright E2E Testing
+
+Reference: [CLAUDE.md](./CLAUDE.md) is the authoritative source.
+
+## Test Locations
+
+- E2E specs in `tests/*.spec.ts`
 
 ## Focus
 
@@ -19,30 +25,9 @@ Limit to **3–5 focused tests per file**.
 4. **Setup in `beforeEach`** — page navigation and route mocking
 5. **Test both success and error scenarios**
 
-## Example
+## RBAC Testing
 
-```ts
-import { test, expect } from '@playwright/test';
-
-test.describe('Chat Interface', () => {
-  test.beforeEach(async ({ page }) => {
-    await page.route('/api/plugins/consensys-asko11y-app/resources/api/agent/run', (route) => {
-      route.fulfill({
-        status: 200,
-        contentType: 'text/event-stream',
-        body: 'data: {"type":"content","content":"Hello!"}\n\ndata: {"type":"done"}\n\n',
-      });
-    });
-    await page.goto('/a/consensys-asko11y-app');
-  });
-
-  test('should send a message and receive a response', async ({ page }) => {
-    await page.locator('[data-testid="chat-input"]').fill('What is the current error rate?');
-    await page.locator('[data-testid="chat-send-button"]').click();
-    await expect(page.locator('[data-testid="assistant-message"]')).toBeVisible();
-  });
-});
-```
+Test RBAC with Admin, Editor, Viewer roles. Viewers must not access write tools.
 
 ## Run Tests
 
@@ -51,8 +36,3 @@ test.describe('Chat Interface', () => {
 nvm use 22 && npm run e2e
 nvm use 22 && npm run e2e -- --grep "test name pattern"
 ```
-
-## RBAC Testing
-
-Always test with different roles (Admin, Editor, Viewer) to verify tool access restrictions.
-Viewers must not access write tools — verify 403 responses for restricted operations.
