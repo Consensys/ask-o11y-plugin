@@ -48,8 +48,10 @@ test.describe('MCP Server Management', () => {
     // Change server type (Grafana Select component)
     // Grafana Select renders the selected label in div[class*="-singleValue"].
     // Menu options are portaled to the page root as role="option".
-    const typeCombobox = page.getByRole('combobox').last();
-    const typeContainer = page.locator('div[class*="-singleValue"]').last();
+    // Scope to the last MCP server card to avoid matching unrelated dropdowns.
+    const serverCard = page.locator('[data-testid^="data-testid ac-mcp-server-"]').filter({ has: page.locator('[data-testid^="data-testid ac-mcp-server-name-"]') }).last();
+    const typeCombobox = serverCard.getByRole('combobox');
+    const typeContainer = serverCard.locator('div[class*="-singleValue"]');
     await expect(typeContainer).toHaveText('OpenAPI');
     await typeCombobox.click();
     await page.getByRole('option', { name: 'SSE', exact: true }).click();

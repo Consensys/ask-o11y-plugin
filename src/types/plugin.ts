@@ -20,4 +20,6 @@ export type AppPluginSettings = {
 
   kioskModeEnabled?: boolean;
   chatPanelPosition?: 'left' | 'right';
+
+  graphitiScanInterval?: string;
 };

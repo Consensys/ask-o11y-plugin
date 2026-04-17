@@ -12,18 +12,7 @@ services:
       GF_AUTH_MANAGED_SERVICE_ACCOUNTS_ENABLED: 'true'
       LLM_API_KEY: ${LLM_API_KEY:-}
       PROM_URL: ${PROM_URL:-}
+      LOKI_URL: ${LOKI_URL:-}
+      TEMPO_URL: ${TEMPO_URL:-}
       O11Y_USER: ${O11Y_USER:-}
       O11Y_PWD: ${O11Y_PWD:-}
-      GF_TRACING_OPENTELEMETRY_OTLP_ADDRESS: tempo:4317
-      GF_TRACING_OPENTELEMETRY_OTLP_INSECURE: 'true'
-    depends_on:
-      - tempo
-
-  tempo:
-    image: grafana/tempo:2.8.1
-    command: -config.file=/etc/tempo.yaml
-    volumes:
-      - ./provisioning/tempo.yaml:/etc/tempo.yaml
-    ports:
-      - '4317:4317'
-      - '3200:3200'

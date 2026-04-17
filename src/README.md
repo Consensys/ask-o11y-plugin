@@ -136,7 +136,7 @@ Access at **Configuration → Plugins → Ask O11y → Configuration** (Admin on
 
 ### LLM Settings
 
-Configure maximum tokens for LLM requests (default: 180,000, range: 1,000–200,000).
+Configure maximum tokens for LLM requests (default: 128,000, range: 1,000–200,000).
 
 ### MCP Server Management
 

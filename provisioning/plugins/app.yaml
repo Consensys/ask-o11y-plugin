@@ -4,6 +4,19 @@ apps:
   - type: grafana-llm-app
     org_id: 1
     jsonData:
+      mcp:
+        disabled: false
+        toolsets:
+          search: false
+          datasource: true
+          incident: false
+          prometheus: true
+          loki: false
+          alerting: false
+          dashboard: false
+          oncall: false
+          asserts: false
+          sift: false
       enableDevSandbox: true
       provider: anthropic
       models:
@@ -16,4 +29,12 @@ apps:
   - type: consensys-asko11y-app
     org_id: 1
     jsonData:
-        useBuiltInMCP: true
+      useBuiltInMCP: true
+      mcpServers:
+        - id: graphiti
+          name: Graphiti Knowledge Graph
+          url: 'http://graphiti:8000/mcp'
+          enabled: true
+          type: 'streamable-http'
+          headers:
+            Host: 'localhost:8000'

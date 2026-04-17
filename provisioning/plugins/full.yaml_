@@ -16,8 +16,15 @@ apps:
   - type: consensys-asko11y-app
     org_id: 1
     jsonData:
-      maxTotalTokens: 180000
+      maxTotalTokens: 128000
       mcpServers:
+        - id: graphiti
+          name: Graphiti Knowledge Graph
+          url: 'http://graphiti:8000/mcp'
+          enabled: true
+          type: 'streamable-http'
+          headers:
+            Host: 'localhost:8000'
         - id: 'time'
           name: 'Time Server'
           url: 'http://mcpo:8000/time'
@@ -55,8 +62,15 @@ apps:
   - type: consensys-asko11y-app
     org_id: 2
     jsonData:
-      maxTotalTokens: 180000
+      maxTotalTokens: 128000
       mcpServers:
+        - id: graphiti
+          name: Graphiti Knowledge Graph
+          url: 'http://graphiti:8000/mcp'
+          enabled: true
+          type: 'streamable-http'
+          headers:
+            Host: 'localhost:8000'
         - id: 'time'
           name: 'Time Server'
           url: 'http://mcpo:8000/time'

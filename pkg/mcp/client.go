@@ -66,9 +66,14 @@ func (t *customRoundTripper) RoundTrip(req *http.Request) (*http.Response, error
 		req.Header.Set("X-Scope-OrgID", t.orgName)
 	}
 
-	// Add any configured headers (can override the above if needed)
+	// Add any configured headers (can override the above if needed).
+	// "Host" must be set via req.Host, not req.Header — Go ignores Header["Host"].
 	for key, value := range t.config.Headers {
-		req.Header.Set(key, value)
+		if strings.EqualFold(key, "Host") {
+			req.Host = value
+		} else {
+			req.Header.Set(key, value)
+		}
 	}
 
 	return t.base.RoundTrip(req)
@@ -174,7 +179,11 @@ type configHeaderRoundTripper struct {
 func (t *configHeaderRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
 	req = req.Clone(req.Context())
 	for key, value := range t.headers {
-		req.Header.Set(key, value)
+		if strings.EqualFold(key, "Host") {
+			req.Host = value
+		} else {
+			req.Header.Set(key, value)
+		}
 	}
 	return t.base.RoundTrip(req)
 }

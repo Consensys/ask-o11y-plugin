@@ -79,6 +79,8 @@ type PluginSettings struct {
 	RecentMessageCount int `json:"recentMessageCount,omitempty"`
 
 	BuiltInMCPBaseURL string `json:"builtInMCPBaseURL,omitempty"`
+
+	GraphitiScanInterval string `json:"graphitiScanInterval,omitempty"`
 }
 
 const mcpServerHeaderPrefix = "mcpServerHeader."
@@ -117,6 +119,7 @@ type Plugin struct {
 	logger         log.Logger
 	mcpProxy       *mcp.Proxy
 	agentLoop      *agent.AgentLoop
+	scout          *Scout
 	shareStore     ShareStoreInterface
 	runStore       RunStoreInterface
 	sessionStore   SessionStoreInterface
@@ -146,7 +149,7 @@ func NewPlugin(ctx context.Context, settings backend.AppInstanceSettings) (insta
 	applySecureHeaders(pluginSettings.MCPServers, settings.DecryptedSecureJSONData)
 
 	if pluginSettings.MaxTotalTokens <= 0 {
-		pluginSettings.MaxTotalTokens = 180000
+		pluginSettings.MaxTotalTokens = agent.DefaultMaxTotalTokens
 	}
 	if pluginSettings.RecentMessageCount <= 0 {
 		pluginSettings.RecentMessageCount = 10
@@ -219,7 +222,7 @@ func NewPlugin(ctx context.Context, settings backend.AppInstanceSettings) (insta
 
 	llmHTTPClient, err := httpclient.New(httpclient.Options{
 		Timeouts: &httpclient.TimeoutOptions{
-			Timeout:     120 * time.Second,
+			Timeout:     600 * time.Second,
 			DialTimeout: 10 * time.Second,
 		},
 	})
@@ -230,10 +233,20 @@ func NewPlugin(ctx context.Context, settings backend.AppInstanceSettings) (insta
 	llmClient := agent.NewLLMClient(logger, llmHTTPClient)
 	agentLoop := agent.NewAgentLoop(llmClient, mcpProxy, logger)
 
+	var scout *Scout
+	if interval, ok := parseScanInterval(pluginSettings.GraphitiScanInterval); ok {
+		scout = NewScout(pluginCtx, agentLoop, mcpProxy, logger, interval, pluginSettings)
+		go scout.Start()
+		logger.Info("Scout started", "interval", pluginSettings.GraphitiScanInterval)
+	} else {
+		logger.Info("Scout auto-scan disabled (interval=off)")
+	}
+
 	p := &Plugin{
 		logger:         logger,
 		mcpProxy:       mcpProxy,
 		agentLoop:      agentLoop,
+		scout:          scout,
 		shareStore:     shareStore,
 		runStore:       runStore,
 		sessionStore:   sessionStore,
@@ -294,6 +307,11 @@ func (p *Plugin) Dispose() {
 	p.runCancels = nil
 	p.runCancelsMu.Unlock()
 
+	// Stop the scout before closing the proxy so its in-flight scavenge can finish.
+	if p.scout != nil {
+		p.scout.Stop()
+	}
+
 	// Close proxy and Redis before cancelling context so that
 	// graceful shutdown I/O can still use the plugin context.
 	p.mcpProxy.StopHealthMonitoring()
@@ -346,6 +364,9 @@ func (p *Plugin) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/agent/run", p.handleAgentRun)
 	mux.HandleFunc("/api/agent/runs/", p.handleAgentRuns)
 	mux.HandleFunc("/api/prompt-defaults", p.handlePromptDefaults)
+	mux.HandleFunc("/api/graphiti/discover", p.handleGraphitiDiscover)
+	mux.HandleFunc("/api/graphiti/status", p.handleGraphitiStatus)
+	mux.HandleFunc("/api/graphiti/ingest-session", p.handleGraphitiIngestSession)
 
 	// Session CRUD (new) — registered before share routes for specificity
 	mux.HandleFunc("/api/sessions/current", p.handleSessionCurrent)
@@ -610,6 +631,10 @@ func (p *Plugin) handleAgentRun(w http.ResponseWriter, r *http.Request) {
 	}
 
 	numericOrgID := getOrgID(r)
+	if p.scout != nil {
+		p.scout.SetOrgID(numericOrgID)
+		p.scout.SetGrafanaConfig(grafanaURL, saToken)
+	}
 
 	toolCtx := BuildToolContext(req.OrgName, userRole)
 	toolCtx.ConversationType = req.Type
@@ -619,6 +644,14 @@ func (p *Plugin) handleAgentRun(w http.ResponseWriter, r *http.Request) {
 		p.logger.Error("Failed to build system prompt", "error", err)
 		http.Error(w, "Failed to build system prompt", http.StatusInternalServerError)
 		return
+	}
+
+	if p.isGraphitiAvailable() {
+		groupID := orgGroupID(numericOrgID)
+		systemPrompt += fmt.Sprintf(
+			"\n\nKnowledge graph tools are available (group_id: %q). Use graphiti_search_memory_facts to look up service topology, dependencies, and historical incidents. Pass center_node_uuid from results for focused graph traversal.",
+			groupID,
+		)
 	}
 
 	userPrompt, err := p.promptRegistry.BuildUserPrompt(req.Type, req.Message, toolCtx)
@@ -715,6 +748,7 @@ func (p *Plugin) handleAgentRun(w http.ResponseWriter, r *http.Request) {
 		OrgID:              orgID,
 		OrgName:            req.OrgName,
 		ScopeOrgID:         req.ScopeOrgID,
+		ExcludeToolNames:   graphitiWriteToolNames,
 	}
 
 	detachedCtx := context.WithoutCancel(ctx)
@@ -991,6 +1025,238 @@ func getUserID(r *http.Request) int64 {
 	}
 
 	return 0
+}
+
+// isGraphitiAvailable returns true when the graphiti MCP server is registered
+// and has initialized its tools (i.e. graphiti_add_memory is in the tool list).
+func (p *Plugin) isGraphitiAvailable() bool {
+	tools, _ := p.mcpProxy.ListTools()
+	return hasGraphitiMemoryTool(tools)
+}
+
+// handleGraphitiStatus returns the knowledge graph connection status by calling
+// the graphiti_get_status MCP tool.
+func (p *Plugin) handleGraphitiStatus(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	enabled := p.isGraphitiAvailable()
+	connected := false
+	if enabled {
+		result, err := p.mcpProxy.CallTool("graphiti_get_status", map[string]interface{}{})
+		connected = err == nil && result != nil && !result.IsError
+		if err != nil {
+			p.logger.Warn("Knowledge graph status check failed", "error", err)
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"enabled":   enabled,
+		"connected": connected,
+	})
+}
+
+// handleGraphitiDiscover triggers a hidden discovery agent session that explores
+// the full observability environment and ingests the findings into the knowledge graph.
+func (p *Plugin) handleGraphitiDiscover(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !p.isGraphitiAvailable() {
+		http.Error(w, "Knowledge graph not available", http.StatusServiceUnavailable)
+		return
+	}
+
+	cfg := backend.GrafanaConfigFromContext(r.Context())
+	if cfg == nil {
+		p.logger.Error("Grafana configuration not available for discovery run")
+		http.Error(w, "Grafana configuration not available", http.StatusInternalServerError)
+		return
+	}
+	saToken, err := cfg.PluginAppClientSecret()
+	if err != nil {
+		p.logger.Warn("Service account token not available for discovery run", "error", err)
+		saToken = ""
+	}
+
+	grafanaURL, urlSource := resolveGrafanaURL(p.settings, cfg)
+	p.logger.Debug("Resolved Grafana URL for discovery run", "url", grafanaURL, "source", urlSource)
+
+	if p.useBuiltInMCP && saToken != "" {
+		builtInURL := grafanaURL + "/api/plugins/grafana-llm-app/resources/mcp/grafana"
+		if err := p.mcpProxy.EnsureServer(mcp.ServerConfig{
+			ID:      "mcp-grafana",
+			Name:    "Grafana Built-in MCP",
+			URL:     builtInURL,
+			Type:    "streamable-http",
+			Enabled: true,
+			Headers: map[string]string{"Authorization": "Bearer " + saToken},
+		}); err != nil {
+			p.logger.Error("Failed to ensure built-in MCP server for discovery", "error", err)
+			http.Error(w, "Failed to initialize MCP server", http.StatusInternalServerError)
+			return
+		}
+	}
+
+	orgID := getOrgID(r)
+	userID := getUserID(r)
+	userRole := getUserRole(r)
+
+	runID, err := generateShareID()
+	if err != nil {
+		p.logger.Error("Failed to generate discovery run ID", "error", err)
+		http.Error(w, "Failed to generate run ID", http.StatusInternalServerError)
+		return
+	}
+
+	p.runStore.CreateRun(runID, userID, orgID)
+
+	loopReq := agent.LoopRequest{
+		Messages:           []agent.Message{{Role: "user", Content: GraphitiDiscoveryMessage}},
+		SystemPrompt:       GraphitiDiscoverySystemPrompt,
+		MaxTotalTokens:     p.settings.MaxTotalTokens,
+		RecentMessageCount: p.settings.RecentMessageCount,
+		MaxIterations:      GraphitiDiscoveryMaxIter,
+		GrafanaURL:         grafanaURL,
+		AuthToken:          saToken,
+		UserRole:           userRole,
+		OrgID:              strconv.FormatInt(orgID, 10),
+		OrgName:            "Org" + strconv.FormatInt(orgID, 10),
+		ExcludeToolNames:   graphitiWriteToolNames,
+	}
+
+	eventCh := make(chan agent.SSEEvent, GraphitiDiscoveryMaxIter*6)
+	detachedCtx := context.WithoutCancel(r.Context())
+	runCtx, runCancel := context.WithCancel(detachedCtx)
+
+	p.runCancelsMu.Lock()
+	p.runCancels[runID] = runCancel
+	p.runCancelsMu.Unlock()
+
+	go p.agentLoop.Run(runCtx, loopReq, eventCh)
+	go func() {
+		p.consumeDiscoveryEvents(runID, orgID, eventCh)
+		runCancel()
+		p.runCancelsMu.Lock()
+		delete(p.runCancels, runID)
+		p.runCancelsMu.Unlock()
+	}()
+
+	p.logger.Info("Knowledge graph discovery run started", "runId", runID, "orgID", orgID)
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"runId":  runID,
+		"status": RunStatusRunning,
+	})
+}
+
+// consumeDiscoveryEvents drains the agent event channel, updates run status,
+// and — on success — calls graphiti_add_memory with the agent's synthesis.
+// We call it from Go rather than letting the agent call it, to avoid Anthropic
+// streaming-parser failures when tool argument JSON contains nested JSON content.
+func (p *Plugin) consumeDiscoveryEvents(runID string, orgID int64, eventCh <-chan agent.SSEEvent) {
+	lastEvent, synthesis := collectDiscoverySynthesis(eventCh, func(event agent.SSEEvent) {
+		p.runStore.AppendEvent(runID, event)
+	})
+
+	switch lastEvent.Type {
+	case "done":
+		if synthesis != "" && p.isGraphitiAvailable() {
+			if err := ingestGraphitiMemory(
+				p.mcpProxy,
+				orgID,
+				"discovery_synthesis",
+				synthesis,
+				"text",
+				"Service topology discovery - agent synthesis",
+			); err != nil {
+				p.logger.Warn("Failed to ingest discovery synthesis into knowledge graph", "runId", runID, "error", err)
+			} else {
+				p.logger.Info("Discovery synthesis ingested into knowledge graph", "runId", runID)
+			}
+		}
+		p.runStore.FinishRun(runID, RunStatusCompleted, "")
+		p.logger.Info("Discovery run completed", "runId", runID, "orgID", orgID)
+	case "error":
+		var errMsg string
+		if ee, ok := lastEvent.Data.(agent.ErrorEvent); ok {
+			errMsg = ee.Message
+		}
+		p.runStore.FinishRun(runID, RunStatusFailed, errMsg)
+		p.logger.Warn("Discovery run failed", "runId", runID, "error", errMsg)
+	default:
+		p.runStore.FinishRun(runID, RunStatusCancelled, "")
+		p.logger.Warn("Discovery run cancelled", "runId", runID)
+	}
+}
+
+// ingestSessionRequest is the JSON body for POST /api/graphiti/ingest-session.
+type ingestSessionRequest struct {
+	Messages []ingestSessionMessage `json:"messages"`
+}
+
+type ingestSessionMessage struct {
+	Role    string `json:"role"` // "user" | "assistant"
+	Content string `json:"content"`
+}
+
+// handleGraphitiIngestSession ingests conversation messages from a completed
+// investigation session into the knowledge graph. This is the "Feed to Knowledge
+// Graph" action — the user opts in to share their investigation findings so
+// future sessions can leverage discovered causal relationships.
+func (p *Plugin) handleGraphitiIngestSession(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !p.isGraphitiAvailable() {
+		http.Error(w, "Knowledge graph not available", http.StatusServiceUnavailable)
+		return
+	}
+
+	var req ingestSessionRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+	if len(req.Messages) == 0 {
+		http.Error(w, "No messages provided", http.StatusBadRequest)
+		return
+	}
+
+	orgID := getOrgID(r)
+	body, count := buildSessionMemoryBody(req.Messages)
+
+	if count == 0 {
+		http.Error(w, "No non-empty messages provided", http.StatusBadRequest)
+		return
+	}
+
+	if err := ingestGraphitiMemory(
+		p.mcpProxy,
+		orgID,
+		"investigation_session",
+		body,
+		"message",
+		"Ask O11y investigation session",
+	); err != nil {
+		p.logger.Error("Failed to ingest session into knowledge graph",
+			"error", err, "orgID", orgID)
+		http.Error(w, "Failed to ingest session", http.StatusInternalServerError)
+		return
+	}
+
+	p.logger.Info("Session ingested into knowledge graph", "orgID", orgID, "messages", count)
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"ingested": count,
+	})
 }
 
 func stringPtr(s string) *string {
