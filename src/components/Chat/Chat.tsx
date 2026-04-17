@@ -8,7 +8,7 @@ import { useChatScene } from './hooks/useChatScene';
 import { useSidePanelState } from './hooks/useSidePanelState';
 import { ChatInterfaceState } from './scenes/ChatInterfaceScene';
 import { GrafanaPageState } from './scenes/GrafanaPageScene';
-import { SessionSidebar, NewChatButton, HistoryButton } from './components';
+import { SessionSidebar, NewChatButton, HistoryButton, SaveToMemoryButton } from './components';
 import { ChatInputRef } from './components/ChatInput/ChatInput';
 import { ChatErrorBoundary } from '../ErrorBoundary';
 import type { SessionMetadata } from './hooks/useSessionManager';
@@ -96,6 +96,7 @@ function ChatComponent({
   const currentSession = sessionManager.sessions.find((s: SessionMetadata) => s.id === sessionManager.currentSessionId);
   const currentSessionTitle = currentSession?.title;
   const hasMessages = chatHistory.length > 0;
+  const graphitiEnabled = pluginSettings.mcpServers?.some((s) => s.id === 'graphiti' && s.enabled) ?? false;
 
   const chatInterfaceState: ChatInterfaceState = useMemo(
     () => ({
@@ -110,7 +111,12 @@ function ChatComponent({
       chatInputRef,
       bottomSpacerRef,
       leftSlot: hasMessages ? <NewChatButton onConfirm={clearChat} isGenerating={isGenerating} /> : undefined,
-      rightSlot: <HistoryButton onClick={openHistory} sessionCount={sessionManager.sessions.length} />,
+      rightSlot: (
+        <div className="flex items-center gap-1">
+          {graphitiEnabled && hasMessages && <SaveToMemoryButton messages={chatHistory} />}
+          <HistoryButton onClick={openHistory} sessionCount={sessionManager.sessions.length} />
+        </div>
+      ),
       readOnly,
       onSuggestionClick: handleSuggestionClick,
       queuedMessageCount: messageQueue.length,
@@ -129,6 +135,7 @@ function ChatComponent({
       chatInputRef,
       bottomSpacerRef,
       hasMessages,
+      graphitiEnabled,
       clearChat,
       openHistory,
       readOnly,

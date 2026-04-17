@@ -2,6 +2,7 @@ import { config } from '@grafana/runtime';
 import type { ChatMessage } from '../components/Chat/types';
 
 const SESSIONS_URL = '/api/plugins/consensys-asko11y-app/resources/api/sessions';
+const GRAPHITI_URL = '/api/plugins/consensys-asko11y-app/resources/api/graphiti';
 
 function orgHeaders(): Record<string, string> {
   const orgId = String(config.bootData.user.orgId || '1');
@@ -114,4 +115,18 @@ export async function setCurrentSessionId(sessionId: string | null): Promise<voi
   if (!resp.ok) {
     throw new Error(`Failed to set current session (${resp.status})`);
   }
+}
+
+export async function ingestSession(messages: ChatMessage[]): Promise<{ ingested: number }> {
+  const resp = await fetch(`${GRAPHITI_URL}/ingest-session`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...orgHeaders() },
+    body: JSON.stringify({
+      messages: messages.map((m) => ({ role: m.role, content: m.content })),
+    }),
+  });
+  if (!resp.ok) {
+    throw new Error(resp.status === 503 ? 'Knowledge graph not available' : 'Failed to save to memory');
+  }
+  return resp.json();
 }

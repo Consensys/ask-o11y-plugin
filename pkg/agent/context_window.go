@@ -5,7 +5,7 @@ import (
 	"strings"
 )
 
-const defaultMaxTotalTokens = 180_000
+const DefaultMaxTotalTokens = 128_000
 const defaultRecentMessageCount = 15
 const systemMessageBuffer = 1000
 const maxToolResponseTokens = 8000
@@ -72,7 +72,7 @@ func sanitizeMessages(messages []Message) []Message {
 
 func TrimMessagesToTokenLimit(messages []Message, tools []OpenAITool, maxTokens int) []Message {
 	if maxTokens <= 0 {
-		maxTokens = defaultMaxTotalTokens
+		maxTokens = DefaultMaxTotalTokens
 	}
 
 	if estimateMessagesTokens(messages, tools) <= maxTokens {

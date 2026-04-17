@@ -1,6 +1,13 @@
 package plugin
 
-import "time"
+import (
+	"fmt"
+	"time"
+)
+
+func orgGroupID(orgID int64) string {
+	return fmt.Sprintf("org_%d", orgID)
+}
 
 const (
 	ShareRateLimitPerHour = 50
@@ -30,4 +37,8 @@ const (
 
 const (
 	SessionMaxPerUserOrg = 50
+)
+
+const (
+	GraphitiDiscoveryMaxIter = 50
 )

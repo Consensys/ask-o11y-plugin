@@ -20,8 +20,8 @@ func respondAsStream(w http.ResponseWriter, resp ChatCompletionResponse) {
 
 	emitChunk := func(chunk streamChunk) {
 		w.Write([]byte("data: ")) //nolint:errcheck
-		enc.Encode(chunk)        //nolint:errcheck
-		w.Write([]byte("\n"))    //nolint:errcheck
+		enc.Encode(chunk)         //nolint:errcheck
+		w.Write([]byte("\n"))     //nolint:errcheck
 	}
 
 	for _, choice := range resp.Choices {
@@ -279,6 +279,52 @@ func TestAgentLoop_ContentWithToolCalls_DropsContent(t *testing.T) {
 	content := events[2].Data.(ContentEvent)
 	if content.Content != "Here are the results." {
 		t.Errorf("expected final answer, got %q", content.Content)
+	}
+}
+
+func TestCompletionTokenBudget(t *testing.T) {
+	tests := []struct {
+		name     string
+		total    int
+		expected int
+	}{
+		{name: "default budget", total: 0, expected: defaultMaxCompletionTokens},
+		{name: "small total clamps to half", total: 1000, expected: 500},
+		{name: "medium total uses one eighth", total: 16000, expected: 2000},
+		{name: "large total caps at default", total: 128000, expected: defaultMaxCompletionTokens},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := completionTokenBudget(tt.total); got != tt.expected {
+				t.Fatalf("completionTokenBudget(%d) = %d, want %d", tt.total, got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestEnsureScopedGraphitiArgs(t *testing.T) {
+	tool := mcp.Tool{
+		Name: "graphiti_search_memory_facts",
+		InputSchema: map[string]interface{}{
+			"properties": map[string]interface{}{
+				"group_id": map[string]interface{}{"type": "string"},
+				"query":    map[string]interface{}{"type": "string"},
+			},
+		},
+	}
+
+	args := map[string]interface{}{"query": "payments"}
+	ensureScopedGraphitiArgs(tool, args, "42")
+
+	if got := args["group_id"]; got != "org_42" {
+		t.Fatalf("group_id = %v, want %q", got, "org_42")
+	}
+
+	// Org-scoped group_id must always be forced — even if the LLM supplied one.
+	ensureScopedGraphitiArgs(tool, args, "7")
+	if got := args["group_id"]; got != "org_7" {
+		t.Fatalf("group_id should be overwritten to current org, got %v", got)
 	}
 }
 

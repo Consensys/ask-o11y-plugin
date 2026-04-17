@@ -41,6 +41,12 @@ type State = {
   defaultSystemPrompt: string;
   investigationPrompt: string;
   performancePrompt: string;
+  graphitiScanInterval: string;
+  graphitiConnected: boolean | null;
+  graphitiDiscovering: boolean;
+  graphitiRunId: string | null;
+  graphitiToolCount: number;
+  graphitiError: string | null;
 };
 
 type ValidationErrors = {
@@ -51,6 +57,7 @@ type ValidationErrors = {
 export interface AppConfigProps extends PluginConfigPageProps<AppPluginMeta<AppPluginSettings>> {}
 
 const PROMPT_DEFAULTS_URL = '/api/plugins/consensys-asko11y-app/resources/api/prompt-defaults';
+const DEFAULT_MAX_TOTAL_TOKENS = 128000;
 
 const AppConfig = ({ plugin }: AppConfigProps) => {
   const { enabled, pinned, jsonData } = plugin.meta;
@@ -58,7 +65,7 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
     (plugin.meta as unknown as { secureJsonFields?: Record<string, boolean> }).secureJsonFields || {};
   const [promptDefaults, setPromptDefaults] = useState<PromptDefaults | null>(null);
   const [state, setState] = useState<State>({
-    maxTotalTokens: jsonData?.maxTotalTokens || 180000,
+    maxTotalTokens: jsonData?.maxTotalTokens || DEFAULT_MAX_TOTAL_TOKENS,
     mcpServers: jsonData?.mcpServers || [],
     useBuiltInMCP: jsonData?.useBuiltInMCP ?? false,
     builtInMCPAvailable: null,
@@ -68,6 +75,12 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
     defaultSystemPrompt: jsonData?.defaultSystemPrompt || '',
     investigationPrompt: jsonData?.investigationPrompt || '',
     performancePrompt: jsonData?.performancePrompt || '',
+    graphitiScanInterval: jsonData?.graphitiScanInterval || 'off',
+    graphitiConnected: null,
+    graphitiDiscovering: false,
+    graphitiRunId: null,
+    graphitiToolCount: 0,
+    graphitiError: null,
   });
   const [validationErrors, setValidationErrors] = useState<ValidationErrors>({
     mcpServers: {},
@@ -319,6 +332,82 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
     updateMCPServer(serverId, { headers: currentHeaders });
   }
 
+  useEffect(() => {
+    setState((prev) => ({ ...prev, graphitiConnected: null }));
+    lastValueFrom(
+      getBackendSrv().fetch<{ connected: boolean }>({
+        url: `/api/plugins/consensys-asko11y-app/resources/api/graphiti/status`,
+      })
+    )
+      .then((res) => setState((prev) => ({ ...prev, graphitiConnected: res.data.connected })))
+      .catch(() => setState((prev) => ({ ...prev, graphitiConnected: false })));
+  }, []);
+
+  useEffect(() => {
+    if (!state.graphitiRunId) {
+      return;
+    }
+    const runId = state.graphitiRunId;
+    const interval = setInterval(async () => {
+      try {
+        const res = await lastValueFrom(
+          getBackendSrv().fetch<{ status: string; events?: Array<{ type: string }> }>({
+            url: `/api/plugins/consensys-asko11y-app/resources/api/agent/runs/${runId}`,
+          })
+        );
+        const { status, events = [] } = res.data;
+        const toolCount = events.filter((e) => e.type === 'tool_call_result').length;
+        if (status === 'running') {
+          setState((prev) => ({ ...prev, graphitiToolCount: toolCount }));
+        } else {
+          clearInterval(interval);
+          setState((prev) => ({
+            ...prev,
+            graphitiDiscovering: false,
+            graphitiRunId: null,
+            graphitiToolCount: toolCount,
+            graphitiError: status === 'failed' ? 'Discovery run failed' : null,
+          }));
+        }
+      } catch {
+        clearInterval(interval);
+        setState((prev) => ({ ...prev, graphitiDiscovering: false, graphitiError: 'Failed to poll discovery status' }));
+      }
+    }, 2000);
+    return () => clearInterval(interval);
+  }, [state.graphitiRunId]);
+
+  function onSubmitGraphitiSettings() {
+    updatePluginAndReload(plugin.meta.id, {
+      enabled,
+      pinned,
+      jsonData: {
+        ...jsonData,
+        graphitiScanInterval: state.graphitiScanInterval,
+      },
+    });
+  }
+
+  async function onBuildKnowledgeGraph() {
+    setState((prev) => ({ ...prev, graphitiDiscovering: true, graphitiRunId: null, graphitiToolCount: 0, graphitiError: null }));
+    try {
+      const res = await lastValueFrom(
+        getBackendSrv().fetch<{ runId: string; status: string }>({
+          url: `/api/plugins/consensys-asko11y-app/resources/api/graphiti/discover`,
+          method: 'POST',
+          data: {},
+        })
+      );
+      setState((prev) => ({ ...prev, graphitiRunId: res.data.runId }));
+    } catch (err) {
+      setState((prev) => ({
+        ...prev,
+        graphitiDiscovering: false,
+        graphitiError: err instanceof Error ? err.message : 'Discovery run failed',
+      }));
+    }
+  }
+
   function savePrompt(field: 'defaultSystemPrompt' | 'investigationPrompt' | 'performancePrompt', value: string) {
     if (value.length > 15000) {
       return;
@@ -461,7 +550,7 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
       <FieldSet label="LLM Settings">
         <Field
           label="Max Total Tokens"
-          description="Maximum number of tokens for LLM requests (minimum: 1000, recommended: 50000-200000)"
+          description="Maximum prompt-plus-completion budget per LLM call (minimum: 1000, default: 128000, recommended: 20000-128000)"
           invalid={!!validationErrors.maxTotalTokens}
           error={validationErrors.maxTotalTokens}
         >
@@ -472,7 +561,7 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
             data-testid={testIds.appConfig.maxTotalTokens}
             type="number"
             value={state.maxTotalTokens}
-            placeholder="180000"
+            placeholder={String(DEFAULT_MAX_TOTAL_TOKENS)}
             min={1000}
             max={200000}
             onChange={onChange}
@@ -871,6 +960,75 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
             Save Display Settings
           </Button>
         </div>
+      </FieldSet>
+
+      <FieldSet label="Knowledge Graph" className="mt-4">
+        <p className="text-sm text-secondary mb-3">
+          Graphiti knowledge graph integration is configured via the MCP server provisioning. The agent uses
+          read-only graph tools during regular sessions; Scout and discover sessions can also write to the graph.
+        </p>
+
+        <Field
+          label="Auto-scan interval"
+          description="How often the Scout agent discovers services via MCP tools and updates the knowledge graph. Each scan covers the corresponding time window."
+        >
+          <Select
+            width={20}
+            value={state.graphitiScanInterval}
+            onChange={(v) => setState({ ...state, graphitiScanInterval: v.value ?? 'off' })}
+            options={[
+              { label: 'Off', value: 'off' },
+              { label: 'Every 5 minutes', value: '5m' },
+              { label: 'Every 15 minutes', value: '15m' },
+              { label: 'Every 30 minutes', value: '30m' },
+              { label: 'Every hour', value: '1h' },
+              { label: 'Every 3 hours', value: '3h' },
+              { label: 'Every 12 hours', value: '12h' },
+              { label: 'Every 24 hours', value: '24h' },
+            ]}
+          />
+        </Field>
+
+        <Field label="Status">
+          {state.graphitiConnected === null ? (
+            <span className="text-secondary text-sm">
+              <Icon name="fa fa-spinner" /> Checking…
+            </span>
+          ) : state.graphitiConnected ? (
+            <span className="text-success text-sm">
+              <Icon name="check-circle" /> Connected
+            </span>
+          ) : (
+            <span className="text-error text-sm">
+              <Icon name="exclamation-triangle" /> Unreachable — ensure the graphiti MCP server is provisioned and running
+            </span>
+          )}
+        </Field>
+
+        <div className="mt-3 flex gap-2">
+          <Button onClick={onSubmitGraphitiSettings} variant="primary">
+            Save Knowledge Graph settings
+          </Button>
+
+          <Button
+            onClick={onBuildKnowledgeGraph}
+            variant="secondary"
+            disabled={state.graphitiDiscovering || !state.graphitiConnected}
+            icon={state.graphitiDiscovering ? 'fa fa-spinner' : 'database'}
+          >
+            {state.graphitiDiscovering
+              ? `Building… (${state.graphitiToolCount} tool calls)`
+              : 'Build Knowledge Graph'}
+          </Button>
+        </div>
+        {state.graphitiError && (
+          <div className="mt-2 text-error text-sm">{state.graphitiError}</div>
+        )}
+        {!state.graphitiDiscovering && !state.graphitiError && state.graphitiToolCount > 0 && (
+          <div className="mt-2 text-success text-sm">
+            <Icon name="check" /> Build complete — {state.graphitiToolCount} tool calls processed
+          </div>
+        )}
       </FieldSet>
     </div>
   );

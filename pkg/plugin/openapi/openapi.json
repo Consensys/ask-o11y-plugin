@@ -3,7 +3,7 @@
   "info": {
     "title": "Ask O11y - AI-Powered Observability Assistant API",
     "version": "0.2.7",
-    "description": "REST API for Ask O11y Grafana plugin. Provides AI-powered observability assistance through natural language conversations. Users can query metrics, logs, traces, manage dashboards, and troubleshoot issues without writing PromQL/LogQL or navigating complex UIs.\n\n## Authentication\nAll endpoints (except `/health` and `/`) require Grafana session authentication via the `grafana_session` cookie.\n\n## Role-Based Access Control (RBAC)\nThe plugin enforces role-based access control:\n- **Admin/Editor**: Full access to all endpoints and MCP tools\n- **Viewer**: Read-only access (MCP tools with `readOnlyHint: true` annotation only)\n\n## Multi-Tenant Organization Isolation\nAll endpoints support multi-tenant organization isolation via headers:\n- `X-Grafana-Org-Id`: Numeric organization ID (defaults to \"1\")\n- `X-Scope-OrgID`: Tenant name (optional)\n- Sessions, shares, and agent runs are scoped to user + organization\n\n## Rate Limiting\n- Session sharing: 50 shares per hour per user\n\n## Limits\n- Max sessions per user/org: 50 (oldest auto-evicted)\n- Max agent iterations per run: 25\n- Max events per run: 500\n- Default token limit: 180,000",
+    "description": "REST API for Ask O11y Grafana plugin. Provides AI-powered observability assistance through natural language conversations. Users can query metrics, logs, traces, manage dashboards, and troubleshoot issues without writing PromQL/LogQL or navigating complex UIs.\n\n## Authentication\nAll endpoints (except `/health` and `/`) require Grafana session authentication via the `grafana_session` cookie.\n\n## Role-Based Access Control (RBAC)\nThe plugin enforces role-based access control:\n- **Admin/Editor**: Full access to all endpoints and MCP tools\n- **Viewer**: Read-only access (MCP tools with `readOnlyHint: true` annotation only)\n\n## Multi-Tenant Organization Isolation\nAll endpoints support multi-tenant organization isolation via headers:\n- `X-Grafana-Org-Id`: Numeric organization ID (defaults to \"1\")\n- `X-Scope-OrgID`: Tenant name (optional)\n- Sessions, shares, and agent runs are scoped to user + organization\n\n## Rate Limiting\n- Session sharing: 50 shares per hour per user\n\n## Limits\n- Max sessions per user/org: 50 (oldest auto-evicted)\n- Max agent iterations per run: 25\n- Max events per run: 500\n- Default token limit: 128,000",
     "contact": {
       "name": "Ask O11y Support",
       "url": "https://github.com/Consensys/ask-o11y-plugin"
@@ -51,6 +51,10 @@
     {
       "name": "Configuration",
       "description": "Plugin configuration and defaults"
+    },
+    {
+      "name": "Knowledge Graph",
+      "description": "Knowledge graph endpoints for service map discovery, status checking, and session feedback ingestion via Graphiti."
     }
   ],
   "paths": {
@@ -59,7 +63,9 @@
         "summary": "Health check",
         "description": "Returns the health status of the plugin and MCP server connectivity. This endpoint does not require authentication.",
         "operationId": "healthCheck",
-        "tags": ["Health"],
+        "tags": [
+          "Health"
+        ],
         "security": [],
         "responses": {
           "200": {
@@ -71,7 +77,10 @@
                   "properties": {
                     "status": {
                       "type": "string",
-                      "enum": ["ok", "warning"],
+                      "enum": [
+                        "ok",
+                        "warning"
+                      ],
                       "description": "Overall health status"
                     },
                     "message": {
@@ -83,7 +92,10 @@
                       "description": "Number of healthy MCP servers"
                     }
                   },
-                  "required": ["status", "message"]
+                  "required": [
+                    "status",
+                    "message"
+                  ]
                 },
                 "example": {
                   "status": "ok",
@@ -104,7 +116,9 @@
         "summary": "Default handler",
         "description": "Informational endpoint that returns plugin metadata. This endpoint does not require authentication.",
         "operationId": "defaultInfo",
-        "tags": ["Health"],
+        "tags": [
+          "Health"
+        ],
         "security": [],
         "responses": {
           "200": {
@@ -137,7 +151,9 @@
         "summary": "OpenAPI specification",
         "description": "Returns the complete OpenAPI 3.0.3 specification for this API. This endpoint does not require authentication.",
         "operationId": "getOpenAPISpec",
-        "tags": ["Health"],
+        "tags": [
+          "Health"
+        ],
         "security": [],
         "responses": {
           "200": {
@@ -167,7 +183,9 @@
         "summary": "MCP JSON-RPC proxy",
         "description": "Raw MCP protocol JSON-RPC 2.0 proxy endpoint. Forwards requests to configured MCP servers. This is a low-level endpoint; most users should use `/api/mcp/tools` and `/api/mcp/call-tool` instead.",
         "operationId": "mcpProxy",
-        "tags": ["MCP"],
+        "tags": [
+          "MCP"
+        ],
         "parameters": [
           {
             "$ref": "#/components/parameters/X-Grafana-Org-Id"
@@ -209,7 +227,9 @@
         "summary": "List MCP tools",
         "description": "Returns a list of available MCP tools filtered by the user's role. Admin/Editor roles see all tools, while Viewer role only sees tools with `readOnlyHint: true` annotation. Tools from multiple MCP servers are aggregated.",
         "operationId": "listMCPTools",
-        "tags": ["MCP"],
+        "tags": [
+          "MCP"
+        ],
         "parameters": [
           {
             "$ref": "#/components/parameters/X-Grafana-Org-Id"
@@ -230,7 +250,9 @@
                       }
                     }
                   },
-                  "required": ["tools"]
+                  "required": [
+                    "tools"
+                  ]
                 },
                 "example": {
                   "tools": [
@@ -245,7 +267,9 @@
                             "description": "PromQL query"
                           }
                         },
-                        "required": ["query"]
+                        "required": [
+                          "query"
+                        ]
                       },
                       "annotations": {
                         "readOnlyHint": true
@@ -270,7 +294,9 @@
         "summary": "Execute MCP tool",
         "description": "Executes an MCP tool with RBAC enforcement. The tool must be available in the user's filtered tool list (see `/api/mcp/tools`). Admin/Editor roles can access all tools, while Viewer role can only access tools with `readOnlyHint: true` annotation. RBAC is enforced both at tool listing time and at execution time (double-check pattern).",
         "operationId": "callMCPTool",
-        "tags": ["MCP"],
+        "tags": [
+          "MCP"
+        ],
         "parameters": [
           {
             "$ref": "#/components/parameters/X-Grafana-Org-Id"
@@ -350,7 +376,9 @@
         "summary": "Get MCP server health",
         "description": "Returns health status for all configured MCP servers. Used for monitoring MCP server connectivity.",
         "operationId": "getMCPServerHealth",
-        "tags": ["MCP"],
+        "tags": [
+          "MCP"
+        ],
         "responses": {
           "200": {
             "description": "MCP server health status",
@@ -375,11 +403,21 @@
                           },
                           "type": {
                             "type": "string",
-                            "enum": ["openapi", "standard", "sse", "streamable-http"]
+                            "enum": [
+                              "openapi",
+                              "standard",
+                              "sse",
+                              "streamable-http"
+                            ]
                           },
                           "status": {
                             "type": "string",
-                            "enum": ["healthy", "unhealthy", "degraded", "disconnected"]
+                            "enum": [
+                              "healthy",
+                              "unhealthy",
+                              "degraded",
+                              "disconnected"
+                            ]
                           },
                           "lastCheck": {
                             "type": "string",
@@ -414,7 +452,11 @@
                       "properties": {
                         "overallStatus": {
                           "type": "string",
-                          "enum": ["healthy", "degraded", "unhealthy"]
+                          "enum": [
+                            "healthy",
+                            "degraded",
+                            "unhealthy"
+                          ]
                         },
                         "total": {
                           "type": "integer"
@@ -449,7 +491,9 @@
         "summary": "Start detached agent run",
         "description": "Starts an agentic conversation loop in detached mode. The agent processes the user's message asynchronously, calling MCP tools as needed. Returns immediately with a `runId` and `sessionId`. Use `/api/agent/runs/{runId}/events` to stream the results via SSE.\n\n## RBAC\nTool execution within the agent loop respects user role permissions. Viewer role can only use read-only tools.\n\n## Iteration Limit\nMax 25 iterations per run.",
         "operationId": "startAgentRun",
-        "tags": ["Agent"],
+        "tags": [
+          "Agent"
+        ],
         "parameters": [
           {
             "$ref": "#/components/parameters/X-Grafana-Org-Id"
@@ -483,11 +527,17 @@
                     },
                     "status": {
                       "type": "string",
-                      "enum": ["running"],
+                      "enum": [
+                        "running"
+                      ],
                       "description": "Initial run status"
                     }
                   },
-                  "required": ["runId", "sessionId", "status"]
+                  "required": [
+                    "runId",
+                    "sessionId",
+                    "status"
+                  ]
                 },
                 "example": {
                   "runId": "fL3eq5ZJZuczUSZa643ltfg8eXhAvvppZu_X4rksm8w",
@@ -514,7 +564,9 @@
         "summary": "Get agent run status and events",
         "description": "Returns the current status and all events for an agent run. Only the user who created the run (in the same organization) can access it.",
         "operationId": "getAgentRun",
-        "tags": ["Agent"],
+        "tags": [
+          "Agent"
+        ],
         "parameters": [
           {
             "name": "runId",
@@ -579,7 +631,9 @@
         "summary": "Stream agent run events",
         "description": "Streams all events for an agent run using Server-Sent Events (SSE). Replays all historical events, then streams new events until the run completes. Includes keepalive comments every 15 seconds. Only the user who created the run (in the same organization) can access it.\n\nThis endpoint is useful for reconnecting to an in-progress run after a page refresh.",
         "operationId": "streamAgentRunEvents",
-        "tags": ["Agent"],
+        "tags": [
+          "Agent"
+        ],
         "parameters": [
           {
             "name": "runId",
@@ -627,7 +681,9 @@
         "summary": "Cancel agent run",
         "description": "Cancels a running agent. Only the user who created the run (in the same organization) can cancel it. Returns 409 if the run is not currently running.",
         "operationId": "cancelAgentRun",
-        "tags": ["Agent"],
+        "tags": [
+          "Agent"
+        ],
         "parameters": [
           {
             "name": "runId",
@@ -653,7 +709,9 @@
                   "properties": {
                     "status": {
                       "type": "string",
-                      "enum": ["cancelled"]
+                      "enum": [
+                        "cancelled"
+                      ]
                     }
                   }
                 }
@@ -698,7 +756,9 @@
         "summary": "Get prompt template defaults",
         "description": "Returns the built-in default prompt templates from the Go backend. Used by the frontend settings UI to populate prompt editors and power the 'Reset to Default' button. The Go backend is the single source of truth for prompt defaults.",
         "operationId": "getPromptDefaults",
-        "tags": ["Configuration"],
+        "tags": [
+          "Configuration"
+        ],
         "responses": {
           "200": {
             "description": "Default prompt templates",
@@ -721,7 +781,9 @@
         "summary": "List user sessions",
         "description": "Returns a list of all sessions for the current user in the current organization. Sessions are sorted by last update time (most recent first). Max 50 sessions per user/org; oldest sessions are auto-evicted when limit is reached.",
         "operationId": "listSessions",
-        "tags": ["Sessions"],
+        "tags": [
+          "Sessions"
+        ],
         "parameters": [
           {
             "$ref": "#/components/parameters/X-Grafana-Org-Id"
@@ -753,7 +815,9 @@
         "summary": "Create session",
         "description": "Creates a new chat session. If this is the first session for the user/org, it is automatically set as the current session. Max 50 sessions per user/org; oldest sessions are auto-evicted when limit is reached.",
         "operationId": "createSession",
-        "tags": ["Sessions"],
+        "tags": [
+          "Sessions"
+        ],
         "parameters": [
           {
             "$ref": "#/components/parameters/X-Grafana-Org-Id"
@@ -808,7 +872,9 @@
         "summary": "Delete all sessions",
         "description": "Deletes all sessions for the current user in the current organization. This action is irreversible.",
         "operationId": "deleteAllSessions",
-        "tags": ["Sessions"],
+        "tags": [
+          "Sessions"
+        ],
         "parameters": [
           {
             "$ref": "#/components/parameters/X-Grafana-Org-Id"
@@ -844,7 +910,9 @@
         "summary": "Get current session ID",
         "description": "Returns the ID of the current active session for the user/org, or empty string if no current session is set.",
         "operationId": "getCurrentSessionId",
-        "tags": ["Sessions"],
+        "tags": [
+          "Sessions"
+        ],
         "parameters": [
           {
             "$ref": "#/components/parameters/X-Grafana-Org-Id"
@@ -879,7 +947,9 @@
         "summary": "Set current session",
         "description": "Sets the specified session as the current active session for the user/org. Pass empty string to clear the current session.",
         "operationId": "setCurrentSession",
-        "tags": ["Sessions"],
+        "tags": [
+          "Sessions"
+        ],
         "parameters": [
           {
             "$ref": "#/components/parameters/X-Grafana-Org-Id"
@@ -897,7 +967,9 @@
                     "description": "Session ID to set as current (empty string to clear)"
                   }
                 },
-                "required": ["sessionId"]
+                "required": [
+                  "sessionId"
+                ]
               }
             }
           }
@@ -936,7 +1008,9 @@
         "summary": "Clear current session",
         "description": "Clears the current active session for the user/org. Equivalent to PUT with empty sessionId.",
         "operationId": "clearCurrentSession",
-        "tags": ["Sessions"],
+        "tags": [
+          "Sessions"
+        ],
         "parameters": [
           {
             "$ref": "#/components/parameters/X-Grafana-Org-Id"
@@ -972,7 +1046,9 @@
         "summary": "Get session by ID",
         "description": "Returns full session details including all messages. Only the session owner (same user + org) can access it.",
         "operationId": "getSession",
-        "tags": ["Sessions"],
+        "tags": [
+          "Sessions"
+        ],
         "parameters": [
           {
             "name": "sessionId",
@@ -1017,7 +1093,9 @@
         "summary": "Update session",
         "description": "Updates session metadata (title, summary) or appends messages. Only the session owner (same user + org) can update it.",
         "operationId": "updateSession",
-        "tags": ["Sessions"],
+        "tags": [
+          "Sessions"
+        ],
         "parameters": [
           {
             "name": "sessionId",
@@ -1094,7 +1172,9 @@
         "summary": "Delete session",
         "description": "Deletes a session. Only the session owner (same user + org) can delete it. This action is irreversible.",
         "operationId": "deleteSession",
-        "tags": ["Sessions"],
+        "tags": [
+          "Sessions"
+        ],
         "parameters": [
           {
             "name": "sessionId",
@@ -1143,7 +1223,9 @@
         "summary": "List shares for session",
         "description": "Returns all active shares created by the current user for the specified session.",
         "operationId": "getSessionShares",
-        "tags": ["Shares"],
+        "tags": [
+          "Shares"
+        ],
         "parameters": [
           {
             "name": "sessionId",
@@ -1203,7 +1285,9 @@
         "summary": "Create share link",
         "description": "Creates a shareable link for a session snapshot. The share is scoped to the organization and can be accessed by any user in the same org. Rate limited to 50 shares per hour per user. The share contains a snapshot of the session at creation time (not live updates).",
         "operationId": "createShare",
-        "tags": ["Shares"],
+        "tags": [
+          "Shares"
+        ],
         "parameters": [
           {
             "$ref": "#/components/parameters/X-Grafana-Org-Id"
@@ -1235,7 +1319,10 @@
                     "description": "Expiration time in days (optional, converted to hours)"
                   }
                 },
-                "required": ["sessionId", "sessionData"]
+                "required": [
+                  "sessionId",
+                  "sessionData"
+                ]
               }
             }
           }
@@ -1287,7 +1374,9 @@
         "summary": "Get shared session",
         "description": "Returns a read-only snapshot of a shared session. The share must belong to the same organization as the requesting user. The returned session includes `isShared: true` and `sharedBy` fields.",
         "operationId": "getSharedSession",
-        "tags": ["Shares"],
+        "tags": [
+          "Shares"
+        ],
         "parameters": [
           {
             "name": "shareId",
@@ -1318,7 +1407,9 @@
                       "properties": {
                         "isShared": {
                           "type": "boolean",
-                          "enum": [true]
+                          "enum": [
+                            true
+                          ]
                         },
                         "sharedBy": {
                           "type": "string",
@@ -1384,7 +1475,9 @@
         "summary": "Revoke share",
         "description": "Revokes a share link. Only the user who created the share can revoke it. After revocation, the share URL will no longer be accessible.",
         "operationId": "revokeShare",
-        "tags": ["Shares"],
+        "tags": [
+          "Shares"
+        ],
         "parameters": [
           {
             "name": "shareId",
@@ -1442,6 +1535,150 @@
           },
           "500": {
             "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    },
+    "/api/graphiti/status": {
+      "get": {
+        "summary": "Knowledge graph status",
+        "description": "Returns the knowledge graph connection status, including whether the Graphiti integration is enabled and currently connected.",
+        "operationId": "getGraphitiStatus",
+        "tags": [
+          "Knowledge Graph"
+        ],
+        "responses": {
+          "200": {
+            "description": "Knowledge graph status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "enabled": {
+                      "type": "boolean",
+                      "description": "Whether the knowledge graph client is configured"
+                    },
+                    "connected": {
+                      "type": "boolean",
+                      "description": "Whether the knowledge graph service is reachable"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/graphiti/discover": {
+      "post": {
+        "summary": "Trigger knowledge graph discovery",
+        "description": "Starts a background discovery agent session that explores the full observability environment and ingests findings into the knowledge graph. Returns immediately with a run ID that can be polled for status.",
+        "operationId": "triggerGraphitiDiscovery",
+        "tags": [
+          "Knowledge Graph"
+        ],
+        "responses": {
+          "200": {
+            "description": "Discovery run started",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "runId": {
+                      "type": "string",
+                      "description": "Unique run ID for tracking the discovery session"
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "running"
+                      ],
+                      "description": "Initial status of the discovery run"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Knowledge graph not configured"
+          }
+        }
+      }
+    },
+    "/api/graphiti/ingest-session": {
+      "post": {
+        "summary": "Ingest session into knowledge graph",
+        "description": "Ingests conversation messages from a completed investigation session into the knowledge graph. This is the 'Feed to Knowledge Graph' action \u2014 the user opts in to share their investigation findings so future sessions can leverage discovered causal relationships (e.g., 'service A failed because database B connection pool was exhausted').",
+        "operationId": "ingestSessionToGraph",
+        "tags": [
+          "Knowledge Graph"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "messages"
+                ],
+                "properties": {
+                  "messages": {
+                    "type": "array",
+                    "description": "Conversation messages to ingest",
+                    "items": {
+                      "type": "object",
+                      "required": [
+                        "role",
+                        "content"
+                      ],
+                      "properties": {
+                        "role": {
+                          "type": "string",
+                          "enum": [
+                            "user",
+                            "assistant"
+                          ],
+                          "description": "Message author role"
+                        },
+                        "content": {
+                          "type": "string",
+                          "description": "Message content"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Messages ingested successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ingested": {
+                      "type": "integer",
+                      "description": "Number of messages ingested"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request or knowledge graph not configured"
+          },
+          "500": {
+            "description": "Failed to ingest session"
           }
         }
       }
@@ -1587,7 +1824,11 @@
       "PromptDefaults": {
         "type": "object",
         "description": "Built-in default prompt templates from the Go backend",
-        "required": ["defaultSystemPrompt", "investigationPrompt", "performancePrompt"],
+        "required": [
+          "defaultSystemPrompt",
+          "investigationPrompt",
+          "performancePrompt"
+        ],
         "properties": {
           "defaultSystemPrompt": {
             "type": "string",
@@ -1609,7 +1850,9 @@
         "properties": {
           "jsonrpc": {
             "type": "string",
-            "enum": ["2.0"]
+            "enum": [
+              "2.0"
+            ]
           },
           "id": {
             "type": "string",
@@ -1625,7 +1868,10 @@
             "description": "Method-specific parameters"
           }
         },
-        "required": ["jsonrpc", "method"]
+        "required": [
+          "jsonrpc",
+          "method"
+        ]
       },
       "MCPResponse": {
         "type": "object",
@@ -1633,7 +1879,9 @@
         "properties": {
           "jsonrpc": {
             "type": "string",
-            "enum": ["2.0"]
+            "enum": [
+              "2.0"
+            ]
           },
           "id": {
             "type": "string",
@@ -1655,10 +1903,16 @@
               },
               "data": {}
             },
-            "required": ["code", "message"]
+            "required": [
+              "code",
+              "message"
+            ]
           }
         },
-        "required": ["jsonrpc", "id"]
+        "required": [
+          "jsonrpc",
+          "id"
+        ]
       },
       "Tool": {
         "type": "object",
@@ -1680,7 +1934,10 @@
             "$ref": "#/components/schemas/ToolAnnotations"
           }
         },
-        "required": ["name", "inputSchema"]
+        "required": [
+          "name",
+          "inputSchema"
+        ]
       },
       "ToolAnnotations": {
         "type": "object",
@@ -1729,7 +1986,9 @@
             "description": "Scope organization ID (optional, for multi-tenant routing)"
           }
         },
-        "required": ["name"]
+        "required": [
+          "name"
+        ]
       },
       "CallToolResult": {
         "type": "object",
@@ -1756,12 +2015,16 @@
             "description": "True if tool execution failed"
           }
         },
-        "required": ["content"]
+        "required": [
+          "content"
+        ]
       },
       "RunRequest": {
         "type": "object",
         "description": "Request to start an agent run. The backend builds the system prompt and manages context window based on the message type and server-side session history.",
-        "required": ["message"],
+        "required": [
+          "message"
+        ],
         "properties": {
           "message": {
             "type": "string",
@@ -1769,7 +2032,11 @@
           },
           "type": {
             "type": "string",
-            "enum": ["investigation", "performance", "chat"],
+            "enum": [
+              "investigation",
+              "performance",
+              "chat"
+            ],
             "description": "Message type that determines which server-side prompt template to use"
           },
           "sessionId": {
@@ -1792,7 +2059,14 @@
         "properties": {
           "type": {
             "type": "string",
-            "enum": ["run_started", "content", "tool_call_start", "tool_call_result", "done", "error"],
+            "enum": [
+              "run_started",
+              "content",
+              "tool_call_start",
+              "tool_call_result",
+              "done",
+              "error"
+            ],
             "description": "Event type"
           },
           "data": {
@@ -1823,7 +2097,11 @@
             "description": "Event sequence number (monotonically increasing)"
           }
         },
-        "required": ["type", "data", "sequence"]
+        "required": [
+          "type",
+          "data",
+          "sequence"
+        ]
       },
       "RunStartedEvent": {
         "type": "object",
@@ -1835,7 +2113,9 @@
             "type": "string"
           }
         },
-        "required": ["runId"]
+        "required": [
+          "runId"
+        ]
       },
       "ContentEvent": {
         "type": "object",
@@ -1845,7 +2125,9 @@
             "description": "AI-generated text content"
           }
         },
-        "required": ["content"]
+        "required": [
+          "content"
+        ]
       },
       "ToolCallStartEvent": {
         "type": "object",
@@ -1863,7 +2145,11 @@
             "description": "JSON-encoded tool arguments"
           }
         },
-        "required": ["id", "name", "arguments"]
+        "required": [
+          "id",
+          "name",
+          "arguments"
+        ]
       },
       "ToolCallResultEvent": {
         "type": "object",
@@ -1885,7 +2171,12 @@
             "description": "True if tool execution failed"
           }
         },
-        "required": ["id", "name", "content", "isError"]
+        "required": [
+          "id",
+          "name",
+          "content",
+          "isError"
+        ]
       },
       "DoneEvent": {
         "type": "object",
@@ -1895,7 +2186,9 @@
             "description": "Number of agent loop iterations completed"
           }
         },
-        "required": ["totalIterations"]
+        "required": [
+          "totalIterations"
+        ]
       },
       "ErrorEvent": {
         "type": "object",
@@ -1905,7 +2198,9 @@
             "description": "Error message"
           }
         },
-        "required": ["message"]
+        "required": [
+          "message"
+        ]
       },
       "AgentRun": {
         "type": "object",
@@ -1916,7 +2211,12 @@
           },
           "status": {
             "type": "string",
-            "enum": ["running", "completed", "failed", "cancelled"]
+            "enum": [
+              "running",
+              "completed",
+              "failed",
+              "cancelled"
+            ]
           },
           "userId": {
             "type": "integer"
@@ -1944,7 +2244,15 @@
             "description": "Error message (only if status is 'failed')"
           }
         },
-        "required": ["runId", "status", "userId", "orgId", "createdAt", "updatedAt", "events"]
+        "required": [
+          "runId",
+          "status",
+          "userId",
+          "orgId",
+          "createdAt",
+          "updatedAt",
+          "events"
+        ]
       },
       "SessionMessage": {
         "type": "object",
@@ -1952,7 +2260,10 @@
         "properties": {
           "role": {
             "type": "string",
-            "enum": ["user", "assistant"],
+            "enum": [
+              "user",
+              "assistant"
+            ],
             "description": "Message role"
           },
           "content": {
@@ -1970,7 +2281,10 @@
             "nullable": true
           }
         },
-        "required": ["role", "content"]
+        "required": [
+          "role",
+          "content"
+        ]
       },
       "ChatSession": {
         "type": "object",
@@ -2012,7 +2326,14 @@
             "description": "ID of currently active agent run (if any)"
           }
         },
-        "required": ["id", "title", "messages", "createdAt", "updatedAt", "messageCount"]
+        "required": [
+          "id",
+          "title",
+          "messages",
+          "createdAt",
+          "updatedAt",
+          "messageCount"
+        ]
       },
       "SessionMetadata": {
         "type": "object",
@@ -2043,7 +2364,13 @@
             "description": "ID of currently active agent run (if any)"
           }
         },
-        "required": ["id", "title", "createdAt", "updatedAt", "messageCount"]
+        "required": [
+          "id",
+          "title",
+          "createdAt",
+          "updatedAt",
+          "messageCount"
+        ]
       }
     }
   }

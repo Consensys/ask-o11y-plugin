@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
@@ -15,6 +16,8 @@ import (
 )
 
 const defaultMaxIterations = 25
+const defaultMaxCompletionTokens = 4096
+const minCompletionTokens = 512
 
 type AgentLoop struct {
 	llmClient *LLMClient
@@ -45,6 +48,10 @@ type LoopRequest struct {
 	OrgID      string
 	OrgName    string
 	ScopeOrgID string
+
+	// ExcludeToolNames, when set, removes these tools from the available set
+	// before the loop runs. Used to hide graphiti write tools from user sessions.
+	ExcludeToolNames []string
 }
 
 func (a *AgentLoop) Run(ctx context.Context, req LoopRequest, eventCh chan<- SSEEvent) {
@@ -56,8 +63,10 @@ func (a *AgentLoop) Run(ctx context.Context, req LoopRequest, eventCh chan<- SSE
 	}
 	maxTokens := req.MaxTotalTokens
 	if maxTokens <= 0 {
-		maxTokens = defaultMaxTotalTokens
+		maxTokens = DefaultMaxTotalTokens
 	}
+	completionBudget := completionTokenBudget(maxTokens)
+	promptBudget := maxTokens - completionBudget
 
 	mcpTools, err := a.mcpProxy.ListTools()
 	if err != nil {
@@ -65,6 +74,19 @@ func (a *AgentLoop) Run(ctx context.Context, req LoopRequest, eventCh chan<- SSE
 		mcpTools = []mcp.Tool{}
 	}
 	mcpTools = rbac.FilterToolsByRole(mcpTools, req.UserRole)
+	if len(req.ExcludeToolNames) > 0 {
+		excluded := make(map[string]bool, len(req.ExcludeToolNames))
+		for _, n := range req.ExcludeToolNames {
+			excluded[n] = true
+		}
+		var filtered []mcp.Tool
+		for _, t := range mcpTools {
+			if !excluded[t.Name] {
+				filtered = append(filtered, t)
+			}
+		}
+		mcpTools = filtered
+	}
 	openAITools := ConvertMCPToolsToOpenAI(mcpTools)
 
 	messages := BuildContextWindow(req.SystemPrompt, req.Messages, req.Summary, req.RecentMessageCount)
@@ -74,7 +96,7 @@ func (a *AgentLoop) Run(ctx context.Context, req LoopRequest, eventCh chan<- SSE
 			return
 		}
 
-		messages = TrimMessagesToTokenLimit(messages, openAITools, maxTokens)
+		messages = TrimMessagesToTokenLimit(messages, openAITools, promptBudget)
 
 		a.logger.Debug("Agent loop iteration",
 			"iteration", iteration,
@@ -82,8 +104,9 @@ func (a *AgentLoop) Run(ctx context.Context, req LoopRequest, eventCh chan<- SSE
 			"toolCount", len(openAITools))
 
 		llmReq := ChatCompletionRequest{
-			Messages: messages,
-			Tools:    openAITools,
+			Messages:  messages,
+			Tools:     openAITools,
+			MaxTokens: completionBudget,
 		}
 		resp, err := a.llmClient.ChatCompletion(ctx, llmReq, req.GrafanaURL, req.AuthToken, req.OrgID)
 		if err != nil {
@@ -156,6 +179,24 @@ func (a *AgentLoop) Run(ctx context.Context, req LoopRequest, eventCh chan<- SSE
 	})
 }
 
+func completionTokenBudget(maxTotalTokens int) int {
+	if maxTotalTokens <= 0 {
+		return defaultMaxCompletionTokens
+	}
+
+	budget := maxTotalTokens / 8
+	if budget < minCompletionTokens {
+		budget = minCompletionTokens
+	}
+	if half := maxTotalTokens / 2; half > 0 && budget > half {
+		budget = half
+	}
+	if budget > defaultMaxCompletionTokens {
+		budget = defaultMaxCompletionTokens
+	}
+	return budget
+}
+
 func (a *AgentLoop) executeTool(ctx context.Context, tc ToolCall, req LoopRequest) (content string, isError bool) {
 	_, span := tracing.DefaultTracer().Start(ctx, "mcp_tool_call",
 		trace.WithAttributes(attribute.String("mcp.tool_name", tc.Function.Name)))
@@ -163,6 +204,7 @@ func (a *AgentLoop) executeTool(ctx context.Context, tc ToolCall, req LoopReques
 		span.SetAttributes(attribute.Bool("mcp.is_error", isError))
 		span.End()
 	}()
+
 	tool, found := a.mcpProxy.FindToolByName(tc.Function.Name)
 	if !found {
 		return fmt.Sprintf("Unknown tool: %s", tc.Function.Name), true
@@ -175,6 +217,7 @@ func (a *AgentLoop) executeTool(ctx context.Context, tc ToolCall, req LoopReques
 	if err := json.Unmarshal([]byte(tc.Function.Arguments), &args); err != nil {
 		return fmt.Sprintf("Invalid tool arguments: %v", err), true
 	}
+	ensureScopedGraphitiArgs(tool, args, req.OrgID)
 
 	result, err := a.mcpProxy.CallToolWithContext(tc.Function.Name, args, req.OrgID, req.OrgName, req.ScopeOrgID)
 	if err != nil {
@@ -195,6 +238,21 @@ func (a *AgentLoop) executeTool(ctx context.Context, tc ToolCall, req LoopReques
 		text = "No results returned (empty response)"
 	}
 	return text, false
+}
+
+func ensureScopedGraphitiArgs(tool mcp.Tool, args map[string]interface{}, orgID string) {
+	if orgID == "" || !strings.HasPrefix(tool.Name, "graphiti_") {
+		return
+	}
+
+	properties, ok := tool.InputSchema["properties"].(map[string]interface{})
+	if !ok || properties["group_id"] == nil {
+		return
+	}
+
+	// Always force group_id to the org-scoped value — never trust LLM-supplied
+	// values, which would break multi-org data isolation.
+	args["group_id"] = "org_" + orgID
 }
 
 func extractText(result *mcp.CallToolResult) string {
