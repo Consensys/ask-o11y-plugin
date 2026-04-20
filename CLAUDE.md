@@ -25,6 +25,8 @@ nvm use 22 && npm run test:ci         # Frontend unit tests
 nvm use 22 && npm run lint            # Linting
 nvm use 22 && npm run typecheck       # Type checking
 nvm use 22 && npm run validate:openapi # OpenAPI spec validation
+nvm use 22 && npm run validate        # Full Grafana plugin validator (build + archive + run)
+nvm use 22 && npm run validate:clean  # Remove validator zip artifacts
 nvm use 22 && npm run e2e             # Playwright E2E tests
 go test ./pkg/...                     # Backend tests
 docker compose restart grafana        # Reload after backend rebuild
@@ -37,6 +39,7 @@ docker compose restart grafana        # Reload after backend rebuild
 3. **Code review** — fix critical/major/medium issues
 4. **Clean AI noise** — remove comments that restate code; only keep non-obvious *why* comments
 5. **Tests & lint** — `npm run test:ci`, `go test ./pkg/...`, `npm run lint`, `npm run typecheck`
+6. **Plugin validator** — run `npm run validate` before PR. It builds, archives, and runs `@grafana/plugin-validator`. Expected benign findings: `unsigned plugin` (MANIFEST.txt is produced at CI sign step) and the optional sponsor-link recommendation. Any other `warning`/`error` must be fixed. Clean up with `npm run validate:clean`.
 
 **Severity policy:** Critical = fix now. Major = fix before commit. Medium = fix before PR. Low = optional.
 
