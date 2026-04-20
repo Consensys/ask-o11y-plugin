@@ -29,6 +29,11 @@ type PromptContext struct {
 
 	OrgName  string
 	UserRole string
+
+	// DatasourceSnapshot is a short, per-run bullet list of real datasource UIDs
+	// injected at session start so the LLM cannot hallucinate UIDs. Empty string
+	// renders no block.
+	DatasourceSnapshot string
 }
 
 type PromptRegistry struct {

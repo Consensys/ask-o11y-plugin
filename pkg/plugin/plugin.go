@@ -133,6 +133,10 @@ type Plugin struct {
 	cancel         context.CancelFunc
 	runCancelsMu   sync.Mutex
 	runCancels     map[string]context.CancelFunc
+	// dsCache memoises the per-org datasource UID snapshot injected into the
+	// system prompt. See datasource_snapshot.go.
+	dsCache   map[string]dsCacheEntry
+	dsCacheMu sync.Mutex
 }
 
 func NewPlugin(ctx context.Context, settings backend.AppInstanceSettings) (instancemgmt.Instance, error) {
@@ -638,6 +642,7 @@ func (p *Plugin) handleAgentRun(w http.ResponseWriter, r *http.Request) {
 
 	toolCtx := BuildToolContext(req.OrgName, userRole)
 	toolCtx.ConversationType = req.Type
+	toolCtx.DatasourceSnapshot = p.datasourceSnapshot(orgID, req.OrgName, req.ScopeOrgID)
 
 	systemPrompt, err := p.promptRegistry.BuildSystemPrompt(toolCtx)
 	if err != nil {
@@ -741,7 +746,7 @@ func (p *Plugin) handleAgentRun(w http.ResponseWriter, r *http.Request) {
 		SystemPrompt:       systemPrompt,
 		MaxTotalTokens:     p.settings.MaxTotalTokens,
 		RecentMessageCount: p.settings.RecentMessageCount,
-		MaxIterations:      AgentMaxIterations,
+		MaxIterations:      resolveMaxIterations(req.Type, req.Message),
 		GrafanaURL:         grafanaURL,
 		AuthToken:          saToken,
 		UserRole:           userRole,

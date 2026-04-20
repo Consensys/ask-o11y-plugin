@@ -5,6 +5,7 @@ import (
 	"consensys-asko11y-app/pkg/rbac"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -18,6 +19,11 @@ import (
 const defaultMaxIterations = 25
 const defaultMaxCompletionTokens = 4096
 const minCompletionTokens = 512
+
+// nearLimitWarning is injected as a one-shot system message on the second-to-last
+// iteration to steer the LLM toward a honest final answer instead of fabricating
+// around missing data when the loop is about to abort at maxIter.
+const nearLimitWarning = "[SYSTEM: You are approaching the iteration limit. Produce a final answer NOW based ONLY on tool results you have actually retrieved this session. If you lack data, say so explicitly — do not fabricate.]"
 
 type AgentLoop struct {
 	llmClient *LLMClient
@@ -91,6 +97,13 @@ func (a *AgentLoop) Run(ctx context.Context, req LoopRequest, eventCh chan<- SSE
 
 	messages := BuildContextWindow(req.SystemPrompt, req.Messages, req.Summary, req.RecentMessageCount)
 
+	// Per-run state for transport-failure aggregation. We emit at most one
+	// mcp_unavailable event per run, once at least 2 distinct tools have hit
+	// transport errors — that's a strong enough signal to tell the user MCP
+	// is down rather than letting the agent chain fabricated summaries.
+	transportFailedTools := map[string]struct{}{}
+	mcpUnavailableEmitted := false
+
 	for iteration := 0; iteration < maxIter; iteration++ {
 		if ctx.Err() != nil {
 			return
@@ -103,8 +116,19 @@ func (a *AgentLoop) Run(ctx context.Context, req LoopRequest, eventCh chan<- SSE
 			"messageCount", len(messages),
 			"toolCount", len(openAITools))
 
+		// One-shot warning on the second-to-last iteration so the LLM produces a
+		// final answer from tool results it actually retrieved rather than
+		// fabricating a summary when the loop aborts at maxIter.
+		callMessages := messages
+		if maxIter >= 2 && iteration == maxIter-2 {
+			callMessages = append(append([]Message{}, messages...), Message{
+				Role:    "system",
+				Content: nearLimitWarning,
+			})
+		}
+
 		llmReq := ChatCompletionRequest{
-			Messages:  messages,
+			Messages:  callMessages,
 			Tools:     openAITools,
 			MaxTokens: completionBudget,
 		}
@@ -153,23 +177,43 @@ func (a *AgentLoop) Run(ctx context.Context, req LoopRequest, eventCh chan<- SSE
 				},
 			})
 
-			toolContent, isError := a.executeTool(ctx, tc, req)
+			toolContent, isError, errorKind := a.executeTool(ctx, tc, req)
 
 			a.send(ctx, eventCh, SSEEvent{
 				Type: "tool_call_result",
 				Data: ToolCallResultEvent{
-					ID:      tc.ID,
-					Name:    tc.Function.Name,
-					Content: toolContent,
-					IsError: isError,
+					ID:        tc.ID,
+					Name:      tc.Function.Name,
+					Content:   toolContent,
+					IsError:   isError,
+					ErrorKind: errorKind,
 				},
 			})
 
+			// LLM-facing content: when the failure is a transport outage, replace
+			// the raw error text with a directive so the model sees that result
+			// is UNAVAILABLE and must not fabricate around it. The SSE event
+			// above still carries the raw content so the user sees real errors.
+			llmContent := toolContent
+			if errorKind == "transport" {
+				llmContent = fmt.Sprintf("[SYSTEM: MCP transport failure for tool '%s' after retries. Result is UNAVAILABLE — do not fabricate output. Either retry this tool once, or tell the user the data is currently unavailable.]", tc.Function.Name)
+				transportFailedTools[tc.Function.Name] = struct{}{}
+			}
 			messages = append(messages, Message{
 				Role:       "tool",
 				ToolCallID: tc.ID,
-				Content:    toolContent,
+				Content:    llmContent,
 			})
+
+			if !mcpUnavailableEmitted && len(transportFailedTools) >= 2 {
+				mcpUnavailableEmitted = true
+				a.send(ctx, eventCh, SSEEvent{
+					Type: "mcp_unavailable",
+					Data: MCPUnavailableEvent{
+						Message: "MCP server unreachable — results may be incomplete. Please retry.",
+					},
+				})
+			}
 		}
 
 	}
@@ -197,32 +241,39 @@ func completionTokenBudget(maxTotalTokens int) int {
 	return budget
 }
 
-func (a *AgentLoop) executeTool(ctx context.Context, tc ToolCall, req LoopRequest) (content string, isError bool) {
+func (a *AgentLoop) executeTool(ctx context.Context, tc ToolCall, req LoopRequest) (content string, isError bool, errorKind string) {
 	_, span := tracing.DefaultTracer().Start(ctx, "mcp_tool_call",
 		trace.WithAttributes(attribute.String("mcp.tool_name", tc.Function.Name)))
 	defer func() {
 		span.SetAttributes(attribute.Bool("mcp.is_error", isError))
+		if errorKind != "" {
+			span.SetAttributes(attribute.String("mcp.error_kind", errorKind))
+		}
 		span.End()
 	}()
 
 	tool, found := a.mcpProxy.FindToolByName(tc.Function.Name)
 	if !found {
-		return fmt.Sprintf("Unknown tool: %s", tc.Function.Name), true
+		return fmt.Sprintf("Unknown tool: %s", tc.Function.Name), true, "tool"
 	}
 	if !rbac.CanAccessTool(req.UserRole, tool) {
-		return fmt.Sprintf("Access denied: %s role cannot access tool %s", req.UserRole, tc.Function.Name), true
+		return fmt.Sprintf("Access denied: %s role cannot access tool %s", req.UserRole, tc.Function.Name), true, "tool"
 	}
 
 	var args map[string]interface{}
 	if err := json.Unmarshal([]byte(tc.Function.Arguments), &args); err != nil {
-		return fmt.Sprintf("Invalid tool arguments: %v", err), true
+		return fmt.Sprintf("Invalid tool arguments: %v", err), true, "tool"
 	}
 	ensureScopedGraphitiArgs(tool, args, req.OrgID)
 
 	result, err := a.mcpProxy.CallToolWithContext(tc.Function.Name, args, req.OrgID, req.OrgName, req.ScopeOrgID)
 	if err != nil {
 		a.logger.Error("Tool call failed", "tool", tc.Function.Name, "error", err)
-		return fmt.Sprintf("Tool call error: %v", err), true
+		var te *mcp.TransportError
+		if errors.As(err, &te) {
+			return fmt.Sprintf("Tool call error: %v", err), true, "transport"
+		}
+		return fmt.Sprintf("Tool call error: %v", err), true, "protocol"
 	}
 
 	if result.IsError {
@@ -230,14 +281,14 @@ func (a *AgentLoop) executeTool(ctx context.Context, tc ToolCall, req LoopReques
 		if text == "" {
 			text = "Tool returned an error with no details"
 		}
-		return text, true
+		return text, true, "tool"
 	}
 
 	text := extractText(result)
 	if text == "" {
 		text = "No results returned (empty response)"
 	}
-	return text, false
+	return text, false, ""
 }
 
 func ensureScopedGraphitiArgs(tool mcp.Tool, args map[string]interface{}, orgID string) {

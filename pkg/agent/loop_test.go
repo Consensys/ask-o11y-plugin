@@ -3,8 +3,11 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 
@@ -375,6 +378,67 @@ func TestAgentLoop_MaxIterations(t *testing.T) {
 	last := events[len(events)-1]
 	if last.Type != "error" {
 		t.Fatalf("expected last event to be error, got %q", last.Type)
+	}
+}
+
+func TestAgentLoop_NearLimitWarningInjected(t *testing.T) {
+	// Every response requests a tool call so we exercise multiple iterations.
+	toolCallResp := ChatCompletionResponse{
+		ID: "loop",
+		Choices: []Choice{{
+			Message: Message{
+				Role: "assistant",
+				ToolCalls: []ToolCall{{
+					ID: "tc", Type: "function",
+					Function: FunctionCall{Name: "some_tool", Arguments: "{}"},
+				}},
+			},
+			FinishReason: "tool_calls",
+		}},
+	}
+
+	var mu sync.Mutex
+	var requestBodies []string
+	llmServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		mu.Lock()
+		requestBodies = append(requestBodies, string(body))
+		mu.Unlock()
+		respondAsStream(w, toolCallResp)
+	}))
+	defer llmServer.Close()
+
+	llmClient := NewLLMClient(log.DefaultLogger, &http.Client{Timeout: llmTimeout})
+	mcpProxy := mcp.NewProxy(context.Background(), log.DefaultLogger)
+	loop := NewAgentLoop(llmClient, mcpProxy, log.DefaultLogger)
+
+	eventCh := make(chan SSEEvent, 64)
+	req := LoopRequest{
+		Messages:      []Message{{Role: "user", Content: "loop forever"}},
+		SystemPrompt:  "sys",
+		MaxIterations: 3,
+		GrafanaURL:    llmServer.URL,
+		AuthToken:     "t",
+		UserRole:      "Admin",
+		OrgID:         "1",
+	}
+	go loop.Run(context.Background(), req, eventCh)
+	collectEvents(eventCh)
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(requestBodies) < 3 {
+		t.Fatalf("expected 3 LLM requests (one per iteration), got %d", len(requestBodies))
+	}
+	// maxIter=3 ⇒ the warning lands on iteration 1 (maxIter-2). Not on iter 0 or 2.
+	if !strings.Contains(requestBodies[1], "approaching the iteration limit") {
+		t.Errorf("expected near-limit warning in iteration 1 body")
+	}
+	if strings.Contains(requestBodies[0], "approaching the iteration limit") {
+		t.Errorf("did not expect warning in iteration 0")
+	}
+	if strings.Contains(requestBodies[2], "approaching the iteration limit") {
+		t.Errorf("did not expect warning in iteration 2 (past)")
 	}
 }
 
