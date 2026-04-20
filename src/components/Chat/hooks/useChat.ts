@@ -10,6 +10,7 @@ import {
   cancelAgentRun,
   type AgentCallbacks,
   type ContentEvent,
+  type MCPUnavailableEvent,
   type ToolCallStartEvent,
   type ToolCallResultEvent,
 } from '../../../services/agentClient';
@@ -145,6 +146,9 @@ export function useChat(
   const [retryCount, setRetryCount] = useState(0);
   const [toolCalls, setToolCalls] = useState<Map<string, RenderedToolCall>>(new Map());
   const [messageQueue, setMessageQueue] = useState<string[]>([]);
+  // mcpUnavailable is set once per run when the backend confirms MCP is down
+  // (multiple distinct tools hit transport errors). Surfaced as a banner.
+  const [mcpUnavailable, setMcpUnavailable] = useState<string | null>(null);
   const queuedForSessionRef = useRef<string | null>(null);
 
   const abortControllerRef = useRef<AbortController | null>(null);
@@ -250,6 +254,9 @@ export function useChat(
           }))
         );
       },
+      onMCPUnavailable: (event: MCPUnavailableEvent) => {
+        setMcpUnavailable(event.message);
+      },
     }),
     []
   );
@@ -287,6 +294,7 @@ export function useChat(
     setCurrentInput('');
     setIsGenerating(true);
     setToolCalls(new Map());
+    setMcpUnavailable(null);
 
     setChatHistory((prev) => [...prev, { role: 'assistant', content: '', toolCalls: [] }]);
 
@@ -570,6 +578,8 @@ export function useChat(
     handleKeyPress,
     clearChat,
     getRunningToolCallsCount,
+    mcpUnavailable,
+    dismissMcpUnavailable: () => setMcpUnavailable(null),
     isAutoScroll,
     sessionManager,
     retryCount,

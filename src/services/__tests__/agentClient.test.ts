@@ -25,6 +25,7 @@ function createMockCallbacks(): jest.Mocked<AgentCallbacks> {
     onToolCallResult: jest.fn(),
     onDone: jest.fn(),
     onError: jest.fn(),
+    onMCPUnavailable: jest.fn(),
   };
 }
 
@@ -152,6 +153,52 @@ describe('reconnectToAgentRun', () => {
     });
     expect(callbacks.onContent).toHaveBeenCalledWith({ content: 'Based on the results...' });
     expect(callbacks.onDone).toHaveBeenCalledWith({ totalIterations: 2 });
+  });
+
+  it('should propagate errorKind on tool_call_result', async () => {
+    const callbacks = createMockCallbacks();
+    const sseLines = [
+      'data: {"type":"tool_call_result","data":{"id":"call_1","name":"query_prometheus","content":"connection refused","isError":true,"errorKind":"transport"}}',
+      '',
+      'data: {"type":"done","data":{"totalIterations":1}}',
+      '',
+    ];
+
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      body: createMockBody(sseLines),
+    });
+
+    await reconnectToAgentRun('run-1', callbacks);
+
+    expect(callbacks.onToolCallResult).toHaveBeenCalledWith({
+      id: 'call_1',
+      name: 'query_prometheus',
+      content: 'connection refused',
+      isError: true,
+      errorKind: 'transport',
+    });
+  });
+
+  it('should dispatch mcp_unavailable event to callback', async () => {
+    const callbacks = createMockCallbacks();
+    const sseLines = [
+      'data: {"type":"mcp_unavailable","data":{"message":"MCP server unreachable — results may be incomplete. Please retry."}}',
+      '',
+      'data: {"type":"done","data":{"totalIterations":1}}',
+      '',
+    ];
+
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      body: createMockBody(sseLines),
+    });
+
+    await reconnectToAgentRun('run-1', callbacks);
+
+    expect(callbacks.onMCPUnavailable).toHaveBeenCalledWith({
+      message: 'MCP server unreachable — results may be incomplete. Please retry.',
+    });
   });
 
   it('should handle SSE error events', async () => {
