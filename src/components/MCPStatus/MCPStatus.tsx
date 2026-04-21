@@ -5,7 +5,8 @@
 
 import React, { useState, useEffect } from 'react';
 import { useTheme2, Badge, Tooltip, Icon, Button } from '@grafana/ui';
-import { mcpServerStatusService, MCPServerStatus, SystemHealth } from '../../services/mcpServerStatus';
+import { mcpServerStatusService, MCPServerStatus, MCPOAuthStatus, SystemHealth } from '../../services/mcpServerStatus';
+import { disconnectOAuth, onOAuthCallback, openOAuthPopup } from '../../services/oauthClient';
 import { InlineLoading } from '../LoadingOverlay';
 
 export interface MCPStatusProps {
@@ -28,12 +29,14 @@ export function MCPStatus({ compact = false, showDetails = true, className = '',
   });
   const [isExpanded, setIsExpanded] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+  const [oauth, setOauth] = useState<Record<string, MCPOAuthStatus>>({});
 
   // Fetch server statuses from backend
   const fetchStatuses = async () => {
     const response = await mcpServerStatusService.fetchServerStatuses();
     setServers(response.servers);
     setSystemHealth(response.systemHealth);
+    setOauth(response.oauth ?? {});
     setIsLoading(false);
   };
 
@@ -44,7 +47,15 @@ export function MCPStatus({ compact = false, showDetails = true, className = '',
     // Poll every 30 seconds
     const interval = setInterval(fetchStatuses, 30000);
 
-    return () => clearInterval(interval);
+    // Re-fetch immediately when an OAuth popup reports back.
+    const unsubscribe = onOAuthCallback(() => {
+      fetchStatuses();
+    });
+
+    return () => {
+      clearInterval(interval);
+      unsubscribe();
+    };
   }, []);
 
   const getStatusIcon = (status: MCPServerStatus['status']) => {
@@ -202,7 +213,14 @@ export function MCPStatus({ compact = false, showDetails = true, className = '',
           {servers.length === 0 ? (
             <div className="text-center py-4 text-secondary">No MCP servers configured</div>
           ) : (
-            servers.map((server) => <ServerStatusRow key={server.serverId} server={server} onRefresh={fetchStatuses} />)
+            servers.map((server) => (
+              <ServerStatusRow
+                key={server.serverId}
+                server={server}
+                oauthStatus={oauth[server.serverId]}
+                onRefresh={fetchStatuses}
+              />
+            ))
           )}
         </div>
       )}
@@ -232,7 +250,15 @@ function StatusCard({ label, value, color, icon }: { label: string; value: numbe
   );
 }
 
-function ServerStatusRow({ server, onRefresh }: { server: MCPServerStatus; onRefresh: () => void }) {
+function ServerStatusRow({
+  server,
+  oauthStatus,
+  onRefresh,
+}: {
+  server: MCPServerStatus;
+  oauthStatus?: MCPOAuthStatus;
+  onRefresh: () => void;
+}) {
   const theme = useTheme2();
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [showTools, setShowTools] = useState(false);
@@ -241,6 +267,19 @@ function ServerStatusRow({ server, onRefresh }: { server: MCPServerStatus; onRef
     setIsRefreshing(true);
     await onRefresh();
     setTimeout(() => setIsRefreshing(false), 500);
+  };
+
+  const handleConnect = () => {
+    const popup = openOAuthPopup(server.serverId);
+    if (!popup) {
+      // Popup blocked: fall back to same-tab navigation.
+      window.location.href = `/api/plugins/consensys-asko11y-app/resources/api/oauth/${encodeURIComponent(server.serverId)}/start`;
+    }
+  };
+
+  const handleDisconnect = async () => {
+    await disconnectOAuth(server.serverId);
+    await onRefresh();
   };
 
   return (
@@ -281,6 +320,29 @@ function ServerStatusRow({ server, onRefresh }: { server: MCPServerStatus; onRef
         </div>
 
         <div className="flex items-center gap-2">
+          {/* OAuth: per-user connect/disconnect for servers that require it */}
+          {oauthStatus?.configured && (
+            oauthStatus.connected ? (
+              <Tooltip
+                content={
+                  oauthStatus.expiresAt
+                    ? `Connected, expires ${new Date(oauthStatus.expiresAt).toLocaleString()}`
+                    : 'Connected'
+                }
+              >
+                <Button size="sm" variant="secondary" icon="unlock" onClick={handleDisconnect}>
+                  Disconnect
+                </Button>
+              </Tooltip>
+            ) : (
+              <Tooltip content="This server requires you to sign in before tools can be called.">
+                <Button size="sm" variant="primary" icon="lock" onClick={handleConnect}>
+                  Connect
+                </Button>
+              </Tooltip>
+            )
+          )}
+
           {/* Tool Count */}
           <Tooltip content={`${server.toolCount} tools available. Click to view.`}>
             <Button size="sm" variant="secondary" onClick={() => setShowTools(!showTools)}>

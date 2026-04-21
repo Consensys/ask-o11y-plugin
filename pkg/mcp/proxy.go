@@ -20,6 +20,20 @@ type Proxy struct {
 	mu            sync.RWMutex
 	healthMonitor *HealthMonitor
 	ctx           context.Context
+	// perUserToken, when set, is passed to every Client so OAuth-enabled
+	// servers can inject a per-user bearer on outbound MCP requests.
+	perUserToken PerUserTokenProvider
+}
+
+// SetPerUserTokenProvider registers the provider for per-user OAuth tokens
+// and propagates it to every existing and future MCP client.
+func (p *Proxy) SetPerUserTokenProvider(provider PerUserTokenProvider) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.perUserToken = provider
+	for _, c := range p.clients {
+		c.SetPerUserTokenProvider(provider)
+	}
 }
 
 // NewProxy creates a new MCP proxy
@@ -76,7 +90,11 @@ func (p *Proxy) UpdateConfig(configs []ServerConfig) error {
 	}
 	for id, config := range newConfigs {
 		if _, exists := p.clients[id]; !exists {
-			p.clients[id] = NewClient(p.ctx, config, p.logger, sdkHTTPClient)
+			c := NewClient(p.ctx, config, p.logger, sdkHTTPClient)
+			if p.perUserToken != nil {
+				c.SetPerUserTokenProvider(p.perUserToken)
+			}
+			p.clients[id] = c
 			p.logger.Info("Added MCP client", "id", id, "url", config.URL, "type", config.Type)
 		}
 	}
@@ -142,11 +160,13 @@ func (p *Proxy) ListTools() ([]Tool, error) {
 
 // CallTool routes a tool call to the appropriate MCP server
 func (p *Proxy) CallTool(toolName string, arguments map[string]interface{}) (*CallToolResult, error) {
-	return p.CallToolWithContext(toolName, arguments, "", "", "")
+	return p.CallToolWithContext(context.Background(), toolName, arguments, "", "", "")
 }
 
-// CallToolWithContext routes a tool call to the appropriate MCP server with additional context (e.g., Org ID, Org Name, Scope Org ID)
-func (p *Proxy) CallToolWithContext(toolName string, arguments map[string]interface{}, orgID string, orgName string, scopeOrgId string) (*CallToolResult, error) {
+// CallToolWithContext routes a tool call to the appropriate MCP server with additional context (e.g., Org ID, Org Name, Scope Org ID).
+// The ctx carries the Grafana user ID (via mcp.WithUserID) for servers using
+// per-user OAuth; its deadline is honored on the outbound call.
+func (p *Proxy) CallToolWithContext(ctx context.Context, toolName string, arguments map[string]interface{}, orgID string, orgName string, scopeOrgId string) (*CallToolResult, error) {
 	// Extract server ID from tool name prefix
 	parts := strings.SplitN(toolName, "_", 2)
 	if len(parts) < 2 {
@@ -173,7 +193,7 @@ func (p *Proxy) CallToolWithContext(toolName string, arguments map[string]interf
 
 	p.logger.Debug("Calling tool on MCP server", "tool", toolName, "server", serverID, "orgID", orgID, "orgName", orgName, "scopeOrgId", scopeOrgId)
 
-	return client.CallToolWithContext(toolName, arguments, orgID, orgName, scopeOrgId)
+	return client.CallToolWithContext(ctx, toolName, arguments, orgID, orgName, scopeOrgId)
 }
 
 // HandleMCPRequest handles an MCP JSON-RPC request
@@ -322,7 +342,11 @@ func (p *Proxy) EnsureServer(config ServerConfig) error {
 		p.logger.Debug("Replacing MCP client", "id", config.ID)
 	}
 
-	p.clients[config.ID] = NewClient(p.ctx, config, p.logger, sdkHTTPClient)
+	c := NewClient(p.ctx, config, p.logger, sdkHTTPClient)
+	if p.perUserToken != nil {
+		c.SetPerUserTokenProvider(p.perUserToken)
+	}
+	p.clients[config.ID] = c
 	p.mu.Unlock()
 
 	if replaced != nil {

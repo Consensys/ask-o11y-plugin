@@ -1682,6 +1682,207 @@
           }
         }
       }
+    },
+    "/api/oauth/{serverId}/start": {
+      "get": {
+        "summary": "Start OAuth authorization for an MCP server",
+        "description": "Generates OAuth state (and PKCE verifier when enabled) then redirects the browser to the server's authorization URL. The caller is the authenticated Grafana user; the resulting token is stored scoped to that user.",
+        "operationId": "startMCPOAuth",
+        "tags": [
+          "OAuth"
+        ],
+        "parameters": [
+          {
+            "name": "serverId",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string" },
+            "description": "MCP server ID as declared in provisioning"
+          }
+        ],
+        "responses": {
+          "302": { "description": "Redirect to the authorization server" },
+          "401": { "description": "Unauthenticated caller" },
+          "404": { "description": "Server not found or has no OAuth config" }
+        }
+      }
+    },
+    "/api/oauth/{serverId}/callback": {
+      "get": {
+        "summary": "OAuth callback",
+        "description": "Exchanges the authorization code for an access token and persists it for the current user. Renders a tiny HTML page that closes the popup and notifies the opener via postMessage.",
+        "operationId": "oauthCallback",
+        "tags": [
+          "OAuth"
+        ],
+        "parameters": [
+          { "name": "serverId", "in": "path", "required": true, "schema": { "type": "string" } },
+          { "name": "code", "in": "query", "required": false, "schema": { "type": "string" } },
+          { "name": "state", "in": "query", "required": false, "schema": { "type": "string" } },
+          { "name": "error", "in": "query", "required": false, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "HTML page that posts a message to window.opener and closes.",
+            "content": { "text/html": { "schema": { "type": "string" } } }
+          }
+        }
+      }
+    },
+    "/api/oauth/{serverId}/status": {
+      "get": {
+        "summary": "Connection status for the current user on an OAuth-enabled MCP server",
+        "operationId": "getMCPOAuthStatus",
+        "tags": [
+          "OAuth"
+        ],
+        "parameters": [
+          { "name": "serverId", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "Status payload",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "configured": { "type": "boolean" },
+                    "connected": { "type": "boolean" },
+                    "expiresAt": { "type": "string", "format": "date-time" }
+                  },
+                  "required": ["configured", "connected"]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/oauth/{serverId}/disconnect": {
+      "post": {
+        "summary": "Forget the current user's OAuth token for an MCP server",
+        "operationId": "disconnectMCPOAuth",
+        "tags": [
+          "OAuth"
+        ],
+        "parameters": [
+          { "name": "serverId", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "204": { "description": "Token removed" },
+          "401": { "description": "Unauthenticated caller" },
+          "405": { "description": "Method not allowed" },
+          "500": { "description": "Failed to delete stored token" }
+        }
+      }
+    },
+    "/api/mcp/provisioner/presets": {
+      "get": {
+        "summary": "List built-in external MCP presets",
+        "operationId": "listMCPPresets",
+        "tags": ["MCP Provisioner"],
+        "responses": {
+          "200": {
+            "description": "Preset catalog",
+            "content": { "application/json": { "schema": { "type": "object", "properties": { "presets": { "type": "array", "items": { "type": "object" } } } } } }
+          }
+        }
+      }
+    },
+    "/api/mcp/provisioner": {
+      "get": {
+        "summary": "List dynamically provisioned MCP servers",
+        "operationId": "listDynamicMCPServers",
+        "tags": ["MCP Provisioner"],
+        "responses": {
+          "200": {
+            "description": "Server list",
+            "content": { "application/json": { "schema": { "type": "object", "properties": { "servers": { "type": "array", "items": { "type": "object" } } } } } }
+          }
+        }
+      }
+    },
+    "/api/mcp/provisioner/preset": {
+      "post": {
+        "summary": "Provision an MCP server from a preset (admin only)",
+        "operationId": "addMCPPreset",
+        "tags": ["MCP Provisioner"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["preset"],
+                "properties": {
+                  "preset": { "type": "string", "enum": ["github-read", "github-write", "atlassian"] },
+                  "clientId": { "type": "string" },
+                  "clientSecret": { "type": "string" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Server provisioned" },
+          "400": { "description": "Invalid preset or missing client_id for non-DCR preset" },
+          "403": { "description": "Admin role required" },
+          "502": { "description": "Discovery or DCR failed against the provider" }
+        }
+      }
+    },
+    "/api/mcp/provisioner/generic": {
+      "post": {
+        "summary": "Provision an MCP server with custom OAuth settings (admin only)",
+        "operationId": "addGenericMCPServer",
+        "tags": ["MCP Provisioner"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["serverId", "mcpUrl", "transport"],
+                "properties": {
+                  "serverId": { "type": "string" },
+                  "displayName": { "type": "string" },
+                  "mcpUrl": { "type": "string" },
+                  "transport": { "type": "string", "enum": ["streamable-http", "sse"] },
+                  "authorizationUrl": { "type": "string" },
+                  "tokenUrl": { "type": "string" },
+                  "clientId": { "type": "string" },
+                  "clientSecret": { "type": "string" },
+                  "scopes": { "type": "array", "items": { "type": "string" } },
+                  "pkce": { "type": "boolean" },
+                  "discover": { "type": "boolean" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Server provisioned" },
+          "400": { "description": "Invalid input" },
+          "403": { "description": "Admin role required" },
+          "502": { "description": "Discovery or DCR failed against the provider" }
+        }
+      }
+    },
+    "/api/mcp/provisioner/{serverId}": {
+      "delete": {
+        "summary": "Remove a provisioned MCP server (admin only)",
+        "operationId": "removeDynamicMCPServer",
+        "tags": ["MCP Provisioner"],
+        "parameters": [
+          { "name": "serverId", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "204": { "description": "Server removed" },
+          "403": { "description": "Admin role required" },
+          "500": { "description": "Delete failed" }
+        }
+      }
     }
   },
   "components": {
