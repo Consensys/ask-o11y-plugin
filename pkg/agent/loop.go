@@ -45,6 +45,7 @@ type LoopRequest struct {
 	AuthToken  string
 
 	UserRole   string
+	UserID     int64
 	OrgID      string
 	OrgName    string
 	ScopeOrgID string
@@ -219,7 +220,8 @@ func (a *AgentLoop) executeTool(ctx context.Context, tc ToolCall, req LoopReques
 	}
 	ensureScopedGraphitiArgs(tool, args, req.OrgID)
 
-	result, err := a.mcpProxy.CallToolWithContext(tc.Function.Name, args, req.OrgID, req.OrgName, req.ScopeOrgID)
+	callCtx := mcp.WithUserID(ctx, req.UserID)
+	result, err := a.mcpProxy.CallToolWithContext(callCtx, tc.Function.Name, args, req.OrgID, req.OrgName, req.ScopeOrgID)
 	if err != nil {
 		a.logger.Error("Tool call failed", "tool", tc.Function.Name, "error", err)
 		return fmt.Sprintf("Tool call error: %v", err), true

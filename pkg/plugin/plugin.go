@@ -3,6 +3,7 @@ package plugin
 import (
 	"consensys-asko11y-app/pkg/agent"
 	"consensys-asko11y-app/pkg/mcp"
+	"consensys-asko11y-app/pkg/plugin/oauth"
 	"consensys-asko11y-app/pkg/plugin/openapi"
 	"consensys-asko11y-app/pkg/rbac"
 	"context"
@@ -132,7 +133,9 @@ type Plugin struct {
 	ctx            context.Context
 	cancel         context.CancelFunc
 	runCancelsMu   sync.Mutex
-	runCancels     map[string]context.CancelFunc
+	runCancels         map[string]context.CancelFunc
+	oauthManager       *oauth.Manager
+	dynamicServerStore oauth.DynamicServerStore
 }
 
 func NewPlugin(ctx context.Context, settings backend.AppInstanceSettings) (instancemgmt.Instance, error) {
@@ -220,6 +223,36 @@ func NewPlugin(ctx context.Context, settings backend.AppInstanceSettings) (insta
 		sessionStore = NewRedisSessionStore(pluginCtx, redisClient, logger)
 	}
 
+	var tokenStore oauth.UserTokenStore
+	var stateStore oauth.StateStore
+	var dynamicServerStore oauth.DynamicServerStore
+	if usingRedis {
+		tokenStore = oauth.NewRedisUserTokenStore(pluginCtx, redisClient, logger)
+		stateStore = oauth.NewRedisStateStore(pluginCtx, redisClient, logger)
+		dynamicServerStore = oauth.NewRedisDynamicServerStore(pluginCtx, redisClient, logger)
+	} else {
+		tokenStore = oauth.NewInMemoryUserTokenStore()
+		stateStore = oauth.NewInMemoryStateStore()
+		dynamicServerStore = oauth.NewInMemoryDynamicServerStore()
+	}
+	oauthManager := oauth.NewManager(tokenStore, stateStore, logger, pluginSettings.MCPServers)
+	mcpProxy.SetPerUserTokenProvider(oauthManager)
+
+	// Restore dynamic (UI-added) MCP servers so they're attached before
+	// health monitoring starts checking them.
+	if dynamicRecords, err := dynamicServerStore.List(pluginCtx); err != nil {
+		logger.Warn("list dynamic MCP servers", "err", err)
+	} else {
+		for _, rec := range dynamicRecords {
+			if rec.Config.OAuth != nil {
+				oauthManager.RegisterConfig(rec.Config.ID, rec.Config.OAuth)
+			}
+			if err := mcpProxy.EnsureServer(rec.Config); err != nil {
+				logger.Warn("restore dynamic MCP server", "id", rec.Config.ID, "err", err)
+			}
+		}
+	}
+
 	llmHTTPClient, err := httpclient.New(httpclient.Options{
 		Timeouts: &httpclient.TimeoutOptions{
 			Timeout:     600 * time.Second,
@@ -257,7 +290,9 @@ func NewPlugin(ctx context.Context, settings backend.AppInstanceSettings) (insta
 		settings:       pluginSettings,
 		ctx:            pluginCtx,
 		cancel:         cancel,
-		runCancels:     make(map[string]context.CancelFunc),
+		runCancels:         make(map[string]context.CancelFunc),
+		oauthManager:       oauthManager,
+		dynamicServerStore: dynamicServerStore,
 	}
 
 	if !usingRedis {
@@ -375,6 +410,12 @@ func (p *Plugin) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/sessions/share/", p.handleDeleteShare)
 	mux.HandleFunc("/api/sessions/", p.handleSessionRouter)
 	mux.HandleFunc("/api/sessions", p.handleSessionsRoot)
+
+	// OAuth for per-user external MCP authentication.
+	if p.oauthManager != nil {
+		p.oauthManager.RegisterRoutes(mux, getUserID)
+	}
+	p.registerProvisionerRoutes(mux)
 
 	mux.HandleFunc("/", p.handleDefault)
 }
@@ -524,7 +565,8 @@ func (p *Plugin) handleMCPCallTool(w http.ResponseWriter, r *http.Request) {
 
 	p.logger.Debug("Tool call context", "orgID", orgID, "orgName", req.OrgName, "scopeOrgId", req.ScopeOrgId, "tool", req.Name)
 
-	result, err := p.mcpProxy.CallToolWithContext(req.Name, req.Arguments, orgID, req.OrgName, req.ScopeOrgId)
+	callCtx := mcp.WithUserID(r.Context(), getUserID(r))
+	result, err := p.mcpProxy.CallToolWithContext(callCtx, req.Name, req.Arguments, orgID, req.OrgName, req.ScopeOrgId)
 	if err != nil {
 		p.logger.Error("Failed to call tool", "error", err)
 		http.Error(w, "Failed to call tool", http.StatusInternalServerError)
@@ -542,14 +584,39 @@ func (p *Plugin) handleMCPServers(w http.ResponseWriter, r *http.Request) {
 	serversHealth := healthMonitor.GetAllHealth()
 	systemHealth := healthMonitor.GetSystemHealth()
 
+	oauthStatus := p.oauthStatusForUser(r)
+
 	w.Header().Set("Content-Type", "application/json")
 
 	response := map[string]interface{}{
 		"servers":      serversHealth,
 		"systemHealth": systemHealth,
+		"oauth":        oauthStatus,
 	}
 
 	json.NewEncoder(w).Encode(response)
+}
+
+// oauthStatusForUser returns a map serverID → {configured, connected, expiresAt}
+// for every MCP server with an OAuth block, telling the frontend whether the
+// current user still needs to click Connect.
+func (p *Plugin) oauthStatusForUser(r *http.Request) map[string]oauth.StatusResponse {
+	out := map[string]oauth.StatusResponse{}
+	if p.oauthManager == nil {
+		return out
+	}
+	userID := getUserID(r)
+	for _, id := range p.oauthManager.ServerIDs() {
+		status := oauth.StatusResponse{Configured: true}
+		if userID != 0 {
+			if tok, ok, err := p.oauthManager.Tokens().Get(r.Context(), id, userID); err == nil && ok {
+				status.Connected = !tok.Expired()
+				status.ExpiresAt = tok.ExpiresAt
+			}
+		}
+		out[id] = status
+	}
+	return out
 }
 
 func (p *Plugin) handleAgentRun(w http.ResponseWriter, r *http.Request) {
@@ -745,6 +812,7 @@ func (p *Plugin) handleAgentRun(w http.ResponseWriter, r *http.Request) {
 		GrafanaURL:         grafanaURL,
 		AuthToken:          saToken,
 		UserRole:           userRole,
+		UserID:             userID,
 		OrgID:              orgID,
 		OrgName:            req.OrgName,
 		ScopeOrgID:         req.ScopeOrgID,
@@ -1124,6 +1192,7 @@ func (p *Plugin) handleGraphitiDiscover(w http.ResponseWriter, r *http.Request) 
 		GrafanaURL:         grafanaURL,
 		AuthToken:          saToken,
 		UserRole:           userRole,
+		UserID:             userID,
 		OrgID:              strconv.FormatInt(orgID, 10),
 		OrgName:            "Org" + strconv.FormatInt(orgID, 10),
 		ExcludeToolNames:   graphitiWriteToolNames,

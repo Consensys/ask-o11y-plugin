@@ -84,4 +84,27 @@ type ServerConfig struct {
 	Type    string            `json:"type"` // "openapi", "standard", "sse", "streamable-http"
 	Enabled bool              `json:"enabled"`
 	Headers map[string]string `json:"headers,omitempty"`
+	// OAuth, when set, makes the server authenticate per Grafana user via an
+	// OAuth2 authorization-code flow. The static Authorization entry in Headers
+	// is ignored for OAuth-enabled servers; each user's access token is
+	// injected per request by the OAuth round tripper.
+	OAuth *OAuthConfig `json:"oauth,omitempty"`
+}
+
+// OAuthConfig declares how to run the authorization-code flow for a server.
+type OAuthConfig struct {
+	AuthorizationURL string   `json:"authorizationURL"`
+	TokenURL         string   `json:"tokenURL"`
+	ClientID         string   `json:"clientID"`
+	ClientSecret     string   `json:"clientSecret,omitempty"`
+	Scopes           []string `json:"scopes,omitempty"`
+	// PKCE enables RFC 7636 code_challenge. Strongly recommended when the
+	// authorization server supports it, required when clientSecret is empty.
+	PKCE bool `json:"pkce,omitempty"`
+	// RedirectURI is the callback URL registered with the authorization
+	// server. Must match the path this plugin serves at
+	// /api/plugins/consensys-asko11y-app/resources/api/oauth/{serverID}/callback.
+	// When empty the handler derives it from the incoming request, but that
+	// only works if the provider allows dynamic redirect URIs.
+	RedirectURI string `json:"redirectURI,omitempty"`
 }

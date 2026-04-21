@@ -7,6 +7,7 @@ import { mcp } from '@grafana/llm';
 import { testIds } from '../testIds';
 import { ValidationService } from '../../services/validation';
 import { PromptEditor } from './PromptEditor';
+import { ExternalMCPs } from './ExternalMCPs';
 import type { AppPluginSettings, MCPServerConfig } from '../../types/plugin';
 
 interface PromptDefaults {
@@ -876,6 +877,8 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
           </Button>
         </div>
       </FieldSet>
+
+      <ExternalMCPs />
 
       {promptDefaults && (
         <FieldSet label="Prompt Templates" className="mt-4">

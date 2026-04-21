@@ -108,6 +108,15 @@ func TestSpecHasAllEndpoints(t *testing.T) {
 		"/api/sessions/share",
 		"/api/sessions/shared/{shareId}",
 		"/api/sessions/share/{shareId}",
+		"/api/oauth/{serverId}/start",
+		"/api/oauth/{serverId}/callback",
+		"/api/oauth/{serverId}/status",
+		"/api/oauth/{serverId}/disconnect",
+		"/api/mcp/provisioner/presets",
+		"/api/mcp/provisioner",
+		"/api/mcp/provisioner/preset",
+		"/api/mcp/provisioner/generic",
+		"/api/mcp/provisioner/{serverId}",
 	}
 
 	for _, path := range expectedPaths {

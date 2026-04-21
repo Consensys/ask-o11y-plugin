@@ -52,6 +52,13 @@ jest.mock('../../services/mcpServerStatus', () => ({
   },
 }));
 
+// Mock oauthClient so tests don't pull in @grafana/runtime.
+jest.mock('../../services/oauthClient', () => ({
+  disconnectOAuth: jest.fn().mockResolvedValue(undefined),
+  onOAuthCallback: jest.fn().mockReturnValue(() => undefined),
+  openOAuthPopup: jest.fn().mockReturnValue({}),
+}));
+
 describe('MCPStatus', () => {
   beforeEach(() => {
     jest.clearAllMocks();

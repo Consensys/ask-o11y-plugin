@@ -37,9 +37,18 @@ export interface SystemHealth {
   total: number;
 }
 
+export interface MCPOAuthStatus {
+  configured: boolean;
+  connected: boolean;
+  expiresAt?: string;
+}
+
 export interface MCPServersResponse {
   servers: MCPServerStatus[];
   systemHealth: SystemHealth;
+  // oauth is keyed by server ID and present only for servers with an oauth
+  // block. It reflects the current Grafana user's connection state.
+  oauth?: Record<string, MCPOAuthStatus>;
 }
 
 export class MCPServerStatusService {
