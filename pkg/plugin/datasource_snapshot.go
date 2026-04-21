@@ -64,7 +64,12 @@ func (p *Plugin) datasourceSnapshot(orgID, orgName, scopeOrgID string) string {
 	// a dead sidecar on every request.
 	done := make(chan string, 1)
 	go func() {
-		result, err := p.mcpProxy.CallToolWithContext("list_datasources", map[string]interface{}{}, orgID, orgName, scopeOrgID)
+		toolName, ok := p.findDatasourceListTool()
+		if !ok {
+			done <- dsSnapshotFailOpen
+			return
+		}
+		result, err := p.mcpProxy.CallToolWithContext(toolName, map[string]interface{}{}, orgID, orgName, scopeOrgID)
 		if err != nil {
 			p.logger.Warn("datasourceSnapshot: list_datasources failed", "error", err, "orgID", orgID)
 			done <- dsSnapshotFailOpen
@@ -92,6 +97,25 @@ func (p *Plugin) datasourceSnapshot(orgID, orgName, scopeOrgID string) string {
 
 	p.storeDatasourceCacheWithTTL(cacheKey, snapshot, datasourceCacheTTL(snapshot))
 	return snapshot
+}
+
+// findDatasourceListTool searches all registered MCP servers for a tool whose
+// base name (the part after the server-id prefix) is "list_datasources".
+// This makes the snapshot work regardless of what id the Grafana MCP server
+// was provisioned with (e.g. "mcp-grafana", "grafana-ds", etc.).
+func (p *Plugin) findDatasourceListTool() (string, bool) {
+	tools, err := p.mcpProxy.ListTools()
+	if err != nil {
+		return "", false
+	}
+	for _, t := range tools {
+		// Tool names are always "{serverID}_{originalName}" per mcp.Client.
+		parts := strings.SplitN(t.Name, "_", 2)
+		if len(parts) == 2 && parts[1] == "list_datasources" {
+			return t.Name, true
+		}
+	}
+	return "", false
 }
 
 func (p *Plugin) lookupDatasourceCache(key string) (string, bool) {

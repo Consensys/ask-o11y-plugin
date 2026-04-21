@@ -1,8 +1,14 @@
 package plugin
 
 import (
+	"consensys-asko11y-app/pkg/mcp"
+	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -164,5 +170,84 @@ func TestDatasourceCache_EvictsOldestOverMax(t *testing.T) {
 	// The oldest seeded entry ("k0") should be gone.
 	if _, ok := p.dsCache["k0"]; ok {
 		t.Fatal("expected oldest entry to be evicted")
+	}
+}
+
+// newDatasourceSnapshotServer returns a test HTTP server that handles both
+// /mcp/list-tools (returns a list_datasources tool) and /mcp/call-tool
+// (returns a single datasource entry). callCount is incremented on each
+// call-tool request.
+func newDatasourceSnapshotServer(t *testing.T, callCount *atomic.Int32) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/mcp/list-tools":
+			_ = json.NewEncoder(w).Encode(struct {
+				Tools []mcp.Tool `json:"tools"`
+			}{Tools: []mcp.Tool{{
+				Name:        "list_datasources",
+				InputSchema: map[string]interface{}{},
+			}}})
+		case "/mcp/call-tool":
+			callCount.Add(1)
+			var req mcp.MCPRequest
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				t.Errorf("failed to decode request: %v", err)
+				return
+			}
+			var params mcp.CallToolParams
+			if err := json.Unmarshal(req.Params, &params); err != nil {
+				t.Errorf("failed to decode call params: %v", err)
+				return
+			}
+			if params.Name != "list_datasources" {
+				t.Errorf("expected list_datasources call, got %q", params.Name)
+			}
+			_ = json.NewEncoder(w).Encode(mcp.CallToolResult{
+				Content: []mcp.ContentBlock{{
+					Type: "text",
+					Text: `[{"uid":"abc123","name":"mimir","type":"prometheus"}]`,
+				}},
+			})
+		default:
+			t.Errorf("unexpected path: %s", r.URL.Path)
+		}
+	}))
+}
+
+func TestDatasourceSnapshot_UsesPrefixedDatasourceTool(t *testing.T) {
+	for _, serverID := range []string{"mcp-grafana", "custom-grafana"} {
+		t.Run("serverID="+serverID, func(t *testing.T) {
+			var callCount atomic.Int32
+			server := newDatasourceSnapshotServer(t, &callCount)
+			defer server.Close()
+
+			proxy := mcp.NewProxy(context.Background(), log.DefaultLogger)
+			if err := proxy.EnsureServer(mcp.ServerConfig{
+				ID:      serverID,
+				Name:    "Grafana",
+				URL:     server.URL,
+				Type:    "standard",
+				Enabled: true,
+			}); err != nil {
+				t.Fatalf("failed to configure proxy: %v", err)
+			}
+			defer proxy.Close()
+
+			p := &Plugin{
+				logger:    log.DefaultLogger,
+				mcpProxy:  proxy,
+				dsCache:   map[string]dsCacheEntry{},
+				dsCacheMu: sync.Mutex{},
+			}
+
+			snapshot := p.datasourceSnapshot("1", "Org1", "")
+			if !strings.Contains(snapshot, "uid=abc123") {
+				t.Fatalf("expected datasource UID in snapshot, got:\n%s", snapshot)
+			}
+			if callCount.Load() != 1 {
+				t.Fatalf("expected one MCP call, got %d", callCount.Load())
+			}
+		})
 	}
 }
