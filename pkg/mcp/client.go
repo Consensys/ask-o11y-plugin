@@ -449,9 +449,10 @@ func (c *Client) CallToolWithContext(toolName string, arguments map[string]inter
 }
 
 // retrySchedule is the fixed exponential backoff used to retry MCP tool calls
-// after transport errors. 3 attempts, upper-bounded at ~1.1s worst case so the
-// user-visible delay stays small while giving the MCP sidecar a chance to
-// recover from transient EOF / connection-refused blips.
+// after transport errors. We make one initial attempt plus one retry per entry
+// in this schedule, upper-bounded at ~1.1s worst case so the user-visible delay
+// stays small while giving the MCP sidecar a chance to recover from transient
+// EOF / connection-refused blips.
 var retrySchedule = []time.Duration{
 	100 * time.Millisecond,
 	300 * time.Millisecond,
@@ -490,7 +491,8 @@ func (c *Client) callMCPToolWithContext(toolName string, arguments map[string]in
 
 func (c *Client) callMCPToolWithRetry(once callToolOncer, toolName string, arguments map[string]interface{}, orgID, orgName, scopeOrgId string) (*CallToolResult, error) {
 	var lastErr error
-	for attempt := 0; attempt < len(retrySchedule); attempt++ {
+	maxAttempts := len(retrySchedule) + 1 // initial try + one retry per backoff slot
+	for attempt := 0; attempt < maxAttempts; attempt++ {
 		result, err := once(toolName, arguments, orgID, orgName, scopeOrgId)
 		if err == nil {
 			return result, nil
@@ -503,7 +505,7 @@ func (c *Client) callMCPToolWithRetry(once callToolOncer, toolName string, argum
 		if kind != ErrKindTransport {
 			return nil, err
 		}
-		if attempt == len(retrySchedule)-1 {
+		if attempt == maxAttempts-1 {
 			break
 		}
 		wait := jitteredDuration(retrySchedule[attempt], 0.30)

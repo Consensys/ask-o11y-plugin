@@ -71,8 +71,9 @@ func TestRetry_PermanentTransportExhausts(t *testing.T) {
 	if res != nil {
 		t.Fatalf("expected nil result on exhaustion, got %+v", res)
 	}
-	if got := calls.Load(); got != int32(len(retrySchedule)) {
-		t.Fatalf("expected %d attempts, got %d", len(retrySchedule), got)
+	expectedAttempts := len(retrySchedule) + 1 // initial attempt + retries
+	if got := calls.Load(); got != int32(expectedAttempts) {
+		t.Fatalf("expected %d attempts, got %d", expectedAttempts, got)
 	}
 }
 
