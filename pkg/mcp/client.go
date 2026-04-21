@@ -134,9 +134,10 @@ func (c *Client) connectMCP() error {
 		}
 	case "streamable-http", "http+streamable":
 		transport = &mcpsdk.StreamableClientTransport{
-			Endpoint:   c.config.URL,
-			HTTPClient: httpClient,
-			MaxRetries: 3,
+			Endpoint:             c.config.URL,
+			HTTPClient:           httpClient,
+			MaxRetries:           3,
+			DisableStandaloneSSE: true,
 		}
 	case "standard":
 		// For standard MCP, we'll use SSE as fallback or custom implementation
@@ -265,9 +266,10 @@ func (c *Client) connectMCPWithOrgContext(orgID string, orgName string, scopeOrg
 		}
 	case "streamable-http", "http+streamable":
 		transport = &mcpsdk.StreamableClientTransport{
-			Endpoint:   c.config.URL,
-			HTTPClient: customHTTPClient,
-			MaxRetries: 3,
+			Endpoint:             c.config.URL,
+			HTTPClient:           customHTTPClient,
+			MaxRetries:           3,
+			DisableStandaloneSSE: true,
 		}
 	case "standard":
 		return fmt.Errorf("standard MCP type requires custom implementation")
