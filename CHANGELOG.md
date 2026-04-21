@@ -5,6 +5,20 @@ All notable changes to the Ask O11y Grafana plugin will be documented in this fi
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.22](https://github.com/Consensys/ask-o11y-plugin/compare/v0.2.21...v0.2.22) (2026-04-21)
+
+
+### Features
+
+* **backend:** add graphiti knowledge graph integration ([#119](https://github.com/Consensys/ask-o11y-plugin/issues/119)) ([835c040](https://github.com/Consensys/ask-o11y-plugin/commit/835c040bc1b09c0e46cf1523a0e26d95212de68c))
+* **backend:** anti-hallucination safeguards and mcp transport retries ([#122](https://github.com/Consensys/ask-o11y-plugin/issues/122)) ([04b0f11](https://github.com/Consensys/ask-o11y-plugin/commit/04b0f11a76a1ce1ec3c704c230bc16aff78efe17))
+
+
+### Bug Fixes
+
+* **backend:** inject real datasource UIDs and discover list_datasources tool dynamically ([#125](https://github.com/Consensys/ask-o11y-plugin/issues/125)) ([bb0993c](https://github.com/Consensys/ask-o11y-plugin/commit/bb0993cc7e1fd5567a8505f51422758e1a5607dc))
+* **mcp:** unblock streamable-http transport behind OAuth/CF gateways ([#123](https://github.com/Consensys/ask-o11y-plugin/issues/123)) ([b1ead68](https://github.com/Consensys/ask-o11y-plugin/commit/b1ead68ff1a9c6702874439ecc1bcea693902147))
+
 ## [0.2.21](https://github.com/Consensys/ask-o11y-plugin/compare/v0.2.20...v0.2.21) (2026-04-07)
 
 
