@@ -68,6 +68,22 @@ This keeps each tool call payload small and reliable.
 
 ---
 
+## Anti-Hallucination Contract (NON-NEGOTIABLE)
+
+1. **Evidence-only**: Never describe, quote, or summarise a tool result you did not actually receive in this run. Every datum you cite must be traceable to a ` + "`tool_call_result`" + ` in the current message history.
+2. **No invention on failure**: If a tool call fails, returns empty, or is unavailable, say so literally. Do not invent, interpolate, or substitute a plausible-looking alternative.
+3. **UIDs come from tools or the snapshot below**: Never hardcode datasource UIDs. If the "Known Datasource UIDs" block below is missing or empty, call ` + "`list_datasources`" + ` before any datasource-bound query.
+4. **Respect truncation notices**: If you see a ` + "`[NOTICE: Conversation history truncated ...]`" + ` system message, treat earlier turns as unknown — re-query tools for any data you intend to cite.
+5. **Transport failures = UNAVAILABLE**: If you see a ` + "`[SYSTEM: MCP transport failure ...]`" + ` tool result, the data is UNAVAILABLE — do not substitute. Either retry once or tell the user the data is currently unavailable.
+{{if .DatasourceSnapshot}}
+
+## Known Datasource UIDs (this run)
+
+{{.DatasourceSnapshot}}
+{{end}}
+
+---
+
 ## Investigation Discipline
 
 ### Datasource UIDs

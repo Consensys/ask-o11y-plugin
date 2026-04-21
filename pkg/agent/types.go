@@ -78,6 +78,18 @@ type ToolCallResultEvent struct {
 	Name    string `json:"name"`
 	Content string `json:"content"`
 	IsError bool   `json:"isError"`
+	// ErrorKind classifies a failed tool call so the UI can show a different
+	// treatment for transport outages vs tool-layer errors. Empty on success.
+	// Values: "transport" | "tool" | "protocol" | "".
+	ErrorKind string `json:"errorKind,omitempty"`
+}
+
+// MCPUnavailableEvent is emitted at most once per run when enough distinct
+// tool calls fail with a transport error that we can confidently tell the
+// user MCP is unreachable — rather than letting the agent fabricate around
+// missing data.
+type MCPUnavailableEvent struct {
+	Message string `json:"message"`
 }
 
 type DoneEvent struct {

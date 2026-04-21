@@ -82,6 +82,43 @@ func TestTrimMessagesToTokenLimit_DropsOldMessages(t *testing.T) {
 	if result[0].Role != "system" {
 		t.Errorf("first message should be system, got %q", result[0].Role)
 	}
+	if !hasTruncationNotice(result) {
+		t.Errorf("expected truncation notice after system prompt, got %+v", result)
+	}
+}
+
+func TestTrimMessagesToTokenLimit_TruncationNoticeIsIdempotent(t *testing.T) {
+	messages := []Message{
+		{Role: "system", Content: "sys"},
+		{Role: "user", Content: strings.Repeat("a", 40000)},
+		{Role: "assistant", Content: strings.Repeat("b", 40000)},
+		{Role: "user", Content: "recent"},
+	}
+
+	first := TrimMessagesToTokenLimit(messages, nil, 2000)
+	second := TrimMessagesToTokenLimit(first, nil, 2000)
+
+	count := 0
+	for _, m := range second {
+		if m.Role == "system" && strings.Contains(m.Content, TruncationMarker) {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Fatalf("expected exactly one truncation notice after re-trim, got %d (messages=%+v)", count, second)
+	}
+}
+
+func TestTrimMessagesToTokenLimit_NoNoticeWhenNoDrop(t *testing.T) {
+	messages := []Message{
+		{Role: "system", Content: "sys"},
+		{Role: "user", Content: "hello"},
+		{Role: "assistant", Content: "world"},
+	}
+	result := TrimMessagesToTokenLimit(messages, nil, 100_000)
+	if hasTruncationNotice(result) {
+		t.Fatalf("did not expect truncation notice when nothing was dropped, got %+v", result)
+	}
 }
 
 func TestTrimToolResponses(t *testing.T) {

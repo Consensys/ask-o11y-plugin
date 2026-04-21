@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	mathrand "math/rand"
 	"net/http"
 	"strings"
 	"sync"
@@ -35,6 +36,10 @@ type Client struct {
 	ctx               context.Context
 	cancel            context.CancelFunc
 	httpClient        *http.Client
+	// sessionCreatedAt tracks when the current MCP session was established so
+	// forceReconnect can dedupe reconnect storms when the on-call retry path
+	// has already refreshed the session within the last few seconds.
+	sessionCreatedAt time.Time
 }
 
 // customRoundTripper wraps http.RoundTripper to add custom headers
@@ -152,12 +157,39 @@ func (c *Client) connectMCP() error {
 	if err != nil {
 		return fmt.Errorf("failed to connect to MCP server: %w", err)
 	}
+	c.sessionCreatedAt = time.Now()
 
 	c.logger.Debug("Connected to MCP server", "type", c.config.Type, "url", c.config.URL)
 	return nil
 }
 
+// forceReconnect tears down the current session and re-establishes it. Safe
+// to call from the health monitor between user requests so the next CallTool
+// hits a fresh session instead of a dead one. Dedupes against reconnects that
+// already happened via the on-call path in the last forceReconnectMinInterval.
+func (c *Client) forceReconnect() error {
+	c.mu.Lock()
+	fresh := !c.sessionCreatedAt.IsZero() && time.Since(c.sessionCreatedAt) < forceReconnectMinInterval
+	if fresh {
+		c.mu.Unlock()
+		c.logger.Debug("forceReconnect skipped: session recently refreshed", "server", c.config.ID)
+		return nil
+	}
+	if c.session != nil {
+		c.session.Close()
+		c.session = nil
+	}
+	c.mu.Unlock()
+
+	// connectMCP takes c.mu internally; do not hold it across this call.
+	return c.connectMCP()
+}
+
 const connectDialTimeout = 10 * time.Second
+
+// forceReconnectMinInterval is the dedupe window that prevents the health
+// monitor from thrashing a session that the on-call retry path just refreshed.
+const forceReconnectMinInterval = 5 * time.Second
 
 func (c *Client) httpClientWithHeaders() *http.Client {
 	if len(c.config.Headers) == 0 {
@@ -254,6 +286,7 @@ func (c *Client) connectMCPWithOrgContext(orgID string, orgName string, scopeOrg
 	if err != nil {
 		return fmt.Errorf("failed to connect to MCP server with org context: %w", err)
 	}
+	c.sessionCreatedAt = time.Now()
 
 	c.logger.Debug("Connected to MCP server with org context", "type", c.config.Type, "url", c.config.URL, "orgID", orgID, "orgName", orgName, "scopeOrgId", scopeOrgId)
 	return nil
@@ -415,9 +448,92 @@ func (c *Client) CallToolWithContext(toolName string, arguments map[string]inter
 	}
 }
 
-// callMCPToolWithContext calls a tool using the MCP SDK with additional context (e.g., Org ID, Org Name, Scope Org ID)
-// Org headers are forwarded to all MCP servers - each server can use whichever headers it needs.
+// retrySchedule is the fixed exponential backoff used to retry MCP tool calls
+// after transport errors. We make one initial attempt plus one retry per entry
+// in this schedule, upper-bounded at ~1.1s worst case so the user-visible delay
+// stays small while giving the MCP sidecar a chance to recover from transient
+// EOF / connection-refused blips.
+var retrySchedule = []time.Duration{
+	100 * time.Millisecond,
+	300 * time.Millisecond,
+	700 * time.Millisecond,
+}
+
+// retryRand seeds jitter; dedicated to retries so we don't perturb the
+// default rand source used elsewhere.
+var retryRand = mathrand.New(mathrand.NewSource(time.Now().UnixNano()))
+var retryRandMu sync.Mutex
+
+// jitteredDuration applies symmetric jitter of ±fraction around base.
+// e.g. jitteredDuration(100ms, 0.30) returns a value in [70ms, 130ms].
+func jitteredDuration(base time.Duration, fraction float64) time.Duration {
+	if fraction <= 0 {
+		return base
+	}
+	retryRandMu.Lock()
+	defer retryRandMu.Unlock()
+	delta := (retryRand.Float64()*2 - 1) * fraction
+	return time.Duration(float64(base) * (1 + delta))
+}
+
+// callToolOncer is the inner function signature used for retry. Declared as a
+// type so tests can inject a stub without spinning up a streamable-http server.
+type callToolOncer func(toolName string, arguments map[string]interface{}, orgID, orgName, scopeOrgId string) (*CallToolResult, error)
+
+// callMCPToolWithContext wraps callMCPToolOnce with classification-aware retry.
+// Only ErrKindTransport errors are retried; tool-logic, protocol, and canceled
+// errors are returned immediately. After the last retry the underlying error
+// is wrapped in *TransportError so callers can distinguish transport outages
+// from tool-layer failures and avoid fabricating around missing data.
 func (c *Client) callMCPToolWithContext(toolName string, arguments map[string]interface{}, orgID string, orgName string, scopeOrgId string) (*CallToolResult, error) {
+	return c.callMCPToolWithRetry(c.callMCPToolOnce, toolName, arguments, orgID, orgName, scopeOrgId)
+}
+
+func (c *Client) callMCPToolWithRetry(once callToolOncer, toolName string, arguments map[string]interface{}, orgID, orgName, scopeOrgId string) (*CallToolResult, error) {
+	var lastErr error
+	maxAttempts := len(retrySchedule) + 1 // initial try + one retry per backoff slot
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		result, err := once(toolName, arguments, orgID, orgName, scopeOrgId)
+		if err == nil {
+			return result, nil
+		}
+		lastErr = err
+		if c.ctx != nil && c.ctx.Err() != nil {
+			return nil, c.ctx.Err()
+		}
+		kind := ClassifyError(c.ctx, err)
+		if kind != ErrKindTransport {
+			return nil, err
+		}
+		if attempt == maxAttempts-1 {
+			break
+		}
+		wait := jitteredDuration(retrySchedule[attempt], 0.30)
+		c.logger.Warn("mcp retry",
+			"server", c.config.ID,
+			"tool", toolName,
+			"attempt", attempt+1,
+			"wait_ms", wait.Milliseconds(),
+			"error", sanitizeError(err))
+		if c.ctx != nil {
+			select {
+			case <-time.After(wait):
+			case <-c.ctx.Done():
+				return nil, c.ctx.Err()
+			}
+		} else {
+			time.Sleep(wait)
+		}
+	}
+	return nil, &TransportError{Err: lastErr}
+}
+
+// callMCPToolOnce executes a single tool call against the MCP session. The
+// existing inline "connection closed / client is closing" one-shot reconnect
+// is preserved here because it reuses the already-locked session path and has
+// been proven safe in production. The outer retry wrapper adds attempts on
+// top — these are two independent reliability layers.
+func (c *Client) callMCPToolOnce(toolName string, arguments map[string]interface{}, orgID string, orgName string, scopeOrgId string) (*CallToolResult, error) {
 	// Track whether we're using org context for potential reconnection
 	// Forward org headers to all MCP servers (not just specific ones)
 	useOrgContext := orgID != "" || orgName != "" || scopeOrgId != ""

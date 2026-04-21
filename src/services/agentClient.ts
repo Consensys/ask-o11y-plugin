@@ -18,11 +18,19 @@ export interface ToolCallStartEvent {
   arguments: string;
 }
 
+export type ToolErrorKind = 'transport' | 'tool' | 'protocol' | '';
+
 export interface ToolCallResultEvent {
   id: string;
   name: string;
   content: string;
   isError: boolean;
+  /**
+   * Classification of a failed tool call. Empty on success. "transport" means
+   * the MCP sidecar was unreachable after retries — the UI should render a
+   * distinct warning style for those to distinguish them from tool-logic errors.
+   */
+  errorKind?: ToolErrorKind;
 }
 
 export interface DoneEvent {
@@ -38,13 +46,18 @@ export interface RunStartedEvent {
   sessionId?: string;
 }
 
+export interface MCPUnavailableEvent {
+  message: string;
+}
+
 export type SSEEvent =
   | { type: 'content'; data: ContentEvent; sequence: number }
   | { type: 'tool_call_start'; data: ToolCallStartEvent; sequence: number }
   | { type: 'tool_call_result'; data: ToolCallResultEvent; sequence: number }
   | { type: 'done'; data: DoneEvent; sequence: number }
   | { type: 'error'; data: ErrorEvent; sequence: number }
-  | { type: 'run_started'; data: RunStartedEvent; sequence: number };
+  | { type: 'run_started'; data: RunStartedEvent; sequence: number }
+  | { type: 'mcp_unavailable'; data: MCPUnavailableEvent; sequence: number };
 
 export interface AgentCallbacks {
   onContent: (event: ContentEvent) => void;
@@ -54,6 +67,7 @@ export interface AgentCallbacks {
   onError: (message: string) => void;
   onRunStarted?: (event: RunStartedEvent) => void;
   onReconnect?: () => void;
+  onMCPUnavailable?: (event: MCPUnavailableEvent) => void;
 }
 
 export interface AgentRunStatus {
@@ -191,6 +205,9 @@ function dispatchEvent(event: SSEEvent, callbacks: AgentCallbacks): void {
       break;
     case 'run_started':
       callbacks.onRunStarted?.(event.data);
+      break;
+    case 'mcp_unavailable':
+      callbacks.onMCPUnavailable?.(event.data);
       break;
     default:
       break;

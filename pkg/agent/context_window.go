@@ -11,6 +11,15 @@ const systemMessageBuffer = 1000
 const maxToolResponseTokens = 8000
 const aggressiveToolResponseTokens = 2000
 
+// TruncationMarker is the prefix used to detect an existing truncation notice
+// so repeated trims in the same run don't stack duplicates.
+const TruncationMarker = "[NOTICE: Conversation history truncated."
+
+// TruncationNotice is the synthetic system message injected after the main
+// system prompt when TrimMessagesToTokenLimit drops messages from the front
+// of the window, so the LLM knows prior context is gone and must re-query.
+const TruncationNotice = TruncationMarker + " Earlier messages are no longer visible — re-query tools if you need prior data.]"
+
 func EstimateTokens(text string) int {
 	return (len(text) + 3) / 4
 }
@@ -104,25 +113,44 @@ func TrimMessagesToTokenLimit(messages []Message, tools []OpenAITool, maxTokens 
 			continue
 		}
 		candidate := nonSystem[i:]
-		var test []Message
-		if systemMsg != nil {
-			test = append([]Message{*systemMsg}, candidate...)
-		} else {
-			test = candidate
-		}
+		test := assembleWithTruncationNotice(systemMsg, candidate, i > 0)
 		if estimateMessagesTokens(test, tools) <= target {
 			return test
 		}
 	}
 
-	var result []Message
-	if systemMsg != nil {
-		result = append(result, *systemMsg)
-	}
+	// Fallback: keep system prompt and only the last non-system message. This drops
+	// everything in between, so always mark the history as truncated.
+	tail := []Message{}
 	if len(nonSystem) > 0 {
-		result = append(result, nonSystem[len(nonSystem)-1])
+		tail = append(tail, nonSystem[len(nonSystem)-1])
 	}
-	return result
+	return assembleWithTruncationNotice(systemMsg, tail, len(nonSystem) > 1)
+}
+
+// assembleWithTruncationNotice prepends the system prompt followed by a one-shot
+// truncation notice (only when messages were dropped and none is already present)
+// in front of the trimmed tail. Idempotent — if the tail already contains the
+// marker, no duplicate is added.
+func assembleWithTruncationNotice(system *Message, tail []Message, dropped bool) []Message {
+	out := make([]Message, 0, len(tail)+2)
+	if system != nil {
+		out = append(out, *system)
+	}
+	if dropped && !hasTruncationNotice(tail) {
+		out = append(out, Message{Role: "system", Content: TruncationNotice})
+	}
+	out = append(out, tail...)
+	return out
+}
+
+func hasTruncationNotice(messages []Message) bool {
+	for _, m := range messages {
+		if m.Role == "system" && strings.Contains(m.Content, TruncationMarker) {
+			return true
+		}
+	}
+	return false
 }
 
 func trimToolResponses(messages []Message, maxTokens int) []Message {

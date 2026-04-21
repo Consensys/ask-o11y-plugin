@@ -29,10 +29,11 @@ const (
 )
 
 const (
-	AgentMaxIterations  = 50
-	RunMaxAge           = 1 * time.Hour
-	RunCleanupInterval  = 5 * time.Minute
-	RunMaxEventsPerRun  = 500
+	AgentMaxIterations        = 50
+	AlertInvestigationMaxIter = 60
+	RunMaxAge                 = 1 * time.Hour
+	RunCleanupInterval        = 5 * time.Minute
+	RunMaxEventsPerRun        = 500
 )
 
 const (

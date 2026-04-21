@@ -109,68 +109,85 @@ func (hm *HealthMonitor) checkServer(serverID string, client *Client) {
 	tools, err := client.ListTools()
 	responseTime := time.Since(startTime).Milliseconds()
 
-	hm.mu.Lock()
-	defer hm.mu.Unlock()
+	needReconnect := false
+	serverName := ""
 
-	health, exists := hm.health[serverID]
-	if !exists {
-		health = &ServerHealth{
-			ServerID:  serverID,
-			Name:      client.config.Name,
-			URL:       client.config.URL,
-			Type:      client.config.Type,
-			Status:    StatusConnecting,
-			Tools:     []Tool{},
-			ToolCount: 0,
+	func() {
+		hm.mu.Lock()
+		defer hm.mu.Unlock()
+
+		health, exists := hm.health[serverID]
+		if !exists {
+			health = &ServerHealth{
+				ServerID:  serverID,
+				Name:      client.config.Name,
+				URL:       client.config.URL,
+				Type:      client.config.Type,
+				Status:    StatusConnecting,
+				Tools:     []Tool{},
+				ToolCount: 0,
+			}
+			hm.health[serverID] = health
 		}
-		hm.health[serverID] = health
-	}
 
-	health.LastCheck = time.Now()
-	health.ResponseTime = responseTime
+		health.LastCheck = time.Now()
+		health.ResponseTime = responseTime
 
-	if err != nil {
-		// Server failed
-		health.ErrorCount++
-		health.ConsecutiveFailures++
-		health.LastError = sanitizeError(err)
+		if err != nil {
+			health.ErrorCount++
+			health.ConsecutiveFailures++
+			health.LastError = sanitizeError(err)
 
-		if health.ConsecutiveFailures >= 5 {
-			health.Status = StatusDisconnected
-		} else if health.ConsecutiveFailures >= 3 {
-			health.Status = StatusUnhealthy
+			if health.ConsecutiveFailures >= 5 {
+				health.Status = StatusDisconnected
+			} else if health.ConsecutiveFailures >= 3 {
+				health.Status = StatusUnhealthy
+			} else {
+				health.Status = StatusDegraded
+			}
+
+			hm.logger.Warn("Health check failed",
+				"server", health.Name,
+				"error", health.LastError,
+				"consecutiveFailures", health.ConsecutiveFailures)
+
+			// One step before StatusUnhealthy, ask the client to re-establish its
+			// session so the next user request doesn't hit a dead socket.
+			if health.ConsecutiveFailures == 2 {
+				needReconnect = true
+				serverName = health.Name
+			}
 		} else {
-			health.Status = StatusDegraded
+			health.ConsecutiveFailures = 0
+			health.LastError = ""
+			health.Tools = tools
+			health.ToolCount = len(tools)
+
+			if responseTime > 2000 {
+				health.Status = StatusDegraded
+			} else {
+				health.Status = StatusHealthy
+			}
+
+			totalChecks := health.ErrorCount + 1
+			successfulChecks := totalChecks - health.ErrorCount
+			health.SuccessRate = float64(successfulChecks) / float64(totalChecks) * 100
+
+			hm.logger.Debug("Health check succeeded",
+				"server", health.Name,
+				"responseTime", responseTime,
+				"toolCount", len(tools))
 		}
+	}()
 
-		hm.logger.Warn("Health check failed",
-			"server", health.Name,
-			"error", health.LastError,
-			"consecutiveFailures", health.ConsecutiveFailures)
-
-	} else {
-		// Server succeeded
-		health.ConsecutiveFailures = 0
-		health.LastError = ""
-		health.Tools = tools
-		health.ToolCount = len(tools)
-
-		// Determine status based on response time
-		if responseTime > 2000 {
-			health.Status = StatusDegraded
+	// Do the potentially-blocking reconnect outside the health-map lock to keep
+	// checkAllServers from serializing on one stuck server.
+	if needReconnect {
+		if recErr := client.forceReconnect(); recErr != nil {
+			hm.logger.Warn("forceReconnect failed", "server", serverName, "error", sanitizeError(recErr))
 		} else {
-			health.Status = StatusHealthy
+			hm.logger.Info("forceReconnect triggered by health monitor", "server", serverName)
 		}
-
-		// Calculate success rate (simple moving average over last checks)
-		totalChecks := health.ErrorCount + 1 // +1 for current success
-		successfulChecks := totalChecks - health.ErrorCount
-		health.SuccessRate = float64(successfulChecks) / float64(totalChecks) * 100
-
-		hm.logger.Debug("Health check succeeded",
-			"server", health.Name,
-			"responseTime", responseTime,
-			"toolCount", len(tools))
 	}
 }
 
