@@ -27,12 +27,17 @@ const (
 	// snapshot, so we fail-open fast.
 	dsMCPCallTimeout = 2 * time.Second
 
+	// dsCacheFailOpenTTL keeps fallback snapshots short-lived so we quickly
+	// recover to real datasource UIDs once MCP is healthy again.
+	dsCacheFailOpenTTL = 30 * time.Second
+
 	dsSnapshotFailOpen = "⚠ Datasource snapshot unavailable for this run. You MUST call `list_datasources` before any datasource-bound query — never guess a UID."
 )
 
 type dsCacheEntry struct {
 	snapshot  string
 	fetchedAt time.Time
+	ttl       time.Duration
 }
 
 // datasourceSnapshot returns a bullet-list of real datasource UIDs to inject
@@ -85,7 +90,7 @@ func (p *Plugin) datasourceSnapshot(orgID, orgName, scopeOrgID string) string {
 		snapshot = dsSnapshotFailOpen
 	}
 
-	p.storeDatasourceCache(cacheKey, snapshot)
+	p.storeDatasourceCacheWithTTL(cacheKey, snapshot, datasourceCacheTTL(snapshot))
 	return snapshot
 }
 
@@ -99,19 +104,27 @@ func (p *Plugin) lookupDatasourceCache(key string) (string, bool) {
 	if !ok {
 		return "", false
 	}
-	if time.Since(entry.fetchedAt) > dsCacheTTL {
+	ttl := entry.ttl
+	if ttl <= 0 {
+		ttl = dsCacheTTL
+	}
+	if time.Since(entry.fetchedAt) > ttl {
 		return "", false
 	}
 	return entry.snapshot, true
 }
 
 func (p *Plugin) storeDatasourceCache(key, snapshot string) {
+	p.storeDatasourceCacheWithTTL(key, snapshot, dsCacheTTL)
+}
+
+func (p *Plugin) storeDatasourceCacheWithTTL(key, snapshot string, ttl time.Duration) {
 	p.dsCacheMu.Lock()
 	defer p.dsCacheMu.Unlock()
 	if p.dsCache == nil {
 		p.dsCache = make(map[string]dsCacheEntry, dsCacheMaxOrgs+1)
 	}
-	p.dsCache[key] = dsCacheEntry{snapshot: snapshot, fetchedAt: time.Now()}
+	p.dsCache[key] = dsCacheEntry{snapshot: snapshot, fetchedAt: time.Now(), ttl: ttl}
 	if len(p.dsCache) > dsCacheMaxOrgs {
 		// Evict the oldest entry — simple O(n) sweep is fine at this cardinality.
 		var oldestKey string
@@ -124,6 +137,13 @@ func (p *Plugin) storeDatasourceCache(key, snapshot string) {
 		}
 		delete(p.dsCache, oldestKey)
 	}
+}
+
+func datasourceCacheTTL(snapshot string) time.Duration {
+	if snapshot == dsSnapshotFailOpen {
+		return dsCacheFailOpenTTL
+	}
+	return dsCacheTTL
 }
 
 // renderDatasourceSnapshot parses list_datasources output into a stable bullet

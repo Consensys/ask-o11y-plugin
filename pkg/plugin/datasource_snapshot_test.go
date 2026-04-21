@@ -112,6 +112,35 @@ func TestDatasourceCache_TTL(t *testing.T) {
 	}
 }
 
+func TestDatasourceCache_FailOpenTTL(t *testing.T) {
+	p := &Plugin{
+		logger:    log.DefaultLogger,
+		dsCache:   map[string]dsCacheEntry{},
+		dsCacheMu: sync.Mutex{},
+	}
+	p.storeDatasourceCacheWithTTL("org1", dsSnapshotFailOpen, datasourceCacheTTL(dsSnapshotFailOpen))
+
+	// Keep entry inside fail-open TTL and ensure it is still returned.
+	p.dsCacheMu.Lock()
+	entry := p.dsCache["org1"]
+	entry.fetchedAt = time.Now().Add(-(dsCacheFailOpenTTL - time.Second))
+	p.dsCache["org1"] = entry
+	p.dsCacheMu.Unlock()
+	if snap, ok := p.lookupDatasourceCache("org1"); !ok || snap != dsSnapshotFailOpen {
+		t.Fatal("expected fail-open cache hit within short TTL")
+	}
+
+	// Age entry beyond fail-open TTL and ensure it expires before normal TTL.
+	p.dsCacheMu.Lock()
+	entry = p.dsCache["org1"]
+	entry.fetchedAt = time.Now().Add(-(dsCacheFailOpenTTL + time.Second))
+	p.dsCache["org1"] = entry
+	p.dsCacheMu.Unlock()
+	if _, ok := p.lookupDatasourceCache("org1"); ok {
+		t.Fatal("expected fail-open cache miss after short TTL")
+	}
+}
+
 func TestDatasourceCache_EvictsOldestOverMax(t *testing.T) {
 	p := &Plugin{logger: log.DefaultLogger, dsCache: map[string]dsCacheEntry{}}
 
