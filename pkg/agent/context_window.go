@@ -11,6 +11,18 @@ const systemMessageBuffer = 1000
 const maxToolResponseTokens = 8000
 const aggressiveToolResponseTokens = 2000
 
+// maxToolDefinitionTokens is the soft cap for the combined token cost of all
+// tool definitions sent to the LLM.  When tools collectively exceed this value
+// they are compressed in two passes: first by truncating long descriptions,
+// then by stripping parameter-level description fields from their JSON schemas.
+// This directly reduces per-request token cost and helps users who are subject
+// to tight tokens-per-minute rate limits (e.g. 10 k/min on some Claude tiers).
+const maxToolDefinitionTokens = 8000
+
+// maxToolDescriptionChars is the maximum number of characters kept in a tool's
+// top-level description during the first compression pass.
+const maxToolDescriptionChars = 512
+
 // TruncationMarker is the prefix used to detect an existing truncation notice
 // so repeated trims in the same run don't stack duplicates.
 const TruncationMarker = "[NOTICE: Conversation history truncated."
@@ -164,6 +176,80 @@ func trimToolResponses(messages []Message, maxTokens int) []Message {
 			m.Content = m.Content[:maxChars] + "\n[...truncated]"
 		}
 		out[i] = m
+	}
+	return out
+}
+
+// estimateToolTokens returns the estimated token count for all tool definitions.
+func estimateToolTokens(tools []OpenAITool) int {
+	total := 0
+	for _, t := range tools {
+		b, _ := json.Marshal(t)
+		total += EstimateTokens(string(b))
+	}
+	return total
+}
+
+// TrimToolsToTokenBudget compresses tool definitions when they collectively
+// exceed maxTokens.  It runs two passes:
+//  1. Truncate each tool's top-level description to maxToolDescriptionChars.
+//  2. Strip "description" fields from every parameter schema property.
+//
+// The function always returns a new slice; the input is never mutated.
+// If maxTokens <= 0 the tools are returned unchanged.
+func TrimToolsToTokenBudget(tools []OpenAITool, maxTokens int) []OpenAITool {
+	if maxTokens <= 0 || estimateToolTokens(tools) <= maxTokens {
+		return tools
+	}
+
+	// Pass 1 — truncate long top-level descriptions.
+	result := make([]OpenAITool, len(tools))
+	for i, t := range tools {
+		result[i] = t
+		if len(t.Function.Description) > maxToolDescriptionChars {
+			result[i].Function.Description = t.Function.Description[:maxToolDescriptionChars] + "…"
+		}
+	}
+	if estimateToolTokens(result) <= maxTokens {
+		return result
+	}
+
+	// Pass 2 — strip description fields from parameter schemas.
+	for i, t := range result {
+		if t.Function.Parameters != nil {
+			result[i].Function.Parameters = stripSchemaDescriptions(t.Function.Parameters)
+		}
+	}
+	return result
+}
+
+// stripSchemaDescriptions returns a deep copy of the JSON Schema map with all
+// "description" keys removed.  Type information, required arrays, and nested
+// properties are preserved so the LLM can still construct valid tool calls.
+func stripSchemaDescriptions(schema map[string]interface{}) map[string]interface{} {
+	if schema == nil {
+		return nil
+	}
+	out := make(map[string]interface{}, len(schema))
+	for k, v := range schema {
+		if k == "description" {
+			continue
+		}
+		if k == "properties" {
+			if props, ok := v.(map[string]interface{}); ok {
+				stripped := make(map[string]interface{}, len(props))
+				for propName, propVal := range props {
+					if propMap, ok := propVal.(map[string]interface{}); ok {
+						stripped[propName] = stripSchemaDescriptions(propMap)
+					} else {
+						stripped[propName] = propVal
+					}
+				}
+				out[k] = stripped
+				continue
+			}
+		}
+		out[k] = v
 	}
 	return out
 }

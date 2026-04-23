@@ -95,6 +95,16 @@ func (a *AgentLoop) Run(ctx context.Context, req LoopRequest, eventCh chan<- SSE
 	}
 	openAITools := ConvertMCPToolsToOpenAI(mcpTools)
 
+	toolTokens := estimateToolTokens(openAITools)
+	if toolTokens > maxToolDefinitionTokens {
+		a.logger.Warn("Tool definitions exceed token threshold, compressing descriptions to reduce LLM token usage",
+			"toolCount", len(openAITools),
+			"estimatedToolTokens", toolTokens,
+			"maxToolDefinitionTokens", maxToolDefinitionTokens,
+		)
+		openAITools = TrimToolsToTokenBudget(openAITools, maxToolDefinitionTokens)
+	}
+
 	messages := BuildContextWindow(req.SystemPrompt, req.Messages, req.Summary, req.RecentMessageCount)
 
 	// Per-run state for transport-failure aggregation. We emit at most one

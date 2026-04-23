@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -212,5 +213,136 @@ func TestEstimateTokens(t *testing.T) {
 	}
 	if got := EstimateTokens(""); got != 0 {
 		t.Errorf("EstimateTokens('') = %d, expected 0", got)
+	}
+}
+
+func TestTrimToolsToTokenBudget_NoTrimWhenUnderBudget(t *testing.T) {
+	tools := []OpenAITool{
+		{Type: "function", Function: OpenAIFunction{Name: "a", Description: "short"}},
+	}
+	result := TrimToolsToTokenBudget(tools, 100_000)
+	if result[0].Function.Description != "short" {
+		t.Errorf("expected description unchanged, got %q", result[0].Function.Description)
+	}
+}
+
+func TestTrimToolsToTokenBudget_TruncatesLongDescriptions(t *testing.T) {
+	longDesc := strings.Repeat("x", 1000)
+	tools := make([]OpenAITool, 50)
+	for i := range tools {
+		tools[i] = OpenAITool{
+			Type: "function",
+			Function: OpenAIFunction{
+				Name:        fmt.Sprintf("tool_%d", i),
+				Description: longDesc,
+			},
+		}
+	}
+
+	result := TrimToolsToTokenBudget(tools, maxToolDefinitionTokens)
+	for _, tool := range result {
+		if len(tool.Function.Description) > maxToolDescriptionChars+5 {
+			t.Errorf("expected description truncated to ~%d chars, got %d", maxToolDescriptionChars, len(tool.Function.Description))
+		}
+	}
+}
+
+func TestTrimToolsToTokenBudget_StripsParameterDescriptionsWhenNeeded(t *testing.T) {
+	paramDesc := strings.Repeat("p", 500)
+	tools := make([]OpenAITool, 50)
+	for i := range tools {
+		tools[i] = OpenAITool{
+			Type: "function",
+			Function: OpenAIFunction{
+				Name:        fmt.Sprintf("tool_%d", i),
+				Description: strings.Repeat("d", 600),
+				Parameters: map[string]interface{}{
+					"type": "object",
+					"properties": map[string]interface{}{
+						"query": map[string]interface{}{
+							"type":        "string",
+							"description": paramDesc,
+						},
+					},
+				},
+			},
+		}
+	}
+
+	originalTokens := estimateToolTokens(tools)
+	result := TrimToolsToTokenBudget(tools, maxToolDefinitionTokens)
+	trimmedTokens := estimateToolTokens(result)
+
+	// The trimmed result should be strictly smaller than the original.
+	if trimmedTokens >= originalTokens {
+		t.Errorf("expected trimmed tools to use fewer tokens: original=%d trimmed=%d", originalTokens, trimmedTokens)
+	}
+
+	// Descriptions should have been truncated.
+	for _, tool := range result {
+		if len(tool.Function.Description) > maxToolDescriptionChars+5 {
+			t.Errorf("expected description truncated to ~%d chars, got %d", maxToolDescriptionChars, len(tool.Function.Description))
+		}
+	}
+
+	// Parameter type should still be present but descriptions should be gone.
+	for _, tool := range result {
+		if tool.Function.Parameters == nil {
+			continue
+		}
+		props, ok := tool.Function.Parameters["properties"].(map[string]interface{})
+		if !ok {
+			continue
+		}
+		queryProp, ok := props["query"].(map[string]interface{})
+		if !ok {
+			continue
+		}
+		if queryProp["type"] != "string" {
+			t.Errorf("expected parameter type 'string' preserved, got %v", queryProp["type"])
+		}
+		if _, hasDesc := queryProp["description"]; hasDesc {
+			t.Error("expected parameter description to be stripped")
+		}
+	}
+}
+
+func TestTrimToolsToTokenBudget_ZeroBudget(t *testing.T) {
+	tools := []OpenAITool{
+		{Type: "function", Function: OpenAIFunction{Name: "a", Description: "b"}},
+	}
+	result := TrimToolsToTokenBudget(tools, 0)
+	if result[0].Function.Description != "b" {
+		t.Errorf("zero budget should be a no-op, got %q", result[0].Function.Description)
+	}
+}
+
+func TestStripSchemaDescriptions(t *testing.T) {
+	schema := map[string]interface{}{
+		"type":        "object",
+		"description": "should be removed",
+		"properties": map[string]interface{}{
+			"query": map[string]interface{}{
+				"type":        "string",
+				"description": "also removed",
+			},
+		},
+		"required": []interface{}{"query"},
+	}
+
+	result := stripSchemaDescriptions(schema)
+	if _, ok := result["description"]; ok {
+		t.Error("top-level description should be stripped")
+	}
+	props := result["properties"].(map[string]interface{})
+	query := props["query"].(map[string]interface{})
+	if _, ok := query["description"]; ok {
+		t.Error("nested description should be stripped")
+	}
+	if query["type"] != "string" {
+		t.Errorf("type should be preserved, got %v", query["type"])
+	}
+	if result["required"] == nil {
+		t.Error("required should be preserved")
 	}
 }
