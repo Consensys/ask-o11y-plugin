@@ -5,6 +5,13 @@ All notable changes to the Ask O11y Grafana plugin will be documented in this fi
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.23](https://github.com/Consensys/ask-o11y-plugin/compare/v0.2.22...v0.2.23) (2026-05-04)
+
+
+### Features
+
+* **mcp:** per-server tool selection UI ([#129](https://github.com/Consensys/ask-o11y-plugin/issues/129)) ([7a2a969](https://github.com/Consensys/ask-o11y-plugin/commit/7a2a96922af55d2a907ee12587e6f4c631ace8bc))
+
 ## [0.2.22](https://github.com/Consensys/ask-o11y-plugin/compare/v0.2.21...v0.2.22) (2026-04-21)
 
 
