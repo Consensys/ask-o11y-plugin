@@ -78,10 +78,11 @@ func boolPtrTrueOnly(b bool) *bool {
 
 // ServerConfig represents configuration for an MCP server
 type ServerConfig struct {
-	ID      string            `json:"id"`
-	Name    string            `json:"name"`
-	URL     string            `json:"url"`
-	Type    string            `json:"type"` // "openapi", "standard", "sse", "streamable-http"
-	Enabled bool              `json:"enabled"`
-	Headers map[string]string `json:"headers,omitempty"`
+	ID             string            `json:"id"`
+	Name           string            `json:"name"`
+	URL            string            `json:"url"`
+	Type           string            `json:"type"` // "openapi", "standard", "sse", "streamable-http"
+	Enabled        bool              `json:"enabled"`
+	Headers        map[string]string `json:"headers,omitempty"`
+	ToolSelections map[string]bool   `json:"toolSelections,omitempty"`
 }

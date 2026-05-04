@@ -67,9 +67,14 @@ func createRedisClient(logger log.Logger, redisURL string) (*redis.Client, error
 	return redis.NewClient(opt), nil
 }
 
+// builtInMCPServerID is the proxy server ID used to register the embedded
+// Grafana MCP server when useBuiltInMCP is enabled.
+const builtInMCPServerID = "mcp-grafana"
+
 type PluginSettings struct {
-	MCPServers    []mcp.ServerConfig `json:"mcpServers"`
-	UseBuiltInMCP bool               `json:"useBuiltInMCP"`
+	MCPServers                []mcp.ServerConfig `json:"mcpServers"`
+	UseBuiltInMCP             bool               `json:"useBuiltInMCP"`
+	BuiltInMCPToolSelections  map[string]bool    `json:"builtInMCPToolSelections,omitempty"`
 
 	DefaultSystemPrompt string `json:"defaultSystemPrompt,omitempty"`
 	InvestigationPrompt string `json:"investigationPrompt,omitempty"`
@@ -383,6 +388,77 @@ func (p *Plugin) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/", p.handleDefault)
 }
 
+// ensureBuiltInMCPRegistered registers the built-in Grafana MCP client with the
+// proxy when useBuiltInMCP is enabled. It removes the client when no SA token
+// is available so the proxy doesn't keep a dead client around.
+func (p *Plugin) ensureBuiltInMCPRegistered(saToken, grafanaURL string) error {
+	if !p.useBuiltInMCP {
+		return nil
+	}
+	if saToken == "" {
+		p.logger.Warn("Built-in MCP requires a service account token; skipping built-in MCP server registration")
+		p.mcpProxy.RemoveServer(builtInMCPServerID)
+		return nil
+	}
+	return p.mcpProxy.EnsureServer(mcp.ServerConfig{
+		ID:      builtInMCPServerID,
+		Name:    "Grafana Built-in MCP",
+		URL:     grafanaURL + "/api/plugins/grafana-llm-app/resources/mcp/grafana",
+		Type:    "streamable-http",
+		Enabled: true,
+		Headers: map[string]string{"Authorization": "Bearer " + saToken},
+	})
+}
+
+// builtInSelectionServer returns a synthetic ServerConfig representing the
+// built-in MCP, used to apply the user's per-tool selections at filter time.
+// Returns nil when useBuiltInMCP is disabled.
+func (p *Plugin) builtInSelectionServer() *mcp.ServerConfig {
+	if !p.useBuiltInMCP {
+		return nil
+	}
+	return &mcp.ServerConfig{
+		ID:             builtInMCPServerID,
+		Enabled:        true,
+		ToolSelections: p.settings.BuiltInMCPToolSelections,
+	}
+}
+
+// settingsForFilter snapshots the server configs (user-defined + built-in
+// selection overlay) used by mcp.FilterToolsBySelection / mcp.IsToolEnabled.
+func (p *Plugin) settingsForFilter() []mcp.ServerConfig {
+	p.settingsMu.RLock()
+	servers := append([]mcp.ServerConfig(nil), p.settings.MCPServers...)
+	p.settingsMu.RUnlock()
+	if b := p.builtInSelectionServer(); b != nil {
+		servers = append(servers, *b)
+	}
+	return servers
+}
+
+// ensureBuiltInForListing registers the built-in MCP on demand (if needed) and
+// runs an immediate health check so /api/mcp/servers returns fresh tools
+// without waiting for the next periodic tick.
+func (p *Plugin) ensureBuiltInForListing(r *http.Request) {
+	if !p.useBuiltInMCP {
+		return
+	}
+	cfg := backend.GrafanaConfigFromContext(r.Context())
+	if cfg == nil {
+		return
+	}
+	saToken, err := cfg.PluginAppClientSecret()
+	if err != nil {
+		return
+	}
+	grafanaURL, _ := resolveGrafanaURL(p.settings, cfg)
+	if err := p.ensureBuiltInMCPRegistered(saToken, grafanaURL); err != nil {
+		p.logger.Warn("Failed to register built-in MCP for listing", "error", err)
+		return
+	}
+	p.mcpProxy.GetHealthMonitor().CheckServerNow(builtInMCPServerID)
+}
+
 func getUserRole(r *http.Request) string {
 	pluginContext := httpadapter.PluginConfigFromContext(r.Context())
 	if pluginContext.User != nil {
@@ -462,6 +538,8 @@ func (p *Plugin) handleMCPTools(w http.ResponseWriter, r *http.Request) {
 	userRole := getUserRole(r)
 	p.logger.Debug("MCP tools request", "method", r.Method, "role", userRole)
 
+	p.ensureBuiltInForListing(r)
+
 	tools, err := p.mcpProxy.ListTools()
 	if err != nil {
 		p.logger.Error("Failed to list tools", "error", err)
@@ -470,7 +548,9 @@ func (p *Plugin) handleMCPTools(w http.ResponseWriter, r *http.Request) {
 	}
 
 	filteredTools := rbac.FilterToolsByRole(tools, userRole)
-	p.logger.Debug("Tools filtered by role", "role", userRole, "totalTools", len(tools), "filteredTools", len(filteredTools))
+	filteredTools = mcp.FilterToolsBySelection(filteredTools, p.settingsForFilter())
+
+	p.logger.Debug("Tools filtered", "role", userRole, "totalTools", len(tools), "filteredTools", len(filteredTools))
 
 	w.Header().Set("Content-Type", "application/json")
 
@@ -521,6 +601,12 @@ func (p *Plugin) handleMCPCallTool(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if !mcp.IsToolEnabled(req.Name, p.settingsForFilter()) {
+		p.logger.Warn("Tool disabled by user selection", "tool", req.Name)
+		http.Error(w, "Tool is not enabled", http.StatusForbidden)
+		return
+	}
+
 	orgID := r.Header.Get("X-Grafana-Org-Id")
 	if orgID == "" {
 		orgID = "1"
@@ -541,6 +627,8 @@ func (p *Plugin) handleMCPCallTool(w http.ResponseWriter, r *http.Request) {
 
 func (p *Plugin) handleMCPServers(w http.ResponseWriter, r *http.Request) {
 	p.logger.Debug("MCP servers status request", "method", r.Method)
+
+	p.ensureBuiltInForListing(r)
 
 	healthMonitor := p.mcpProxy.GetHealthMonitor()
 	serversHealth := healthMonitor.GetAllHealth()
@@ -604,27 +692,10 @@ func (p *Plugin) handleAgentRun(w http.ResponseWriter, r *http.Request) {
 	grafanaURL, urlSource := resolveGrafanaURL(p.settings, cfg)
 	p.logger.Debug("Resolved Grafana URL for LLM/MCP calls", "url", grafanaURL, "source", urlSource)
 
-	if p.useBuiltInMCP {
-		if saToken == "" {
-			p.logger.Warn("Built-in MCP requires a service account token; skipping built-in MCP server registration")
-			p.mcpProxy.RemoveServer("mcp-grafana")
-		} else {
-			builtInURL := grafanaURL + "/api/plugins/grafana-llm-app/resources/mcp/grafana"
-			if err := p.mcpProxy.EnsureServer(mcp.ServerConfig{
-				ID:      "mcp-grafana",
-				Name:    "Grafana Built-in MCP",
-				URL:     builtInURL,
-				Type:    "streamable-http",
-				Enabled: true,
-				Headers: map[string]string{
-					"Authorization": "Bearer " + saToken,
-				},
-			}); err != nil {
-				p.logger.Error("Failed to register built-in MCP server", "error", err)
-				http.Error(w, "Failed to initialize MCP server", http.StatusInternalServerError)
-				return
-			}
-		}
+	if err := p.ensureBuiltInMCPRegistered(saToken, grafanaURL); err != nil {
+		p.logger.Error("Failed to register built-in MCP server", "error", err)
+		http.Error(w, "Failed to initialize MCP server", http.StatusInternalServerError)
+		return
 	}
 
 	runID, err := generateShareID()
@@ -754,6 +825,7 @@ func (p *Plugin) handleAgentRun(w http.ResponseWriter, r *http.Request) {
 		OrgName:            req.OrgName,
 		ScopeOrgID:         req.ScopeOrgID,
 		ExcludeToolNames:   graphitiWriteToolNames,
+		MCPServers:         p.settingsForFilter(),
 	}
 
 	detachedCtx := context.WithoutCancel(ctx)
@@ -1091,20 +1163,10 @@ func (p *Plugin) handleGraphitiDiscover(w http.ResponseWriter, r *http.Request) 
 	grafanaURL, urlSource := resolveGrafanaURL(p.settings, cfg)
 	p.logger.Debug("Resolved Grafana URL for discovery run", "url", grafanaURL, "source", urlSource)
 
-	if p.useBuiltInMCP && saToken != "" {
-		builtInURL := grafanaURL + "/api/plugins/grafana-llm-app/resources/mcp/grafana"
-		if err := p.mcpProxy.EnsureServer(mcp.ServerConfig{
-			ID:      "mcp-grafana",
-			Name:    "Grafana Built-in MCP",
-			URL:     builtInURL,
-			Type:    "streamable-http",
-			Enabled: true,
-			Headers: map[string]string{"Authorization": "Bearer " + saToken},
-		}); err != nil {
-			p.logger.Error("Failed to ensure built-in MCP server for discovery", "error", err)
-			http.Error(w, "Failed to initialize MCP server", http.StatusInternalServerError)
-			return
-		}
+	if err := p.ensureBuiltInMCPRegistered(saToken, grafanaURL); err != nil {
+		p.logger.Error("Failed to register built-in MCP server", "error", err)
+		http.Error(w, "Failed to initialize MCP server", http.StatusInternalServerError)
+		return
 	}
 
 	orgID := getOrgID(r)
@@ -1132,6 +1194,7 @@ func (p *Plugin) handleGraphitiDiscover(w http.ResponseWriter, r *http.Request) 
 		OrgID:              strconv.FormatInt(orgID, 10),
 		OrgName:            "Org" + strconv.FormatInt(orgID, 10),
 		ExcludeToolNames:   graphitiWriteToolNames,
+		MCPServers:         p.settingsForFilter(),
 	}
 
 	eventCh := make(chan agent.SSEEvent, GraphitiDiscoveryMaxIter*6)

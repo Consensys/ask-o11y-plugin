@@ -58,6 +58,10 @@ type LoopRequest struct {
 	// ExcludeToolNames, when set, removes these tools from the available set
 	// before the loop runs. Used to hide graphiti write tools from user sessions.
 	ExcludeToolNames []string
+
+	// MCPServers carries per-server tool-selection settings, used to honor the
+	// user's Manage Tools choices inside the agent loop (not just at HTTP edges).
+	MCPServers []mcp.ServerConfig
 }
 
 func (a *AgentLoop) Run(ctx context.Context, req LoopRequest, eventCh chan<- SSEEvent) {
@@ -80,6 +84,7 @@ func (a *AgentLoop) Run(ctx context.Context, req LoopRequest, eventCh chan<- SSE
 		mcpTools = []mcp.Tool{}
 	}
 	mcpTools = rbac.FilterToolsByRole(mcpTools, req.UserRole)
+	mcpTools = mcp.FilterToolsBySelection(mcpTools, req.MCPServers)
 	if len(req.ExcludeToolNames) > 0 {
 		excluded := make(map[string]bool, len(req.ExcludeToolNames))
 		for _, n := range req.ExcludeToolNames {
@@ -258,6 +263,9 @@ func (a *AgentLoop) executeTool(ctx context.Context, tc ToolCall, req LoopReques
 	}
 	if !rbac.CanAccessTool(req.UserRole, tool) {
 		return fmt.Sprintf("Access denied: %s role cannot access tool %s", req.UserRole, tc.Function.Name), true, "tool"
+	}
+	if !mcp.IsToolEnabled(tc.Function.Name, req.MCPServers) {
+		return fmt.Sprintf("Tool %s is disabled in MCP server settings", tc.Function.Name), true, "tool"
 	}
 
 	var args map[string]interface{}

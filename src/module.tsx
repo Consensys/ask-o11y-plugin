@@ -10,7 +10,6 @@ import './index.css';
 
 const LazyApp = lazy(() => import('./components/App/App'));
 const LazyAppConfig = lazy(() => import('./components/AppConfig/AppConfig'));
-const LazyMCPStatus = lazy(() => import('./components/MCPStatus').then((module) => ({ default: module.MCPStatus })));
 
 const App = (props: AppRootProps) => (
   <ErrorBoundary fallbackTitle="Application Error">
@@ -28,14 +27,6 @@ const AppConfig = (props: AppConfigProps) => (
   </ErrorBoundary>
 );
 
-const MCPStatus = (props: any) => (
-  <ErrorBoundary fallbackTitle="MCP Status Error">
-    <Suspense fallback={<InlineAppLoader text="Loading MCP status..." />}>
-      <LazyMCPStatus onClose={() => {}} />
-    </Suspense>
-  </ErrorBoundary>
-);
-
 export const plugin = new AppPlugin<AppPluginSettings>()
   .setRootPage(App)
   .addConfigPage({
@@ -43,10 +34,4 @@ export const plugin = new AppPlugin<AppPluginSettings>()
     icon: 'cog',
     body: AppConfig,
     id: 'configuration',
-  })
-  .addConfigPage({
-    title: 'MCP Connections',
-    icon: 'plug',
-    body: MCPStatus,
-    id: 'mcp-connections',
   });

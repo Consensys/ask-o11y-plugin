@@ -101,6 +101,33 @@ func (hm *HealthMonitor) checkAllServers() {
 	}
 }
 
+// CheckServerNow performs an immediate, synchronous health check for one
+// server. Used right after on-demand registration so callers can see fresh
+// tools without waiting for the next periodic tick. Retries briefly to absorb
+// the cold-connect window for streamable-http transports.
+func (hm *HealthMonitor) CheckServerNow(serverID string) {
+	hm.proxy.mu.RLock()
+	client, ok := hm.proxy.clients[serverID]
+	hm.proxy.mu.RUnlock()
+	if !ok {
+		return
+	}
+	const maxAttempts = 3
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		hm.checkServer(serverID, client)
+		hm.mu.RLock()
+		health, exists := hm.health[serverID]
+		populated := exists && health.ToolCount > 0
+		hm.mu.RUnlock()
+		if populated {
+			return
+		}
+		if attempt < maxAttempts-1 {
+			time.Sleep(150 * time.Millisecond)
+		}
+	}
+}
+
 // checkServer performs a health check on a single server
 func (hm *HealthMonitor) checkServer(serverID string, client *Client) {
 	startTime := time.Now()

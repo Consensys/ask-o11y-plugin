@@ -8,9 +8,7 @@ export const testIds = {
     apiUrl: 'data-testid ac-api-url',
     maxTotalTokens: 'data-testid ac-max-total-tokens',
     submit: 'data-testid ac-submit-form',
-    useBuiltInMCPField: 'data-testid ac-use-builtin-mcp-field',
     useBuiltInMCPToggle: 'data-testid ac-use-builtin-mcp-toggle',
-    saveMCPModeButton: 'data-testid ac-save-mcp-mode',
     addMcpServerButton: 'data-testid ac-add-mcp-server',
     saveMcpServersButton: 'data-testid ac-save-mcp-servers',
     mcpServerCard: (id: string) => `data-testid ac-mcp-server-${id}`,
@@ -23,6 +21,9 @@ export const testIds = {
     mcpServerHeaderValueInput: (id: string, index: number) => `data-testid ac-mcp-server-header-value-${id}-${index}`,
     mcpServerHeaderRemoveButton: (id: string, index: number) =>
       `data-testid ac-mcp-server-header-remove-${id}-${index}`,
+    manageToolsButton: (id: string) => `data-testid ac-manage-tools-${id}`,
+    manageToolsModal: 'data-testid ac-manage-tools-modal',
+    manageToolsToolItem: (toolName: string) => `data-testid ac-manage-tool-item-${toolName}`,
     promptEditor: {
       system: 'ac-prompt-system',
       investigation: 'ac-prompt-investigation',
