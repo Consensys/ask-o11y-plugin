@@ -22,10 +22,18 @@ export interface MCPServerStatus {
   toolCount: number;
 }
 
+export interface MCPToolAnnotations {
+  readOnlyHint?: boolean;
+  destructiveHint?: boolean;
+  idempotentHint?: boolean;
+  openWorldHint?: boolean;
+}
+
 export interface MCPTool {
   name: string;
   description: string;
   inputSchema: Record<string, any>;
+  annotations?: MCPToolAnnotations;
 }
 
 export interface SystemHealth {

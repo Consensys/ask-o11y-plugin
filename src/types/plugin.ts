@@ -5,11 +5,13 @@ export interface MCPServerConfig {
   enabled: boolean;
   type?: 'openapi' | 'standard' | 'sse' | 'streamable-http';
   headers?: Record<string, string>;
+  toolSelections?: Record<string, boolean>;
 }
 
 export type AppPluginSettings = {
   mcpServers?: MCPServerConfig[];
   useBuiltInMCP?: boolean;
+  builtInMCPToolSelections?: Record<string, boolean>;
 
   defaultSystemPrompt?: string;
   investigationPrompt?: string;

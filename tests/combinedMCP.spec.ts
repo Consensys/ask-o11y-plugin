@@ -10,8 +10,8 @@ async function ensureBuiltInMCPEnabled(page: Page, shouldReload = false): Promis
 
   if (!isBuiltInEnabled) {
     await builtInToggle.click();
-    const saveMCPModeButton = page.locator('[data-testid="data-testid ac-save-mcp-mode"]');
-    await saveMCPModeButton.click();
+    const saveButton = page.locator('[data-testid="data-testid ac-save-mcp-servers"]');
+    await saveButton.click();
     await page.waitForTimeout(1000);
     if (shouldReload) {
       await page.reload();

@@ -7,7 +7,38 @@ import { mcp } from '@grafana/llm';
 import { testIds } from '../testIds';
 import { ValidationService } from '../../services/validation';
 import { PromptEditor } from './PromptEditor';
+import { ManageToolsModal } from './ManageToolsModal';
+import { mcpServerStatusService, type MCPServerStatus, type MCPTool } from '../../services/mcpServerStatus';
 import type { AppPluginSettings, MCPServerConfig } from '../../types/plugin';
+
+type ServerStatusKind = MCPServerStatus['status'];
+
+const STATUS_LABELS: Record<ServerStatusKind, string> = {
+  healthy: 'Healthy',
+  degraded: 'Degraded',
+  unhealthy: 'Unhealthy',
+  disconnected: 'Disconnected',
+  connecting: 'Connecting',
+};
+
+const STATUS_BADGE_CLASSES: Record<ServerStatusKind, string> = {
+  healthy: 'bg-success text-success-text',
+  degraded: 'bg-warning text-warning-text',
+  unhealthy: 'bg-error text-error-text',
+  disconnected: 'bg-error text-error-text',
+  connecting: 'bg-info text-info-text',
+};
+
+function StatusBadge({ status }: { status?: ServerStatusKind }) {
+  if (!status) {
+    return <span className="text-xs text-secondary">Status unknown</span>;
+  }
+  return (
+    <span className={`inline-block px-2 py-0.5 rounded text-xs font-medium ${STATUS_BADGE_CLASSES[status]}`}>
+      {STATUS_LABELS[status]}
+    </span>
+  );
+}
 
 interface PromptDefaults {
   defaultSystemPrompt: string;
@@ -35,6 +66,7 @@ type State = {
   mcpServers: MCPServerConfig[];
   useBuiltInMCP: boolean;
   builtInMCPAvailable: boolean | null;
+  builtInMCPToolSelections: Record<string, boolean>;
   expandedAdvanced: Set<string>;
   kioskModeEnabled: boolean;
   chatPanelPosition: 'left' | 'right';
@@ -58,6 +90,7 @@ export interface AppConfigProps extends PluginConfigPageProps<AppPluginMeta<AppP
 
 const PROMPT_DEFAULTS_URL = '/api/plugins/consensys-asko11y-app/resources/api/prompt-defaults';
 const DEFAULT_MAX_TOTAL_TOKENS = 128000;
+const BUILTIN_MCP_SERVER_ID = 'mcp-grafana';
 
 const AppConfig = ({ plugin }: AppConfigProps) => {
   const { enabled, pinned, jsonData } = plugin.meta;
@@ -69,6 +102,7 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
     mcpServers: jsonData?.mcpServers || [],
     useBuiltInMCP: jsonData?.useBuiltInMCP ?? false,
     builtInMCPAvailable: null,
+    builtInMCPToolSelections: jsonData?.builtInMCPToolSelections ?? {},
     expandedAdvanced: new Set<string>(),
     kioskModeEnabled: jsonData?.kioskModeEnabled ?? true,
     chatPanelPosition: jsonData?.chatPanelPosition || 'right',
@@ -87,6 +121,40 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
   });
   const [resetSecureKeys, setResetSecureKeys] = useState<Set<string>>(new Set());
   const [deletedSecureKeys, setDeletedSecureKeys] = useState<Set<string>>(new Set());
+
+  // Manage Tools modal state
+  const [modalServerId, setModalServerId] = useState<string | null>(null);
+  const [modalOpen, setModalOpen] = useState(false);
+  const [serverTools, setServerTools] = useState<MCPTool[]>([]);
+  const [serverToolsLoading, setServerToolsLoading] = useState(false);
+
+  // Per-server health status, keyed by serverId. Refreshed on mount and periodically.
+  const [serverStatuses, setServerStatuses] = useState<Record<string, ServerStatusKind>>({});
+
+  useEffect(() => {
+    let cancelled = false;
+    const fetchStatuses = async () => {
+      try {
+        const response = await mcpServerStatusService.fetchServerStatuses();
+        if (cancelled) {
+          return;
+        }
+        const next: Record<string, ServerStatusKind> = {};
+        for (const s of response.servers) {
+          next[s.serverId] = s.status;
+        }
+        setServerStatuses(next);
+      } catch {
+        // status fetch is best-effort; UI shows "Status unknown"
+      }
+    };
+    fetchStatuses();
+    const id = window.setInterval(fetchStatuses, 15000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(id);
+    };
+  }, []);
 
   useEffect(() => {
     const init = async () => {
@@ -332,6 +400,54 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
     updateMCPServer(serverId, { headers: currentHeaders });
   }
 
+  async function openManageTools(serverId: string) {
+    setServerTools([]);
+    setServerToolsLoading(true);
+    setModalServerId(serverId);
+    setModalOpen(true);
+    try {
+      const response = await mcpServerStatusService.fetchServerStatuses();
+      const statusInfo = response.servers.find((s) => s.serverId === serverId);
+      setServerTools(statusInfo?.tools ?? []);
+    } catch {
+      setServerTools([]);
+    } finally {
+      setServerToolsLoading(false);
+    }
+  }
+
+  async function handleSaveToolSelections(serverId: string, selections: Record<string, boolean>) {
+    const nextBuiltInSelections =
+      serverId === BUILTIN_MCP_SERVER_ID ? selections : state.builtInMCPToolSelections;
+    const nextServers =
+      serverId === BUILTIN_MCP_SERVER_ID
+        ? state.mcpServers
+        : state.mcpServers.map((s) => (s.id === serverId ? { ...s, toolSelections: selections } : s));
+
+    setState((prev) => ({
+      ...prev,
+      builtInMCPToolSelections: nextBuiltInSelections,
+      mcpServers: nextServers,
+    }));
+    setModalOpen(false);
+    setModalServerId(null);
+
+    // Persist all MCP-related fields from the latest local state so successive
+    // Apply calls don't overwrite each other's prior changes via stale jsonData.
+    const nextJsonData: AppPluginSettings = {
+      ...jsonData,
+      useBuiltInMCP: state.useBuiltInMCP,
+      builtInMCPToolSelections: nextBuiltInSelections,
+      mcpServers: nextServers,
+    };
+
+    try {
+      await updatePlugin(plugin.meta.id, { enabled, pinned, jsonData: nextJsonData });
+    } catch {
+      // Persist error: local state already updated; user can retry via the main Save button.
+    }
+  }
+
   useEffect(() => {
     setState((prev) => ({ ...prev, graphitiConnected: null }));
     lastValueFrom(
@@ -447,17 +563,6 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
     });
   }
 
-  function onSubmitMCPMode() {
-    updatePluginAndReload(plugin.meta.id, {
-      enabled,
-      pinned,
-      jsonData: {
-        ...jsonData,
-        useBuiltInMCP: state.useBuiltInMCP,
-      },
-    });
-  }
-
   function onSubmitMCPServers() {
     const errors: ValidationErrors['mcpServers'] = {};
     let hasErrors = false;
@@ -540,6 +645,8 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
       jsonData: {
         ...jsonData,
         mcpServers: cleanedServers,
+        useBuiltInMCP: state.useBuiltInMCP,
+        builtInMCPToolSelections: state.builtInMCPToolSelections,
       },
       ...(hasSecureChanges ? { secureJsonData } : {}),
     });
@@ -580,80 +687,52 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
         </div>
       </FieldSet>
 
-      <FieldSet label="MCP Mode" className="mt-4">
+      <FieldSet label="MCP Servers" className="mt-4">
         <p className="text-sm text-secondary mb-3">
-          Choose how to connect to MCP (Model Context Protocol) tools. Built-in mode uses Grafana&apos;s integrated MCP
-          server, while External mode connects to custom MCP servers you configure.
+          MCP (Model Context Protocol) servers provide tools the agent can call. The built-in Grafana MCP is bundled
+          with the grafana-llm-app plugin; external servers extend the toolset.
         </p>
-
-        {state.builtInMCPAvailable === null && (
-          <Alert severity="info" title="Checking availability">
-            Checking if built-in MCP is available...
-          </Alert>
-        )}
 
         {state.builtInMCPAvailable === false && (
-          <Alert severity="warning" title="Built-in MCP unavailable">
-            The grafana-llm-app plugin is not installed or MCP is not enabled. To use built-in MCP, install and
-            configure grafana-llm-app.
+          <Alert severity="warning" title="Built-in MCP unavailable" className="mb-3">
+            The grafana-llm-app plugin is not installed or MCP is not enabled. To use the built-in Grafana MCP, install
+            and configure grafana-llm-app.
           </Alert>
         )}
 
-        <Field
-          label="Use Built-in Grafana MCP"
-          description={
-            state.useBuiltInMCP
-              ? "Enable Grafana's built-in MCP server. Can be used together with external servers below."
-              : 'Using external MCP servers configured below. Built-in MCP is disabled.'
-          }
-          data-testid={testIds.appConfig.useBuiltInMCPField}
+        <div
+          data-testid={testIds.appConfig.mcpServerCard(BUILTIN_MCP_SERVER_ID)}
+          className="p-4 mb-3 rounded border border-medium bg-secondary"
         >
-          <Switch
-            value={state.useBuiltInMCP}
-            onChange={(e) => setState({ ...state, useBuiltInMCP: e.currentTarget.checked })}
-            disabled={state.builtInMCPAvailable === false}
-            data-testid={testIds.appConfig.useBuiltInMCPToggle}
-          />
-        </Field>
-
-        {state.useBuiltInMCP && state.builtInMCPAvailable && !state.mcpServers.some((s) => s.enabled) && (
-          <Alert severity="info" title="Built-in MCP enabled" className="mt-2">
-            Using Grafana&apos;s built-in MCP server with observability tools. You can also configure external servers
-            below - all tools will be available together.
-          </Alert>
-        )}
-
-        {state.useBuiltInMCP && state.builtInMCPAvailable && state.mcpServers.some((s) => s.enabled) && (
-          <Alert severity="success" title="Combined mode active" className="mt-2">
-            Using both built-in Grafana MCP and {state.mcpServers.filter((s) => s.enabled).length} external server(s).
-            All tools available in chat.
-          </Alert>
-        )}
-
-        <div className="mt-3">
-          <Button
-            onClick={onSubmitMCPMode}
-            variant="primary"
-            disabled={
-              state.builtInMCPAvailable === null ||
-              (state.useBuiltInMCP && state.builtInMCPAvailable === false)
-            }
-            data-testid={testIds.appConfig.saveMCPModeButton}
-          >
-            Save MCP Mode
-          </Button>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2 min-w-0">
+              <Icon name="plug" />
+              <span className="font-medium">Grafana Built-in MCP</span>
+              <StatusBadge status={serverStatuses[BUILTIN_MCP_SERVER_ID]} />
+            </div>
+            <div className="flex items-center gap-2">
+              <Switch
+                value={state.useBuiltInMCP}
+                onChange={(e) => {
+                  const checked = (e.currentTarget ?? e.target)?.checked ?? false;
+                  setState((prev) => ({ ...prev, useBuiltInMCP: checked }));
+                }}
+                disabled={state.builtInMCPAvailable === false}
+                data-testid={testIds.appConfig.useBuiltInMCPToggle}
+              />
+              <Button
+                variant="secondary"
+                size="sm"
+                icon="wrench"
+                onClick={() => openManageTools(BUILTIN_MCP_SERVER_ID)}
+                disabled={!state.useBuiltInMCP || state.builtInMCPAvailable === false}
+                data-testid={testIds.appConfig.manageToolsButton(BUILTIN_MCP_SERVER_ID)}
+              >
+                Tools
+              </Button>
+            </div>
+          </div>
         </div>
-      </FieldSet>
-
-      <FieldSet label="MCP Server Connections" className="mt-4">
-        <p className="text-sm text-secondary mb-3">
-          Configure additional MCP (Model Context Protocol) servers to extend tool capabilities. Supports OpenAPI-based
-          servers like{' '}
-          <a href="https://github.com/open-webui/mcpo" target="_blank" rel="noopener noreferrer">
-            MCPO
-          </a>
-          .
-        </p>
 
         {state.mcpServers.map((server) => (
           <div
@@ -662,15 +741,25 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
             className="p-4 mb-3 rounded border border-medium bg-secondary"
           >
             <div className="flex items-center justify-between mb-3">
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 min-w-0">
                 <Icon name="plug" />
                 <span className="font-medium">{server.name || 'Unnamed Server'}</span>
+                <StatusBadge status={serverStatuses[server.id]} />
               </div>
               <div className="flex items-center gap-2">
                 <Switch
                   value={server.enabled}
                   onChange={(e) => updateMCPServer(server.id, { enabled: e.currentTarget.checked })}
                 />
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  icon="wrench"
+                  onClick={() => openManageTools(server.id)}
+                  data-testid={testIds.appConfig.manageToolsButton(server.id)}
+                >
+                  Tools
+                </Button>
                 <Button
                   variant="secondary"
                   size="sm"
@@ -872,7 +961,7 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
             disabled={Object.keys(validationErrors.mcpServers).length > 0}
             data-testid={testIds.appConfig.saveMcpServersButton}
           >
-            Save MCP Server Connections
+            Save MCP Servers
           </Button>
         </div>
       </FieldSet>
@@ -1030,6 +1119,36 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
           </div>
         )}
       </FieldSet>
+
+      {modalServerId && (
+        <ManageToolsModal
+          key={modalServerId}
+          serverId={modalServerId}
+          serverName={
+            modalServerId === BUILTIN_MCP_SERVER_ID
+              ? 'Grafana Built-in MCP'
+              : state.mcpServers.find((s) => s.id === modalServerId)?.name || modalServerId
+          }
+          tools={serverTools}
+          loading={serverToolsLoading}
+          serverEnabled={
+            modalServerId === BUILTIN_MCP_SERVER_ID
+              ? state.useBuiltInMCP
+              : state.mcpServers.find((s) => s.id === modalServerId)?.enabled ?? true
+          }
+          currentSelections={
+            modalServerId === BUILTIN_MCP_SERVER_ID
+              ? state.builtInMCPToolSelections
+              : state.mcpServers.find((s) => s.id === modalServerId)?.toolSelections
+          }
+          isOpen={modalOpen}
+          onDismiss={() => {
+            setModalOpen(false);
+            setModalServerId(null);
+          }}
+          onSave={handleSaveToolSelections}
+        />
+      )}
     </div>
   );
 };
