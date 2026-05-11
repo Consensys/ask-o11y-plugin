@@ -74,17 +74,6 @@ Use this option if you are on a multi-org Grafana instance:
 
 ---
 
-## Installation
-
-1. In Grafana, go to **Administration → Plugins and data → Plugins**
-2. Search for "Ask O11y"
-3. Click **Install**
-4. Navigate to **Apps → Ask O11y**
-
-For manual installation, download from [GitHub Releases](https://github.com/Consensys/ask-o11y-plugin/releases) and extract to your Grafana plugins directory.
-
----
-
 ## Quick Start
 
 1. Navigate to **Apps → Ask O11y**
@@ -150,14 +139,6 @@ Customize three prompts: **System Prompt** (base AI instructions), **Investigati
 
 - **Kiosk Mode**: Hide Grafana navigation bars in embedded pages (on by default)
 - **Chat Panel Position**: Left or right (right by default)
-
----
-
-## REST API
-
-Ask O11y exposes a REST API for programmatic access. The OpenAPI 3.0.3 spec is served at `/api/plugins/consensys-asko11y-app/resources/openapi.json`.
-
-For the full endpoint reference, see the [REST API Reference](https://github.com/Consensys/ask-o11y-plugin/blob/main/CONTRIBUTING.md#rest-api-reference) in the contributing guide.
 
 ---
 

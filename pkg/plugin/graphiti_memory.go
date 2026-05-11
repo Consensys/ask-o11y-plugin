@@ -36,6 +36,13 @@ func hasGraphitiMemoryTool(tools []mcp.Tool) bool {
 	return false
 }
 
+func graphitiKnowledgePrompt(groupID string) string {
+	return fmt.Sprintf(
+		"\n\nKnowledge graph tools are available. Use graphiti_search_memory_facts to look up service topology, dependencies, and historical incidents. When calling any Graphiti tool that accepts group_id, always pass group_id exactly %q; never omit group_id, invent another group_id, or reuse a group_id from prior context. This also applies if the tool name is server-prefixed, for example graphiti_graphiti_search_memory_facts. Pass center_node_uuid from search results for focused graph traversal.",
+		groupID,
+	)
+}
+
 func collectDiscoverySynthesis(eventCh <-chan agent.SSEEvent, onEvent func(agent.SSEEvent)) (agent.SSEEvent, string) {
 	var (
 		lastEvent   agent.SSEEvent

@@ -318,14 +318,14 @@ func TestEnsureScopedGraphitiArgs(t *testing.T) {
 	}
 
 	args := map[string]interface{}{"query": "payments"}
-	ensureScopedGraphitiArgs(tool, args, "42")
+	mcp.EnsureScopedGraphitiArgs(tool, args, "42")
 
 	if got := args["group_id"]; got != "org_42" {
 		t.Fatalf("group_id = %v, want %q", got, "org_42")
 	}
 
 	// Org-scoped group_id must always be forced — even if the LLM supplied one.
-	ensureScopedGraphitiArgs(tool, args, "7")
+	mcp.EnsureScopedGraphitiArgs(tool, args, "7")
 	if got := args["group_id"]; got != "org_7" {
 		t.Fatalf("group_id should be overwritten to current org, got %v", got)
 	}

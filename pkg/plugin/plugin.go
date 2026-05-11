@@ -72,9 +72,9 @@ func createRedisClient(logger log.Logger, redisURL string) (*redis.Client, error
 const builtInMCPServerID = "mcp-grafana"
 
 type PluginSettings struct {
-	MCPServers                []mcp.ServerConfig `json:"mcpServers"`
-	UseBuiltInMCP             bool               `json:"useBuiltInMCP"`
-	BuiltInMCPToolSelections  map[string]bool    `json:"builtInMCPToolSelections,omitempty"`
+	MCPServers               []mcp.ServerConfig `json:"mcpServers"`
+	UseBuiltInMCP            bool               `json:"useBuiltInMCP"`
+	BuiltInMCPToolSelections map[string]bool    `json:"builtInMCPToolSelections,omitempty"`
 
 	DefaultSystemPrompt string `json:"defaultSystemPrompt,omitempty"`
 	InvestigationPrompt string `json:"investigationPrompt,omitempty"`
@@ -611,6 +611,7 @@ func (p *Plugin) handleMCPCallTool(w http.ResponseWriter, r *http.Request) {
 	if orgID == "" {
 		orgID = "1"
 	}
+	mcp.EnsureScopedGraphitiArgs(tool, req.Arguments, orgID)
 
 	p.logger.Debug("Tool call context", "orgID", orgID, "orgName", req.OrgName, "scopeOrgId", req.ScopeOrgId, "tool", req.Name)
 
@@ -723,11 +724,7 @@ func (p *Plugin) handleAgentRun(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if p.isGraphitiAvailable() {
-		groupID := orgGroupID(numericOrgID)
-		systemPrompt += fmt.Sprintf(
-			"\n\nKnowledge graph tools are available (group_id: %q). Use graphiti_search_memory_facts to look up service topology, dependencies, and historical incidents. Pass center_node_uuid from results for focused graph traversal.",
-			groupID,
-		)
+		systemPrompt += graphitiKnowledgePrompt(orgGroupID(numericOrgID))
 	}
 
 	userPrompt, err := p.promptRegistry.BuildUserPrompt(req.Type, req.Message, toolCtx)

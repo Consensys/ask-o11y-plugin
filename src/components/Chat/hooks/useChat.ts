@@ -154,6 +154,7 @@ export function useChat(
   const abortControllerRef = useRef<AbortController | null>(null);
   const activeRunIdRef = useRef<string | null>(null);
   const activeSessionIdRef = useRef<string | null>(null);
+  const pendingRunSessionIdRef = useRef<string | null>(null);
 
   const sessionManager = useSessionManager(
     orgId,
@@ -325,6 +326,7 @@ export function useChat(
       activeRunIdRef.current = result.runId;
 
       if (result.sessionId && !sessionManager.currentSessionId) {
+        pendingRunSessionIdRef.current = result.sessionId;
         sessionManager.setCurrentSessionIdDirect(result.sessionId);
         onSessionIdChange(result.sessionId);
       }
@@ -488,9 +490,15 @@ export function useChat(
   // Abort active generation and clear queue when switching sessions to prevent chat leaking
   useEffect(() => {
     const prevSessionId = activeSessionIdRef.current;
-    activeSessionIdRef.current = sessionManager.currentSessionId;
+    const nextSessionId = sessionManager.currentSessionId;
+    activeSessionIdRef.current = nextSessionId;
 
-    if (prevSessionId !== null && prevSessionId !== sessionManager.currentSessionId) {
+    if (pendingRunSessionIdRef.current === nextSessionId) {
+      pendingRunSessionIdRef.current = null;
+      return;
+    }
+
+    if (prevSessionId !== nextSessionId && (abortControllerRef.current || activeRunIdRef.current || messageQueue.length > 0)) {
       if (abortControllerRef.current) {
         abortControllerRef.current.abort();
         abortControllerRef.current = null;
@@ -504,7 +512,7 @@ export function useChat(
       setMessageQueue([]);
       queuedForSessionRef.current = null;
     }
-  }, [sessionManager.currentSessionId, orgId]);
+  }, [sessionManager.currentSessionId, orgId, messageQueue.length]);
 
   const handleKeyPress = (e: React.KeyboardEvent): void => {
     if (e.key === 'Enter' && !e.shiftKey) {

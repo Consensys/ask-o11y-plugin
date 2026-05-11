@@ -42,6 +42,21 @@ func TestTrimGraphitiBody_TruncatesLongBodies(t *testing.T) {
 	}
 }
 
+func TestGraphitiKnowledgePrompt_RequiresScopedGroupID(t *testing.T) {
+	prompt := graphitiKnowledgePrompt("org_42")
+
+	required := []string{
+		"always pass group_id exactly \"org_42\"",
+		"never omit group_id",
+		"server-prefixed",
+	}
+	for _, text := range required {
+		if !strings.Contains(prompt, text) {
+			t.Fatalf("prompt should contain %q, got %q", text, prompt)
+		}
+	}
+}
+
 func TestCollectDiscoverySynthesis_ConcatenatesContentOnly(t *testing.T) {
 	eventCh := make(chan agent.SSEEvent, 4)
 	eventCh <- agent.SSEEvent{Type: "tool_call_start"}
