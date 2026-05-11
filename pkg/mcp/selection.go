@@ -38,3 +38,42 @@ func FilterToolsBySelection(tools []Tool, servers []ServerConfig) []Tool {
 	}
 	return result
 }
+
+// EnsureScopedGraphitiArgs forces org-scoped Graphiti tools to use the current
+// Grafana org group when the tool schema accepts group_id.
+func EnsureScopedGraphitiArgs(tool Tool, args map[string]interface{}, orgID string) {
+	if orgID == "" || args == nil || !isGraphitiTool(tool.Name) {
+		return
+	}
+
+	properties, ok := tool.InputSchema["properties"].(map[string]interface{})
+	if !ok || properties["group_id"] == nil {
+		return
+	}
+
+	// Always force group_id to the org-scoped value. LLM-supplied values are not
+	// trusted because they could break multi-org data isolation.
+	args["group_id"] = "org_" + orgID
+}
+
+func isGraphitiTool(name string) bool {
+	if strings.HasPrefix(name, "graphiti_") || strings.Contains(name, "_graphiti_") {
+		return true
+	}
+
+	for _, baseName := range graphitiBaseToolNames {
+		if name == baseName || strings.HasSuffix(name, "_"+baseName) {
+			return true
+		}
+	}
+	return false
+}
+
+var graphitiBaseToolNames = []string{
+	"add_memory",
+	"search_memory_facts",
+	"search_memory_nodes",
+	"delete_entity_edge",
+	"delete_episode",
+	"clear_graph",
+}
