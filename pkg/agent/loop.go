@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"strings"
 
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
@@ -272,7 +271,7 @@ func (a *AgentLoop) executeTool(ctx context.Context, tc ToolCall, req LoopReques
 	if err := json.Unmarshal([]byte(tc.Function.Arguments), &args); err != nil {
 		return fmt.Sprintf("Invalid tool arguments: %v", err), true, "tool"
 	}
-	ensureScopedGraphitiArgs(tool, args, req.OrgID)
+	mcp.EnsureScopedGraphitiArgs(tool, args, req.OrgID)
 
 	result, err := a.mcpProxy.CallToolWithContext(tc.Function.Name, args, req.OrgID, req.OrgName, req.ScopeOrgID)
 	if err != nil {
@@ -297,21 +296,6 @@ func (a *AgentLoop) executeTool(ctx context.Context, tc ToolCall, req LoopReques
 		text = "No results returned (empty response)"
 	}
 	return text, false, ""
-}
-
-func ensureScopedGraphitiArgs(tool mcp.Tool, args map[string]interface{}, orgID string) {
-	if orgID == "" || !strings.HasPrefix(tool.Name, "graphiti_") {
-		return
-	}
-
-	properties, ok := tool.InputSchema["properties"].(map[string]interface{})
-	if !ok || properties["group_id"] == nil {
-		return
-	}
-
-	// Always force group_id to the org-scoped value — never trust LLM-supplied
-	// values, which would break multi-org data isolation.
-	args["group_id"] = "org_" + orgID
 }
 
 func extractText(result *mcp.CallToolResult) string {

@@ -6,7 +6,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"maps"
 	"net/http"
 	"slices"
@@ -100,10 +99,7 @@ func (c *LLMClient) ChatCompletion(ctx context.Context, req ChatCompletionReques
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		errBody, _ := io.ReadAll(io.LimitReader(resp.Body, 512)) // best-effort; status error is returned regardless
-		if len(errBody) > 0 {
-			c.logger.Warn("LLM returned error", "status", resp.StatusCode, "body", string(errBody))
-		}
+		c.logger.Warn("LLM returned non-OK status", "status", resp.StatusCode)
 		return nil, fmt.Errorf("LLM returned status %d", resp.StatusCode)
 	}
 
