@@ -27,8 +27,9 @@
     "server:full": "bash -c 'cleanup() { mv provisioning/plugins/full.yaml provisioning/plugins/full.yaml_ 2>/dev/null; mv provisioning/plugins/app.yaml_ provisioning/plugins/app.yaml 2>/dev/null; }; trap cleanup EXIT; mv provisioning/plugins/app.yaml provisioning/plugins/app.yaml_ 2>/dev/null; mv provisioning/plugins/full.yaml_ provisioning/plugins/full.yaml 2>/dev/null; docker compose -f docker-compose-full.yaml up --build'",
     "sign": "npx --yes @grafana/sign-plugin@latest",
     "backend:mod": "go mod tidy",
-    "validate": "npm run validate:build && npm run validate:archive && npm run validate:run",
+    "validate": "npm run validate:build && npm run validate:react19 && npm run validate:archive && npm run validate:run",
     "validate:build": "npm run build",
+    "validate:react19": "npx -y @grafana/react-detect@latest detect19 --pluginRoot . --distDir dist",
     "validate:archive": "PLUGIN_ID=$(node -e \"console.log(require('./src/plugin.json').id)\") && rm -rf \"${PLUGIN_ID}\" \"${PLUGIN_ID}.zip\" && mkdir -p \"${PLUGIN_ID}\" && cp -r dist/* \"${PLUGIN_ID}/\" && zip -qr \"${PLUGIN_ID}.zip\" \"${PLUGIN_ID}\" && echo \"Created ${PLUGIN_ID}.zip\"",
     "validate:run": "PLUGIN_ID=$(node -e \"console.log(require('./src/plugin.json').id)\") && npx -y @grafana/plugin-validator@latest -config .github/plugin-validator.config.yaml -sourceCodeUri file://. \"${PLUGIN_ID}.zip\"",
     "validate:clean": "PLUGIN_ID=$(node -e \"console.log(require('./src/plugin.json').id)\") && rm -rf \"${PLUGIN_ID}\" \"${PLUGIN_ID}.zip\""

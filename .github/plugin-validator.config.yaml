@@ -7,5 +7,11 @@ global:
   reportAll: false
 
 analyzers:
+  # Run @grafana/react-detect directly via npm instead. The validator invokes its
+  # embedded reactcompat pass from the extracted plugin zip, where webpack.config.ts
+  # is absent, so it cannot detect the externalized JSX runtime and reports a false
+  # positive for dependencies such as streamdown.
+  reactcompat:
+    enabled: false
   version:
     enabled: false

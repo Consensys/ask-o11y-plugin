@@ -71,6 +71,8 @@ jobs:
         run: npm run test:ci
       - name: Build frontend
         run: npm run build
+      - name: Validate React 19 compatibility
+        run: npm run validate:react19
 
       - name: Check for backend
         id: check-for-backend
