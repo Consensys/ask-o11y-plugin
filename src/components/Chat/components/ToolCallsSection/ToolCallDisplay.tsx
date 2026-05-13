@@ -90,18 +90,18 @@ export const ToolCallDisplay: React.FC<ToolCallDisplayProps> = ({ toolCall }) =>
     if (error) {
       return {
         icon: <XIcon size={12} />,
-        color: '#ef4444',
+        color: theme.colors.error.text,
       };
     }
     if (running) {
       return {
         icon: <SpinnerIcon size={12} />,
-        color: '#fbbf24',
+        color: theme.colors.warning.text,
       };
     }
     return {
       icon: <CheckIcon size={12} />,
-      color: '#22c55e',
+      color: theme.colors.success.text,
     };
   };
 
@@ -114,8 +114,8 @@ export const ToolCallDisplay: React.FC<ToolCallDisplayProps> = ({ toolCall }) =>
     <div
       className="group rounded-lg transition-all duration-200"
       style={{
-        backgroundColor: theme.isDark ? 'rgba(255, 255, 255, 0.02)' : 'rgba(0, 0, 0, 0.01)',
-        border: `1px solid ${theme.isDark ? 'rgba(255, 255, 255, 0.04)' : 'rgba(0, 0, 0, 0.04)'}`,
+        backgroundColor: theme.colors.background.secondary,
+        border: `1px solid ${theme.colors.border.weak}`,
       }}
     >
       {/* Main row */}
@@ -172,7 +172,7 @@ export const ToolCallDisplay: React.FC<ToolCallDisplayProps> = ({ toolCall }) =>
         <div
           className="mx-3 mb-3 p-2.5 rounded-md font-mono text-xs overflow-x-auto"
           style={{
-            backgroundColor: theme.isDark ? 'rgba(0, 0, 0, 0.3)' : 'rgba(0, 0, 0, 0.03)',
+            backgroundColor: theme.colors.background.canvas,
             color: theme.colors.text.secondary,
           }}
         >
@@ -187,12 +187,12 @@ export const ToolCallDisplay: React.FC<ToolCallDisplayProps> = ({ toolCall }) =>
         <div
           className="mx-3 mb-3 p-2.5 rounded-md"
           style={{
-            backgroundColor: theme.isDark ? 'rgba(239, 68, 68, 0.1)' : 'rgba(239, 68, 68, 0.05)',
-            border: `1px solid ${theme.isDark ? 'rgba(239, 68, 68, 0.2)' : 'rgba(239, 68, 68, 0.15)'}`,
+            backgroundColor: theme.colors.error.transparent,
+            border: `1px solid ${theme.colors.error.borderTransparent}`,
           }}
         >
           <div className="flex items-start gap-2">
-            <span style={{ color: '#ef4444' }}>
+            <span style={{ color: theme.colors.error.text }}>
               <XIcon size={12} />
             </span>
             <pre

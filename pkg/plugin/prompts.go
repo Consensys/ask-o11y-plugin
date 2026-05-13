@@ -46,11 +46,20 @@ type PromptRegistry struct {
 func NewPromptRegistry(settings PluginSettings) (*PromptRegistry, error) {
 	registry := &PromptRegistry{}
 
-	registry.systemTemplate = parseTemplateWithFallback("system", settings.DefaultSystemPrompt, DefaultSystemPrompt)
-	registry.investigationTemplate = parseTemplateWithFallback("investigation", settings.InvestigationPrompt, DefaultInvestigationPrompt)
-	registry.performanceTemplate = parseTemplateWithFallback("performance", settings.PerformancePrompt, DefaultPerformancePrompt)
-
 	var err error
+	registry.systemTemplate, err = parseTemplateWithFallback("system", settings.DefaultSystemPrompt, DefaultSystemPrompt)
+	if err != nil {
+		return nil, err
+	}
+	registry.investigationTemplate, err = parseTemplateWithFallback("investigation", settings.InvestigationPrompt, DefaultInvestigationPrompt)
+	if err != nil {
+		return nil, err
+	}
+	registry.performanceTemplate, err = parseTemplateWithFallback("performance", settings.PerformancePrompt, DefaultPerformancePrompt)
+	if err != nil {
+		return nil, err
+	}
+
 	registry.toolInstructionsTemplate, err = template.New("tool_instructions").Parse(ToolInstructionsFragment)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse tool instructions template: %w", err)
@@ -59,17 +68,25 @@ func NewPromptRegistry(settings PluginSettings) (*PromptRegistry, error) {
 	return registry, nil
 }
 
-func parseTemplateWithFallback(name, custom, fallback string) *template.Template {
+func parseTemplateWithFallback(name, custom, fallback string) (*template.Template, error) {
 	text := custom
 	if text == "" {
 		text = fallback
 	}
 	t, err := template.New(name).Parse(text)
-	if err != nil {
-		log.Printf("[WARN] Invalid %s template, falling back to default: %v", name, err)
-		t = template.Must(template.New(name).Parse(fallback))
+	if err == nil {
+		return t, nil
 	}
-	return t
+	if custom == "" {
+		return nil, fmt.Errorf("failed to parse default %s template: %w", name, err)
+	}
+
+	log.Printf("[WARN] Invalid %s template, falling back to default: %v", name, err)
+	t, fallbackErr := template.New(name).Parse(fallback)
+	if fallbackErr != nil {
+		return nil, fmt.Errorf("failed to parse default %s template after custom template parse failed: %w", name, fallbackErr)
+	}
+	return t, nil
 }
 
 func (r *PromptRegistry) BuildSystemPrompt(ctx PromptContext) (string, error) {

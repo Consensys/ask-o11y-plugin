@@ -113,6 +113,7 @@ const config = async (env: Env): Promise<Configuration> => {
 
   // Merge configs, ensuring module.rules is completely replaced (not concatenated)
   const mergedConfig = merge(baseConfig, {
+    externals: ['react/jsx-runtime', 'react/jsx-dev-runtime'],
     module: {
       rules,
     },

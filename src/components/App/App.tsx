@@ -1,7 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Route, Routes } from 'react-router-dom';
 import { AppRootProps } from '@grafana/data';
-import { GrafanaThemeProvider } from '../../theme';
 import { AppLoader } from '../AppLoader';
 import Home from '../../pages/Home';
 import SharedSession from '../../pages/SharedSession';
@@ -30,12 +29,10 @@ function App(props: AppRootProps<AppPluginSettings>) {
   }
 
   return (
-    <GrafanaThemeProvider>
-      <Routes>
-        <Route path="/shared/:shareId" element={<SharedSession />} />
-        <Route path="*" element={<Home pluginSettings={pluginSettings} />} />
-      </Routes>
-    </GrafanaThemeProvider>
+    <Routes>
+      <Route path="/shared/:shareId" element={<SharedSession />} />
+      <Route path="*" element={<Home pluginSettings={pluginSettings} />} />
+    </Routes>
   );
 }
 

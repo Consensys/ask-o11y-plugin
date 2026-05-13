@@ -191,17 +191,27 @@ const connectDialTimeout = 10 * time.Second
 // monitor from thrashing a session that the on-call retry path just refreshed.
 const forceReconnectMinInterval = 5 * time.Second
 
+func (c *Client) baseTransport() http.RoundTripper {
+	if c.httpClient.Transport != nil {
+		return c.httpClient.Transport
+	}
+	return http.DefaultTransport
+}
+
+func (c *Client) sdkHTTPClientWithTransport(transport http.RoundTripper) *http.Client {
+	client := *c.httpClient
+	client.Transport = transport
+	return &client
+}
+
 func (c *Client) httpClientWithHeaders() *http.Client {
 	if len(c.config.Headers) == 0 {
 		return c.httpClient
 	}
-	return &http.Client{
-		Transport: &configHeaderRoundTripper{
-			base:    c.httpClient.Transport,
-			headers: c.config.Headers,
-		},
-		Timeout: c.httpClient.Timeout,
-	}
+	return c.sdkHTTPClientWithTransport(&configHeaderRoundTripper{
+		base:    c.baseTransport(),
+		headers: c.config.Headers,
+	})
 }
 
 type configHeaderRoundTripper struct {
@@ -244,16 +254,13 @@ func (c *Client) connectMCPWithOrgContext(orgID string, orgName string, scopeOrg
 		Version: "1.0.0",
 	}, nil)
 
-	customHTTPClient := &http.Client{
-		Transport: &customRoundTripper{
-			base:       c.httpClient.Transport,
-			orgID:      orgID,
-			orgName:    orgName,
-			scopeOrgId: scopeOrgId,
-			config:     c.config,
-		},
-		Timeout: c.httpClient.Timeout,
-	}
+	customHTTPClient := c.sdkHTTPClientWithTransport(&customRoundTripper{
+		base:       c.baseTransport(),
+		orgID:      orgID,
+		orgName:    orgName,
+		scopeOrgId: scopeOrgId,
+		config:     c.config,
+	})
 
 	var transport mcpsdk.Transport
 	var err error
