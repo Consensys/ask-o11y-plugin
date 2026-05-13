@@ -38,4 +38,4 @@ jobs:
           VERSION="${GITHUB_REF_NAME#v}"
           gh attestation verify "${PLUGIN_ID}-${VERSION}.zip" \
             --repo "${GITHUB_REPOSITORY}" \
-            --signer-workflow "https://github.com/${GITHUB_REPOSITORY}/.github/workflows/release.yml@refs/tags/${GITHUB_REF_NAME}"
+            --cert-identity "https://github.com/${GITHUB_REPOSITORY}/.github/workflows/release.yml@refs/tags/${GITHUB_REF_NAME}"
