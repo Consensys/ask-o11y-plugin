@@ -219,7 +219,7 @@ test.describe('Session Sharing', () => {
 
     await test.step('Verify read-only mode', async () => {
       // Wait for the chat messages container to be visible
-      const chatLog = page.locator('[role="log"]');
+      const chatLog = page.getByRole('log', { name: 'Chat messages' });
       await expect(chatLog).toBeVisible({ timeout: 10000 });
 
       // Wait for at least one message to render (indicates data loaded)
@@ -301,7 +301,7 @@ test.describe('Session Sharing', () => {
       await page.waitForTimeout(3000);
 
       // Wait for messages to load
-      const sharedChatLog = page.locator('[role="log"]');
+      const sharedChatLog = page.getByRole('log', { name: 'Chat messages' });
       await expect(sharedChatLog).toBeVisible({ timeout: 15000 });
 
       // Wait for message content to be visible - retry if needed
@@ -324,7 +324,7 @@ test.describe('Session Sharing', () => {
       await page.waitForURL(/\/a\/consensys-asko11y-app\/?(\?.*)?$/, { timeout: 15000 });
 
       // Verify the imported session content is visible in the chat log
-      const homeChatLog = page.locator('[role="log"]');
+      const homeChatLog = page.getByRole('log', { name: 'Chat messages' });
       await expect(homeChatLog).toBeVisible({ timeout: 10000 });
 
       // Verify the message from the imported session appears
@@ -342,7 +342,9 @@ test.describe('Session Sharing', () => {
 
       // Click on the session to verify it loads
       await sessionItems.first().click();
-      await expect(page.locator('[role="log"]').getByText('list your datasources')).toBeVisible({ timeout: 5000 });
+      await expect(page.getByRole('log', { name: 'Chat messages' }).getByText('list your datasources')).toBeVisible({
+        timeout: 5000,
+      });
 
       // Close sidebar
       await page.locator('button[title="Close"]').click();

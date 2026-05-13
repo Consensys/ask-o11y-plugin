@@ -74,9 +74,11 @@ export async function clearPersistedSession(page: Page) {
   // Wait for page to load
   const chatInput = page.getByLabel('Chat input');
   await chatInput.waitFor({ state: 'visible', timeout: 5000 }).catch(() => {});
+  await dismissGrafanaWhatsNewModal(page);
 
   // Delete all existing sessions first to ensure a clean slate
   await deleteAllPersistedSessions(page);
+  await dismissGrafanaWhatsNewModal(page);
 
   // After deleting sessions, check if we're on welcome screen
   const welcomeHeading = page.getByRole('heading', { name: 'Ask O11y Assistant' });
@@ -106,10 +108,12 @@ export async function deleteAllPersistedSessions(page: Page): Promise<void> {
   // Wait for page to load
   const chatInput = page.getByLabel('Chat input');
   await chatInput.waitFor({ state: 'visible', timeout: 5000 }).catch(() => {});
+  await dismissGrafanaWhatsNewModal(page);
 
   if (await deleteAllPersistedSessionsViaApi(page)) {
     // The API delete happens outside React state; reload so the app rehydrates from the empty session store.
     await page.reload({ waitUntil: 'domcontentloaded' });
+    await dismissGrafanaWhatsNewModal(page);
     return;
   }
 
@@ -157,6 +161,22 @@ async function deleteAllPersistedSessionsViaApi(page: Page): Promise<boolean> {
   }
 
   return false;
+}
+
+async function dismissGrafanaWhatsNewModal(page: Page): Promise<void> {
+  const whatsNewDialog = page.getByRole('dialog', { name: /What's new in Grafana/i });
+  if (!(await whatsNewDialog.isVisible({ timeout: 1000 }).catch(() => false))) {
+    return;
+  }
+
+  const closeButton = whatsNewDialog.getByRole('button', { name: /Close/i }).first();
+  if (await closeButton.isVisible({ timeout: 1000 }).catch(() => false)) {
+    await closeButton.click({ timeout: 2000 }).catch(() => {});
+  } else {
+    await page.keyboard.press('Escape').catch(() => {});
+  }
+
+  await whatsNewDialog.waitFor({ state: 'hidden', timeout: 3000 }).catch(() => {});
 }
 
 /**
