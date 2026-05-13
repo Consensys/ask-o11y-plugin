@@ -112,10 +112,18 @@ const config = async (env: Env): Promise<Configuration> => {
   }
 
   // Merge configs, ensuring module.rules is completely replaced (not concatenated)
+  const reactJsxRuntimeShim = path.resolve(process.cwd(), 'src/reactJsxRuntimeShim.ts');
+
   const mergedConfig = merge(baseConfig, {
-    externals: ['react/jsx-runtime', 'react/jsx-dev-runtime'],
     module: {
       rules,
+    },
+    resolve: {
+      alias: {
+        'react/jsx-runtime$': reactJsxRuntimeShim,
+        'react/jsx-dev-runtime$': reactJsxRuntimeShim,
+        '@grafana/scenes$': path.resolve(process.cwd(), 'src/grafanaScenes.ts'),
+      },
     },
     // Always generate source maps for Grafana plugin validator
     devtool: isCoverage ? 'inline-source-map' : 'source-map',

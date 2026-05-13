@@ -1,5 +1,6 @@
 import React from 'react';
-import { Streamdown } from 'streamdown';
+import DOMPurify from 'dompurify';
+import { marked } from 'marked';
 import { useTheme2 } from '@grafana/ui';
 import { ToolCallsSection } from '../ToolCallsSection/ToolCallsSection';
 import { GraphRenderer } from '../GraphRenderer/GraphRenderer';
@@ -19,6 +20,24 @@ function buildTimeRange(query: ContentSection['query']): { from: string; to: str
     return undefined;
   }
   return { from: query.from, to: query.to || 'now' };
+}
+
+interface MarkdownContentProps {
+  content: string;
+}
+
+function MarkdownContent({ content }: MarkdownContentProps): React.ReactElement {
+  const html = React.useMemo(() => {
+    const rendered = marked.parse(content, {
+      async: false,
+      breaks: true,
+      gfm: true,
+    }) as string;
+
+    return DOMPurify.sanitize(rendered);
+  }, [content]);
+
+  return <div dangerouslySetInnerHTML={{ __html: html }} />;
 }
 
 interface QuerySectionProps {
@@ -112,7 +131,7 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
                if (section.type === 'text') {
                  return (
                    <div key={index} className="prose prose-sm max-w-none">
-                     <Streamdown>{section.content}</Streamdown>
+                     <MarkdownContent content={section.content} />
                    </div>
                  );
                }
@@ -132,9 +151,9 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
 
          {!showThinking && contentSections.length === 0 && (
            <div
-            className="text-sm leading-relaxed whitespace-normal break-words prose prose-sm max-w-none text-primary"
-           >
-             <Streamdown>{message.content}</Streamdown>
+           className="text-sm leading-relaxed whitespace-normal break-words prose prose-sm max-w-none text-primary"
+          >
+             <MarkdownContent content={message.content} />
            </div>
          )}
        </div>

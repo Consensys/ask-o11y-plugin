@@ -1,5 +1,4 @@
 @import 'tailwindcss' important;
-@source "../node_modules/streamdown/dist/index.js";
 
 /* Default CSS custom properties for fallback values (before Grafana theme loads) */
 .ask-o11y-plugin-root {
@@ -168,28 +167,6 @@
   transform: translateY(-1px);
 }
 
-
-/* Streamdown code block fix - force visibility regardless of system dark mode preference
- * Streamdown renders two code blocks (light/dark) that toggle via Tailwind's dark: variant.
- * Since Grafana manages its own theme separately from prefers-color-scheme, this can cause
- * both blocks to be hidden. This fix shows the first code block always - our muted colors
- * adapt automatically via Grafana's CSS custom properties.
- *
- * Note: We use :not(:last-child) and :not(:first-child) to handle edge cases where only
- * one code block exists. Without this, a single block would match both :first-child and
- * :last-child, and the later display:none rule would win due to CSS cascade. */
-[data-code-block-container] > div > div:first-child:not(:last-child)[data-code-block] {
-  display: block !important;
-}
-[data-code-block-container] > div > div:last-child:not(:first-child)[data-code-block] {
-  display: none !important;
-}
-
-/* Ensure code block content is visible */
-[data-code-block] pre {
-  display: block !important;
-  visibility: visible !important;
-}
 
 /* Apply Grafana UI ExplorePage pattern for independent scrolling panes
  * Targets: Scene containers with flex-grow divs (used by EmbeddedScene components)
