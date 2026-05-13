@@ -2,7 +2,7 @@
 @source "../node_modules/streamdown/dist/index.js";
 
 /* Default CSS custom properties for fallback values (before Grafana theme loads) */
-:root {
+.ask-o11y-plugin-root {
   /* Light theme fallback values */
   --grafana-color-primary: #1f77b4;
   --grafana-color-primary-light: #4d94d1;

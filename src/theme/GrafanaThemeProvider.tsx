@@ -1,12 +1,14 @@
-import React, { useRef, useEffect, ReactNode } from 'react';
+import React, { CSSProperties, useRef, useEffect, ReactNode } from 'react';
 import { useTheme2 } from '@grafana/ui';
 import { GrafanaTheme2 } from '@grafana/data';
 
 interface GrafanaThemeProviderProps {
   children: ReactNode;
+  className?: string;
+  style?: CSSProperties;
 }
 
-const setThemeCustomProperties = (element: HTMLElement, theme: GrafanaTheme2) => {
+export const setThemeCustomProperties = (element: HTMLElement, theme: GrafanaTheme2) => {
   // Primary colors
   element.style.setProperty('--grafana-color-primary', theme.colors.primary.main);
   element.style.setProperty('--grafana-color-primary-light', theme.colors.primary.shade);
@@ -102,7 +104,7 @@ const setThemeCustomProperties = (element: HTMLElement, theme: GrafanaTheme2) =>
   element.style.setProperty('--grafana-z-index-tooltip', theme.zIndex.tooltip.toString());
 };
 
-export const GrafanaThemeProvider: React.FC<GrafanaThemeProviderProps> = ({ children }) => {
+export const GrafanaThemeProvider: React.FC<GrafanaThemeProviderProps> = ({ children, className, style }) => {
   const theme = useTheme2();
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -112,5 +114,9 @@ export const GrafanaThemeProvider: React.FC<GrafanaThemeProviderProps> = ({ chil
     }
   }, [theme]);
 
-  return <div ref={containerRef} style={{ height: '100%' }}>{children}</div>;
+  return (
+    <div ref={containerRef} className={className} style={{ height: '100%', ...style }}>
+      {children}
+    </div>
+  );
 };

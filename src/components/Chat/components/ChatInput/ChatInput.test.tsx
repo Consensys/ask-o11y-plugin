@@ -37,9 +37,11 @@ const mockTheme = {
       hover: 'rgba(204, 204, 220, 0.12)',
     },
   },
+  spacing: (factor: number) => `${factor * 8}px`,
   shape: {
     radius: {
       default: '4px',
+      sm: '2px',
     },
   },
 };
@@ -92,7 +94,9 @@ describe('ChatInput', () => {
   describe('rendering', () => {
     it('should render the textarea', () => {
       render(<ChatInput {...defaultProps} />);
-      expect(screen.getByPlaceholderText('Ask me anything about your metrics, logs, or observability...')).toBeInTheDocument();
+      expect(
+        screen.getByPlaceholderText('Ask me anything about your metrics, logs, or observability...')
+      ).toBeInTheDocument();
     });
 
     it('should render the send button', () => {
@@ -109,17 +113,19 @@ describe('ChatInput', () => {
   describe('input handling', () => {
     it('should call setCurrentInput when typing', () => {
       render(<ChatInput {...defaultProps} />);
-      
+
       const textarea = screen.getByPlaceholderText('Ask me anything about your metrics, logs, or observability...');
       fireEvent.change(textarea, { target: { value: 'Hello' } });
-      
+
       expect(mockSetCurrentInput).toHaveBeenCalledWith('Hello');
     });
 
     it('should display current input value', () => {
       render(<ChatInput {...defaultProps} currentInput="Test message" />);
-      
-      const textarea = screen.getByPlaceholderText('Ask me anything about your metrics, logs, or observability...') as HTMLTextAreaElement;
+
+      const textarea = screen.getByPlaceholderText(
+        'Ask me anything about your metrics, logs, or observability...'
+      ) as HTMLTextAreaElement;
       expect(textarea.value).toBe('Test message');
     });
   });
@@ -127,10 +133,10 @@ describe('ChatInput', () => {
   describe('send button', () => {
     it('should call sendMessage when clicked', () => {
       render(<ChatInput {...defaultProps} currentInput="Hello" />);
-      
+
       const sendButton = screen.getByLabelText('Send message (Enter)');
       fireEvent.click(sendButton);
-      
+
       expect(mockSendMessage).toHaveBeenCalled();
     });
 
@@ -143,14 +149,14 @@ describe('ChatInput', () => {
 
     it('should be disabled when input is empty', () => {
       render(<ChatInput {...defaultProps} currentInput="" />);
-      
+
       const sendButton = screen.getByLabelText('Send message (Enter)');
       expect(sendButton).toBeDisabled();
     });
 
     it('should be enabled when input has content and not generating', () => {
       render(<ChatInput {...defaultProps} currentInput="Hello" />);
-      
+
       const sendButton = screen.getByLabelText('Send message (Enter)');
       expect(sendButton).not.toBeDisabled();
     });
@@ -159,10 +165,10 @@ describe('ChatInput', () => {
   describe('keyboard handling', () => {
     it('should call handleKeyPress on key down', () => {
       render(<ChatInput {...defaultProps} currentInput="Hello" />);
-      
+
       const textarea = screen.getByPlaceholderText('Ask me anything about your metrics, logs, or observability...');
       fireEvent.keyDown(textarea, { key: 'Enter' });
-      
+
       expect(mockHandleKeyPress).toHaveBeenCalled();
     });
 
@@ -181,7 +187,7 @@ describe('ChatInput', () => {
     it('should expose focus method', () => {
       const ref = React.createRef<ChatInputRef>();
       render(<ChatInput {...defaultProps} ref={ref} />);
-      
+
       expect(ref.current).toHaveProperty('focus');
       expect(typeof ref.current?.focus).toBe('function');
     });
@@ -200,7 +206,9 @@ describe('ChatInput', () => {
       const ref = React.createRef<ChatInputRef>();
       render(<ChatInput {...defaultProps} currentInput="Hello World" ref={ref} />);
 
-      const textarea = screen.getByPlaceholderText('Ask me anything about your metrics, logs, or observability...') as HTMLTextAreaElement;
+      const textarea = screen.getByPlaceholderText(
+        'Ask me anything about your metrics, logs, or observability...'
+      ) as HTMLTextAreaElement;
 
       // Set cursor position to middle of text
       textarea.setSelectionRange(5, 5);
@@ -230,7 +238,9 @@ describe('ChatInput', () => {
     it('should auto-resize on input change', () => {
       render(<ChatInput {...defaultProps} />);
 
-      const textarea = screen.getByPlaceholderText('Ask me anything about your metrics, logs, or observability...') as HTMLTextAreaElement;
+      const textarea = screen.getByPlaceholderText(
+        'Ask me anything about your metrics, logs, or observability...'
+      ) as HTMLTextAreaElement;
 
       // Simulate typing multiline content
       fireEvent.change(textarea, { target: { value: 'Line 1\nLine 2\nLine 3' } });
@@ -290,4 +300,3 @@ describe('ChatInput', () => {
     });
   });
 });
-

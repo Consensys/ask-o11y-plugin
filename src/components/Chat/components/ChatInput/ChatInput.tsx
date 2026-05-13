@@ -24,7 +24,17 @@ export interface ChatInputRef {
 
 export const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(
   (
-    { currentInput, isGenerating, setCurrentInput, sendMessage, handleKeyPress, rightSlot, leftSlot, queuedMessageCount, onStopGeneration },
+    {
+      currentInput,
+      isGenerating,
+      setCurrentInput,
+      sendMessage,
+      handleKeyPress,
+      rightSlot,
+      leftSlot,
+      queuedMessageCount,
+      onStopGeneration,
+    },
     ref
   ) => {
     const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -125,7 +135,9 @@ export const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(
               defaultValue={currentInput}
               onChange={handleInputChange}
               onKeyDown={handleKeyDown}
-              onCompositionStart={() => { isComposingRef.current = true; }}
+              onCompositionStart={() => {
+                isComposingRef.current = true;
+              }}
               onCompositionEnd={(e) => {
                 isComposingRef.current = false;
                 handleInputChange(e as any);
@@ -173,7 +185,9 @@ export const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(
                 {queuedMessageCount > 0 && (
                   <div
                     className="flex items-center text-xs px-2 py-1 rounded-full border border-weak bg-surface"
-                    aria-label={`${queuedMessageCount} message${queuedMessageCount > 1 ? 's' : ''} queued — will be sent after current response completes`}
+                    aria-label={`${queuedMessageCount} message${
+                      queuedMessageCount > 1 ? 's' : ''
+                    } queued — will be sent after current response completes`}
                     data-testid="chat-queue-indicator"
                   >
                     <Icon name="clock-nine" size="xs" className="mr-1" />
@@ -203,7 +217,10 @@ export const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(
                 <button
                   onClick={handleSendClick}
                   disabled={!currentInput.trim() || !!validationError}
-                  className={cx('p-2 rounded-md transition-colors disabled:opacity-30 disabled:cursor-not-allowed', styles.hoverButton)}
+                  className={cx(
+                    'p-2 rounded-md transition-colors disabled:opacity-30 disabled:cursor-not-allowed',
+                    styles.hoverButton
+                  )}
                   aria-label="Send message (Enter)"
                   style={{ color: theme.colors.text.secondary }}
                 >
@@ -228,14 +245,16 @@ const getStyles = (theme: GrafanaTheme2) => {
   });
 
   const gradient = `linear-gradient(90deg, ${theme.colors.primary.main}, ${theme.colors.error.main}, ${theme.colors.warning.main}, ${theme.colors.error.main}, ${theme.colors.primary.main})`;
-  // Concentric radii: wrapper (base), glow (base + 2px outset), inner (base - 2px inset)
-  const r = theme.shape.radius.default;
+  const gradientInset = theme.spacing(0.25);
+  const glowBlur = theme.spacing(1);
+  const outerRadius = theme.shape.radius.default;
+  const innerRadius = theme.shape.radius.sm;
 
   return {
     gradientWrapper: css({
       position: 'relative',
-      borderRadius: r,
-      padding: 2,
+      borderRadius: outerRadius,
+      padding: gradientInset,
       background: gradient,
       backgroundSize: '200% 100%',
       animation: `${gradientShift} 4s ease infinite`,
@@ -244,19 +263,19 @@ const getStyles = (theme: GrafanaTheme2) => {
       '&::before': {
         content: '""',
         position: 'absolute',
-        inset: -2,
-        borderRadius: `calc(${r} + 2px)`,
+        inset: `calc(-1 * ${gradientInset})`,
+        borderRadius: `calc(${outerRadius} + ${gradientInset})`,
         background: gradient,
         backgroundSize: '200% 100%',
         animation: `${gradientShift} 4s ease infinite`,
-        filter: 'blur(8px)',
+        filter: `blur(${glowBlur})`,
         opacity: 0.5,
         zIndex: -1,
       },
     }),
     gradientInner: css({
       backgroundColor: theme.colors.background.canvas,
-      borderRadius: `calc(${r} - 2px)`,
+      borderRadius: innerRadius,
       position: 'relative',
       zIndex: 1,
     }),
