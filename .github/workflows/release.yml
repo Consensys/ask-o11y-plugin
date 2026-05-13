@@ -29,3 +29,13 @@ jobs:
           # Plugin signing enabled with Grafana Access Policy token
           # (For more info see https://grafana.com/developers/plugin-tools/publish-a-plugin/sign-a-plugin#generate-an-access-policy-token)
           policy_token: ${{ secrets.GRAFANA_ACCESS_POLICY_TOKEN }}
+
+      - name: Verify provenance attestation
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          PLUGIN_ID=$(node -p "require('./src/plugin.json').id")
+          VERSION="${GITHUB_REF_NAME#v}"
+          gh attestation verify "${PLUGIN_ID}-${VERSION}.zip" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --signer-workflow "https://github.com/${GITHUB_REPOSITORY}/.github/workflows/release.yml@refs/tags/${GITHUB_REF_NAME}"

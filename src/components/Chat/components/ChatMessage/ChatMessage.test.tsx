@@ -39,9 +39,17 @@ jest.mock('../TracesRenderer/TracesRenderer', () => ({
   TracesRenderer: () => <div data-testid="traces-renderer">Traces</div>,
 }));
 
-// Mock streamdown
-jest.mock('streamdown', () => ({
-  Streamdown: ({ text }: { text: string }) => <div data-testid="streamdown">{text}</div>,
+jest.mock('marked', () => ({
+  marked: {
+    parse: (content: string) => `<p data-testid="markdown-content">${content}</p>`,
+  },
+}));
+
+jest.mock('dompurify', () => ({
+  __esModule: true,
+  default: {
+    sanitize: (html: string) => html,
+  },
 }));
 
 // Mock the PromQL parser
@@ -106,7 +114,7 @@ describe('ChatMessage', () => {
 
       render(<ChatMessage message={message} />);
 
-      expect(screen.getByTestId('streamdown')).toBeInTheDocument();
+      expect(screen.getByTestId('markdown-content')).toBeInTheDocument();
     });
 
     it('should have assistant message aria label', () => {
@@ -216,7 +224,7 @@ describe('ChatMessage', () => {
       render(<ChatMessage message={message} isGenerating={true} isLastMessage={true} />);
 
       expect(screen.queryByText('Thinking...')).not.toBeInTheDocument();
-      expect(screen.getByTestId('streamdown')).toBeInTheDocument();
+      expect(screen.getByTestId('markdown-content')).toBeInTheDocument();
     });
 
     it('should show content and hide thinking when content is present', () => {
@@ -227,7 +235,7 @@ describe('ChatMessage', () => {
 
       render(<ChatMessage message={message} isGenerating={true} isLastMessage={true} />);
 
-      expect(screen.getByTestId('streamdown')).toBeInTheDocument();
+      expect(screen.getByTestId('markdown-content')).toBeInTheDocument();
       expect(screen.queryByText('Thinking...')).not.toBeInTheDocument();
     });
 
@@ -315,4 +323,3 @@ describe('ChatMessage', () => {
     });
   });
 });
-
