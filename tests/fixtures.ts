@@ -12,6 +12,7 @@ type AppTestFixture = {
 
 // Coverage output directory
 const COVERAGE_DIR = path.join(process.cwd(), 'coverage-e2e', '.nyc_output');
+const SESSION_RESOURCE_URL = `/api/plugins/${pluginJson.id}/resources/api/sessions`;
 
 // Ensure coverage directory exists
 if (process.env.COVERAGE === 'true') {
@@ -106,6 +107,12 @@ export async function deleteAllPersistedSessions(page: Page): Promise<void> {
   const chatInput = page.getByLabel('Chat input');
   await chatInput.waitFor({ state: 'visible', timeout: 5000 }).catch(() => {});
 
+  if (await deleteAllPersistedSessionsViaApi(page)) {
+    // The API delete happens outside React state; reload so the app rehydrates from the empty session store.
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    return;
+  }
+
   // Open the history sidebar
   const sidebarOpened = await openHistorySidebar(page);
   if (!sidebarOpened) {
@@ -130,6 +137,26 @@ export async function deleteAllPersistedSessions(page: Page): Promise<void> {
   }
 
   await closeSidebar(page);
+}
+
+async function deleteAllPersistedSessionsViaApi(page: Page): Promise<boolean> {
+  try {
+    const sessionsUrl = new URL(SESSION_RESOURCE_URL, page.url()).toString();
+    const response = await page.request.delete(sessionsUrl, {
+      headers: { 'X-Grafana-Org-Id': '1' },
+      timeout: 3000,
+    });
+
+    if (response.ok()) {
+      return true;
+    }
+
+    console.warn(`[deleteAllPersistedSessions] API cleanup failed (${response.status()}); falling back to UI cleanup`);
+  } catch (error) {
+    console.warn(`[deleteAllPersistedSessions] API cleanup unavailable; falling back to UI cleanup: ${String(error)}`);
+  }
+
+  return false;
 }
 
 /**
@@ -287,4 +314,3 @@ export async function resetRateLimits() {
     // The error is expected when Redis is not available, so we don't log it
   }
 }
-
