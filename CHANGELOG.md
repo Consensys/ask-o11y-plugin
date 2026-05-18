@@ -5,6 +5,13 @@ All notable changes to the Ask O11y Grafana plugin will be documented in this fi
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.27](https://github.com/Consensys/ask-o11y-plugin/compare/v0.2.26...v0.2.27) (2026-05-18)
+
+
+### Bug Fixes
+
+* **frontend:** scope plugin styles and use theme font size ([#139](https://github.com/Consensys/ask-o11y-plugin/issues/139)) ([b8655f9](https://github.com/Consensys/ask-o11y-plugin/commit/b8655f9c193a86dc178ae97c114cbb79b2fad222))
+
 ## [0.2.26](https://github.com/Consensys/ask-o11y-plugin/compare/v0.2.25...v0.2.26) (2026-05-13)
 
 
