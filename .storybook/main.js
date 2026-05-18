@@ -22,9 +22,26 @@ module.exports = {
     },
   },
   webpackFinal: async (config) => {
-    // Add support for CSS modules
+    const cssModuleLoader = {
+      loader: 'css-loader',
+      options: {
+        importLoaders: 1,
+        modules: {
+          mode: 'global',
+          exportGlobals: true,
+          localIdentName: '[path][name]__[local]',
+        },
+      },
+    };
+
+    config.module.rules.push({
+      test: /\.module\.css$/,
+      use: ['style-loader', cssModuleLoader, 'postcss-loader'],
+    });
+
     config.module.rules.push({
       test: /\.css$/,
+      exclude: /\.module\.css$/,
       use: ['style-loader', 'css-loader', 'postcss-loader'],
     });
 

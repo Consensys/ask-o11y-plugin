@@ -1,5 +1,5 @@
 import React from 'react';
-import '../src/index.css';
+import '../src/PluginRoot.module.css';
 import { themes } from '@storybook/theming';
 
 export const parameters = {
