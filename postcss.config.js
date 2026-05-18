@@ -17,7 +17,13 @@ const isInsideIgnoredAtRule = (rule) => {
 const scopeSelector = (selector) => {
   const trimmed = selector.trim();
 
-  if (trimmed === '' || trimmed.startsWith(pluginRootSelector) || trimmed.includes('&')) {
+  if (
+    trimmed === '' ||
+    trimmed.startsWith(pluginRootSelector) ||
+    trimmed.startsWith(':local') ||
+    trimmed.startsWith(':global') ||
+    trimmed.includes('&')
+  ) {
     return selector;
   }
 

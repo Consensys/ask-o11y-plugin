@@ -26,6 +26,7 @@ export default defineConfig([
       '**/coverage-unit/',
       '**/coverage-combined/',
       '**/dist/',
+      '**/.react19-*/',
       '**/artifacts/',
       '**/work/',
       '**/ci/',

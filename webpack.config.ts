@@ -36,17 +36,43 @@ const config = async (env: Env): Promise<Configuration> => {
   // Build the rules array with our CSS rule that includes postcss-loader
   // Only apply postcss-loader to CSS files in our src directory (for Tailwind)
   // Other CSS files (like from node_modules) should use the base rule without postcss-loader
+  const sourcePath = path.resolve(process.cwd(), 'src');
+  const cssLoader = {
+    loader: 'css-loader',
+    options: {
+      importLoaders: 1,
+    },
+  };
+  const cssModuleLoader = {
+    loader: 'css-loader',
+    options: {
+      importLoaders: 1,
+      modules: {
+        mode: 'global',
+        exportGlobals: true,
+        localIdentName: isProduction ? '[hash:base64:8]' : '[path][name]__[local]',
+      },
+    },
+  };
   const rules: RuleSetRule[] = [
+    // CSS modules for component-scoped source styles. Global utility selectors
+    // remain scoped by postcss.config.js to the plugin root class.
+    {
+      test: /\.module\.css$/,
+      include: sourcePath,
+      use: ['style-loader', cssModuleLoader, 'postcss-loader'],
+    },
     // CSS rule for our source files (with postcss-loader for Tailwind)
     {
       test: /\.css$/,
-      include: path.resolve(process.cwd(), 'src'),
-      use: ['style-loader', 'css-loader', 'postcss-loader'],
+      include: sourcePath,
+      exclude: /\.module\.css$/,
+      use: ['style-loader', cssLoader, 'postcss-loader'],
     },
     // CSS rule for other files (node_modules, etc.) - without postcss-loader
     {
       test: /\.css$/,
-      exclude: path.resolve(process.cwd(), 'src'),
+      exclude: sourcePath,
       use: ['style-loader', 'css-loader'],
     },
     // Add all other base rules, but modify swc-loader for coverage builds

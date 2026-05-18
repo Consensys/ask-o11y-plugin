@@ -1,6 +1,7 @@
 import React, { ReactNode } from 'react';
+import { cx } from '@emotion/css';
 import { GrafanaThemeProvider } from './theme';
-import './index.css';
+import styles from './PluginRoot.module.css';
 
 export const PLUGIN_ROOT_CLASS = 'ask-o11y-plugin-root';
 
@@ -9,7 +10,7 @@ interface PluginRootProps {
 }
 
 export const PluginRoot = ({ children }: PluginRootProps) => (
-  <GrafanaThemeProvider className={PLUGIN_ROOT_CLASS} style={{ width: '100%', height: '100%' }}>
+  <GrafanaThemeProvider className={cx(PLUGIN_ROOT_CLASS, styles.root)}>
     {children}
   </GrafanaThemeProvider>
 );

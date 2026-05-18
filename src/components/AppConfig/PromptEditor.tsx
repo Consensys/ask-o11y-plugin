@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { Button, Modal, TextArea } from '@grafana/ui';
+import { Button, Modal, TextArea, useTheme2 } from '@grafana/ui';
 
 interface PromptEditorProps {
   label: string;
@@ -43,6 +43,7 @@ export function PromptEditor({
   onSave,
   testIdPrefix,
 }: PromptEditorProps) {
+  const theme = useTheme2();
   const [isOpen, setIsOpen] = useState(false);
   const [draft, setDraft] = useState(currentValue);
 
@@ -89,7 +90,10 @@ export function PromptEditor({
             rows={16}
             data-testid={`${testIdPrefix}-textarea`}
             invalid={isOverLimit || !!templateError}
-            style={{ fontFamily: 'monospace', fontSize: '13px' }}
+            style={{
+              fontFamily: theme.typography.fontFamilyMonospace,
+              fontSize: theme.typography.bodySmall.fontSize,
+            }}
           />
 
           <div className="flex items-center justify-between mt-2">

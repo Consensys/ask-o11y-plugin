@@ -30,6 +30,14 @@ jest.mock('@grafana/ui', () => ({
       </div>
     ) : null,
   TextArea: ({ invalid, ...props }: MockTextAreaProps) => <textarea {...props} aria-invalid={invalid ? 'true' : 'false'} />,
+  useTheme2: () => ({
+    typography: {
+      bodySmall: {
+        fontSize: '12px',
+      },
+      fontFamilyMonospace: 'monospace',
+    },
+  }),
 }));
 
 describe('PromptEditor', () => {
