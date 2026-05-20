@@ -26,6 +26,7 @@ type ChatSession struct {
 	UpdatedAt    time.Time        `json:"updatedAt"`
 	MessageCount int              `json:"messageCount"`
 	ActiveRunID  string           `json:"activeRunId,omitempty"`
+	Model        string           `json:"model,omitempty"`
 	UserID       int64            `json:"-"`
 	OrgID        int64            `json:"-"`
 }
@@ -37,12 +38,14 @@ type SessionMetadata struct {
 	UpdatedAt    time.Time `json:"updatedAt"`
 	MessageCount int       `json:"messageCount"`
 	ActiveRunID  string    `json:"activeRunId,omitempty"`
+	Model        string    `json:"model,omitempty"`
 }
 
 type SessionUpdate struct {
 	Messages []SessionMessage `json:"messages,omitempty"`
 	Title    *string          `json:"title,omitempty"`
 	Summary  *string          `json:"summary,omitempty"`
+	Model    *string          `json:"model,omitempty"`
 }
 
 type SessionStoreInterface interface {
@@ -79,9 +82,9 @@ func generateSessionTitle(messages []SessionMessage) string {
 
 type SessionStore struct {
 	mu       sync.RWMutex
-	sessions map[string]*ChatSession         // sessionID -> session
-	userIdx  map[string]map[string]struct{}   // ownerKey -> set of sessionIDs
-	current  map[string]string                // ownerKey -> current sessionID
+	sessions map[string]*ChatSession        // sessionID -> session
+	userIdx  map[string]map[string]struct{} // ownerKey -> set of sessionIDs
+	current  map[string]string              // ownerKey -> current sessionID
 	logger   log.Logger
 }
 
@@ -199,6 +202,7 @@ func (s *SessionStore) ListSessions(userID, orgID int64) ([]SessionMetadata, err
 			UpdatedAt:    sess.UpdatedAt,
 			MessageCount: sess.MessageCount,
 			ActiveRunID:  sess.ActiveRunID,
+			Model:        sess.Model,
 		})
 	}
 
@@ -230,6 +234,9 @@ func (s *SessionStore) UpdateSession(sessionID string, userID, orgID int64, upda
 	}
 	if update.Summary != nil {
 		session.Summary = *update.Summary
+	}
+	if update.Model != nil {
+		session.Model = *update.Model
 	}
 	session.UpdatedAt = time.Now()
 

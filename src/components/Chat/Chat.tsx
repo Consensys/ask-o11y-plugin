@@ -1,4 +1,4 @@
-import React, { useRef, useState, useCallback, useMemo } from 'react';
+import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { useTheme2 } from '@grafana/ui';
 
 import { useChat } from './hooks/useChat';
@@ -8,12 +8,18 @@ import { useChatScene } from './hooks/useChatScene';
 import { useSidePanelState } from './hooks/useSidePanelState';
 import { ChatInterfaceState } from './scenes/ChatInterfaceScene';
 import { GrafanaPageState } from './scenes/GrafanaPageScene';
-import { SessionSidebar, NewChatButton, HistoryButton, SaveToMemoryButton } from './components';
+import { SessionSidebar, NewChatButton, HistoryButton, SaveToMemoryButton, ModelSelector } from './components';
 import { ChatInputRef } from './components/ChatInput/ChatInput';
 import { ChatErrorBoundary } from '../ErrorBoundary';
 import type { SessionMetadata } from './hooks/useSessionManager';
 import type { ChatMessage } from './types';
 import type { AppPluginSettings } from '../../types/plugin';
+import {
+  formatModelLabel,
+  listLLMModelOptions,
+  type LLMModel,
+  type LLMModelOption,
+} from '../../services/llmModels';
 
 interface ChatProps {
   pluginSettings: AppPluginSettings;
@@ -36,9 +42,31 @@ function ChatComponent({
 }: ChatProps): React.ReactElement | null {
   const theme = useTheme2();
   const allowEmbedding = useEmbeddingAllowed();
+  const [modelOptions, setModelOptions] = useState<LLMModelOption[]>([]);
+  const [selectedModel, setSelectedModel] = useState<LLMModel | undefined>(undefined);
 
   const kioskModeEnabled = pluginSettings?.kioskModeEnabled ?? true;
   const chatPanelPosition = pluginSettings?.chatPanelPosition || 'right';
+
+  useEffect(() => {
+    let cancelled = false;
+    listLLMModelOptions()
+      .then((options) => {
+        if (cancelled) {
+          return;
+        }
+        setModelOptions(options);
+        setSelectedModel((prev) => prev ?? options.find((option) => option.isDefault)?.value);
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setModelOptions([]);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const {
     chatHistory,
@@ -61,7 +89,8 @@ function ChatComponent({
     readOnly ? initialSession : undefined,
     readOnly,
     initialMessage,
-    initialMessageType
+    initialMessageType,
+    selectedModel
   );
 
   const chatInputRef = useRef<ChatInputRef>(null);
@@ -95,8 +124,29 @@ function ChatComponent({
 
   const currentSession = sessionManager.sessions.find((s: SessionMetadata) => s.id === sessionManager.currentSessionId);
   const currentSessionTitle = currentSession?.title;
+  const sessionModel = currentSession?.model;
+  const selectedModelOption = modelOptions.find((option) => option.value === selectedModel);
+  const sessionModelOption = modelOptions.find((option) => option.value === sessionModel);
+  const currentModelLabel = sessionModel
+    ? sessionModelOption?.label || formatModelLabel(sessionModel)
+    : chatHistory.length > 0 && selectedModel
+      ? selectedModelOption?.label || formatModelLabel(selectedModel)
+      : undefined;
   const hasMessages = chatHistory.length > 0;
   const graphitiEnabled = pluginSettings.mcpServers?.some((s) => s.id === 'graphiti' && s.enabled) ?? false;
+  const showModelSelector = !readOnly && modelOptions.length > 0 && !sessionModel;
+  const modelSelector = useMemo(
+    () =>
+      showModelSelector ? (
+        <ModelSelector
+          options={modelOptions}
+          value={selectedModel}
+          disabled={isGenerating}
+          onChange={setSelectedModel}
+        />
+      ) : undefined,
+    [showModelSelector, modelOptions, selectedModel, isGenerating]
+  );
 
   const chatInterfaceState: ChatInterfaceState = useMemo(
     () => ({
@@ -104,13 +154,19 @@ function ChatComponent({
       currentInput,
       isGenerating,
       currentSessionTitle,
+      currentModelLabel,
       setCurrentInput,
       sendMessage,
       handleKeyPress,
       chatContainerRef,
       chatInputRef,
       bottomSpacerRef,
-      leftSlot: hasMessages ? <NewChatButton onConfirm={clearChat} isGenerating={isGenerating} /> : undefined,
+      leftSlot: hasMessages ? (
+        <div className="flex items-center gap-2">
+          <NewChatButton onConfirm={clearChat} isGenerating={isGenerating} />
+          {modelSelector}
+        </div>
+      ) : modelSelector,
       rightSlot: (
         <div className="flex items-center gap-1">
           {graphitiEnabled && hasMessages && <SaveToMemoryButton messages={chatHistory} />}
@@ -127,6 +183,7 @@ function ChatComponent({
       currentInput,
       isGenerating,
       currentSessionTitle,
+      currentModelLabel,
       sessionManager.sessions.length,
       setCurrentInput,
       sendMessage,
@@ -135,6 +192,7 @@ function ChatComponent({
       chatInputRef,
       bottomSpacerRef,
       hasMessages,
+      modelSelector,
       graphitiEnabled,
       clearChat,
       openHistory,

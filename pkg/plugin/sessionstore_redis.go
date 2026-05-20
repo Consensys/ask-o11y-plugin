@@ -11,7 +11,7 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-func sessionKey(id string) string         { return fmt.Sprintf("session:%s", id) }
+func sessionKey(id string) string { return fmt.Sprintf("session:%s", id) }
 func sessionUserIdxKey(userID, orgID int64) string {
 	return fmt.Sprintf("usersessions:%d:%d", userID, orgID)
 }
@@ -29,6 +29,7 @@ type redisSession struct {
 	UpdatedAt    time.Time        `json:"updatedAt"`
 	MessageCount int              `json:"messageCount"`
 	ActiveRunID  string           `json:"activeRunId,omitempty"`
+	Model        string           `json:"model,omitempty"`
 	UserID       int64            `json:"userId"`
 	OrgID        int64            `json:"orgId"`
 }
@@ -37,7 +38,7 @@ func toRedis(s *ChatSession) *redisSession {
 	return &redisSession{
 		ID: s.ID, Title: s.Title, Messages: s.Messages,
 		Summary: s.Summary, CreatedAt: s.CreatedAt, UpdatedAt: s.UpdatedAt,
-		MessageCount: s.MessageCount, ActiveRunID: s.ActiveRunID,
+		MessageCount: s.MessageCount, ActiveRunID: s.ActiveRunID, Model: s.Model,
 		UserID: s.UserID, OrgID: s.OrgID,
 	}
 }
@@ -46,7 +47,7 @@ func fromRedis(rs *redisSession) *ChatSession {
 	return &ChatSession{
 		ID: rs.ID, Title: rs.Title, Messages: rs.Messages,
 		Summary: rs.Summary, CreatedAt: rs.CreatedAt, UpdatedAt: rs.UpdatedAt,
-		MessageCount: rs.MessageCount, ActiveRunID: rs.ActiveRunID,
+		MessageCount: rs.MessageCount, ActiveRunID: rs.ActiveRunID, Model: rs.Model,
 		UserID: rs.UserID, OrgID: rs.OrgID,
 	}
 }
@@ -212,6 +213,7 @@ func (s *RedisSessionStore) ListSessions(userID, orgID int64) ([]SessionMetadata
 			ID: rs.ID, Title: rs.Title, CreatedAt: rs.CreatedAt,
 			UpdatedAt: rs.UpdatedAt, MessageCount: rs.MessageCount,
 			ActiveRunID: rs.ActiveRunID,
+			Model:       rs.Model,
 		})
 	}
 
@@ -241,6 +243,9 @@ func (s *RedisSessionStore) UpdateSession(sessionID string, userID, orgID int64,
 	}
 	if update.Summary != nil {
 		session.Summary = *update.Summary
+	}
+	if update.Model != nil {
+		session.Model = *update.Model
 	}
 	session.UpdatedAt = time.Now()
 
