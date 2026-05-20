@@ -16,6 +16,7 @@ import {
 } from '../../../services/agentClient';
 import { getSession } from '../../../services/backendSessionClient';
 import type { AppPluginSettings } from '../../../types/plugin';
+import type { LLMModel } from '../../../services/llmModels';
 
 interface InitialSessionData {
   id?: string;
@@ -38,7 +39,8 @@ export function useChat(
   initialSession?: InitialSessionData,
   readOnly?: boolean,
   initialMessage?: string,
-  initialMessageType?: 'chat' | 'investigation' | 'performance'
+  initialMessageType?: 'chat' | 'investigation' | 'performance',
+  selectedModel?: LLMModel
 ) {
   const orgId = String(config.bootData.user.orgId || '1');
 
@@ -307,12 +309,15 @@ export function useChat(
     if (conversationType !== 'chat') {
       setConversationType('chat');
     }
+    const sessionModel = sessionManager.sessions.find((s) => s.id === sessionManager.currentSessionId)?.model;
+    const runModel = sessionModel || selectedModel;
 
     try {
       const result = await runAgentDetached({
         message: validatedInput,
         type: messageType,
         sessionId: sessionManager.currentSessionId || undefined,
+        model: runModel,
         orgId,
         orgName: config.bootData.user.orgName || '',
         scopeOrgId: config.bootData.user.orgName || '',

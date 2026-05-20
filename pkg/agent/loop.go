@@ -45,6 +45,7 @@ type LoopRequest struct {
 	MaxTotalTokens     int
 	RecentMessageCount int
 	MaxIterations      int
+	Model              string
 
 	GrafanaURL string
 	AuthToken  string
@@ -132,6 +133,7 @@ func (a *AgentLoop) Run(ctx context.Context, req LoopRequest, eventCh chan<- SSE
 		}
 
 		llmReq := ChatCompletionRequest{
+			Model:     req.Model,
 			Messages:  callMessages,
 			Tools:     openAITools,
 			MaxTokens: completionBudget,

@@ -20,7 +20,6 @@ import (
 
 const (
 	llmEndpoint    = "/api/plugins/grafana-llm-app/resources/openai/v1/chat/completions"
-	llmModel       = "large"
 	llmTimeout     = 600 * time.Second
 	maxSSELineSize = 1 * 1024 * 1024 // 1 MB — large tool-call payloads (e.g. dashboard JSON) can exceed bufio's 64 KB default
 )
@@ -73,7 +72,6 @@ func (c *LLMClient) ChatCompletion(ctx context.Context, req ChatCompletionReques
 		span.End()
 	}()
 
-	req.Model = llmModel
 	req.Stream = true
 
 	body, err := json.Marshal(req)

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -36,12 +37,21 @@ func TestLLMClient_ChatCompletion(t *testing.T) {
 			t.Errorf("expected content-type json, got %q", r.Header.Get("Content-Type"))
 		}
 
-		var req ChatCompletionRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			t.Fatalf("failed to decode request: %v", err)
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("failed to read request body: %v", err)
 		}
-		if req.Model != "large" {
-			t.Errorf("expected model 'large', got %q", req.Model)
+		var raw map[string]interface{}
+		if err := json.Unmarshal(body, &raw); err != nil {
+			t.Fatalf("failed to decode raw request: %v", err)
+		}
+		if _, ok := raw["model"]; ok {
+			t.Errorf("expected model to be omitted when unset, got %v", raw["model"])
+		}
+
+		var req ChatCompletionRequest
+		if err := json.Unmarshal(body, &req); err != nil {
+			t.Fatalf("failed to decode request: %v", err)
 		}
 		if !req.Stream {
 			t.Errorf("expected stream=true in request")
@@ -69,6 +79,36 @@ func TestLLMClient_ChatCompletion(t *testing.T) {
 	}
 	if resp.Choices[0].Message.Content != "Hello from the LLM!" {
 		t.Errorf("unexpected content: %q", resp.Choices[0].Message.Content)
+	}
+}
+
+func TestLLMClient_ChatCompletion_UsesRequestedModel(t *testing.T) {
+	receivedModel := make(chan string, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req ChatCompletionRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Fatalf("failed to decode request: %v", err)
+		}
+		receivedModel <- req.Model
+
+		writeSSEChunks(w,
+			`{"id":"test-id","choices":[{"index":0,"delta":{"content":"ok"},"finish_reason":null}]}`,
+			`{"id":"test-id","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`,
+		)
+	}))
+	defer server.Close()
+
+	client := NewLLMClient(log.DefaultLogger, &http.Client{Timeout: llmTimeout})
+	_, err := client.ChatCompletion(context.Background(), ChatCompletionRequest{
+		Model:    "base",
+		Messages: []Message{{Role: "user", Content: "hi"}},
+	}, server.URL, "token", "1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if got := <-receivedModel; got != "base" {
+		t.Fatalf("expected model base, got %q", got)
 	}
 }
 

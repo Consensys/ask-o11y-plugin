@@ -90,6 +90,25 @@ describe('runAgentDetached', () => {
     const body = JSON.parse(fetchOptions.body);
     expect(body.orgId).toBeUndefined();
   });
+
+  it('should append model as a query param and keep it out of the request body', async () => {
+    const mockFetch = jest.fn().mockResolvedValue({
+      ok: true,
+      json: jest.fn().mockResolvedValue({ runId: 'run-1', sessionId: 'sess-1', status: 'running' }),
+    });
+    global.fetch = mockFetch;
+
+    await runAgentDetached({
+      message: 'test',
+      type: 'chat',
+      model: 'large',
+    });
+
+    const [url, fetchOptions] = mockFetch.mock.calls[0];
+    expect(url).toBe('/api/plugins/consensys-asko11y-app/resources/api/agent/run?model=large');
+    const body = JSON.parse(fetchOptions.body);
+    expect(body.model).toBeUndefined();
+  });
 });
 
 describe('reconnectToAgentRun', () => {

@@ -16,6 +16,7 @@ export interface SessionMetadata {
   updatedAt: string;
   messageCount: number;
   activeRunId?: string;
+  model?: 'base' | 'large';
 }
 
 export interface BackendChatSession extends SessionMetadata {

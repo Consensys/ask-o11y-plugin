@@ -53,6 +53,7 @@ export interface ChatInterfaceProps {
   currentInput: string;
   isGenerating: boolean;
   currentSessionTitle?: string;
+  currentModelLabel?: string;
   setCurrentInput: (value: string) => void;
   sendMessage: () => void;
   handleKeyPress: (e: React.KeyboardEvent) => void;

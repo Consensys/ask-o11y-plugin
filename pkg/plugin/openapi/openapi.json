@@ -497,6 +497,19 @@
         "parameters": [
           {
             "$ref": "#/components/parameters/X-Grafana-Org-Id"
+          },
+          {
+            "name": "model",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "base",
+                "large"
+              ]
+            },
+            "description": "LLM app model abstraction to use for this session. Omit to use the grafana-llm-app default. Once set on a session, later runs must use the same model."
           }
         ],
         "requestBody": {
@@ -2324,6 +2337,14 @@
           "activeRunId": {
             "type": "string",
             "description": "ID of currently active agent run (if any)"
+          },
+          "model": {
+            "type": "string",
+            "enum": [
+              "base",
+              "large"
+            ],
+            "description": "LLM app model abstraction locked to this session, if selected"
           }
         },
         "required": [
@@ -2362,6 +2383,14 @@
           "activeRunId": {
             "type": "string",
             "description": "ID of currently active agent run (if any)"
+          },
+          "model": {
+            "type": "string",
+            "enum": [
+              "base",
+              "large"
+            ],
+            "description": "LLM app model abstraction locked to this session, if selected"
           }
         },
         "required": [

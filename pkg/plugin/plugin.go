@@ -678,6 +678,12 @@ func (p *Plugin) handleAgentRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	requestedModel, ok := parseAgentModelParam(r)
+	if !ok {
+		http.Error(w, "Invalid model; supported values are 'base' and 'large'", http.StatusBadRequest)
+		return
+	}
+
 	cfg := backend.GrafanaConfigFromContext(r.Context())
 	if cfg == nil {
 		p.logger.Error("Grafana configuration not available in request context")
@@ -736,6 +742,7 @@ func (p *Plugin) handleAgentRun(w http.ResponseWriter, r *http.Request) {
 
 	var messages []agent.Message
 	var sessionID string
+	runModel := requestedModel
 
 	if req.SessionID != "" {
 		session, err := p.sessionStore.GetSession(req.SessionID, userID, numericOrgID)
@@ -744,6 +751,19 @@ func (p *Plugin) handleAgentRun(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		sessionID = req.SessionID
+		if session.Model != "" {
+			if requestedModel != "" && requestedModel != session.Model {
+				http.Error(w, "Session model cannot be changed", http.StatusBadRequest)
+				return
+			}
+			runModel = session.Model
+		} else if requestedModel != "" {
+			if err := persistSessionModel(p.sessionStore, sessionID, userID, numericOrgID, requestedModel); err != nil {
+				p.logger.Error("Failed to persist session model", "error", err, "sessionId", sessionID)
+				http.Error(w, "Failed to persist session model", http.StatusInternalServerError)
+				return
+			}
+		}
 
 		for _, msg := range session.Messages {
 			messages = append(messages, agent.Message{
@@ -781,6 +801,13 @@ func (p *Plugin) handleAgentRun(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		sessionID = session.ID
+		if runModel != "" {
+			if err := persistSessionModel(p.sessionStore, sessionID, userID, numericOrgID, runModel); err != nil {
+				p.logger.Error("Failed to persist session model", "error", err, "sessionId", sessionID)
+				http.Error(w, "Failed to persist session model", http.StatusInternalServerError)
+				return
+			}
+		}
 
 		if err := p.sessionStore.SetCurrentSessionID(userID, numericOrgID, sessionID); err != nil {
 			p.logger.Warn("Failed to set current session ID", "error", err)
@@ -799,6 +826,7 @@ func (p *Plugin) handleAgentRun(w http.ResponseWriter, r *http.Request) {
 		"sessionId", sessionID,
 		"messageCount", len(messages),
 		"type", req.Type,
+		"model", runModel,
 	)
 
 	span.SetAttributes(
@@ -815,6 +843,7 @@ func (p *Plugin) handleAgentRun(w http.ResponseWriter, r *http.Request) {
 		MaxTotalTokens:     p.settings.MaxTotalTokens,
 		RecentMessageCount: p.settings.RecentMessageCount,
 		MaxIterations:      resolveMaxIterations(req.Type, req.Message),
+		Model:              runModel,
 		GrafanaURL:         grafanaURL,
 		AuthToken:          saToken,
 		UserRole:           userRole,
@@ -1679,6 +1708,10 @@ func (p *Plugin) handleSessionRouter(w http.ResponseWriter, r *http.Request) {
 		if err := json.NewDecoder(r.Body).Decode(&update); err != nil {
 			p.logger.Warn("Invalid update-session request body", "error", err)
 			http.Error(w, "Invalid request body", http.StatusBadRequest)
+			return
+		}
+		if update.Model != nil {
+			http.Error(w, "Session model can only be set by agent run creation", http.StatusBadRequest)
 			return
 		}
 		if err := p.sessionStore.UpdateSession(sessionID, userID, orgID, update); err != nil {
