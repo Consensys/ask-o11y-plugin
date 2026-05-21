@@ -5,6 +5,13 @@ All notable changes to the Ask O11y Grafana plugin will be documented in this fi
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.28](https://github.com/Consensys/ask-o11y-plugin/compare/v0.2.27...v0.2.28) (2026-05-21)
+
+
+### Features
+
+* **chat:** add model selection for chat runs ([#141](https://github.com/Consensys/ask-o11y-plugin/issues/141)) ([705ddcd](https://github.com/Consensys/ask-o11y-plugin/commit/705ddcdf6df3858730e044a3aca97c56c446b60a))
+
 ## [0.2.27](https://github.com/Consensys/ask-o11y-plugin/compare/v0.2.26...v0.2.27) (2026-05-18)
 
 
