@@ -6,6 +6,7 @@ export { GraphRenderer } from './GraphRenderer/GraphRenderer';
 export { HistoryButton } from './HistoryButton/HistoryButton';
 export { SaveToMemoryButton } from './SaveToMemoryButton/SaveToMemoryButton';
 export { LogsRenderer } from './LogsRenderer/LogsRenderer';
+export { ModelSelector } from './ModelSelector/ModelSelector';
 export { NewChatButton } from './NewChatButton/NewChatButton';
 export { QuickSuggestions } from './QuickSuggestions/QuickSuggestions';
 export { SessionSidebar } from './SessionSidebar/SessionSidebar';

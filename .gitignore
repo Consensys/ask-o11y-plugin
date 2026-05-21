@@ -43,6 +43,7 @@ ci/
 /blob-report/
 /playwright/.cache/
 /playwright/.auth/
+.playwright-mcp/
 
 # Editor
 .idea

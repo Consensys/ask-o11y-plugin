@@ -89,9 +89,11 @@ func TestSessionStore_UpdateSession(t *testing.T) {
 
 	newTitle := "updated title"
 	newSummary := "a summary"
+	model := "base"
 	err := store.UpdateSession(session.ID, 1, 1, SessionUpdate{
 		Title:   &newTitle,
 		Summary: &newSummary,
+		Model:   &model,
 		Messages: []SessionMessage{
 			{Role: "user", Content: "hello"},
 			{Role: "assistant", Content: "hi there"},
@@ -110,6 +112,17 @@ func TestSessionStore_UpdateSession(t *testing.T) {
 	}
 	if got.MessageCount != 2 {
 		t.Fatalf("expected 2 messages, got %d", got.MessageCount)
+	}
+	if got.Model != "base" {
+		t.Fatalf("expected model base, got %q", got.Model)
+	}
+
+	sessions, err := store.ListSessions(1, 1)
+	if err != nil {
+		t.Fatalf("ListSessions failed: %v", err)
+	}
+	if len(sessions) != 1 || sessions[0].Model != "base" {
+		t.Fatalf("expected listed session model base, got %+v", sessions)
 	}
 }
 

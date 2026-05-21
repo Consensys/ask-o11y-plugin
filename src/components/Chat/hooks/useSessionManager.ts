@@ -122,6 +122,20 @@ export function useSessionManager(
         const session = await getSession(sessionId);
         setCurrentSessionId_(session.id);
         setChatHistory(session.messages as ChatMessage[]);
+        setSessions((prev) => {
+          const metadata = {
+            id: session.id,
+            title: session.title,
+            createdAt: session.createdAt,
+            updatedAt: session.updatedAt,
+            messageCount: session.messageCount,
+            activeRunId: session.activeRunId,
+            model: session.model,
+          };
+          return prev.some((s) => s.id === session.id)
+            ? prev.map((s) => (s.id === session.id ? { ...s, ...metadata } : s))
+            : [metadata, ...prev];
+        });
         onSessionIdChange(session.id);
         await setCurrentSessionId(session.id);
       } catch (error: unknown) {

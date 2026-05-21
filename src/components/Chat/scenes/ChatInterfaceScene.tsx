@@ -18,6 +18,7 @@ function useChatInterface(model: ChatInterfaceScene): ChatInterfaceProps {
     currentInput: state.currentInput,
     isGenerating: state.isGenerating,
     currentSessionTitle: state.currentSessionTitle,
+    currentModelLabel: state.currentModelLabel,
     setCurrentInput: state.setCurrentInput,
     sendMessage: state.sendMessage,
     handleKeyPress: state.handleKeyPress,
@@ -50,6 +51,7 @@ function ChatInterfaceRenderer({ model }: SceneComponentProps<ChatInterfaceScene
     currentInput,
     isGenerating,
     currentSessionTitle,
+    currentModelLabel,
     setCurrentInput,
     sendMessage,
     handleKeyPress,
@@ -76,7 +78,11 @@ function ChatInterfaceRenderer({ model }: SceneComponentProps<ChatInterfaceScene
             className="chat-interface-scroll-container w-full px-4 max-w-4xl mx-auto"
             style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, overflow: 'auto' }}
           >
-            <ChatHeader isGenerating={isGenerating} currentSessionTitle={currentSessionTitle} />
+            <ChatHeader
+              isGenerating={isGenerating}
+              currentSessionTitle={currentSessionTitle}
+              currentModelLabel={currentModelLabel}
+            />
 
             <div
               className="py-6 rounded-lg"
@@ -134,7 +140,7 @@ function ChatInterfaceRenderer({ model }: SceneComponentProps<ChatInterfaceScene
                 setCurrentInput={setCurrentInput}
                 sendMessage={sendMessage}
                 handleKeyPress={handleKeyPress}
-                leftSlot={undefined}
+                leftSlot={leftSlot}
                 rightSlot={rightSlot}
                 queuedMessageCount={queuedMessageCount}
                 onStopGeneration={onStopGeneration}

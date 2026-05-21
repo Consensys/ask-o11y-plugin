@@ -156,6 +156,47 @@ func TestAgentLoop_SimpleTextResponse(t *testing.T) {
 	}
 }
 
+func TestAgentLoop_ForwardsRequestedModel(t *testing.T) {
+	receivedModel := make(chan string, 1)
+	llmServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req ChatCompletionRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Fatalf("failed to decode request: %v", err)
+		}
+		receivedModel <- req.Model
+		respondAsStream(w, ChatCompletionResponse{
+			ID: "1",
+			Choices: []Choice{{
+				Message:      Message{Role: "assistant", Content: "ok"},
+				FinishReason: "stop",
+			}},
+		})
+	}))
+	defer llmServer.Close()
+
+	llmClient := NewLLMClient(log.DefaultLogger, &http.Client{Timeout: llmTimeout})
+	mcpProxy := mcp.NewProxy(context.Background(), log.DefaultLogger)
+	loop := NewAgentLoop(llmClient, mcpProxy, log.DefaultLogger)
+
+	eventCh := make(chan SSEEvent, 32)
+	req := LoopRequest{
+		Messages:     []Message{{Role: "user", Content: "hello"}},
+		SystemPrompt: "sys",
+		Model:        "large",
+		GrafanaURL:   llmServer.URL,
+		AuthToken:    "test-token",
+		UserRole:     "Admin",
+		OrgID:        "1",
+	}
+
+	go loop.Run(context.Background(), req, eventCh)
+	collectEvents(eventCh)
+
+	if got := <-receivedModel; got != "large" {
+		t.Fatalf("expected model large, got %q", got)
+	}
+}
+
 func TestAgentLoop_ToolCallThenText(t *testing.T) {
 	// First response: tool call. Second response: text.
 	// The tool call will fail (no MCP server configured) but the loop should continue.

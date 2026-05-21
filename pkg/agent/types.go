@@ -32,7 +32,7 @@ type OpenAIFunction struct {
 }
 
 type ChatCompletionRequest struct {
-	Model     string       `json:"model"`
+	Model     string       `json:"model,omitempty"`
 	Messages  []Message    `json:"messages"`
 	Tools     []OpenAITool `json:"tools,omitempty"`
 	Stream    bool         `json:"stream,omitempty"`

@@ -2,6 +2,7 @@ export interface AgentRunRequest {
   message: string;
   type?: 'chat' | 'investigation' | 'performance';
   sessionId?: string;
+  model?: 'base' | 'large';
 
   orgId?: string;
   orgName?: string;
@@ -221,8 +222,13 @@ export interface DetachedRunResult {
 }
 
 export async function runAgentDetached(request: AgentRunRequest): Promise<DetachedRunResult> {
-  const { orgId, ...body } = request;
-  const resp = await fetch(AGENT_RUN_URL, {
+  const { orgId, model, ...body } = request;
+  const url = new URL(AGENT_RUN_URL, window.location.origin);
+  if (model) {
+    url.searchParams.set('model', model);
+  }
+
+  const resp = await fetch(url.pathname + url.search, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',

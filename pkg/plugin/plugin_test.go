@@ -2,14 +2,94 @@ package plugin
 
 import (
 	"consensys-asko11y-app/pkg/agent"
+	"consensys-asko11y-app/pkg/mcp"
+	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/grafana/grafana-plugin-sdk-go/backend"
 	"github.com/grafana/grafana-plugin-sdk-go/backend/log"
 )
+
+func newAgentRunTestPlugin(t *testing.T) *Plugin {
+	t.Helper()
+
+	logger := log.DefaultLogger
+	proxy := mcp.NewProxy(context.Background(), logger)
+	llmClient := agent.NewLLMClient(logger, http.DefaultClient)
+	promptRegistry, err := NewPromptRegistry(PluginSettings{})
+	if err != nil {
+		t.Fatalf("NewPromptRegistry failed: %v", err)
+	}
+
+	return &Plugin{
+		logger:         logger,
+		mcpProxy:       proxy,
+		agentLoop:      agent.NewAgentLoop(llmClient, proxy, logger),
+		runStore:       NewRunStore(logger),
+		sessionStore:   NewSessionStore(logger),
+		promptRegistry: promptRegistry,
+		settings: PluginSettings{
+			MaxTotalTokens:     agent.DefaultMaxTotalTokens,
+			RecentMessageCount: 10,
+		},
+		runCancels: make(map[string]context.CancelFunc),
+		dsCache:    make(map[string]dsCacheEntry),
+	}
+}
+
+func newAgentRunRequest(t *testing.T, grafanaURL, targetURL, body string) *http.Request {
+	t.Helper()
+
+	req := httptest.NewRequest(http.MethodPost, targetURL, strings.NewReader(body))
+	req.Header.Set("X-Grafana-Org-Id", "2")
+	req.Header.Set("X-Grafana-User-Id", "7")
+	req.Header.Set("X-Grafana-User-Role", "Admin")
+	cfg := backend.NewGrafanaCfg(map[string]string{
+		"GF_APP_URL":                  grafanaURL,
+		"GF_PLUGIN_APP_CLIENT_SECRET": "test-token",
+	})
+	return req.WithContext(backend.WithGrafanaConfig(req.Context(), cfg))
+}
+
+func newAgentRunLLMServer(t *testing.T) (*httptest.Server, <-chan agent.ChatCompletionRequest) {
+	t.Helper()
+
+	received := make(chan agent.ChatCompletionRequest, 4)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/plugins/grafana-llm-app/resources/openai/v1/chat/completions" {
+			t.Errorf("unexpected LLM path %q", r.URL.Path)
+		}
+		var req agent.ChatCompletionRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Errorf("failed to decode LLM request: %v", err)
+		}
+		received <- req
+
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprint(w, "data: {\"id\":\"run\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"ok\"},\"finish_reason\":null}]}\n\n")
+		fmt.Fprint(w, "data: {\"id\":\"run\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n")
+		fmt.Fprint(w, "data: [DONE]\n\n")
+	}))
+
+	return server, received
+}
+
+func receiveAgentRunLLMRequest(t *testing.T, ch <-chan agent.ChatCompletionRequest) agent.ChatCompletionRequest {
+	t.Helper()
+	select {
+	case req := <-ch:
+		return req
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for LLM request")
+		return agent.ChatCompletionRequest{}
+	}
+}
 
 func TestBuiltInMCPBaseURL(t *testing.T) {
 	t.Run("default returns localhost:3000", func(t *testing.T) {
@@ -78,6 +158,97 @@ func TestResolveGrafanaURL(t *testing.T) {
 			t.Errorf("url = %q, want %q", url, "https://cloud.grafana.net")
 		}
 	})
+}
+
+func TestHandleAgentRunRejectsInvalidModel(t *testing.T) {
+	p := &Plugin{logger: log.DefaultLogger}
+	req := httptest.NewRequest(http.MethodPost, "/api/agent/run?model=opus", strings.NewReader(`{"message":"hello"}`))
+	rec := httptest.NewRecorder()
+
+	p.handleAgentRun(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusBadRequest)
+	}
+}
+
+func TestHandleAgentRunPersistsNewSessionModel(t *testing.T) {
+	llmServer, received := newAgentRunLLMServer(t)
+	defer llmServer.Close()
+
+	p := newAgentRunTestPlugin(t)
+	req := newAgentRunRequest(t, llmServer.URL, "/api/agent/run?model=base", `{"message":"hello","type":"chat"}`)
+	rec := httptest.NewRecorder()
+
+	p.handleAgentRun(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	var body struct {
+		SessionID string `json:"sessionId"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	session, err := p.sessionStore.GetSession(body.SessionID, 7, 2)
+	if err != nil {
+		t.Fatalf("GetSession failed: %v", err)
+	}
+	if session.Model != "base" {
+		t.Fatalf("expected session model base, got %q", session.Model)
+	}
+	if got := receiveAgentRunLLMRequest(t, received); got.Model != "base" {
+		t.Fatalf("expected LLM model base, got %q", got.Model)
+	}
+}
+
+func TestHandleAgentRunUsesStoredSessionModelWhenQueryOmitted(t *testing.T) {
+	llmServer, received := newAgentRunLLMServer(t)
+	defer llmServer.Close()
+
+	p := newAgentRunTestPlugin(t)
+	session, err := p.sessionStore.CreateSession(7, 2, "existing", []SessionMessage{{Role: "user", Content: "previous"}})
+	if err != nil {
+		t.Fatalf("CreateSession failed: %v", err)
+	}
+	model := "large"
+	if err := p.sessionStore.UpdateSession(session.ID, 7, 2, SessionUpdate{Model: &model}); err != nil {
+		t.Fatalf("UpdateSession failed: %v", err)
+	}
+
+	req := newAgentRunRequest(t, llmServer.URL, "/api/agent/run", fmt.Sprintf(`{"message":"follow up","sessionId":%q}`, session.ID))
+	rec := httptest.NewRecorder()
+
+	p.handleAgentRun(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	if got := receiveAgentRunLLMRequest(t, received); got.Model != "large" {
+		t.Fatalf("expected LLM model large, got %q", got.Model)
+	}
+}
+
+func TestHandleAgentRunRejectsConflictingSessionModel(t *testing.T) {
+	p := newAgentRunTestPlugin(t)
+	session, err := p.sessionStore.CreateSession(7, 2, "existing", []SessionMessage{{Role: "user", Content: "previous"}})
+	if err != nil {
+		t.Fatalf("CreateSession failed: %v", err)
+	}
+	model := "base"
+	if err := p.sessionStore.UpdateSession(session.ID, 7, 2, SessionUpdate{Model: &model}); err != nil {
+		t.Fatalf("UpdateSession failed: %v", err)
+	}
+
+	req := newAgentRunRequest(t, "http://grafana.test", "/api/agent/run?model=large", fmt.Sprintf(`{"message":"follow up","sessionId":%q}`, session.ID))
+	rec := httptest.NewRecorder()
+
+	p.handleAgentRun(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusBadRequest)
+	}
 }
 
 func TestReconstructAssistantMessage(t *testing.T) {

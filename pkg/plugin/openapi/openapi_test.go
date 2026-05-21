@@ -192,6 +192,56 @@ func TestSpecHasSSEDocumentation(t *testing.T) {
 	}
 }
 
+func TestSpecDocumentsAgentRunModelSelection(t *testing.T) {
+	spec, err := GetSpec()
+	if err != nil {
+		t.Fatalf("GetSpec() failed: %v", err)
+	}
+
+	paths := spec["paths"].(map[string]interface{})
+	runPath := paths["/api/agent/run"].(map[string]interface{})
+	post := runPath["post"].(map[string]interface{})
+	params := post["parameters"].([]interface{})
+
+	var modelParam map[string]interface{}
+	for _, param := range params {
+		p, ok := param.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		if p["name"] == "model" {
+			modelParam = p
+			break
+		}
+	}
+	if modelParam == nil {
+		t.Fatal("agent run endpoint missing model query parameter")
+	}
+	if modelParam["in"] != "query" {
+		t.Fatalf("model parameter in = %v, want query", modelParam["in"])
+	}
+	schema := modelParam["schema"].(map[string]interface{})
+	enum := schema["enum"].([]interface{})
+	if len(enum) != 2 || enum[0] != "base" || enum[1] != "large" {
+		t.Fatalf("model enum = %v, want [base large]", enum)
+	}
+
+	components := spec["components"].(map[string]interface{})
+	schemas := components["schemas"].(map[string]interface{})
+	for _, schemaName := range []string{"ChatSession", "SessionMetadata"} {
+		sessionSchema := schemas[schemaName].(map[string]interface{})
+		properties := sessionSchema["properties"].(map[string]interface{})
+		model, ok := properties["model"].(map[string]interface{})
+		if !ok {
+			t.Fatalf("%s missing model property", schemaName)
+		}
+		modelEnum := model["enum"].([]interface{})
+		if len(modelEnum) != 2 || modelEnum[0] != "base" || modelEnum[1] != "large" {
+			t.Fatalf("%s model enum = %v, want [base large]", schemaName, modelEnum)
+		}
+	}
+}
+
 func TestSpecHasRateLimitingDocumentation(t *testing.T) {
 	spec, err := GetSpec()
 	if err != nil {
