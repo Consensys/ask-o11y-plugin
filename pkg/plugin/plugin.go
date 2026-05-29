@@ -7,6 +7,7 @@ import (
 	"consensys-asko11y-app/pkg/rbac"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"hash/fnv"
 	"io"
@@ -154,25 +155,24 @@ func applyAgentRuntimeSettings(settings *PluginSettings) {
 
 type Plugin struct {
 	backend.CallResourceHandler
-	logger          log.Logger
-	mcpProxy        *mcp.Proxy
-	agentLoop       *agent.AgentLoop
-	scout           *Scout
-	shareStore      ShareStoreInterface
-	runStore        RunStoreInterface
-	sessionStore    SessionStoreInterface
-	redisClient     *redis.Client
-	usingRedis      bool
-	useBuiltInMCP   bool
-	promptRegistry  *PromptRegistry
-	settings        PluginSettings
-	settingsMu      sync.RWMutex
-	ctx             context.Context
-	cancel          context.CancelFunc
-	runCancelsMu    sync.Mutex
-	runCancels      map[string]context.CancelFunc
-	approvalMu      sync.Mutex
-	approvalWaiters map[string]map[string]chan agent.ApprovalResolvedEvent
+	logger         log.Logger
+	mcpProxy       *mcp.Proxy
+	agentLoop      *agent.AgentLoop
+	scout          *Scout
+	shareStore     ShareStoreInterface
+	runStore       RunStoreInterface
+	sessionStore   SessionStoreInterface
+	redisClient    *redis.Client
+	usingRedis     bool
+	approvalBroker ApprovalBroker
+	useBuiltInMCP  bool
+	promptRegistry *PromptRegistry
+	settings       PluginSettings
+	settingsMu     sync.RWMutex
+	ctx            context.Context
+	cancel         context.CancelFunc
+	runCancelsMu   sync.Mutex
+	runCancels     map[string]context.CancelFunc
 	// dsCache memoises the per-org datasource UID snapshot injected into the
 	// system prompt. See datasource_snapshot.go.
 	dsCache   map[string]dsCacheEntry
@@ -265,6 +265,15 @@ func NewPlugin(ctx context.Context, settings backend.AppInstanceSettings) (insta
 		sessionStore = NewRedisSessionStore(pluginCtx, redisClient, logger)
 	}
 
+	var approvalBroker ApprovalBroker
+	if usingRedis && redisClient != nil {
+		approvalBroker = NewRedisApprovalBroker(pluginCtx, redisClient, logger)
+		logger.Info("Using Redis for distributed approval coordination")
+	} else {
+		approvalBroker = NewInMemoryApprovalBroker()
+		logger.Warn("Using in-memory approval coordination; approval routing is unsafe with multiple Grafana replicas. Configure Redis for production.")
+	}
+
 	llmHTTPClient, err := httpclient.New(httpclient.Options{
 		Timeouts: &httpclient.TimeoutOptions{
 			Timeout:     600 * time.Second,
@@ -288,22 +297,22 @@ func NewPlugin(ctx context.Context, settings backend.AppInstanceSettings) (insta
 	}
 
 	p := &Plugin{
-		logger:          logger,
-		mcpProxy:        mcpProxy,
-		agentLoop:       agentLoop,
-		scout:           scout,
-		shareStore:      shareStore,
-		runStore:        runStore,
-		sessionStore:    sessionStore,
-		redisClient:     redisClient,
-		usingRedis:      usingRedis,
-		useBuiltInMCP:   pluginSettings.UseBuiltInMCP,
-		promptRegistry:  promptRegistry,
-		settings:        pluginSettings,
-		ctx:             pluginCtx,
-		cancel:          cancel,
-		runCancels:      make(map[string]context.CancelFunc),
-		approvalWaiters: make(map[string]map[string]chan agent.ApprovalResolvedEvent),
+		logger:         logger,
+		mcpProxy:       mcpProxy,
+		agentLoop:      agentLoop,
+		scout:          scout,
+		shareStore:     shareStore,
+		runStore:       runStore,
+		sessionStore:   sessionStore,
+		redisClient:    redisClient,
+		usingRedis:     usingRedis,
+		approvalBroker: approvalBroker,
+		useBuiltInMCP:  pluginSettings.UseBuiltInMCP,
+		promptRegistry: promptRegistry,
+		settings:       pluginSettings,
+		ctx:            pluginCtx,
+		cancel:         cancel,
+		runCancels:     make(map[string]context.CancelFunc),
 	}
 
 	if !usingRedis {
@@ -352,14 +361,9 @@ func (p *Plugin) Dispose() {
 	}
 	p.runCancels = nil
 	p.runCancelsMu.Unlock()
-	p.approvalMu.Lock()
-	for _, approvals := range p.approvalWaiters {
-		for _, ch := range approvals {
-			close(ch)
-		}
+	if p.approvalBroker != nil {
+		p.approvalBroker.Close()
 	}
-	p.approvalWaiters = nil
-	p.approvalMu.Unlock()
 
 	// Stop the scout before closing the proxy so its in-flight scavenge can finish.
 	if p.scout != nil {
@@ -907,6 +911,7 @@ func (p *Plugin) handleAgentRun(w http.ResponseWriter, r *http.Request) {
 		RecentMessageCount:      p.settings.RecentMessageCount,
 		MaxIterations:           resolveMaxIterations(req.Type, req.Message),
 		Model:                   effectiveRunModel,
+		AllowModelFallback:      modelSource == "auto" && effectiveRunModel == "large",
 		ConversationType:        req.Type,
 		GrafanaURL:              grafanaURL,
 		AuthToken:               saToken,
@@ -1021,62 +1026,12 @@ func (p *Plugin) getAuthorizedRun(w http.ResponseWriter, r *http.Request, runID 
 
 func (p *Plugin) approvalRegistrar(runID string) agent.ApprovalRegistrar {
 	return func(ctx context.Context, request agent.ApprovalRequestEvent) (agent.ApprovalWaitFunc, error) {
-		if !isValidApprovalID(request.ApprovalID) {
-			return nil, fmt.Errorf("invalid approval id")
+		broker := p.approvalBroker
+		if broker == nil {
+			broker = NewInMemoryApprovalBroker()
+			p.approvalBroker = broker
 		}
-		ch := make(chan agent.ApprovalResolvedEvent, 1)
-
-		p.approvalMu.Lock()
-		if p.approvalWaiters == nil {
-			p.approvalWaiters = make(map[string]map[string]chan agent.ApprovalResolvedEvent)
-		}
-		if p.approvalWaiters[runID] == nil {
-			p.approvalWaiters[runID] = make(map[string]chan agent.ApprovalResolvedEvent)
-		}
-		if _, exists := p.approvalWaiters[runID][request.ApprovalID]; exists {
-			p.approvalMu.Unlock()
-			return nil, fmt.Errorf("approval already pending")
-		}
-		p.approvalWaiters[runID][request.ApprovalID] = ch
-		p.approvalMu.Unlock()
-
-		return func(waitCtx context.Context) (agent.ApprovalResolvedEvent, error) {
-			defer p.removeApprovalWaiter(runID, request.ApprovalID)
-			timer := time.NewTimer(approvalTimeout)
-			defer timer.Stop()
-
-			select {
-			case resolved, ok := <-ch:
-				if !ok {
-					return agent.ApprovalResolvedEvent{}, fmt.Errorf("approval channel closed")
-				}
-				return resolved, nil
-			case <-timer.C:
-				return agent.ApprovalResolvedEvent{
-					ApprovalID: request.ApprovalID,
-					Decision:   "rejected",
-					Comment:    "approval timed out",
-					ResolvedAt: time.Now().UTC().Format(time.RFC3339),
-				}, nil
-			case <-waitCtx.Done():
-				return agent.ApprovalResolvedEvent{}, waitCtx.Err()
-			case <-ctx.Done():
-				return agent.ApprovalResolvedEvent{}, ctx.Err()
-			}
-		}, nil
-	}
-}
-
-func (p *Plugin) removeApprovalWaiter(runID, approvalID string) {
-	p.approvalMu.Lock()
-	defer p.approvalMu.Unlock()
-	waiters := p.approvalWaiters[runID]
-	if waiters == nil {
-		return
-	}
-	delete(waiters, approvalID)
-	if len(waiters) == 0 {
-		delete(p.approvalWaiters, runID)
+		return broker.Register(ctx, runID, request)
 	}
 }
 
@@ -1157,7 +1112,8 @@ type approvalDecisionRequest struct {
 }
 
 func (p *Plugin) handleAgentApproval(w http.ResponseWriter, r *http.Request, runID, approvalID string) {
-	if _, ok := p.getAuthorizedRun(w, r, runID); !ok {
+	run, ok := p.getAuthorizedRun(w, r, runID)
+	if !ok {
 		return
 	}
 	role := getUserRole(r)
@@ -1184,26 +1140,73 @@ func (p *Plugin) handleAgentApproval(w http.ResponseWriter, r *http.Request, run
 		ResolvedAt: time.Now().UTC().Format(time.RFC3339),
 	}
 
-	p.approvalMu.Lock()
-	waiters := p.approvalWaiters[runID]
-	ch := waiters[approvalID]
-	p.approvalMu.Unlock()
-	if ch == nil {
-		http.Error(w, "Approval is not pending", http.StatusConflict)
-		return
+	broker := p.approvalBroker
+	if broker == nil {
+		broker = NewInMemoryApprovalBroker()
+		p.approvalBroker = broker
 	}
 
-	select {
-	case ch <- resolved:
-	case <-r.Context().Done():
-		return
-	case <-time.After(5 * time.Second):
-		http.Error(w, "Approval delivery timed out", http.StatusGatewayTimeout)
+	delivered, err := broker.Resolve(r.Context(), runID, resolved)
+	if err != nil {
+		var conflict *approvalConflictError
+		switch {
+		case errors.As(err, &conflict):
+			http.Error(w, approvalAlreadyResolvedMessage(conflict.decision), http.StatusConflict)
+			return
+		case errors.Is(err, errApprovalNotPending):
+			if existing, exists := resolvedApprovalFromRun(run, approvalID); exists {
+				if existing.Decision == decision {
+					w.Header().Set("Content-Type", "application/json")
+					json.NewEncoder(w).Encode(existing)
+					return
+				}
+				http.Error(w, approvalAlreadyResolvedMessage(existing.Decision), http.StatusConflict)
+				return
+			}
+			http.Error(w, "Approval is not pending or has expired", http.StatusConflict)
+			return
+		default:
+			p.logger.Warn("Failed to resolve approval", "error", err, "runId", runID, "approvalId", approvalID)
+			http.Error(w, "Approval delivery failed", http.StatusGatewayTimeout)
+			return
+		}
+	}
+	if delivered.Decision != decision {
+		http.Error(w, approvalAlreadyResolvedMessage(delivered.Decision), http.StatusConflict)
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(resolved)
+	json.NewEncoder(w).Encode(delivered)
+}
+
+func resolvedApprovalFromRun(run *AgentRun, approvalID string) (agent.ApprovalResolvedEvent, bool) {
+	if run == nil || run.Trace == nil {
+		return agent.ApprovalResolvedEvent{}, false
+	}
+	for _, approval := range run.Trace.Approvals {
+		if approval.ApprovalID != approvalID || approval.Decision == "" {
+			continue
+		}
+		resolvedAt := ""
+		if approval.ResolvedAt != nil {
+			resolvedAt = approval.ResolvedAt.UTC().Format(time.RFC3339)
+		}
+		return agent.ApprovalResolvedEvent{
+			ApprovalID: approval.ApprovalID,
+			Decision:   approval.Decision,
+			Comment:    approval.Comment,
+			ResolvedAt: resolvedAt,
+		}, true
+	}
+	return agent.ApprovalResolvedEvent{}, false
+}
+
+func approvalAlreadyResolvedMessage(decision string) string {
+	if decision == "" {
+		return "Approval already resolved"
+	}
+	return fmt.Sprintf("Approval already resolved as %s", decision)
 }
 
 func (p *Plugin) handleCancelRun(w http.ResponseWriter, r *http.Request, runID string) {

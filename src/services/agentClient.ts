@@ -41,6 +41,10 @@ export interface DoneEvent {
 
 export interface ErrorEvent {
   message: string;
+  code?: string;
+  statusCode?: number;
+  requestId?: string;
+  retryable?: boolean;
 }
 
 export interface RunStartedEvent {

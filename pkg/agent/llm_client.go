@@ -9,6 +9,7 @@ import (
 	"maps"
 	"net/http"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -19,10 +20,68 @@ import (
 )
 
 const (
-	llmEndpoint    = "/api/plugins/grafana-llm-app/resources/openai/v1/chat/completions"
-	llmTimeout     = 600 * time.Second
-	maxSSELineSize = 1 * 1024 * 1024 // 1 MB — large tool-call payloads (e.g. dashboard JSON) can exceed bufio's 64 KB default
+	llmEndpoint       = "/api/plugins/grafana-llm-app/resources/openai/v1/chat/completions"
+	llmTimeout        = 600 * time.Second
+	maxSSELineSize    = 1 * 1024 * 1024 // 1 MB — large tool-call payloads (e.g. dashboard JSON) can exceed bufio's 64 KB default
+	maxLLMAttempts    = 2
+	llmRetryBaseDelay = 250 * time.Millisecond
 )
+
+type LLMHTTPError struct {
+	StatusCode   int
+	Status       string
+	RequestID    string
+	TraceID      string
+	Model        string
+	MessageCount int
+	ToolCount    int
+	MaxTokens    int
+	RequestBytes int
+	Retryable    bool
+}
+
+func (e *LLMHTTPError) Error() string {
+	if e == nil {
+		return "LLM request failed"
+	}
+	if e.RequestID != "" {
+		return fmt.Sprintf("LLM returned status %d (requestId=%s)", e.StatusCode, e.RequestID)
+	}
+	return fmt.Sprintf("LLM returned status %d", e.StatusCode)
+}
+
+func (e *LLMHTTPError) Code() string {
+	if e == nil || e.StatusCode == 0 {
+		return "llm_http_error"
+	}
+	return fmt.Sprintf("llm_http_%d", e.StatusCode)
+}
+
+func (e *LLMHTTPError) UserMessage() string {
+	if e == nil {
+		return "LLM request failed."
+	}
+
+	var message string
+	switch e.StatusCode {
+	case http.StatusUnauthorized, http.StatusForbidden:
+		message = "LLM app authorization failed. Ask an admin to verify the Ask O11y service account token and grafana-llm-app access."
+	case http.StatusNotFound:
+		message = "Grafana LLM app endpoint was not found. Ask an admin to verify grafana-llm-app is installed and enabled."
+	case http.StatusTooManyRequests:
+		message = "Grafana LLM app rate limited this request. Retry after the provider quota resets."
+	default:
+		if e.StatusCode >= 500 {
+			message = "Grafana LLM app returned an internal error. Ask an admin to check grafana-llm-app provider configuration and backend logs."
+		} else {
+			message = fmt.Sprintf("Grafana LLM app rejected this request with HTTP %d.", e.StatusCode)
+		}
+	}
+	if e.RequestID != "" {
+		message += " Request ID: " + e.RequestID + "."
+	}
+	return message
+}
 
 type streamChunk struct {
 	ID      string         `json:"id"`
@@ -79,31 +138,79 @@ func (c *LLMClient) ChatCompletion(ctx context.Context, req ChatCompletionReques
 		return nil, fmt.Errorf("marshal request: %w", err)
 	}
 
-	httpReq, err := c.buildHTTPRequest(ctx, body, grafanaURL, authToken, orgID)
-	if err != nil {
-		return nil, err
-	}
+	span.SetAttributes(
+		attribute.String("llm.model", req.Model),
+		attribute.Int("llm.message_count", len(req.Messages)),
+		attribute.Int("llm.tool_count", len(req.Tools)),
+		attribute.Int("llm.max_tokens", req.MaxTokens),
+		attribute.Int("llm.request_bytes", len(body)),
+	)
 
-	c.logger.Debug("Calling LLM",
-		"url", httpReq.URL.String(),
-		"messageCount", len(req.Messages),
-		"toolCount", len(req.Tools),
-		"orgID", orgID)
+	for attempt := 1; attempt <= maxLLMAttempts; attempt++ {
+		httpReq, err := c.buildHTTPRequest(ctx, body, grafanaURL, authToken, orgID)
+		if err != nil {
+			return nil, err
+		}
 
-	resp, err := c.httpClient.Do(httpReq)
-	if err != nil {
-		return nil, fmt.Errorf("LLM request failed: %w", err)
-	}
-	defer resp.Body.Close()
+		c.logger.Debug("Calling LLM",
+			"url", httpReq.URL.String(),
+			"messageCount", len(req.Messages),
+			"toolCount", len(req.Tools),
+			"maxTokens", req.MaxTokens,
+			"requestBytes", len(body),
+			"model", req.Model,
+			"attempt", attempt,
+			"orgID", orgID)
 
-	if resp.StatusCode != http.StatusOK {
-		c.logger.Warn("LLM returned non-OK status", "status", resp.StatusCode)
-		return nil, fmt.Errorf("LLM returned status %d", resp.StatusCode)
-	}
+		resp, err := c.httpClient.Do(httpReq)
+		if err != nil {
+			if ctx.Err() != nil {
+				return nil, fmt.Errorf("LLM request failed: %w", err)
+			}
+			if attempt < maxLLMAttempts {
+				c.logger.Warn("LLM request failed, retrying", "error", err, "attempt", attempt)
+				if !sleepWithContext(ctx, retryDelay(nil, attempt)) {
+					return nil, ctx.Err()
+				}
+				continue
+			}
+			return nil, fmt.Errorf("LLM request failed: %w", err)
+		}
 
-	result, err = parseStream(resp)
-	if err != nil {
-		return nil, err
+		if resp.StatusCode != http.StatusOK {
+			llmErr := c.buildHTTPError(resp, req, len(body))
+			resp.Body.Close()
+			span.SetAttributes(
+				attribute.Int("llm.http_status", llmErr.StatusCode),
+				attribute.String("llm.request_id", llmErr.RequestID),
+				attribute.Bool("llm.retryable", llmErr.Retryable),
+			)
+			c.logger.Warn("LLM returned non-OK status",
+				"status", llmErr.StatusCode,
+				"requestId", llmErr.RequestID,
+				"traceId", llmErr.TraceID,
+				"retryable", llmErr.Retryable,
+				"model", llmErr.Model,
+				"messageCount", llmErr.MessageCount,
+				"toolCount", llmErr.ToolCount,
+				"maxTokens", llmErr.MaxTokens,
+				"requestBytes", llmErr.RequestBytes,
+				"attempt", attempt)
+			if llmErr.Retryable && attempt < maxLLMAttempts {
+				if !sleepWithContext(ctx, retryDelay(resp, attempt)) {
+					return nil, ctx.Err()
+				}
+				continue
+			}
+			return nil, llmErr
+		}
+
+		result, err = parseStream(resp)
+		resp.Body.Close()
+		if err != nil {
+			return nil, err
+		}
+		break
 	}
 
 	if result.Usage != nil {
@@ -114,6 +221,72 @@ func (c *LLMClient) ChatCompletion(ctx context.Context, req ChatCompletionReques
 	}
 
 	return result, nil
+}
+
+func (c *LLMClient) buildHTTPError(resp *http.Response, req ChatCompletionRequest, requestBytes int) *LLMHTTPError {
+	requestID, traceID := llmDiagnosticHeaders(resp.Header)
+	return &LLMHTTPError{
+		StatusCode:   resp.StatusCode,
+		Status:       resp.Status,
+		RequestID:    requestID,
+		TraceID:      traceID,
+		Model:        req.Model,
+		MessageCount: len(req.Messages),
+		ToolCount:    len(req.Tools),
+		MaxTokens:    req.MaxTokens,
+		RequestBytes: requestBytes,
+		Retryable:    isRetryableLLMStatus(resp.StatusCode),
+	}
+}
+
+func llmDiagnosticHeaders(headers http.Header) (requestID, traceID string) {
+	for _, key := range []string{"X-Request-Id", "X-Grafana-Request-Id", "X-Request-ID", "X-Correlation-Id"} {
+		if value := strings.TrimSpace(headers.Get(key)); value != "" {
+			requestID = value
+			break
+		}
+	}
+	for _, key := range []string{"X-Trace-Id", "X-Grafana-Trace-Id", "Traceparent"} {
+		if value := strings.TrimSpace(headers.Get(key)); value != "" {
+			traceID = value
+			break
+		}
+	}
+	return requestID, traceID
+}
+
+func isRetryableLLMStatus(statusCode int) bool {
+	return statusCode == http.StatusTooManyRequests ||
+		statusCode == http.StatusInternalServerError ||
+		statusCode == http.StatusBadGateway ||
+		statusCode == http.StatusServiceUnavailable ||
+		statusCode == http.StatusGatewayTimeout
+}
+
+func retryDelay(resp *http.Response, attempt int) time.Duration {
+	if resp != nil {
+		if retryAfter := strings.TrimSpace(resp.Header.Get("Retry-After")); retryAfter != "" {
+			if seconds, err := strconv.Atoi(retryAfter); err == nil && seconds >= 0 {
+				delay := time.Duration(seconds) * time.Second
+				if delay > 5*time.Second {
+					return 5 * time.Second
+				}
+				return delay
+			}
+		}
+	}
+	return time.Duration(attempt) * llmRetryBaseDelay
+}
+
+func sleepWithContext(ctx context.Context, delay time.Duration) bool {
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+		return true
+	case <-ctx.Done():
+		return false
+	}
 }
 
 // buildHTTPRequest constructs the POST request with auth headers set.

@@ -155,7 +155,11 @@ type DoneEvent struct {
 }
 
 type ErrorEvent struct {
-	Message string `json:"message"`
+	Message    string `json:"message"`
+	Code       string `json:"code,omitempty"`
+	StatusCode int    `json:"statusCode,omitempty"`
+	RequestID  string `json:"requestId,omitempty"`
+	Retryable  bool   `json:"retryable,omitempty"`
 }
 
 type RunRequest struct {

@@ -48,6 +48,7 @@ type LoopRequest struct {
 	RecentMessageCount int
 	MaxIterations      int
 	Model              string
+	AllowModelFallback bool
 	ConversationType   string
 
 	GrafanaURL string
@@ -162,14 +163,14 @@ func (a *AgentLoop) Run(ctx context.Context, req LoopRequest, eventCh chan<- SSE
 			Tools:     openAITools,
 			MaxTokens: completionBudget,
 		}
-		resp, err := a.llmClient.ChatCompletion(ctx, llmReq, req.GrafanaURL, req.AuthToken, req.OrgID)
+		resp, err := a.chatCompletionWithFallback(ctx, llmReq, req)
 		if err != nil {
 			if ctx.Err() != nil {
 				return
 			}
 			a.send(ctx, eventCh, SSEEvent{
 				Type: "error",
-				Data: ErrorEvent{Message: fmt.Sprintf("LLM error: %v", err)},
+				Data: llmErrorEvent(err),
 			})
 			return
 		}
@@ -279,6 +280,52 @@ func (a *AgentLoop) Run(ctx context.Context, req LoopRequest, eventCh chan<- SSE
 		Type: "error",
 		Data: ErrorEvent{Message: fmt.Sprintf("Agent loop reached maximum iterations (%d)", maxIter)},
 	})
+}
+
+func (a *AgentLoop) chatCompletionWithFallback(ctx context.Context, llmReq ChatCompletionRequest, req LoopRequest) (*ChatCompletionResponse, error) {
+	resp, err := a.llmClient.ChatCompletion(ctx, llmReq, req.GrafanaURL, req.AuthToken, req.OrgID)
+	if err == nil {
+		return resp, nil
+	}
+
+	var llmErr *LLMHTTPError
+	if !req.AllowModelFallback || llmReq.Model != "large" || !errors.As(err, &llmErr) || llmErr.StatusCode < 500 {
+		return nil, err
+	}
+
+	fallbackReq := llmReq
+	fallbackReq.Model = "base"
+	a.logger.Warn("LLM large model failed; retrying auto-selected run with base model",
+		"status", llmErr.StatusCode,
+		"requestId", llmErr.RequestID,
+		"messageCount", llmErr.MessageCount,
+		"toolCount", llmErr.ToolCount)
+
+	resp, fallbackErr := a.llmClient.ChatCompletion(ctx, fallbackReq, req.GrafanaURL, req.AuthToken, req.OrgID)
+	if fallbackErr != nil {
+		a.logger.Warn("LLM base fallback failed", "error", fallbackErr)
+		return nil, fallbackErr
+	}
+
+	a.logger.Info("LLM base fallback succeeded after large model failure", "requestId", llmErr.RequestID)
+	return resp, nil
+}
+
+func llmErrorEvent(err error) ErrorEvent {
+	var llmErr *LLMHTTPError
+	if errors.As(err, &llmErr) {
+		return ErrorEvent{
+			Message:    llmErr.UserMessage(),
+			Code:       llmErr.Code(),
+			StatusCode: llmErr.StatusCode,
+			RequestID:  llmErr.RequestID,
+			Retryable:  llmErr.Retryable,
+		}
+	}
+	return ErrorEvent{
+		Message: fmt.Sprintf("LLM error: %v", err),
+		Code:    "llm_error",
+	}
 }
 
 func completionTokenBudget(maxTotalTokens int) int {

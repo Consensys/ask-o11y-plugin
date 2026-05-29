@@ -123,7 +123,7 @@ function AgentTraceSummary({
               <div className="flex items-start justify-between gap-3">
                 <div>
                   <div className="text-sm font-medium" style={{ color: theme.colors.text.primary }}>
-                    Approval required: {approval.toolName}
+                    {approval.decision ? 'Approval resolved' : 'Approval required'}: {approval.toolName}
                   </div>
                   <div className="text-xs mt-1" style={{ color: theme.colors.text.secondary }}>
                     {approval.risk} · {approval.reason}

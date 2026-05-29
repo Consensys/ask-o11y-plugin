@@ -9,6 +9,7 @@ import {
   reconnectToAgentRun,
   cancelAgentRun,
   resolveAgentApproval,
+  getAgentRunStatus,
   type AgentCallbacks,
   type ApprovalRequestEvent,
   type ApprovalResolvedEvent,
@@ -164,6 +165,7 @@ export function useChat(
   const activeRunIdRef = useRef<string | null>(null);
   const activeSessionIdRef = useRef<string | null>(null);
   const pendingRunSessionIdRef = useRef<string | null>(null);
+  const approvalInFlightRef = useRef<Set<string>>(new Set());
 
   const sessionManager = useSessionManager(
     orgId,
@@ -367,9 +369,14 @@ export function useChat(
   const resolveApproval = useCallback(
     async (approval: AgentApprovalItem, decision: 'approved' | 'rejected'): Promise<void> => {
       const runId = approval.runId || activeRunIdRef.current;
-      if (!runId) {
+      if (!runId || approval.decision) {
         return;
       }
+      const inFlightKey = `${runId}:${approval.approvalId}`;
+      if (approvalInFlightRef.current.has(inFlightKey)) {
+        return;
+      }
+      approvalInFlightRef.current.add(inFlightKey);
 
       setChatHistory((prev) =>
         updateLastAssistantMessage(prev, (msg) => ({
@@ -381,8 +388,51 @@ export function useChat(
       );
 
       try {
-        await resolveAgentApproval(runId, approval.approvalId, decision, undefined, orgId);
+        const resolved = await resolveAgentApproval(runId, approval.approvalId, decision, undefined, orgId);
+        setChatHistory((prev) =>
+          updateLastAssistantMessage(prev, (msg) => ({
+            ...msg,
+            approvals: (msg.approvals || []).map((item) =>
+              item.approvalId === approval.approvalId
+                ? {
+                    ...item,
+                    decision: resolved.decision,
+                    comment: resolved.comment,
+                    resolvedAt: resolved.resolvedAt,
+                    resolving: false,
+                    error: undefined,
+                  }
+                : item
+            ),
+          }))
+        );
       } catch (error) {
+        try {
+          const run = await getAgentRunStatus(runId, orgId);
+          const resolved = run.trace?.approvals?.find((item) => item.approvalId === approval.approvalId && item.decision);
+          if (resolved) {
+            setChatHistory((prev) =>
+              updateLastAssistantMessage(prev, (msg) => ({
+                ...msg,
+                approvals: (msg.approvals || []).map((item) =>
+                  item.approvalId === approval.approvalId
+                    ? {
+                        ...item,
+                        decision: resolved.decision,
+                        comment: resolved.comment,
+                        resolvedAt: resolved.resolvedAt,
+                        resolving: false,
+                        error: undefined,
+                      }
+                    : item
+                ),
+              }))
+            );
+            return;
+          }
+        } catch {
+          // Keep the original approval error below; the refresh is best effort.
+        }
         setChatHistory((prev) =>
           updateLastAssistantMessage(prev, (msg) => ({
             ...msg,
@@ -397,6 +447,8 @@ export function useChat(
             ),
           }))
         );
+      } finally {
+        approvalInFlightRef.current.delete(inFlightKey);
       }
     },
     [orgId]

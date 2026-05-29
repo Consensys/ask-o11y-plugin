@@ -14,9 +14,16 @@ jest.mock('@grafana/ui', () => ({
     colors: {
       text: { primary: '#000', secondary: '#666', disabled: '#999' },
       background: { primary: '#fff', secondary: '#f5f5f5' },
+      border: { weak: '#ddd' },
       primary: { main: '#7c3aed' },
     },
   }),
+  Button: ({ children, disabled, onClick }: any) => (
+    <button disabled={disabled} onClick={onClick}>
+      {children}
+    </button>
+  ),
+  Icon: ({ name }: any) => <span data-testid={`icon-${name}`} />,
 }));
 
 // Mock child components to simplify testing
@@ -156,6 +163,32 @@ describe('ChatMessage', () => {
       render(<ChatMessage message={message} />);
 
       expect(screen.queryByTestId('tool-calls-section')).not.toBeInTheDocument();
+    });
+
+    it('should hide approval action buttons after approval is resolved', () => {
+      const message: ChatMessageType = {
+        role: 'assistant',
+        content: 'Waiting on approval',
+        approvals: [
+          {
+            approvalId: 'tc_1',
+            toolCallId: 'tc_1',
+            toolName: 'grafana_alerting_manage_rules',
+            risk: 'destructive',
+            reason: 'Tool is destructive',
+            arguments: '{}',
+            decision: 'approved',
+            resolvedAt: '2026-05-29T12:00:00Z',
+          },
+        ],
+      };
+
+      render(<ChatMessage message={message} onResolveApproval={jest.fn()} />);
+
+      expect(screen.getByText('Approval resolved: grafana_alerting_manage_rules')).toBeInTheDocument();
+      expect(screen.getByText('approved')).toBeInTheDocument();
+      expect(screen.queryByText('Approve')).not.toBeInTheDocument();
+      expect(screen.queryByText('Reject')).not.toBeInTheDocument();
     });
   });
 

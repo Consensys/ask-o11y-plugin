@@ -33,6 +33,7 @@ func newAgentRunTestPlugin(t *testing.T) *Plugin {
 		agentLoop:      agent.NewAgentLoop(llmClient, proxy, logger),
 		runStore:       NewRunStore(logger),
 		sessionStore:   NewSessionStore(logger),
+		approvalBroker: NewInMemoryApprovalBroker(),
 		promptRegistry: promptRegistry,
 		settings: PluginSettings{
 			MaxTotalTokens:     agent.DefaultMaxTotalTokens,
@@ -135,8 +136,9 @@ func TestHandleAgentApprovalRequiresEditorOrAdmin(t *testing.T) {
 
 func TestHandleAgentApprovalDeliversDecision(t *testing.T) {
 	p := newAgentRunTestPlugin(t)
-	p.approvalWaiters = map[string]map[string]chan agent.ApprovalResolvedEvent{
-		"run-1": {"tc_1": make(chan agent.ApprovalResolvedEvent, 1)},
+	wait, err := p.approvalBroker.Register(context.Background(), "run-1", agent.ApprovalRequestEvent{ApprovalID: "tc_1"})
+	if err != nil {
+		t.Fatalf("register approval failed: %v", err)
 	}
 	p.runStore.CreateRun("run-1", 7, 2)
 
@@ -151,13 +153,85 @@ func TestHandleAgentApprovalDeliversDecision(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
 	}
-	select {
-	case resolved := <-p.approvalWaiters["run-1"]["tc_1"]:
-		if resolved.Decision != "approved" {
-			t.Fatalf("decision = %q, want approved", resolved.Decision)
+	waitCtx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	resolved, err := wait(waitCtx)
+	if err != nil {
+		t.Fatalf("wait failed: %v", err)
+	}
+	if resolved.Decision != "approved" {
+		t.Fatalf("decision = %q, want approved", resolved.Decision)
+	}
+}
+
+func TestHandleAgentApprovalIsIdempotentForDuplicateDecision(t *testing.T) {
+	p := newAgentRunTestPlugin(t)
+	if _, err := p.approvalBroker.Register(context.Background(), "run-1", agent.ApprovalRequestEvent{ApprovalID: "tc_1"}); err != nil {
+		t.Fatalf("register approval failed: %v", err)
+	}
+	p.runStore.CreateRun("run-1", 7, 2)
+
+	for i := 0; i < 2; i++ {
+		req := httptest.NewRequest(http.MethodPost, "/api/agent/runs/run-1/approvals/tc_1", strings.NewReader(`{"decision":"approved"}`))
+		req.Header.Set("X-Grafana-Org-Id", "2")
+		req.Header.Set("X-Grafana-User-Id", "7")
+		req.Header.Set("X-Grafana-User-Role", "Editor")
+		rec := httptest.NewRecorder()
+
+		p.handleAgentApproval(rec, req, "run-1", "tc_1")
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("attempt %d: expected 200, got %d: %s", i+1, rec.Code, rec.Body.String())
 		}
-	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for approval decision")
+	}
+}
+
+func TestHandleAgentApprovalRejectsConflictingDuplicateDecision(t *testing.T) {
+	p := newAgentRunTestPlugin(t)
+	if _, err := p.approvalBroker.Register(context.Background(), "run-1", agent.ApprovalRequestEvent{ApprovalID: "tc_1"}); err != nil {
+		t.Fatalf("register approval failed: %v", err)
+	}
+	p.runStore.CreateRun("run-1", 7, 2)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/agent/runs/run-1/approvals/tc_1", strings.NewReader(`{"decision":"approved"}`))
+	req.Header.Set("X-Grafana-Org-Id", "2")
+	req.Header.Set("X-Grafana-User-Id", "7")
+	req.Header.Set("X-Grafana-User-Role", "Editor")
+	p.handleAgentApproval(httptest.NewRecorder(), req, "run-1", "tc_1")
+
+	conflictReq := httptest.NewRequest(http.MethodPost, "/api/agent/runs/run-1/approvals/tc_1", strings.NewReader(`{"decision":"rejected"}`))
+	conflictReq.Header.Set("X-Grafana-Org-Id", "2")
+	conflictReq.Header.Set("X-Grafana-User-Id", "7")
+	conflictReq.Header.Set("X-Grafana-User-Role", "Editor")
+	rec := httptest.NewRecorder()
+
+	p.handleAgentApproval(rec, conflictReq, "run-1", "tc_1")
+
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("expected 409, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "Approval already resolved as approved") {
+		t.Fatalf("unexpected conflict message: %s", rec.Body.String())
+	}
+}
+
+func TestHandleAgentApprovalUnknownPendingStillConflicts(t *testing.T) {
+	p := newAgentRunTestPlugin(t)
+	p.runStore.CreateRun("run-1", 7, 2)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/agent/runs/run-1/approvals/tc_1", strings.NewReader(`{"decision":"approved"}`))
+	req.Header.Set("X-Grafana-Org-Id", "2")
+	req.Header.Set("X-Grafana-User-Id", "7")
+	req.Header.Set("X-Grafana-User-Role", "Editor")
+	rec := httptest.NewRecorder()
+
+	p.handleAgentApproval(rec, req, "run-1", "tc_1")
+
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("expected 409, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "Approval is not pending or has expired") {
+		t.Fatalf("unexpected response: %s", rec.Body.String())
 	}
 }
 

@@ -788,7 +788,7 @@
     "/api/agent/runs/{runId}/approvals/{approvalId}": {
       "post": {
         "summary": "Resolve an agent tool approval",
-        "description": "Approves or rejects a pending approval-gated tool call for an agent run.",
+        "description": "Approves or rejects a pending approval-gated tool call for an agent run. Duplicate same-decision requests are idempotent.",
         "operationId": "resolveAgentApproval",
         "tags": [
           "Agent"
@@ -2061,7 +2061,7 @@
               }
             },
             "example": {
-              "error": "Approval is not pending"
+              "error": "Approval is not pending or has expired"
             }
           }
         }
@@ -2881,6 +2881,22 @@
           "message": {
             "type": "string",
             "description": "Error message"
+          },
+          "code": {
+            "type": "string",
+            "description": "Stable error code for client diagnostics"
+          },
+          "statusCode": {
+            "type": "integer",
+            "description": "Upstream HTTP status code when the error came from an upstream service"
+          },
+          "requestId": {
+            "type": "string",
+            "description": "Upstream request or correlation ID when available"
+          },
+          "retryable": {
+            "type": "boolean",
+            "description": "Whether retrying the same operation may succeed"
           }
         },
         "required": [

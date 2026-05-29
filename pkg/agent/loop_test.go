@@ -197,6 +197,101 @@ func TestAgentLoop_ForwardsRequestedModel(t *testing.T) {
 	}
 }
 
+func TestAgentLoop_FallsBackFromAutoLargeToBaseOnLLM5xx(t *testing.T) {
+	var models []string
+	llmServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req ChatCompletionRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Fatalf("failed to decode request: %v", err)
+		}
+		models = append(models, req.Model)
+		if req.Model == "large" {
+			w.Header().Set("X-Request-Id", "large-req")
+			w.WriteHeader(http.StatusInternalServerError)
+			w.Write([]byte(`{"error":"large provider failed"}`)) //nolint:errcheck
+			return
+		}
+		respondAsStream(w, ChatCompletionResponse{
+			ID: "base-ok",
+			Choices: []Choice{{
+				Message:      Message{Role: "assistant", Content: "base recovered"},
+				FinishReason: "stop",
+			}},
+		})
+	}))
+	defer llmServer.Close()
+
+	llmClient := NewLLMClient(log.DefaultLogger, &http.Client{Timeout: llmTimeout})
+	mcpProxy := mcp.NewProxy(context.Background(), log.DefaultLogger)
+	loop := NewAgentLoop(llmClient, mcpProxy, log.DefaultLogger)
+
+	eventCh := make(chan SSEEvent, 32)
+	req := LoopRequest{
+		Messages:           []Message{{Role: "user", Content: "investigate"}},
+		SystemPrompt:       "sys",
+		Model:              "large",
+		AllowModelFallback: true,
+		GrafanaURL:         llmServer.URL,
+		AuthToken:          "test-token",
+		UserRole:           "Admin",
+		OrgID:              "1",
+	}
+
+	go loop.Run(context.Background(), req, eventCh)
+	events := collectEvents(eventCh)
+
+	if len(models) != 3 || models[0] != "large" || models[1] != "large" || models[2] != "base" {
+		t.Fatalf("models = %v, want large retry then base fallback", models)
+	}
+	if len(events) != 2 || events[0].Type != "content" || events[1].Type != "done" {
+		t.Fatalf("unexpected events: %+v", events)
+	}
+	if content := events[0].Data.(ContentEvent).Content; content != "base recovered" {
+		t.Fatalf("content = %q, want base recovered", content)
+	}
+}
+
+func TestAgentLoop_SendsDiagnosticErrorForLLMStatus(t *testing.T) {
+	llmServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Request-Id", "req-500")
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Write([]byte(`{"error":"provider failed"}`)) //nolint:errcheck
+	}))
+	defer llmServer.Close()
+
+	llmClient := NewLLMClient(log.DefaultLogger, &http.Client{Timeout: llmTimeout})
+	mcpProxy := mcp.NewProxy(context.Background(), log.DefaultLogger)
+	loop := NewAgentLoop(llmClient, mcpProxy, log.DefaultLogger)
+
+	eventCh := make(chan SSEEvent, 32)
+	req := LoopRequest{
+		Messages:     []Message{{Role: "user", Content: "hello"}},
+		SystemPrompt: "sys",
+		Model:        "large",
+		GrafanaURL:   llmServer.URL,
+		AuthToken:    "test-token",
+		UserRole:     "Admin",
+		OrgID:        "1",
+	}
+
+	go loop.Run(context.Background(), req, eventCh)
+	events := collectEvents(eventCh)
+
+	if len(events) != 1 || events[0].Type != "error" {
+		t.Fatalf("unexpected events: %+v", events)
+	}
+	errEvent := events[0].Data.(ErrorEvent)
+	if errEvent.Code != "llm_http_500" || errEvent.StatusCode != http.StatusInternalServerError {
+		t.Fatalf("unexpected error event: %+v", errEvent)
+	}
+	if errEvent.RequestID != "req-500" || !strings.Contains(errEvent.Message, "Request ID: req-500") {
+		t.Fatalf("missing request id in error event: %+v", errEvent)
+	}
+	if strings.Contains(errEvent.Message, "provider failed") {
+		t.Fatalf("user error leaked provider body: %s", errEvent.Message)
+	}
+}
+
 func TestAgentLoop_ToolCallThenText(t *testing.T) {
 	// First response: tool call. Second response: text.
 	// The tool call will fail (no MCP server configured) but the loop should continue.

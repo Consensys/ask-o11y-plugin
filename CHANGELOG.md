@@ -5,6 +5,13 @@ All notable changes to the Ask O11y Grafana plugin will be documented in this fi
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.30](https://github.com/Consensys/ask-o11y-plugin/compare/v0.2.29...v0.2.30) (2026-05-29)
+
+### Bug Fixes
+
+- **agent:** coordinate approval decisions through Redis across Grafana replicas
+- **llm:** add retry, auto fallback, and safe diagnostics for Grafana LLM 500s
+
 ## [0.2.29](https://github.com/Consensys/ask-o11y-plugin/compare/v0.2.28...v0.2.29) (2026-05-29)
 
 ### Features

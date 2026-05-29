@@ -3,10 +3,12 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/grafana/grafana-plugin-sdk-go/backend/log"
@@ -256,5 +258,79 @@ func TestLLMClient_ChatCompletion_ErrorBody(t *testing.T) {
 
 	if err == nil {
 		t.Fatal("expected error for 429 response")
+	}
+}
+
+func TestLLMClient_ChatCompletion_HTTPErrorIncludesSafeDiagnostics(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Request-Id", "req-123")
+		w.Header().Set("X-Trace-Id", "trace-abc")
+		w.WriteHeader(http.StatusInternalServerError)
+		fmt.Fprint(w, `{"error":"provider failed","token":"Bearer secret-token"}`)
+	}))
+	defer server.Close()
+
+	client := NewLLMClient(log.DefaultLogger, &http.Client{Timeout: llmTimeout})
+	_, err := client.ChatCompletion(context.Background(), ChatCompletionRequest{
+		Model:     "large",
+		Messages:  []Message{{Role: "user", Content: "hi"}},
+		Tools:     []OpenAITool{{Type: "function", Function: OpenAIFunction{Name: "query"}}},
+		MaxTokens: 2048,
+	}, server.URL, "token", "1")
+
+	var llmErr *LLMHTTPError
+	if !errors.As(err, &llmErr) {
+		t.Fatalf("expected LLMHTTPError, got %T: %v", err, err)
+	}
+	if llmErr.StatusCode != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500", llmErr.StatusCode)
+	}
+	if llmErr.RequestID != "req-123" || llmErr.TraceID != "trace-abc" {
+		t.Fatalf("unexpected diagnostic headers: %+v", llmErr)
+	}
+	if !llmErr.Retryable {
+		t.Fatal("expected 500 to be retryable")
+	}
+	if strings.Contains(err.Error(), "provider failed") {
+		t.Fatalf("error string should not expose response body: %s", err.Error())
+	}
+	if strings.Contains(llmErr.UserMessage(), "provider failed") || strings.Contains(llmErr.UserMessage(), "secret-token") {
+		t.Fatalf("user message should not expose response body: %s", llmErr.UserMessage())
+	}
+	if !strings.Contains(llmErr.UserMessage(), "Request ID: req-123") {
+		t.Fatalf("user message missing request id: %s", llmErr.UserMessage())
+	}
+}
+
+func TestLLMClient_ChatCompletion_RetriesTransientStatus(t *testing.T) {
+	attempts := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts++
+		if attempts == 1 {
+			w.Header().Set("Retry-After", "0")
+			w.WriteHeader(http.StatusServiceUnavailable)
+			fmt.Fprint(w, `{"error":"temporarily unavailable"}`)
+			return
+		}
+		writeSSEChunks(w,
+			`{"id":"test-id","choices":[{"index":0,"delta":{"content":"ok"},"finish_reason":null}]}`,
+			`{"id":"test-id","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`,
+		)
+	}))
+	defer server.Close()
+
+	client := NewLLMClient(log.DefaultLogger, &http.Client{Timeout: llmTimeout})
+	resp, err := client.ChatCompletion(context.Background(), ChatCompletionRequest{
+		Messages: []Message{{Role: "user", Content: "hi"}},
+	}, server.URL, "token", "1")
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if attempts != 2 {
+		t.Fatalf("attempts = %d, want 2", attempts)
+	}
+	if resp.Choices[0].Message.Content != "ok" {
+		t.Fatalf("content = %q, want ok", resp.Choices[0].Message.Content)
 	}
 }
