@@ -147,6 +147,7 @@ func (s *Scout) Scavenge() {
 			URL:     builtInURL,
 			Type:    "streamable-http",
 			Enabled: true,
+			Trusted: true,
 			Headers: map[string]string{"Authorization": "Bearer " + saToken},
 		}); err != nil {
 			s.logger.Warn("Scout: failed to register built-in MCP server", "error", err)
@@ -159,11 +160,14 @@ func (s *Scout) Scavenge() {
 		MaxTotalTokens:     s.settings.MaxTotalTokens,
 		RecentMessageCount: s.settings.RecentMessageCount,
 		MaxIterations:      GraphitiDiscoveryMaxIter,
+		Model:              agentModelLarge,
 		GrafanaURL:         grafanaURL,
 		AuthToken:          saToken,
 		OrgID:              fmt.Sprintf("%d", orgID),
 		OrgName:            fmt.Sprintf("Org%d", orgID),
 		ExcludeToolNames:   graphitiWriteToolNames,
+		ConversationType:   "discovery",
+		ApprovalPolicy:     "off",
 	}
 
 	eventCh := make(chan agent.SSEEvent, GraphitiDiscoveryMaxIter*6)

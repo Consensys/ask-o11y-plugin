@@ -1,12 +1,12 @@
 import React from 'react';
 import { Combobox } from '@grafana/ui';
-import type { LLMModel, LLMModelOption } from '../../../../services/llmModels';
+import type { LLMModelOption, LLMModelSelection } from '../../../../services/llmModels';
 
 interface ModelSelectorProps {
   options: LLMModelOption[];
-  value?: LLMModel;
+  value: LLMModelSelection;
   disabled?: boolean;
-  onChange: (model: LLMModel) => void;
+  onChange: (model: LLMModelSelection) => void;
 }
 
 export function ModelSelector({ options, value, disabled, onChange }: ModelSelectorProps): React.ReactElement | null {
@@ -19,7 +19,7 @@ export function ModelSelector({ options, value, disabled, onChange }: ModelSelec
       <span id="chat-model-selector-label" className="sr-only">
         Chat model
       </span>
-      <Combobox<LLMModel>
+      <Combobox<LLMModelSelection>
         aria-labelledby="chat-model-selector-label"
         width={28}
         value={value}

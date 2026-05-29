@@ -6,6 +6,9 @@ export const testIds = {
   appConfig: {
     apiKey: 'data-testid ac-api-key',
     apiUrl: 'data-testid ac-api-url',
+    settingsTab: (id: string) => `data-testid ac-settings-tab-${id}`,
+    settingsTabPanel: (id: string) => `data-testid ac-settings-tab-panel-${id}`,
+    unsavedChangesNotice: 'data-testid ac-unsaved-changes-notice',
     maxTotalTokens: 'data-testid ac-max-total-tokens',
     submit: 'data-testid ac-submit-form',
     useBuiltInMCPToggle: 'data-testid ac-use-builtin-mcp-toggle',
@@ -35,6 +38,11 @@ export const testIds = {
     chatPanelPositionField: 'data-testid ac-chat-panel-position-field',
     chatPanelPositionSelector: 'data-testid ac-chat-panel-position-selector',
     saveDisplaySettingsButton: 'data-testid ac-save-display-settings',
+    serviceGraphMaxNodes: 'data-testid ac-service-graph-max-nodes',
+    serviceGraphMaxEdges: 'data-testid ac-service-graph-max-edges',
+    refreshServiceGraphButton: 'data-testid ac-refresh-service-graph',
+    serviceGraphSummary: 'data-testid ac-service-graph-summary',
+    saveServiceGraphSettingsButton: 'data-testid ac-save-service-graph-settings',
   },
   home: {
     container: 'data-testid home-container',

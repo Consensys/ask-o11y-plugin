@@ -5,6 +5,8 @@ import type { Page } from '@playwright/test';
  * Ensure built-in MCP is enabled, clicking the toggle and saving if needed.
  */
 async function ensureBuiltInMCPEnabled(page: Page, shouldReload = false): Promise<void> {
+  await openSettingsTab(page, 'mcp');
+
   const builtInToggle = page.locator('[data-testid="data-testid ac-use-builtin-mcp-toggle"]');
   const isBuiltInEnabled = await builtInToggle.isChecked().catch(() => false);
 
@@ -15,8 +17,13 @@ async function ensureBuiltInMCPEnabled(page: Page, shouldReload = false): Promis
     await page.waitForTimeout(1000);
     if (shouldReload) {
       await page.reload();
+      await openSettingsTab(page, 'mcp');
     }
   }
+}
+
+async function openSettingsTab(page: Page, tabId: string): Promise<void> {
+  await page.locator(`[data-testid="data-testid ac-settings-tab-${tabId}"]`).click();
 }
 
 test.describe('Combined MCP Mode', () => {
@@ -92,6 +99,7 @@ test.describe('Combined MCP Mode', () => {
     // Reload and edit the server
     await page.reload();
     await page.waitForTimeout(1000);
+    await openSettingsTab(page, 'mcp');
 
     const editedNameInput = page.locator('[data-testid^="data-testid ac-mcp-server-name-"]').first();
     await expect(editedNameInput).toBeEnabled();
@@ -117,7 +125,9 @@ test.describe('Combined MCP Mode', () => {
     await addButton.click();
 
     // Wait for new server form to appear
-    await expect(page.locator('[data-testid^="data-testid ac-mcp-server-name-"]').nth(initialServerCount)).toBeVisible({ timeout: 5000 });
+    await expect(page.locator('[data-testid^="data-testid ac-mcp-server-name-"]').nth(initialServerCount)).toBeVisible({
+      timeout: 5000,
+    });
 
     const nameInput = page.locator('[data-testid^="data-testid ac-mcp-server-name-"]').nth(initialServerCount);
     await nameInput.fill('Server To Remove');

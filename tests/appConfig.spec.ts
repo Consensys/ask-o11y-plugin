@@ -1,4 +1,9 @@
 import { test, expect } from './fixtures';
+import type { Page } from '@playwright/test';
+
+async function openSettingsTab(page: Page, tabId: string) {
+  await page.locator(`[data-testid="data-testid ac-settings-tab-${tabId}"]`).click();
+}
 
 test.describe('LLM Settings', () => {
   test('should save valid config and reject invalid token limits', async ({ appConfigPage, page }) => {
@@ -10,6 +15,11 @@ test.describe('LLM Settings', () => {
     await maxTokensInput.fill('500');
     await expect(saveButton).toBeDisabled();
 
+    // Reject value above maximum (200000)
+    await maxTokensInput.clear();
+    await maxTokensInput.fill('200001');
+    await expect(saveButton).toBeDisabled();
+
     // Accept valid value and save
     await maxTokensInput.clear();
     await maxTokensInput.fill('75000');
@@ -19,11 +29,28 @@ test.describe('LLM Settings', () => {
     await saveButton.click();
     await expect(saveResponse).toBeOK();
   });
+
+  test('should return to the active settings tab after saving', async ({ appConfigPage, page }) => {
+    void appConfigPage;
+    await openSettingsTab(page, 'agent-runtime');
+
+    const saveButton = page.getByRole('button', { name: /Save agent runtime/i });
+    await expect(saveButton).toBeEnabled();
+
+    const saveResponse = appConfigPage.waitForSettingsResponse();
+    await saveButton.click();
+    await expect(saveResponse).toBeOK();
+    await page.waitForLoadState('domcontentloaded');
+
+    await expect(page.locator('[data-testid="data-testid ac-settings-tab-panel-agent-runtime"]')).toBeVisible();
+    await expect(page.getByRole('group', { name: /agent runtime/i })).toBeVisible();
+  });
 });
 
 test.describe('MCP Server Management', () => {
   test('should add, configure, and remove MCP servers', async ({ appConfigPage, page }) => {
     void appConfigPage;
+    await openSettingsTab(page, 'mcp');
 
     const addButton = page.locator('[data-testid="data-testid ac-add-mcp-server"]');
     await expect(addButton).toBeVisible();
@@ -45,20 +72,22 @@ test.describe('MCP Server Management', () => {
     const urlInput = page.locator('[data-testid^="data-testid ac-mcp-server-url-"]').last();
     await urlInput.fill('https://test-mcp.example.com');
 
-    // Change server type (Grafana Select component)
-    // Grafana Select renders the selected label in div[class*="-singleValue"].
+    // Change server type (Grafana Combobox component)
+    // Grafana Combobox exposes the selected label as the input value.
     // Menu options are portaled to the page root as role="option".
     // Scope to the last MCP server card to avoid matching unrelated dropdowns.
-    const serverCard = page.locator('[data-testid^="data-testid ac-mcp-server-"]').filter({ has: page.locator('[data-testid^="data-testid ac-mcp-server-name-"]') }).last();
+    const serverCard = page
+      .locator('[data-testid^="data-testid ac-mcp-server-"]')
+      .filter({ has: page.locator('[data-testid^="data-testid ac-mcp-server-name-"]') })
+      .last();
     const typeCombobox = serverCard.getByRole('combobox');
-    const typeContainer = serverCard.locator('div[class*="-singleValue"]');
-    await expect(typeContainer).toHaveText('OpenAPI');
+    await expect(typeCombobox).toHaveValue('OpenAPI');
     await typeCombobox.click();
     await page.getByRole('option', { name: 'SSE', exact: true }).click();
-    await expect(typeContainer).toHaveText('SSE');
+    await expect(typeCombobox).toHaveValue('SSE');
     await typeCombobox.click();
     await page.getByRole('option', { name: 'Streamable HTTP', exact: true }).click();
-    await expect(typeContainer).toHaveText('Streamable HTTP');
+    await expect(typeCombobox).toHaveValue('Streamable HTTP');
 
     // Save button should be enabled
     const saveMcpButton = page.locator('[data-testid="data-testid ac-save-mcp-servers"]');
@@ -71,6 +100,7 @@ test.describe('MCP Server Management', () => {
 
   test('should show "Unnamed Server" when name is cleared', async ({ appConfigPage, page }) => {
     void appConfigPage;
+    await openSettingsTab(page, 'mcp');
 
     const addButton = page.locator('[data-testid="data-testid ac-add-mcp-server"]');
     await addButton.click();
@@ -86,6 +116,7 @@ test.describe('MCP Server Management', () => {
 test.describe('Prompt Templates', () => {
   test('should display all three prompt editors', async ({ appConfigPage, page }) => {
     void appConfigPage;
+    await openSettingsTab(page, 'prompts');
 
     await expect(page.getByText('Prompt Templates', { exact: true })).toBeVisible();
 
@@ -96,6 +127,7 @@ test.describe('Prompt Templates', () => {
 
   test('should open editor modal with working controls', async ({ appConfigPage, page }) => {
     void appConfigPage;
+    await openSettingsTab(page, 'prompts');
 
     await page.locator('[data-testid="ac-prompt-system-edit-button"]').click();
     await expect(page.getByRole('heading', { name: 'Edit System Prompt' })).toBeVisible();

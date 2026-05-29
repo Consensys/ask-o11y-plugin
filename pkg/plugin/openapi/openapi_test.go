@@ -97,6 +97,10 @@ func TestSpecHasAllEndpoints(t *testing.T) {
 		"/api/agent/runs/{runId}",
 		"/api/agent/runs/{runId}/events",
 		"/api/agent/runs/{runId}/cancel",
+		"/api/agent/runs/{runId}/approvals/{approvalId}",
+		"/api/agent/evals",
+		"/api/agent/evals/run",
+		"/api/agent/topology",
 		"/api/prompt-defaults",
 		"/api/graphiti/status",
 		"/api/graphiti/discover",
@@ -311,6 +315,15 @@ func TestSpecHasKeySchemas(t *testing.T) {
 		"CallToolParams",
 		"CallToolResult",
 		"AgentRun",
+		"AgentRunTrace",
+		"ApprovalRequestEvent",
+		"ApprovalResolvedEvent",
+		"AgentEvalRunRequest",
+		"AgentEvalScores",
+		"AgentEvalResult",
+		"AgentTopology",
+		"TopologyNode",
+		"TopologyEdge",
 	}
 
 	for _, schemaName := range requiredSchemas {
@@ -357,6 +370,7 @@ func TestSpecHasCommonResponses(t *testing.T) {
 		"Forbidden",
 		"NotFound",
 		"TooManyRequests",
+		"Conflict",
 		"InternalError",
 	}
 

@@ -30,6 +30,10 @@ import (
 
 const PluginID = "consensys-asko11y-app"
 
+const defaultApprovalTimeout = 30 * time.Minute
+
+var approvalTimeout = defaultApprovalTimeout
+
 var (
 	_ backend.CallResourceHandler   = (*Plugin)(nil)
 	_ instancemgmt.InstanceDisposer = (*Plugin)(nil)
@@ -72,9 +76,11 @@ func createRedisClient(logger log.Logger, redisURL string) (*redis.Client, error
 const builtInMCPServerID = "mcp-grafana"
 
 type PluginSettings struct {
-	MCPServers               []mcp.ServerConfig `json:"mcpServers"`
-	UseBuiltInMCP            bool               `json:"useBuiltInMCP"`
-	BuiltInMCPToolSelections map[string]bool    `json:"builtInMCPToolSelections,omitempty"`
+	MCPServers               []mcp.ServerConfig              `json:"mcpServers"`
+	UseBuiltInMCP            bool                            `json:"useBuiltInMCP"`
+	BuiltInMCPToolSelections map[string]bool                 `json:"builtInMCPToolSelections,omitempty"`
+	TrustedMCPServers        map[string]bool                 `json:"trustedMCPServers,omitempty"`
+	RiskOverrides            map[string]mcp.ToolRiskOverride `json:"riskOverrides,omitempty"`
 
 	DefaultSystemPrompt string `json:"defaultSystemPrompt,omitempty"`
 	InvestigationPrompt string `json:"investigationPrompt,omitempty"`
@@ -86,6 +92,13 @@ type PluginSettings struct {
 	BuiltInMCPBaseURL string `json:"builtInMCPBaseURL,omitempty"`
 
 	GraphitiScanInterval string `json:"graphitiScanInterval,omitempty"`
+	ServiceGraphMaxNodes int    `json:"serviceGraphMaxNodes,omitempty"`
+	ServiceGraphMaxEdges int    `json:"serviceGraphMaxEdges,omitempty"`
+
+	AgentWorkflowVersion    string `json:"agentWorkflowVersion,omitempty"`
+	ApprovalPolicy          string `json:"approvalPolicy,omitempty"`
+	MaxParallelToolCalls    int    `json:"maxParallelToolCalls,omitempty"`
+	AgentEvalCaptureEnabled bool   `json:"agentEvalCaptureEnabled,omitempty"`
 }
 
 const mcpServerHeaderPrefix = "mcpServerHeader."
@@ -119,25 +132,47 @@ func applySecureHeaders(servers []mcp.ServerConfig, secure map[string]string) {
 	}
 }
 
+func applyAgentRuntimeSettings(settings *PluginSettings) {
+	if settings.AgentWorkflowVersion == "" {
+		settings.AgentWorkflowVersion = "v2"
+	}
+	if settings.ApprovalPolicy == "" {
+		settings.ApprovalPolicy = "approval-gated-writes"
+	}
+	if settings.MaxParallelToolCalls <= 0 {
+		settings.MaxParallelToolCalls = 4
+	}
+	for i := range settings.MCPServers {
+		if trusted, ok := settings.TrustedMCPServers[settings.MCPServers[i].ID]; ok {
+			settings.MCPServers[i].Trusted = trusted
+		}
+		if len(settings.RiskOverrides) > 0 && len(settings.MCPServers[i].RiskOverrides) == 0 {
+			settings.MCPServers[i].RiskOverrides = settings.RiskOverrides
+		}
+	}
+}
+
 type Plugin struct {
 	backend.CallResourceHandler
-	logger         log.Logger
-	mcpProxy       *mcp.Proxy
-	agentLoop      *agent.AgentLoop
-	scout          *Scout
-	shareStore     ShareStoreInterface
-	runStore       RunStoreInterface
-	sessionStore   SessionStoreInterface
-	redisClient    *redis.Client
-	usingRedis     bool
-	useBuiltInMCP  bool
-	promptRegistry *PromptRegistry
-	settings       PluginSettings
-	settingsMu     sync.RWMutex
-	ctx            context.Context
-	cancel         context.CancelFunc
-	runCancelsMu   sync.Mutex
-	runCancels     map[string]context.CancelFunc
+	logger          log.Logger
+	mcpProxy        *mcp.Proxy
+	agentLoop       *agent.AgentLoop
+	scout           *Scout
+	shareStore      ShareStoreInterface
+	runStore        RunStoreInterface
+	sessionStore    SessionStoreInterface
+	redisClient     *redis.Client
+	usingRedis      bool
+	useBuiltInMCP   bool
+	promptRegistry  *PromptRegistry
+	settings        PluginSettings
+	settingsMu      sync.RWMutex
+	ctx             context.Context
+	cancel          context.CancelFunc
+	runCancelsMu    sync.Mutex
+	runCancels      map[string]context.CancelFunc
+	approvalMu      sync.Mutex
+	approvalWaiters map[string]map[string]chan agent.ApprovalResolvedEvent
 	// dsCache memoises the per-org datasource UID snapshot injected into the
 	// system prompt. See datasource_snapshot.go.
 	dsCache   map[string]dsCacheEntry
@@ -156,6 +191,7 @@ func NewPlugin(ctx context.Context, settings backend.AppInstanceSettings) (insta
 	}
 
 	applySecureHeaders(pluginSettings.MCPServers, settings.DecryptedSecureJSONData)
+	applyAgentRuntimeSettings(&pluginSettings)
 
 	if pluginSettings.MaxTotalTokens <= 0 {
 		pluginSettings.MaxTotalTokens = agent.DefaultMaxTotalTokens
@@ -252,21 +288,22 @@ func NewPlugin(ctx context.Context, settings backend.AppInstanceSettings) (insta
 	}
 
 	p := &Plugin{
-		logger:         logger,
-		mcpProxy:       mcpProxy,
-		agentLoop:      agentLoop,
-		scout:          scout,
-		shareStore:     shareStore,
-		runStore:       runStore,
-		sessionStore:   sessionStore,
-		redisClient:    redisClient,
-		usingRedis:     usingRedis,
-		useBuiltInMCP:  pluginSettings.UseBuiltInMCP,
-		promptRegistry: promptRegistry,
-		settings:       pluginSettings,
-		ctx:            pluginCtx,
-		cancel:         cancel,
-		runCancels:     make(map[string]context.CancelFunc),
+		logger:          logger,
+		mcpProxy:        mcpProxy,
+		agentLoop:       agentLoop,
+		scout:           scout,
+		shareStore:      shareStore,
+		runStore:        runStore,
+		sessionStore:    sessionStore,
+		redisClient:     redisClient,
+		usingRedis:      usingRedis,
+		useBuiltInMCP:   pluginSettings.UseBuiltInMCP,
+		promptRegistry:  promptRegistry,
+		settings:        pluginSettings,
+		ctx:             pluginCtx,
+		cancel:          cancel,
+		runCancels:      make(map[string]context.CancelFunc),
+		approvalWaiters: make(map[string]map[string]chan agent.ApprovalResolvedEvent),
 	}
 
 	if !usingRedis {
@@ -315,6 +352,14 @@ func (p *Plugin) Dispose() {
 	}
 	p.runCancels = nil
 	p.runCancelsMu.Unlock()
+	p.approvalMu.Lock()
+	for _, approvals := range p.approvalWaiters {
+		for _, ch := range approvals {
+			close(ch)
+		}
+	}
+	p.approvalWaiters = nil
+	p.approvalMu.Unlock()
 
 	// Stop the scout before closing the proxy so its in-flight scavenge can finish.
 	if p.scout != nil {
@@ -372,6 +417,9 @@ func (p *Plugin) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/mcp/servers", p.handleMCPServers)
 	mux.HandleFunc("/api/agent/run", p.handleAgentRun)
 	mux.HandleFunc("/api/agent/runs/", p.handleAgentRuns)
+	mux.HandleFunc("/api/agent/evals", p.handleAgentEvals)
+	mux.HandleFunc("/api/agent/evals/run", p.handleAgentEvalRun)
+	mux.HandleFunc("/api/agent/topology", p.handleAgentTopology)
 	mux.HandleFunc("/api/prompt-defaults", p.handlePromptDefaults)
 	mux.HandleFunc("/api/graphiti/discover", p.handleGraphitiDiscover)
 	mux.HandleFunc("/api/graphiti/status", p.handleGraphitiStatus)
@@ -406,6 +454,7 @@ func (p *Plugin) ensureBuiltInMCPRegistered(saToken, grafanaURL string) error {
 		URL:     grafanaURL + "/api/plugins/grafana-llm-app/resources/mcp/grafana",
 		Type:    "streamable-http",
 		Enabled: true,
+		Trusted: true,
 		Headers: map[string]string{"Authorization": "Bearer " + saToken},
 	})
 }
@@ -420,7 +469,9 @@ func (p *Plugin) builtInSelectionServer() *mcp.ServerConfig {
 	return &mcp.ServerConfig{
 		ID:             builtInMCPServerID,
 		Enabled:        true,
+		Trusted:        true,
 		ToolSelections: p.settings.BuiltInMCPToolSelections,
+		RiskOverrides:  p.settings.RiskOverrides,
 	}
 }
 
@@ -743,6 +794,10 @@ func (p *Plugin) handleAgentRun(w http.ResponseWriter, r *http.Request) {
 	var messages []agent.Message
 	var sessionID string
 	runModel := requestedModel
+	modelSource := "auto"
+	if requestedModel != "" {
+		modelSource = "request"
+	}
 
 	if req.SessionID != "" {
 		session, err := p.sessionStore.GetSession(req.SessionID, userID, numericOrgID)
@@ -757,6 +812,7 @@ func (p *Plugin) handleAgentRun(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			runModel = session.Model
+			modelSource = "session"
 		} else if requestedModel != "" {
 			if err := persistSessionModel(p.sessionStore, sessionID, userID, numericOrgID, requestedModel); err != nil {
 				p.logger.Error("Failed to persist session model", "error", err, "sessionId", sessionID)
@@ -814,6 +870,12 @@ func (p *Plugin) handleAgentRun(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	effectiveRunModel := runModel
+	if effectiveRunModel == "" {
+		effectiveRunModel = selectAgentModelForTask(req.Type, req.Message)
+		modelSource = "auto"
+	}
+
 	if err := p.sessionStore.SetActiveRunID(sessionID, userID, numericOrgID, runID); err != nil {
 		p.logger.Warn("Failed to set active run ID", "error", err)
 	}
@@ -826,7 +888,8 @@ func (p *Plugin) handleAgentRun(w http.ResponseWriter, r *http.Request) {
 		"sessionId", sessionID,
 		"messageCount", len(messages),
 		"type", req.Type,
-		"model", runModel,
+		"model", effectiveRunModel,
+		"modelSource", modelSource,
 	)
 
 	span.SetAttributes(
@@ -838,20 +901,25 @@ func (p *Plugin) handleAgentRun(w http.ResponseWriter, r *http.Request) {
 	eventCh := make(chan agent.SSEEvent, 16)
 
 	loopReq := agent.LoopRequest{
-		Messages:           messages,
-		SystemPrompt:       systemPrompt,
-		MaxTotalTokens:     p.settings.MaxTotalTokens,
-		RecentMessageCount: p.settings.RecentMessageCount,
-		MaxIterations:      resolveMaxIterations(req.Type, req.Message),
-		Model:              runModel,
-		GrafanaURL:         grafanaURL,
-		AuthToken:          saToken,
-		UserRole:           userRole,
-		OrgID:              orgID,
-		OrgName:            req.OrgName,
-		ScopeOrgID:         req.ScopeOrgID,
-		ExcludeToolNames:   graphitiWriteToolNames,
-		MCPServers:         p.settingsForFilter(),
+		Messages:                messages,
+		SystemPrompt:            systemPrompt,
+		MaxTotalTokens:          p.settings.MaxTotalTokens,
+		RecentMessageCount:      p.settings.RecentMessageCount,
+		MaxIterations:           resolveMaxIterations(req.Type, req.Message),
+		Model:                   effectiveRunModel,
+		ConversationType:        req.Type,
+		GrafanaURL:              grafanaURL,
+		AuthToken:               saToken,
+		UserRole:                userRole,
+		OrgID:                   orgID,
+		OrgName:                 req.OrgName,
+		ScopeOrgID:              req.ScopeOrgID,
+		ExcludeToolNames:        graphitiWriteToolNames,
+		MCPServers:              p.settingsForFilter(),
+		ApprovalPolicy:          p.settings.ApprovalPolicy,
+		MaxParallelToolCalls:    p.settings.MaxParallelToolCalls,
+		EnableProgressiveEvents: p.settings.AgentWorkflowVersion != "legacy",
+		RegisterApproval:        p.approvalRegistrar(runID),
 	}
 
 	detachedCtx := context.WithoutCancel(ctx)
@@ -872,9 +940,11 @@ func (p *Plugin) handleAgentRun(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"runId":     runID,
-		"sessionId": sessionID,
-		"status":    RunStatusRunning,
+		"runId":       runID,
+		"sessionId":   sessionID,
+		"status":      RunStatusRunning,
+		"model":       effectiveRunModel,
+		"modelSource": modelSource,
 	})
 }
 
@@ -949,6 +1019,67 @@ func (p *Plugin) getAuthorizedRun(w http.ResponseWriter, r *http.Request, runID 
 	return run, true
 }
 
+func (p *Plugin) approvalRegistrar(runID string) agent.ApprovalRegistrar {
+	return func(ctx context.Context, request agent.ApprovalRequestEvent) (agent.ApprovalWaitFunc, error) {
+		if !isValidApprovalID(request.ApprovalID) {
+			return nil, fmt.Errorf("invalid approval id")
+		}
+		ch := make(chan agent.ApprovalResolvedEvent, 1)
+
+		p.approvalMu.Lock()
+		if p.approvalWaiters == nil {
+			p.approvalWaiters = make(map[string]map[string]chan agent.ApprovalResolvedEvent)
+		}
+		if p.approvalWaiters[runID] == nil {
+			p.approvalWaiters[runID] = make(map[string]chan agent.ApprovalResolvedEvent)
+		}
+		if _, exists := p.approvalWaiters[runID][request.ApprovalID]; exists {
+			p.approvalMu.Unlock()
+			return nil, fmt.Errorf("approval already pending")
+		}
+		p.approvalWaiters[runID][request.ApprovalID] = ch
+		p.approvalMu.Unlock()
+
+		return func(waitCtx context.Context) (agent.ApprovalResolvedEvent, error) {
+			defer p.removeApprovalWaiter(runID, request.ApprovalID)
+			timer := time.NewTimer(approvalTimeout)
+			defer timer.Stop()
+
+			select {
+			case resolved, ok := <-ch:
+				if !ok {
+					return agent.ApprovalResolvedEvent{}, fmt.Errorf("approval channel closed")
+				}
+				return resolved, nil
+			case <-timer.C:
+				return agent.ApprovalResolvedEvent{
+					ApprovalID: request.ApprovalID,
+					Decision:   "rejected",
+					Comment:    "approval timed out",
+					ResolvedAt: time.Now().UTC().Format(time.RFC3339),
+				}, nil
+			case <-waitCtx.Done():
+				return agent.ApprovalResolvedEvent{}, waitCtx.Err()
+			case <-ctx.Done():
+				return agent.ApprovalResolvedEvent{}, ctx.Err()
+			}
+		}, nil
+	}
+}
+
+func (p *Plugin) removeApprovalWaiter(runID, approvalID string) {
+	p.approvalMu.Lock()
+	defer p.approvalMu.Unlock()
+	waiters := p.approvalWaiters[runID]
+	if waiters == nil {
+		return
+	}
+	delete(waiters, approvalID)
+	if len(waiters) == 0 {
+		delete(p.approvalWaiters, runID)
+	}
+}
+
 func (p *Plugin) handleAgentRuns(w http.ResponseWriter, r *http.Request) {
 	path := r.URL.Path
 	prefix := "/api/agent/runs/"
@@ -960,6 +1091,25 @@ func (p *Plugin) handleAgentRuns(w http.ResponseWriter, r *http.Request) {
 	remainder := strings.TrimPrefix(path, prefix)
 	if remainder == "" {
 		http.Error(w, "Run ID required", http.StatusBadRequest)
+		return
+	}
+
+	if strings.Contains(remainder, "/approvals/") {
+		parts := strings.Split(remainder, "/")
+		if len(parts) != 3 || parts[1] != "approvals" {
+			http.Error(w, "Invalid approval path format", http.StatusBadRequest)
+			return
+		}
+		runID, approvalID := parts[0], parts[2]
+		if r.Method != http.MethodPost {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if !isValidSecureID(runID) || !isValidApprovalID(approvalID) {
+			http.Error(w, "Invalid approval path identifiers", http.StatusBadRequest)
+			return
+		}
+		p.handleAgentApproval(w, r, runID, approvalID)
 		return
 	}
 
@@ -999,6 +1149,61 @@ func (p *Plugin) handleAgentRuns(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(run)
+}
+
+type approvalDecisionRequest struct {
+	Decision string `json:"decision"`
+	Comment  string `json:"comment,omitempty"`
+}
+
+func (p *Plugin) handleAgentApproval(w http.ResponseWriter, r *http.Request, runID, approvalID string) {
+	if _, ok := p.getAuthorizedRun(w, r, runID); !ok {
+		return
+	}
+	role := getUserRole(r)
+	if role != "Admin" && role != "Editor" {
+		http.Error(w, "Access denied", http.StatusForbidden)
+		return
+	}
+
+	var req approvalDecisionRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+	decision := normalizeApprovalDecision(req.Decision)
+	if decision == "" {
+		http.Error(w, "Invalid approval decision", http.StatusBadRequest)
+		return
+	}
+
+	resolved := agent.ApprovalResolvedEvent{
+		ApprovalID: approvalID,
+		Decision:   decision,
+		Comment:    strings.TrimSpace(req.Comment),
+		ResolvedAt: time.Now().UTC().Format(time.RFC3339),
+	}
+
+	p.approvalMu.Lock()
+	waiters := p.approvalWaiters[runID]
+	ch := waiters[approvalID]
+	p.approvalMu.Unlock()
+	if ch == nil {
+		http.Error(w, "Approval is not pending", http.StatusConflict)
+		return
+	}
+
+	select {
+	case ch <- resolved:
+	case <-r.Context().Done():
+		return
+	case <-time.After(5 * time.Second):
+		http.Error(w, "Approval delivery timed out", http.StatusGatewayTimeout)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(resolved)
 }
 
 func (p *Plugin) handleCancelRun(w http.ResponseWriter, r *http.Request, runID string) {
@@ -1099,6 +1304,165 @@ func (p *Plugin) handlePromptDefaults(w http.ResponseWriter, r *http.Request) {
 		"investigationPrompt": DefaultInvestigationPrompt,
 		"performancePrompt":   DefaultPerformancePrompt,
 	})
+}
+
+func (p *Plugin) handleAgentEvals(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !p.settings.AgentEvalCaptureEnabled {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"enabled": false,
+			"evals":   []AgentEvalResult{},
+		})
+		return
+	}
+
+	runs, err := p.runStore.ListRuns(getUserID(r), getOrgID(r), parseLimitQuery(r, 20))
+	if err != nil {
+		p.logger.Warn("Failed to list runs for evals", "error", err)
+		http.Error(w, "Failed to list agent evals", http.StatusInternalServerError)
+		return
+	}
+	results := make([]AgentEvalResult, 0, len(runs))
+	for _, run := range runs {
+		results = append(results, scoreAgentRun(run))
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"enabled": true,
+		"evals":   results,
+	})
+}
+
+func (p *Plugin) handleAgentEvalRun(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !p.settings.AgentEvalCaptureEnabled {
+		http.Error(w, "Agent eval capture is disabled", http.StatusNotFound)
+		return
+	}
+	role := getUserRole(r)
+	if role != "Admin" && role != "Editor" {
+		http.Error(w, "Access denied", http.StatusForbidden)
+		return
+	}
+
+	var req agentEvalRunRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil && err != io.EOF {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	var results []AgentEvalResult
+	if req.RunID != "" {
+		run, ok := p.getAuthorizedRun(w, r, req.RunID)
+		if !ok {
+			return
+		}
+		results = []AgentEvalResult{scoreAgentRun(run)}
+	} else {
+		runs, err := p.runStore.ListRuns(getUserID(r), getOrgID(r), defaultEvalLimit(req.Limit))
+		if err != nil {
+			p.logger.Warn("Failed to list runs for eval execution", "error", err)
+			http.Error(w, "Failed to run agent evals", http.StatusInternalServerError)
+			return
+		}
+		results = make([]AgentEvalResult, 0, len(runs))
+		for _, run := range runs {
+			results = append(results, scoreAgentRun(run))
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"status":  "completed",
+		"results": results,
+	})
+}
+
+func (p *Plugin) handleAgentTopology(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	maxNodes := topologyLimitFromQuery(r, "maxNodes", defaultTopologyMaxNodes, hardTopologyMaxNodes)
+	maxEdges := topologyLimitFromQuery(r, "maxEdges", defaultTopologyMaxEdges, hardTopologyMaxEdges)
+
+	tools, err := p.mcpProxy.ListTools()
+	if err != nil {
+		p.logger.Warn("Failed to list tools for topology", "error", err)
+		http.Error(w, "Failed to load topology tools", http.StatusInternalServerError)
+		return
+	}
+	if !hasGraphitiMemoryTool(tools) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(AgentTopologyResponse{
+			Enabled: false,
+			Source:  "graphiti",
+			Nodes:   []TopologyNode{},
+			Edges:   []TopologyEdge{},
+		})
+		return
+	}
+	toolName := findGraphitiSearchFactsTool(tools)
+	if toolName == "" {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(AgentTopologyResponse{
+			Enabled:  true,
+			Source:   "graphiti",
+			Nodes:    []TopologyNode{},
+			Edges:    []TopologyEdge{},
+			Warnings: []string{"graphiti_search_memory_facts tool is not available"},
+		})
+		return
+	}
+
+	orgID := getOrgID(r)
+	query := strings.TrimSpace(r.URL.Query().Get("query"))
+	if query == "" {
+		query = "service topology dependencies incidents upstream downstream"
+	}
+	result, err := p.mcpProxy.CallToolWithContext(toolName, map[string]interface{}{
+		"query":    query,
+		"group_id": orgGroupID(orgID),
+	}, strconv.FormatInt(orgID, 10), "Org"+strconv.FormatInt(orgID, 10), "")
+	if err != nil {
+		p.logger.Warn("Failed to query Graphiti topology", "error", err)
+		http.Error(w, "Failed to load topology", http.StatusInternalServerError)
+		return
+	}
+
+	response := parseGraphitiTopology(graphitiToolBody(result))
+	response.Enabled = true
+	response.Source = "graphiti"
+	if result != nil && result.IsError {
+		response.Warnings = append(response.Warnings, "Graphiti topology query returned an error")
+	}
+	response = limitTopologyResponse(response, maxNodes, maxEdges)
+	if len(response.Nodes) == 0 {
+		response.Warnings = append(response.Warnings, "No service topology facts matched the current organization")
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(response)
+}
+
+func topologyLimitFromQuery(r *http.Request, key string, fallback, hardMax int) int {
+	raw := strings.TrimSpace(r.URL.Query().Get(key))
+	if raw == "" {
+		return fallback
+	}
+	value, err := strconv.Atoi(raw)
+	if err != nil {
+		return fallback
+	}
+	return sanitizeTopologyLimit(value, fallback, hardMax)
 }
 
 func (p *Plugin) handleDefault(w http.ResponseWriter, r *http.Request) {
@@ -1214,6 +1578,7 @@ func (p *Plugin) handleGraphitiDiscover(w http.ResponseWriter, r *http.Request) 
 		MaxTotalTokens:     p.settings.MaxTotalTokens,
 		RecentMessageCount: p.settings.RecentMessageCount,
 		MaxIterations:      GraphitiDiscoveryMaxIter,
+		Model:              agentModelLarge,
 		GrafanaURL:         grafanaURL,
 		AuthToken:          saToken,
 		UserRole:           userRole,
@@ -1221,6 +1586,8 @@ func (p *Plugin) handleGraphitiDiscover(w http.ResponseWriter, r *http.Request) 
 		OrgName:            "Org" + strconv.FormatInt(orgID, 10),
 		ExcludeToolNames:   graphitiWriteToolNames,
 		MCPServers:         p.settingsForFilter(),
+		ConversationType:   "discovery",
+		ApprovalPolicy:     "off",
 	}
 
 	eventCh := make(chan agent.SSEEvent, GraphitiDiscoveryMaxIter*6)
@@ -1357,11 +1724,53 @@ func stringPtr(s string) *string {
 	return &s
 }
 
+func parseLimitQuery(r *http.Request, fallback int) int {
+	value, err := strconv.Atoi(r.URL.Query().Get("limit"))
+	if err != nil {
+		return defaultEvalLimit(fallback)
+	}
+	return defaultEvalLimit(value)
+}
+
+func defaultEvalLimit(limit int) int {
+	if limit <= 0 {
+		return 20
+	}
+	if limit > 100 {
+		return 100
+	}
+	return limit
+}
+
 func getOrgID(r *http.Request) int64 {
 	if id, err := strconv.ParseInt(r.Header.Get("X-Grafana-Org-Id"), 10, 64); err == nil && id > 0 {
 		return id
 	}
 	return 1
+}
+
+func isValidApprovalID(id string) bool {
+	if id == "" || len(id) > 128 {
+		return false
+	}
+	for _, r := range id {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_' || r == '-' {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+func normalizeApprovalDecision(decision string) string {
+	switch strings.ToLower(strings.TrimSpace(decision)) {
+	case "approved", "approve", "accepted", "accept":
+		return "approved"
+	case "rejected", "reject", "denied", "deny":
+		return "rejected"
+	default:
+		return ""
+	}
 }
 
 func (p *Plugin) handleCreateShare(w http.ResponseWriter, r *http.Request) {

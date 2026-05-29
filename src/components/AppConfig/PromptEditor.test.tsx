@@ -29,7 +29,9 @@ jest.mock('@grafana/ui', () => ({
         {children}
       </div>
     ) : null,
-  TextArea: ({ invalid, ...props }: MockTextAreaProps) => <textarea {...props} aria-invalid={invalid ? 'true' : 'false'} />,
+  TextArea: ({ invalid, ...props }: MockTextAreaProps) => (
+    <textarea {...props} aria-invalid={invalid ? 'true' : 'false'} />
+  ),
   useTheme2: () => ({
     typography: {
       bodySmall: {
@@ -68,4 +70,16 @@ describe('PromptEditor', () => {
       expect(screen.getByTestId('prompt-editor-save-button')).toBeDisabled();
     }
   );
+
+  it('shows an unsaved changes notice while the prompt draft differs from the saved value', () => {
+    openEditor();
+
+    expect(screen.queryByRole('status')).not.toBeInTheDocument();
+
+    fireEvent.change(screen.getByTestId('prompt-editor-textarea'), {
+      target: { value: 'Updated prompt' },
+    });
+
+    expect(screen.getByRole('status')).toHaveTextContent('Unsaved changes');
+  });
 });

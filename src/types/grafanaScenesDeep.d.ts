@@ -22,6 +22,10 @@ declare module '@grafana/scenes/dist/esm/packages/scenes/src/core/PanelBuilders/
   export { PanelBuilders } from '@grafana/scenes';
 }
 
+declare module '@grafana/scenes/dist/esm/packages/scenes/src/core/SceneDataNode.js' {
+  export { SceneDataNode } from '@grafana/scenes';
+}
+
 declare module '@grafana/scenes/dist/esm/packages/scenes/src/core/SceneObjectBase.js' {
   export { SceneObjectBase } from '@grafana/scenes';
 }

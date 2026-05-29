@@ -57,6 +57,31 @@ func newAgentRunRequest(t *testing.T, grafanaURL, targetURL, body string) *http.
 	return req.WithContext(backend.WithGrafanaConfig(req.Context(), cfg))
 }
 
+func TestHandleAgentTopologyAcceptsLimitQueryParamsWithoutGraphiti(t *testing.T) {
+	plugin := newAgentRunTestPlugin(t)
+	req := httptest.NewRequest(http.MethodGet, "/api/agent/topology?maxNodes=2&maxEdges=1", nil)
+	req.Header.Set("X-Grafana-Org-Id", "2")
+	req.Header.Set("X-Grafana-User-Id", "7")
+	req.Header.Set("X-Grafana-User-Role", "Admin")
+	rec := httptest.NewRecorder()
+
+	plugin.handleAgentTopology(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	var response AgentTopologyResponse
+	if err := json.NewDecoder(rec.Body).Decode(&response); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if response.Enabled {
+		t.Fatalf("enabled = true, want false without Graphiti tools")
+	}
+	if len(response.Nodes) != 0 || len(response.Edges) != 0 {
+		t.Fatalf("topology = %+v, want empty graph", response)
+	}
+}
+
 func newAgentRunLLMServer(t *testing.T) (*httptest.Server, <-chan agent.ChatCompletionRequest) {
 	t.Helper()
 
@@ -88,6 +113,72 @@ func receiveAgentRunLLMRequest(t *testing.T, ch <-chan agent.ChatCompletionReque
 	case <-time.After(2 * time.Second):
 		t.Fatal("timed out waiting for LLM request")
 		return agent.ChatCompletionRequest{}
+	}
+}
+
+func TestHandleAgentApprovalRequiresEditorOrAdmin(t *testing.T) {
+	p := newAgentRunTestPlugin(t)
+	p.runStore.CreateRun("run-1", 7, 2)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/agent/runs/run-1/approvals/tc_1", strings.NewReader(`{"decision":"approved"}`))
+	req.Header.Set("X-Grafana-Org-Id", "2")
+	req.Header.Set("X-Grafana-User-Id", "7")
+	req.Header.Set("X-Grafana-User-Role", "Viewer")
+	rec := httptest.NewRecorder()
+
+	p.handleAgentApproval(rec, req, "run-1", "tc_1")
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 for Viewer approval, got %d", rec.Code)
+	}
+}
+
+func TestHandleAgentApprovalDeliversDecision(t *testing.T) {
+	p := newAgentRunTestPlugin(t)
+	p.approvalWaiters = map[string]map[string]chan agent.ApprovalResolvedEvent{
+		"run-1": {"tc_1": make(chan agent.ApprovalResolvedEvent, 1)},
+	}
+	p.runStore.CreateRun("run-1", 7, 2)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/agent/runs/run-1/approvals/tc_1", strings.NewReader(`{"decision":"approved"}`))
+	req.Header.Set("X-Grafana-Org-Id", "2")
+	req.Header.Set("X-Grafana-User-Id", "7")
+	req.Header.Set("X-Grafana-User-Role", "Editor")
+	rec := httptest.NewRecorder()
+
+	p.handleAgentApproval(rec, req, "run-1", "tc_1")
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	select {
+	case resolved := <-p.approvalWaiters["run-1"]["tc_1"]:
+		if resolved.Decision != "approved" {
+			t.Fatalf("decision = %q, want approved", resolved.Decision)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for approval decision")
+	}
+}
+
+func TestApprovalRegistrarTimesOutPendingApproval(t *testing.T) {
+	p := newAgentRunTestPlugin(t)
+	oldTimeout := approvalTimeout
+	approvalTimeout = 10 * time.Millisecond
+	defer func() { approvalTimeout = oldTimeout }()
+
+	register := p.approvalRegistrar("run-1")
+	wait, err := register(context.Background(), agent.ApprovalRequestEvent{ApprovalID: "tc_1"})
+	if err != nil {
+		t.Fatalf("register approval failed: %v", err)
+	}
+
+	resolved, err := wait(context.Background())
+	if err != nil {
+		t.Fatalf("wait failed: %v", err)
+	}
+	if resolved.Decision != "rejected" || resolved.Comment != "approval timed out" {
+		t.Fatalf("unexpected timeout resolution: %+v", resolved)
 	}
 }
 
@@ -200,6 +291,60 @@ func TestHandleAgentRunPersistsNewSessionModel(t *testing.T) {
 	}
 	if got := receiveAgentRunLLMRequest(t, received); got.Model != "base" {
 		t.Fatalf("expected LLM model base, got %q", got.Model)
+	}
+}
+
+func TestHandleAgentRunAutoSelectsBaseWhenModelOmitted(t *testing.T) {
+	llmServer, received := newAgentRunLLMServer(t)
+	defer llmServer.Close()
+
+	p := newAgentRunTestPlugin(t)
+	req := newAgentRunRequest(t, llmServer.URL, "/api/agent/run", `{"message":"hello","type":"chat"}`)
+	rec := httptest.NewRecorder()
+
+	p.handleAgentRun(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	var body struct {
+		SessionID   string `json:"sessionId"`
+		Model       string `json:"model"`
+		ModelSource string `json:"modelSource"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if body.Model != "base" || body.ModelSource != "auto" {
+		t.Fatalf("unexpected model response: %+v", body)
+	}
+	session, err := p.sessionStore.GetSession(body.SessionID, 7, 2)
+	if err != nil {
+		t.Fatalf("GetSession failed: %v", err)
+	}
+	if session.Model != "" {
+		t.Fatalf("auto-selected model should not lock the session, got %q", session.Model)
+	}
+	if got := receiveAgentRunLLMRequest(t, received); got.Model != "base" {
+		t.Fatalf("expected LLM model base, got %q", got.Model)
+	}
+}
+
+func TestHandleAgentRunAutoSelectsLargeForInvestigation(t *testing.T) {
+	llmServer, received := newAgentRunLLMServer(t)
+	defer llmServer.Close()
+
+	p := newAgentRunTestPlugin(t)
+	req := newAgentRunRequest(t, llmServer.URL, "/api/agent/run", `{"message":"why is checkout erroring","type":"investigation"}`)
+	rec := httptest.NewRecorder()
+
+	p.handleAgentRun(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	if got := receiveAgentRunLLMRequest(t, received); got.Model != "large" {
+		t.Fatalf("expected LLM model large, got %q", got.Model)
 	}
 }
 

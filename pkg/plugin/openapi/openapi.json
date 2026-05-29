@@ -509,7 +509,7 @@
                 "large"
               ]
             },
-            "description": "LLM app model abstraction to use for this session. Omit to use the grafana-llm-app default. Once set on a session, later runs must use the same model."
+            "description": "Optional explicit LLM app model abstraction to use for this session. Omit to let Ask O11y choose base or large from the task type and message complexity. Once explicitly set on a session, later runs must use the same model."
           }
         ],
         "requestBody": {
@@ -544,18 +544,39 @@
                         "running"
                       ],
                       "description": "Initial run status"
+                    },
+                    "model": {
+                      "type": "string",
+                      "enum": [
+                        "base",
+                        "large"
+                      ],
+                      "description": "Effective model selected for this run"
+                    },
+                    "modelSource": {
+                      "type": "string",
+                      "enum": [
+                        "auto",
+                        "request",
+                        "session"
+                      ],
+                      "description": "How the effective model was chosen"
                     }
                   },
                   "required": [
                     "runId",
                     "sessionId",
-                    "status"
+                    "status",
+                    "model",
+                    "modelSource"
                   ]
                 },
                 "example": {
                   "runId": "fL3eq5ZJZuczUSZa643ltfg8eXhAvvppZu_X4rksm8w",
                   "sessionId": "Qgy-DFhlul0hTHLKBJqrHyLrITYOApxS4n85_zjGbus",
-                  "status": "running"
+                  "status": "running",
+                  "model": "large",
+                  "modelSource": "auto"
                 }
               }
             }
@@ -760,6 +781,219 @@
           },
           "500": {
             "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    },
+    "/api/agent/runs/{runId}/approvals/{approvalId}": {
+      "post": {
+        "summary": "Resolve an agent tool approval",
+        "description": "Approves or rejects a pending approval-gated tool call for an agent run.",
+        "operationId": "resolveAgentApproval",
+        "tags": [
+          "Agent"
+        ],
+        "parameters": [
+          {
+            "name": "runId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{43}$"
+            }
+          },
+          {
+            "name": "approvalId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{1,128}$"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/X-Grafana-Org-Id"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApprovalDecisionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Approval resolved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApprovalResolvedEvent"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          }
+        }
+      }
+    },
+    "/api/agent/evals": {
+      "get": {
+        "summary": "List captured agent evals",
+        "operationId": "listAgentEvals",
+        "tags": [
+          "Agent"
+        ],
+        "responses": {
+          "200": {
+            "description": "Eval capture state and captured eval rows",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "enabled": {
+                      "type": "boolean"
+                    },
+                    "evals": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/AgentEvalResult"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/agent/evals/run": {
+      "post": {
+        "summary": "Run experimental agent evals",
+        "operationId": "runAgentEvals",
+        "tags": [
+          "Agent"
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgentEvalRunRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Eval run completed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "completed"
+                      ]
+                    },
+                    "results": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/AgentEvalResult"
+                      }
+                    }
+                  },
+                  "required": [
+                    "status",
+                    "results"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/api/agent/topology": {
+      "get": {
+        "summary": "Get Graphiti-backed topology for agent Scenes",
+        "operationId": "getAgentTopology",
+        "tags": [
+          "Agent"
+        ],
+        "parameters": [
+          {
+            "name": "query",
+            "in": "query",
+            "required": false,
+            "description": "Optional topology search query sent to Graphiti memory.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "maxNodes",
+            "in": "query",
+            "required": false,
+            "description": "Maximum service nodes to return. Defaults to 100 and is capped server-side.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 100,
+              "maximum": 500
+            }
+          },
+          {
+            "name": "maxEdges",
+            "in": "query",
+            "required": false,
+            "description": "Maximum graph edges to return. Defaults to 200 and is capped server-side.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 200,
+              "maximum": 1000
+            }
+          },
+          {
+            "$ref": "#/components/parameters/X-Grafana-Org-Id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Topology graph",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentTopology"
+                }
+              }
+            }
           }
         }
       }
@@ -1814,6 +2048,24 @@
           }
         }
       },
+      "Conflict": {
+        "description": "Conflict with current resource state",
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "properties": {
+                "error": {
+                  "type": "string"
+                }
+              }
+            },
+            "example": {
+              "error": "Approval is not pending"
+            }
+          }
+        }
+      },
       "InternalError": {
         "description": "Internal server error",
         "content": {
@@ -2077,6 +2329,13 @@
               "content",
               "tool_call_start",
               "tool_call_result",
+              "run_plan",
+              "step_start",
+              "step_done",
+              "evidence",
+              "approval_request",
+              "approval_resolved",
+              "final_report",
               "done",
               "error"
             ],
@@ -2095,6 +2354,24 @@
               },
               {
                 "$ref": "#/components/schemas/ToolCallResultEvent"
+              },
+              {
+                "$ref": "#/components/schemas/RunPlanEvent"
+              },
+              {
+                "$ref": "#/components/schemas/StepEvent"
+              },
+              {
+                "$ref": "#/components/schemas/EvidenceEvent"
+              },
+              {
+                "$ref": "#/components/schemas/ApprovalRequestEvent"
+              },
+              {
+                "$ref": "#/components/schemas/ApprovalResolvedEvent"
+              },
+              {
+                "$ref": "#/components/schemas/FinalReportEvent"
               },
               {
                 "$ref": "#/components/schemas/DoneEvent"
@@ -2191,6 +2468,401 @@
           "isError"
         ]
       },
+      "PlanStep": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "status"
+        ]
+      },
+      "RunPlanEvent": {
+        "type": "object",
+        "properties": {
+          "objective": {
+            "type": "string"
+          },
+          "steps": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PlanStep"
+            }
+          }
+        },
+        "required": [
+          "objective",
+          "steps"
+        ]
+      },
+      "StepEvent": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "status"
+        ]
+      },
+      "EvidenceEvent": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "stepId": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "summary": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          },
+          "toolName": {
+            "type": "string"
+          },
+          "query": {
+            "type": "string"
+          },
+          "datasourceUid": {
+            "type": "string"
+          },
+          "timeRange": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "summary"
+        ]
+      },
+      "ApprovalRequestEvent": {
+        "type": "object",
+        "properties": {
+          "approvalId": {
+            "type": "string"
+          },
+          "toolCallId": {
+            "type": "string"
+          },
+          "toolName": {
+            "type": "string"
+          },
+          "risk": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "arguments": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "approvalId",
+          "toolCallId",
+          "toolName",
+          "risk",
+          "reason",
+          "arguments"
+        ]
+      },
+      "ApprovalDecisionRequest": {
+        "type": "object",
+        "properties": {
+          "decision": {
+            "type": "string",
+            "enum": [
+              "approved",
+              "rejected"
+            ]
+          },
+          "comment": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "decision"
+        ]
+      },
+      "ApprovalResolvedEvent": {
+        "type": "object",
+        "properties": {
+          "approvalId": {
+            "type": "string"
+          },
+          "decision": {
+            "type": "string"
+          },
+          "comment": {
+            "type": "string"
+          },
+          "resolvedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "approvalId",
+          "decision"
+        ]
+      },
+      "FinalReportEvent": {
+        "type": "object",
+        "properties": {
+          "verdict": {
+            "type": "string"
+          },
+          "confidence": {
+            "type": "string"
+          },
+          "summary": {
+            "type": "string"
+          },
+          "evidenceIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "gaps": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "nextSteps": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "summary"
+        ]
+      },
+      "AgentEvalRunRequest": {
+        "type": "object",
+        "properties": {
+          "runId": {
+            "type": "string",
+            "description": "Optional run ID to score. If omitted, recent runs for the current user/org are scored."
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "description": "Maximum recent runs to score when runId is omitted"
+          }
+        }
+      },
+      "AgentEvalScores": {
+        "type": "object",
+        "properties": {
+          "evidenceCoverage": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100
+          },
+          "approvalCompliance": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100
+          },
+          "finalReportCompleteness": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100
+          },
+          "rcaQuality": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100
+          },
+          "hallucinationRisk": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100
+          },
+          "overall": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100
+          }
+        },
+        "required": [
+          "evidenceCoverage",
+          "approvalCompliance",
+          "finalReportCompleteness",
+          "rcaQuality",
+          "hallucinationRisk",
+          "overall"
+        ]
+      },
+      "AgentEvalResult": {
+        "type": "object",
+        "properties": {
+          "runId": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "running",
+              "completed",
+              "failed",
+              "cancelled"
+            ]
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "evidenceCount": {
+            "type": "integer"
+          },
+          "approvalCount": {
+            "type": "integer"
+          },
+          "unresolvedApprovalCount": {
+            "type": "integer"
+          },
+          "finalReportPresent": {
+            "type": "boolean"
+          },
+          "scores": {
+            "$ref": "#/components/schemas/AgentEvalScores"
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "runId",
+          "status",
+          "createdAt",
+          "updatedAt",
+          "evidenceCount",
+          "approvalCount",
+          "unresolvedApprovalCount",
+          "finalReportPresent",
+          "scores"
+        ]
+      },
+      "TopologyNode": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "label",
+          "type"
+        ]
+      },
+      "TopologyEdge": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          },
+          "target": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "source",
+          "target"
+        ]
+      },
+      "AgentTopology": {
+        "type": "object",
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "source": {
+            "type": "string"
+          },
+          "nodes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TopologyNode"
+            }
+          },
+          "edges": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TopologyEdge"
+            }
+          },
+          "rawFactCount": {
+            "type": "integer"
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "enabled",
+          "source",
+          "nodes",
+          "edges"
+        ]
+      },
       "DoneEvent": {
         "type": "object",
         "properties": {
@@ -2252,6 +2924,9 @@
             },
             "description": "All events for this run (max 500)"
           },
+          "trace": {
+            "$ref": "#/components/schemas/AgentRunTrace"
+          },
           "error": {
             "type": "string",
             "description": "Error message (only if status is 'failed')"
@@ -2265,6 +2940,58 @@
           "createdAt",
           "updatedAt",
           "events"
+        ]
+      },
+      "AgentRunTrace": {
+        "type": "object",
+        "properties": {
+          "plan": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PlanStep"
+            }
+          },
+          "evidence": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/EvidenceEvent"
+            }
+          },
+          "approvals": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RunApproval"
+            }
+          },
+          "finalReport": {
+            "$ref": "#/components/schemas/FinalReportEvent"
+          }
+        }
+      },
+      "RunApproval": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/ApprovalRequestEvent"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "decision": {
+                "type": "string"
+              },
+              "comment": {
+                "type": "string"
+              },
+              "createdAt": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "resolvedAt": {
+                "type": "string",
+                "format": "date-time"
+              }
+            }
+          }
         ]
       },
       "SessionMessage": {

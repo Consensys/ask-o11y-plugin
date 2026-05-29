@@ -1,7 +1,8 @@
 export type LLMModel = 'base' | 'large';
+export type LLMModelSelection = 'auto' | LLMModel;
 
 export interface LLMModelOption {
-  value: LLMModel;
+  value: LLMModelSelection;
   label: string;
   providerModel?: string;
   isDefault: boolean;
@@ -43,6 +44,10 @@ export function formatModelLabel(model: LLMModel, providerModel?: string): strin
   return providerModel ? `${modelTitle(model)} · ${providerModel}` : modelTitle(model);
 }
 
+export function formatModelSelectionLabel(model: LLMModelSelection, providerModel?: string): string {
+  return model === 'auto' ? 'Auto' : formatModelLabel(model, providerModel);
+}
+
 function extractModelIDs(response: LLMModelsResponse): Array<string | undefined> {
   if (Array.isArray(response)) {
     return response.map((model) => model.id ?? model.name ?? model.model);
@@ -65,19 +70,26 @@ export async function listLLMModelOptions(): Promise<LLMModelOption[]> {
   const modelsData = (await modelsResp.json()) as LLMModelsResponse;
   const settingsData = settingsResp?.ok ? ((await settingsResp.json()) as LLMPluginSettingsResponse) : {};
   const mapping = settingsData.jsonData?.models?.mapping ?? {};
-  const configuredDefault = settingsData.jsonData?.models?.default;
-  const defaultModel: LLMModel | undefined = isLLMModel(configuredDefault) ? configuredDefault : undefined;
 
   const available = extractModelIDs(modelsData).filter(isLLMModel);
   const uniqueModels = Array.from(new Set(available.length > 0 ? available : SUPPORTED_MODELS));
 
-  return uniqueModels.map((model) => {
+  const explicitOptions = uniqueModels.map((model) => {
     const providerModel = mapping[model];
     return {
       value: model,
       providerModel,
       label: formatModelLabel(model, providerModel),
-      isDefault: model === defaultModel,
+      isDefault: false,
     };
   });
+
+  return [
+    {
+      value: 'auto',
+      label: 'Auto',
+      isDefault: true,
+    },
+    ...explicitOptions,
+  ];
 }

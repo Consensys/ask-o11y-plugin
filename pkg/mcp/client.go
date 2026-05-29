@@ -379,6 +379,21 @@ func normalizeJSONSchema(schema map[string]interface{}) map[string]interface{} {
 	return schema
 }
 
+func schemaToMap(schema interface{}) map[string]interface{} {
+	if schema == nil {
+		return nil
+	}
+	schemaBytes, err := json.Marshal(schema)
+	if err != nil {
+		return nil
+	}
+	var out map[string]interface{}
+	if err := json.Unmarshal(schemaBytes, &out); err != nil {
+		return nil
+	}
+	return normalizeJSONSchema(out)
+}
+
 // listMCPTools lists tools using the MCP SDK
 func (c *Client) listMCPTools() ([]Tool, error) {
 	if err := c.connectMCP(); err != nil {
@@ -396,23 +411,11 @@ func (c *Client) listMCPTools() ([]Tool, error) {
 	// Convert SDK tools to our Tool type
 	tools := make([]Tool, len(result.Tools))
 	for i, sdkTool := range result.Tools {
-		inputSchema := make(map[string]interface{})
-		if sdkTool.InputSchema != nil {
-			// Convert the input schema
-			schemaBytes, err := json.Marshal(sdkTool.InputSchema)
-			if err != nil {
-				c.logger.Warn("Failed to marshal input schema", "tool", sdkTool.Name, "error", err)
-				continue
-			}
-			if err := json.Unmarshal(schemaBytes, &inputSchema); err != nil {
-				c.logger.Warn("Failed to unmarshal input schema", "tool", sdkTool.Name, "error", err)
-				continue
-			}
+		inputSchema := schemaToMap(sdkTool.InputSchema)
+		if inputSchema == nil {
+			inputSchema = normalizeJSONSchema(nil)
 		}
-
-		// Normalize the schema to ensure it has the proper JSON Schema structure
-		// LiteLLM expects at least a "properties" field as an object, not null
-		inputSchema = normalizeJSONSchema(inputSchema)
+		outputSchema := schemaToMap(sdkTool.OutputSchema)
 
 		var annotations *ToolAnnotations
 		if sdkTool.Annotations != nil {
@@ -421,14 +424,17 @@ func (c *Client) listMCPTools() ([]Tool, error) {
 				DestructiveHint: sdkTool.Annotations.DestructiveHint,
 				IdempotentHint:  boolPtrTrueOnly(sdkTool.Annotations.IdempotentHint),
 				OpenWorldHint:   sdkTool.Annotations.OpenWorldHint,
+				Title:           sdkTool.Annotations.Title,
 			}
 		}
 
 		tools[i] = Tool{
-			Name:        sdkTool.Name,
-			Description: sdkTool.Description,
-			InputSchema: inputSchema,
-			Annotations: annotations,
+			Name:         sdkTool.Name,
+			Title:        sdkTool.Title,
+			Description:  sdkTool.Description,
+			InputSchema:  inputSchema,
+			OutputSchema: outputSchema,
+			Annotations:  annotations,
 		}
 	}
 
@@ -647,24 +653,37 @@ func (c *Client) callMCPToolOnce(toolName string, arguments map[string]interface
 				Text: c.Text,
 			}
 		case *mcpsdk.ImageContent:
-			// Convert image content to text representation
 			content[i] = ContentBlock{
-				Type: "text",
-				Text: fmt.Sprintf("[Image: %s]", c.MIMEType),
+				Type:     "image",
+				Data:     string(c.Data),
+				MimeType: c.MIMEType,
+			}
+		case *mcpsdk.AudioContent:
+			content[i] = ContentBlock{
+				Type:     "audio",
+				Data:     string(c.Data),
+				MimeType: c.MIMEType,
+			}
+		case *mcpsdk.ResourceLink:
+			content[i] = ContentBlock{
+				Type:        "resource_link",
+				URI:         c.URI,
+				Name:        c.Name,
+				Title:       c.Title,
+				Description: c.Description,
+				MimeType:    c.MIMEType,
 			}
 		case *mcpsdk.EmbeddedResource:
-			// Convert embedded resource content to text representation
-			if c.Resource != nil && c.Resource.URI != "" {
-				content[i] = ContentBlock{
-					Type: "text",
-					Text: fmt.Sprintf("[Resource: %s]", c.Resource.URI),
-				}
-			} else {
-				content[i] = ContentBlock{
-					Type: "text",
-					Text: "[Embedded Resource]",
+			block := ContentBlock{Type: "resource"}
+			if c.Resource != nil {
+				block.Resource = map[string]interface{}{
+					"uri":      c.Resource.URI,
+					"mimeType": c.Resource.MIMEType,
+					"text":     c.Resource.Text,
+					"blob":     string(c.Resource.Blob),
 				}
 			}
+			content[i] = block
 		default:
 			// Unknown content type
 			content[i] = ContentBlock{
@@ -675,8 +694,9 @@ func (c *Client) callMCPToolOnce(toolName string, arguments map[string]interface
 	}
 
 	return &CallToolResult{
-		Content: content,
-		IsError: result.IsError,
+		Content:           content,
+		StructuredContent: result.StructuredContent,
+		IsError:           result.IsError,
 	}, nil
 }
 
@@ -762,6 +782,7 @@ func (c *Client) listOpenAPITools() ([]Tool, error) {
 				Name:        operationID,
 				Description: description,
 				InputSchema: schema,
+				Annotations: openAPIToolAnnotations(method),
 			})
 
 			// Store operation metadata
@@ -1248,4 +1269,16 @@ func isHTTPMethod(method string) bool {
 		}
 	}
 	return false
+}
+
+func openAPIToolAnnotations(method string) *ToolAnnotations {
+	upper := strings.ToUpper(method)
+	readOnly := upper == "GET" || upper == "HEAD" || upper == "OPTIONS"
+	destructive := upper == "DELETE"
+	idempotent := readOnly || upper == "PUT" || upper == "DELETE"
+	return &ToolAnnotations{
+		ReadOnlyHint:    boolPtr(readOnly),
+		DestructiveHint: boolPtr(destructive),
+		IdempotentHint:  boolPtr(idempotent),
+	}
 }

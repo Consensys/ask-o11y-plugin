@@ -1,8 +1,14 @@
 import { test, expect } from './fixtures';
+import type { Page } from '@playwright/test';
+
+async function openSettingsTab(page: Page, tabId: string) {
+  await page.locator(`[data-testid="data-testid ac-settings-tab-${tabId}"]`).click();
+}
 
 test.describe('MCP Server Advanced Options', () => {
   test.beforeEach(async ({ appConfigPage, page }) => {
     void appConfigPage;
+    await openSettingsTab(page, 'mcp');
 
     const addButton = page.locator('[data-testid="data-testid ac-add-mcp-server"]');
     await expect(addButton).toBeVisible();

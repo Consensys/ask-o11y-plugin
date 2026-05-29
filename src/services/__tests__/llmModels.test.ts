@@ -1,4 +1,4 @@
-import { formatModelLabel, listLLMModelOptions } from '../llmModels';
+import { formatModelLabel, formatModelSelectionLabel, listLLMModelOptions } from '../llmModels';
 
 describe('llmModels', () => {
   const originalFetch = global.fetch;
@@ -12,6 +12,7 @@ describe('llmModels', () => {
     expect(formatModelLabel('base', 'claude-haiku-4-5')).toBe('Base · claude-haiku-4-5');
     expect(formatModelLabel('large', 'claude-sonnet-4-6')).toBe('Large · claude-sonnet-4-6');
     expect(formatModelLabel('base')).toBe('Base');
+    expect(formatModelSelectionLabel('auto')).toBe('Auto');
   });
 
   it('lists supported model abstractions and maps configured provider IDs', async () => {
@@ -38,6 +39,11 @@ describe('llmModels', () => {
 
     await expect(listLLMModelOptions()).resolves.toEqual([
       {
+        value: 'auto',
+        label: 'Auto',
+        isDefault: true,
+      },
+      {
         value: 'base',
         providerModel: 'claude-haiku-4-5',
         label: 'Base · claude-haiku-4-5',
@@ -47,7 +53,7 @@ describe('llmModels', () => {
         value: 'large',
         providerModel: 'claude-sonnet-4-6',
         label: 'Large · claude-sonnet-4-6',
-        isDefault: true,
+        isDefault: false,
       },
     ]);
   });
@@ -66,7 +72,7 @@ describe('llmModels', () => {
 
     const options = await listLLMModelOptions();
 
-    expect(options.map((option) => option.value)).toEqual(['base', 'large']);
+    expect(options.map((option) => option.value)).toEqual(['auto', 'base', 'large']);
     expect(options[0].isDefault).toBe(true);
   });
 
@@ -83,6 +89,7 @@ describe('llmModels', () => {
       });
 
     await expect(listLLMModelOptions()).resolves.toEqual([
+      { value: 'auto', label: 'Auto', isDefault: true },
       { value: 'base', providerModel: undefined, label: 'Base', isDefault: false },
       { value: 'large', providerModel: undefined, label: 'Large', isDefault: false },
     ]);

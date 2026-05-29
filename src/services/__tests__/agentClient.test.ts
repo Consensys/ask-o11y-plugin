@@ -26,6 +26,11 @@ function createMockCallbacks(): jest.Mocked<AgentCallbacks> {
     onDone: jest.fn(),
     onError: jest.fn(),
     onMCPUnavailable: jest.fn(),
+    onRunPlan: jest.fn(),
+    onEvidence: jest.fn(),
+    onApprovalRequest: jest.fn(),
+    onApprovalResolved: jest.fn(),
+    onFinalReport: jest.fn(),
   };
 }
 
@@ -218,6 +223,47 @@ describe('reconnectToAgentRun', () => {
     expect(callbacks.onMCPUnavailable).toHaveBeenCalledWith({
       message: 'MCP server unreachable — results may be incomplete. Please retry.',
     });
+  });
+
+  it('should dispatch progressive agent events to callbacks', async () => {
+    const callbacks = createMockCallbacks();
+    const sseLines = [
+      'data: {"type":"run_plan","data":{"objective":"Investigate","steps":[{"id":"evidence","title":"Gather evidence","status":"pending"}]}}',
+      '',
+      'data: {"type":"evidence","data":{"id":"tc_1","title":"Prometheus","summary":"up is 1"}}',
+      '',
+      'data: {"type":"approval_request","data":{"approvalId":"tc_2","toolCallId":"tc_2","toolName":"delete_dashboard","risk":"destructive","reason":"write","arguments":"{}"}}',
+      '',
+      'data: {"type":"approval_resolved","data":{"approvalId":"tc_2","decision":"approved"}}',
+      '',
+      'data: {"type":"final_report","data":{"summary":"RCA complete"}}',
+      '',
+      'data: {"type":"done","data":{"totalIterations":1}}',
+      '',
+    ];
+
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      body: createMockBody(sseLines),
+    });
+
+    await reconnectToAgentRun('run-1', callbacks);
+
+    expect(callbacks.onRunPlan).toHaveBeenCalledWith({
+      objective: 'Investigate',
+      steps: [{ id: 'evidence', title: 'Gather evidence', status: 'pending' }],
+    });
+    expect(callbacks.onEvidence).toHaveBeenCalledWith({ id: 'tc_1', title: 'Prometheus', summary: 'up is 1' });
+    expect(callbacks.onApprovalRequest).toHaveBeenCalledWith({
+      approvalId: 'tc_2',
+      toolCallId: 'tc_2',
+      toolName: 'delete_dashboard',
+      risk: 'destructive',
+      reason: 'write',
+      arguments: '{}',
+    });
+    expect(callbacks.onApprovalResolved).toHaveBeenCalledWith({ approvalId: 'tc_2', decision: 'approved' });
+    expect(callbacks.onFinalReport).toHaveBeenCalledWith({ summary: 'RCA complete' });
   });
 
   it('should handle SSE error events', async () => {

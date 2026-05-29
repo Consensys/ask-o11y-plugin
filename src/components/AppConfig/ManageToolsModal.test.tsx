@@ -7,9 +7,69 @@ type ButtonProps = React.ButtonHTMLAttributes<HTMLButtonElement> & { children?: 
 type ModalProps = { children?: React.ReactNode; isOpen?: boolean; title?: React.ReactNode };
 type SwitchProps = { value?: boolean; onChange?: (e: { currentTarget: { checked: boolean } }) => void };
 type InputProps = React.InputHTMLAttributes<HTMLInputElement>;
+type IconButtonProps = React.ButtonHTMLAttributes<HTMLButtonElement> & {
+  tooltip?: React.ReactNode;
+  tooltipPlacement?: string;
+};
+
+const mockTheme = {
+  breakpoints: {
+    down: () => '@media (max-width: 600px)',
+  },
+  colors: {
+    background: {
+      primary: '#111217',
+      secondary: '#181b1f',
+    },
+    border: {
+      weak: '#343741',
+    },
+    error: {
+      borderTransparent: 'rgba(242, 73, 92, 0.3)',
+      text: '#ff9aa2',
+      transparent: 'rgba(242, 73, 92, 0.15)',
+    },
+    info: {
+      borderTransparent: 'rgba(50, 116, 217, 0.3)',
+      text: '#9ac2ff',
+      transparent: 'rgba(50, 116, 217, 0.15)',
+    },
+    text: {
+      primary: '#d8d9da',
+      secondary: '#a3a7b3',
+    },
+    warning: {
+      borderTransparent: 'rgba(255, 184, 0, 0.3)',
+      text: '#ffd47d',
+      transparent: 'rgba(255, 184, 0, 0.15)',
+    },
+  },
+  shape: {
+    radius: {
+      default: '2px',
+    },
+  },
+  spacing: (...values: Array<number | string>) =>
+    (values.length === 0 ? [1] : values)
+      .map((value) => (typeof value === 'number' ? `${value * 8}px` : value))
+      .join(' '),
+  typography: {
+    bodySmall: {
+      fontSize: '12px',
+      lineHeight: 1.4,
+    },
+    fontFamilyMonospace: 'monospace',
+    fontWeightMedium: 500,
+  },
+};
 
 jest.mock('@grafana/ui', () => ({
   Button: ({ children, ...props }: ButtonProps) => <button {...props}>{children}</button>,
+  IconButton: ({ tooltip, tooltipPlacement: _tooltipPlacement, ...props }: IconButtonProps) => (
+    <button aria-label={typeof tooltip === 'string' ? tooltip : 'Tool description'} {...props}>
+      ?
+    </button>
+  ),
   Modal: ({ children, isOpen, title }: ModalProps) =>
     isOpen ? (
       <div>
@@ -17,18 +77,21 @@ jest.mock('@grafana/ui', () => ({
         {children}
       </div>
     ) : null,
-  Switch: ({ value, onChange }: SwitchProps) => (
+  Switch: ({ value, onChange, ...props }: SwitchProps & React.InputHTMLAttributes<HTMLInputElement>) => (
     <input
       type="checkbox"
       checked={!!value}
       onChange={(e) => onChange?.({ currentTarget: { checked: e.target.checked } })}
+      {...props}
     />
   ),
   Input: (props: InputProps) => <input {...props} />,
+  useStyles2: (getStyles: (theme: typeof mockTheme) => unknown) => getStyles(mockTheme),
 }));
 
 const tools: MCPTool[] = [
   { name: 'list_things', description: 'list', inputSchema: {}, annotations: { readOnlyHint: true } },
+  { name: 'update_thing', description: 'update', inputSchema: {}, annotations: {} },
   { name: 'delete_thing', description: 'delete', inputSchema: {}, annotations: { destructiveHint: true } },
 ];
 
@@ -69,7 +132,7 @@ describe('ManageToolsModal', () => {
     fireEvent.click(screen.getByText('Disable all'));
     fireEvent.click(screen.getByText('Apply'));
 
-    expect(onSave).toHaveBeenCalledWith('srv1', { list_things: false, delete_thing: false });
+    expect(onSave).toHaveBeenCalledWith('srv1', { list_things: false, update_thing: false, delete_thing: false });
   });
 
   it('filters tools by name', () => {
@@ -79,6 +142,24 @@ describe('ManageToolsModal', () => {
 
     expect(screen.queryByText('list_things')).toBeNull();
     expect(screen.getByText('delete_thing')).toBeInTheDocument();
+  });
+
+  it('shows tool names, separate risk labels, and descriptions through question mark buttons', () => {
+    render(<ManageToolsModal {...baseProps} />);
+
+    expect(screen.getByText('list_things')).toBeInTheDocument();
+    expect(screen.getByText('update_thing')).toBeInTheDocument();
+    expect(screen.getByText('delete_thing')).toBeInTheDocument();
+    expect(screen.getByText('Read-only')).toBeInTheDocument();
+    expect(screen.getByText('Read/write')).toBeInTheDocument();
+    expect(screen.getByText('Destructive')).toBeInTheDocument();
+    expect(screen.queryByText('list')).not.toBeInTheDocument();
+    expect(screen.queryByText('update')).not.toBeInTheDocument();
+    expect(screen.queryByText('delete')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('list')).toHaveTextContent('?');
+    expect(screen.getByLabelText('update')).toHaveTextContent('?');
+    expect(screen.getByLabelText('delete')).toHaveTextContent('?');
+    expect(screen.getByText('list_things')).toHaveTextContent(/^list_things$/);
   });
 
   it('shows empty state when no tools', () => {

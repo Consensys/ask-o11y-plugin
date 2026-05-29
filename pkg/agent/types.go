@@ -1,6 +1,9 @@
 package agent
 
-import "encoding/json"
+import (
+	"context"
+	"encoding/json"
+)
 
 type Message struct {
 	Role       string     `json:"role"`
@@ -84,6 +87,61 @@ type ToolCallResultEvent struct {
 	ErrorKind string `json:"errorKind,omitempty"`
 }
 
+type PlanStep struct {
+	ID          string `json:"id"`
+	Title       string `json:"title"`
+	Description string `json:"description,omitempty"`
+	Status      string `json:"status"`
+}
+
+type RunPlanEvent struct {
+	Objective string     `json:"objective"`
+	Steps     []PlanStep `json:"steps"`
+}
+
+type StepEvent struct {
+	ID     string `json:"id"`
+	Title  string `json:"title,omitempty"`
+	Status string `json:"status"`
+}
+
+type EvidenceEvent struct {
+	ID            string `json:"id"`
+	StepID        string `json:"stepId,omitempty"`
+	Title         string `json:"title"`
+	Summary       string `json:"summary"`
+	Source        string `json:"source,omitempty"`
+	ToolName      string `json:"toolName,omitempty"`
+	Query         string `json:"query,omitempty"`
+	DatasourceUID string `json:"datasourceUid,omitempty"`
+	TimeRange     string `json:"timeRange,omitempty"`
+}
+
+type ApprovalRequestEvent struct {
+	ApprovalID string `json:"approvalId"`
+	ToolCallID string `json:"toolCallId"`
+	ToolName   string `json:"toolName"`
+	Risk       string `json:"risk"`
+	Reason     string `json:"reason"`
+	Arguments  string `json:"arguments"`
+}
+
+type ApprovalResolvedEvent struct {
+	ApprovalID string `json:"approvalId"`
+	Decision   string `json:"decision"`
+	Comment    string `json:"comment,omitempty"`
+	ResolvedAt string `json:"resolvedAt,omitempty"`
+}
+
+type FinalReportEvent struct {
+	Verdict     string   `json:"verdict,omitempty"`
+	Confidence  string   `json:"confidence,omitempty"`
+	Summary     string   `json:"summary"`
+	EvidenceIDs []string `json:"evidenceIds,omitempty"`
+	Gaps        []string `json:"gaps,omitempty"`
+	NextSteps   []string `json:"nextSteps,omitempty"`
+}
+
 // MCPUnavailableEvent is emitted at most once per run when enough distinct
 // tool calls fail with a transport error that we can confidently tell the
 // user MCP is unreachable — rather than letting the agent fabricate around
@@ -124,3 +182,6 @@ func MarshalSSE(event SSEEvent) ([]byte, error) {
 	line = append(line, '\n', '\n')
 	return line, nil
 }
+
+type ApprovalWaitFunc func(context.Context) (ApprovalResolvedEvent, error)
+type ApprovalRegistrar func(context.Context, ApprovalRequestEvent) (ApprovalWaitFunc, error)

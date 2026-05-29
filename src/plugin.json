@@ -47,10 +47,12 @@
       "large": "img/ask_o11y_logo.png"
     },
     "screenshots": [
-  { "name": "Home Page", "path": "img/screenshots/home-page.png" },
-  { "name": "Main Chat Interface", "path": "img/screenshots/chat-interface.png" },
-  { "name": "Configuration", "path": "img/screenshots/mcp-configuration.png" },
-  { "name": "Session History", "path": "img/screenshots/session-history.png" }
+      { "name": "Agent RCA overview", "path": "img/screenshots/home-page.png" },
+      { "name": "Live investigation workspace", "path": "img/screenshots/chat-interface.png" },
+      { "name": "MCP settings", "path": "img/screenshots/mcp-configuration.png" },
+      { "name": "MCP tool selection", "path": "img/screenshots/tool-selection.png" },
+      { "name": "Service graph settings", "path": "img/screenshots/service-graph-settings.png" },
+      { "name": "Run trace and evidence history", "path": "img/screenshots/session-history.png" }
     ],
     "version": "%VERSION%",
     "updated": "%TODAY%"
@@ -60,6 +62,7 @@
       "type": "page",
       "name": "Ask O11y",
       "path": "/a/%PLUGIN_ID%",
+      "action": "consensys-asko11y-app.agent:read",
       "addToNav": true,
       "defaultNav": true,
       "icon": "ai"
@@ -69,8 +72,51 @@
       "icon": "cog",
       "name": "Configuration",
       "path": "/plugins/%PLUGIN_ID%",
+      "action": "consensys-asko11y-app.settings:write",
       "role": "Admin",
       "addToNav": true
+    }
+  ],
+  "roles": [
+    {
+      "role": {
+        "name": "Ask O11y Reader",
+        "description": "Read Ask O11y agent runs, traces, memory, and topology.",
+        "permissions": [
+          { "action": "consensys-asko11y-app.agent:read" },
+          { "action": "consensys-asko11y-app.memory:read" }
+        ]
+      },
+      "grants": ["Viewer", "Editor", "Admin"]
+    },
+    {
+      "role": {
+        "name": "Ask O11y Operator",
+        "description": "Run Ask O11y agent workflows and approve gated tool calls.",
+        "permissions": [
+          { "action": "consensys-asko11y-app.agent:read" },
+          { "action": "consensys-asko11y-app.agent:run" },
+          { "action": "consensys-asko11y-app.agent:approve" },
+          { "action": "consensys-asko11y-app.memory:read" }
+        ]
+      },
+      "grants": ["Editor", "Admin"]
+    },
+    {
+      "role": {
+        "name": "Ask O11y Administrator",
+        "description": "Administer Ask O11y settings, memory writes, and agent runtime policy.",
+        "permissions": [
+          { "action": "consensys-asko11y-app.agent:read" },
+          { "action": "consensys-asko11y-app.agent:run" },
+          { "action": "consensys-asko11y-app.agent:approve" },
+          { "action": "consensys-asko11y-app.agent:write" },
+          { "action": "consensys-asko11y-app.memory:read" },
+          { "action": "consensys-asko11y-app.memory:write" },
+          { "action": "consensys-asko11y-app.settings:write" }
+        ]
+      },
+      "grants": ["Admin"]
     }
   ],
   "backend": true,
@@ -86,8 +132,6 @@
     ]
   },
   "iam": {
-    "permissions": [
-      { "action": "plugins.app:access", "scope": "plugins:id:grafana-llm-app" }
-    ]
+    "permissions": [{ "action": "plugins.app:access", "scope": "plugins:id:grafana-llm-app" }]
   }
 }

@@ -105,6 +105,12 @@ export function PromptEditor({
             {isDefault && <span className="text-xs text-secondary">Using default template</span>}
           </div>
 
+          {hasChanges && (
+            <div className="mt-2 text-sm text-warning" role="status">
+              Unsaved changes
+            </div>
+          )}
+
           <div className="flex gap-2 mt-4 justify-end">
             <Button
               variant="secondary"

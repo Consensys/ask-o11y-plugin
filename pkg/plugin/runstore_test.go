@@ -51,6 +51,54 @@ func TestRunStore_AppendEvent(t *testing.T) {
 	}
 }
 
+func TestRunStore_AppendEventBuildsTrace(t *testing.T) {
+	store := NewRunStore(log.DefaultLogger)
+	store.CreateRun("run-1", 100, 1)
+
+	store.AppendEvent("run-1", agent.SSEEvent{Type: "run_plan", Data: agent.RunPlanEvent{
+		Objective: "Investigate",
+		Steps: []agent.PlanStep{{
+			ID:     "evidence",
+			Title:  "Gather evidence",
+			Status: "pending",
+		}},
+	}})
+	store.AppendEvent("run-1", agent.SSEEvent{Type: "approval_request", Data: agent.ApprovalRequestEvent{
+		ApprovalID: "tc_1",
+		ToolCallID: "tc_1",
+		ToolName:   "grafana_delete_dashboard",
+		Risk:       "destructive",
+		Reason:     "Tool is destructive.",
+		Arguments:  "{}",
+	}})
+	store.AppendEvent("run-1", agent.SSEEvent{Type: "approval_resolved", Data: agent.ApprovalResolvedEvent{
+		ApprovalID: "tc_1",
+		Decision:   "approved",
+	}})
+	store.AppendEvent("run-1", agent.SSEEvent{Type: "evidence", Data: agent.EvidenceEvent{
+		ID:      "tc_2",
+		Title:   "Prometheus result",
+		Summary: "up is 1",
+	}})
+
+	run, err := store.GetRun("run-1")
+	if err != nil {
+		t.Fatalf("failed to get run: %v", err)
+	}
+	if run.Trace == nil {
+		t.Fatal("expected trace")
+	}
+	if len(run.Trace.Plan) != 1 || run.Trace.Plan[0].ID != "evidence" {
+		t.Fatalf("unexpected plan: %+v", run.Trace.Plan)
+	}
+	if len(run.Trace.Approvals) != 1 || run.Trace.Approvals[0].Decision != "approved" {
+		t.Fatalf("unexpected approvals: %+v", run.Trace.Approvals)
+	}
+	if len(run.Trace.Evidence) != 1 || run.Trace.Evidence[0].Summary != "up is 1" {
+		t.Fatalf("unexpected evidence: %+v", run.Trace.Evidence)
+	}
+}
+
 func TestRunStore_AppendEvent_TrimsOldest(t *testing.T) {
 	store := NewRunStore(log.DefaultLogger)
 	store.CreateRun("run-1", 100, 1)
@@ -112,6 +160,30 @@ func TestRunStore_FinishRun_WithError(t *testing.T) {
 	}
 	if run.Error != "LLM error" {
 		t.Errorf("expected error 'LLM error', got %q", run.Error)
+	}
+}
+
+func TestRunStore_ListRunsFiltersAndSorts(t *testing.T) {
+	store := NewRunStore(log.DefaultLogger)
+	store.CreateRun("old", 100, 1)
+	store.CreateRun("other-user", 101, 1)
+	store.CreateRun("other-org", 100, 2)
+	store.CreateRun("new", 100, 1)
+
+	store.mu.Lock()
+	store.runs["old"].UpdatedAt = time.Now().Add(-time.Hour)
+	store.runs["new"].UpdatedAt = time.Now()
+	store.mu.Unlock()
+
+	runs, err := store.ListRuns(100, 1, 10)
+	if err != nil {
+		t.Fatalf("ListRuns failed: %v", err)
+	}
+	if len(runs) != 2 {
+		t.Fatalf("expected 2 runs, got %d", len(runs))
+	}
+	if runs[0].RunID != "new" || runs[1].RunID != "old" {
+		t.Fatalf("unexpected order: %s, %s", runs[0].RunID, runs[1].RunID)
 	}
 }
 

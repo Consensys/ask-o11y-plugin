@@ -31,6 +31,7 @@ function useChatInterface(model: ChatInterfaceScene): ChatInterfaceProps {
     onSuggestionClick: state.onSuggestionClick,
     queuedMessageCount: state.queuedMessageCount,
     onStopGeneration: state.onStopGeneration,
+    onResolveApproval: state.onResolveApproval,
   };
 }
 
@@ -64,6 +65,7 @@ function ChatInterfaceRenderer({ model }: SceneComponentProps<ChatInterfaceScene
     onSuggestionClick,
     queuedMessageCount,
     onStopGeneration,
+    onResolveApproval,
   } = props;
 
   const hasMessages = chatHistory.length > 0;
@@ -96,7 +98,7 @@ function ChatInterfaceRenderer({ model }: SceneComponentProps<ChatInterfaceScene
               }}
             >
               <div className="px-4">
-                <ChatHistory chatHistory={chatHistory} isGenerating={isGenerating} />
+                <ChatHistory chatHistory={chatHistory} isGenerating={isGenerating} onResolveApproval={onResolveApproval} />
                 <div ref={bottomSpacerRef} className="h-16" style={{ scrollMarginBottom: '100px' }} />
               </div>
             </div>

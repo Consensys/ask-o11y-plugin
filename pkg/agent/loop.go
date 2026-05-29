@@ -7,6 +7,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
+	"time"
 
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
@@ -46,6 +48,7 @@ type LoopRequest struct {
 	RecentMessageCount int
 	MaxIterations      int
 	Model              string
+	ConversationType   string
 
 	GrafanaURL string
 	AuthToken  string
@@ -62,6 +65,11 @@ type LoopRequest struct {
 	// MCPServers carries per-server tool-selection settings, used to honor the
 	// user's Manage Tools choices inside the agent loop (not just at HTTP edges).
 	MCPServers []mcp.ServerConfig
+
+	ApprovalPolicy          string
+	MaxParallelToolCalls    int
+	EnableProgressiveEvents bool
+	RegisterApproval        ApprovalRegistrar
 }
 
 func (a *AgentLoop) Run(ctx context.Context, req LoopRequest, eventCh chan<- SSEEvent) {
@@ -101,6 +109,16 @@ func (a *AgentLoop) Run(ctx context.Context, req LoopRequest, eventCh chan<- SSE
 	openAITools := ConvertMCPToolsToOpenAI(mcpTools)
 
 	messages := BuildContextWindow(req.SystemPrompt, req.Messages, req.Summary, req.RecentMessageCount)
+	plan := buildRunPlan(req.ConversationType)
+	if req.EnableProgressiveEvents {
+		a.send(ctx, eventCh, SSEEvent{
+			Type: "run_plan",
+			Data: RunPlanEvent{
+				Objective: planObjective(req.ConversationType),
+				Steps:     plan,
+			},
+		})
+	}
 
 	// Per-run state for transport-failure aggregation. We emit at most one
 	// mcp_unavailable event per run, once at least 2 distinct tools have hit
@@ -112,6 +130,12 @@ func (a *AgentLoop) Run(ctx context.Context, req LoopRequest, eventCh chan<- SSE
 	for iteration := 0; iteration < maxIter; iteration++ {
 		if ctx.Err() != nil {
 			return
+		}
+		if req.EnableProgressiveEvents && iteration == 0 && len(plan) > 0 {
+			a.send(ctx, eventCh, SSEEvent{
+				Type: "step_start",
+				Data: StepEvent{ID: plan[0].ID, Title: plan[0].Title, Status: "running"},
+			})
 		}
 
 		messages = TrimMessagesToTokenLimit(messages, openAITools, promptBudget)
@@ -154,6 +178,20 @@ func (a *AgentLoop) Run(ctx context.Context, req LoopRequest, eventCh chan<- SSE
 
 		if len(msg.ToolCalls) == 0 {
 			if msg.Content != "" {
+				if req.EnableProgressiveEvents && len(plan) > 0 {
+					a.send(ctx, eventCh, SSEEvent{
+						Type: "step_done",
+						Data: StepEvent{ID: plan[len(plan)-1].ID, Title: plan[len(plan)-1].Title, Status: "completed"},
+					})
+					a.send(ctx, eventCh, SSEEvent{
+						Type: "final_report",
+						Data: FinalReportEvent{
+							Verdict:    finalReportVerdict(req.ConversationType),
+							Confidence: "medium",
+							Summary:    summarizeFinalContent(msg.Content),
+						},
+					})
+				}
 				a.send(ctx, eventCh, SSEEvent{
 					Type: "content",
 					Data: ContentEvent{Content: msg.Content},
@@ -183,7 +221,7 @@ func (a *AgentLoop) Run(ctx context.Context, req LoopRequest, eventCh chan<- SSE
 				},
 			})
 
-			toolContent, isError, errorKind := a.executeTool(ctx, tc, req)
+			toolContent, isError, errorKind := a.executeToolWithApproval(ctx, eventCh, tc, req)
 
 			a.send(ctx, eventCh, SSEEvent{
 				Type: "tool_call_result",
@@ -217,6 +255,20 @@ func (a *AgentLoop) Run(ctx context.Context, req LoopRequest, eventCh chan<- SSE
 					Type: "mcp_unavailable",
 					Data: MCPUnavailableEvent{
 						Message: "MCP server unreachable — results may be incomplete. Please retry.",
+					},
+				})
+			}
+			if req.EnableProgressiveEvents && !isError {
+				a.send(ctx, eventCh, SSEEvent{
+					Type: "evidence",
+					Data: EvidenceEvent{
+						ID:       tc.ID,
+						StepID:   currentEvidenceStepID(plan),
+						Title:    evidenceTitle(tc.Function.Name),
+						Summary:  summarizeToolEvidence(toolContent),
+						Source:   "mcp",
+						ToolName: tc.Function.Name,
+						Query:    extractEvidenceQuery(tc.Function.Arguments),
 					},
 				})
 			}
@@ -300,6 +352,84 @@ func (a *AgentLoop) executeTool(ctx context.Context, tc ToolCall, req LoopReques
 	return text, false, ""
 }
 
+func (a *AgentLoop) executeToolWithApproval(ctx context.Context, eventCh chan<- SSEEvent, tc ToolCall, req LoopRequest) (content string, isError bool, errorKind string) {
+	tool, found := a.mcpProxy.FindToolByName(tc.Function.Name)
+	if !found {
+		return a.executeTool(ctx, tc, req)
+	}
+
+	risk := mcp.ClassifyToolRisk(tool, req.MCPServers)
+	if !approvalPolicyEnabled(req.ApprovalPolicy) || !risk.RequiresApproval {
+		return a.executeTool(ctx, tc, req)
+	}
+
+	approval := ApprovalRequestEvent{
+		ApprovalID: tc.ID,
+		ToolCallID: tc.ID,
+		ToolName:   tc.Function.Name,
+		Risk:       riskLabel(risk),
+		Reason:     risk.Reason,
+		Arguments:  tc.Function.Arguments,
+	}
+
+	if req.RegisterApproval == nil {
+		return fmt.Sprintf("Tool %s requires approval before execution: %s", tc.Function.Name, risk.Reason), true, "approval_required"
+	}
+
+	waitApproval, err := req.RegisterApproval(ctx, approval)
+	if err != nil {
+		return fmt.Sprintf("Failed to prepare approval for tool %s: %v", tc.Function.Name, err), true, "approval_required"
+	}
+
+	a.send(ctx, eventCh, SSEEvent{
+		Type: "approval_request",
+		Data: approval,
+	})
+
+	resolved, err := waitApproval(ctx)
+	if err != nil {
+		if ctx.Err() != nil {
+			return "", true, "approval_required"
+		}
+		return fmt.Sprintf("Tool %s approval failed: %v", tc.Function.Name, err), true, "approval_required"
+	}
+	if resolved.ResolvedAt == "" {
+		resolved.ResolvedAt = time.Now().UTC().Format(time.RFC3339)
+	}
+	a.send(ctx, eventCh, SSEEvent{
+		Type: "approval_resolved",
+		Data: resolved,
+	})
+
+	if resolved.Decision != "approved" {
+		return fmt.Sprintf("Tool %s was not approved by the user.", tc.Function.Name), true, "approval_denied"
+	}
+
+	return a.executeTool(ctx, tc, req)
+}
+
+func approvalPolicyEnabled(policy string) bool {
+	switch strings.ToLower(strings.TrimSpace(policy)) {
+	case "", "off", "none", "never", "disabled":
+		return false
+	default:
+		return true
+	}
+}
+
+func riskLabel(risk mcp.ToolRisk) string {
+	switch {
+	case risk.Destructive:
+		return "destructive"
+	case risk.OpenWorld:
+		return "open_world"
+	case !risk.ReadOnly:
+		return "write"
+	default:
+		return "read"
+	}
+}
+
 func extractText(result *mcp.CallToolResult) string {
 	var out string
 	for _, block := range result.Content {
@@ -310,7 +440,103 @@ func extractText(result *mcp.CallToolResult) string {
 			out += block.Text
 		}
 	}
+	if out == "" && result.StructuredContent != nil {
+		if data, err := json.Marshal(result.StructuredContent); err == nil {
+			out = string(data)
+		}
+	}
 	return out
+}
+
+func buildRunPlan(conversationType string) []PlanStep {
+	switch conversationType {
+	case "investigation":
+		return []PlanStep{
+			{ID: "scope", Title: "Scope incident context", Description: "Identify alert, service, org, and likely time window.", Status: "pending"},
+			{ID: "evidence", Title: "Gather observability evidence", Description: "Query metrics, logs, traces, deploy signals, runbooks, and topology.", Status: "pending"},
+			{ID: "report", Title: "Synthesize RCA report", Description: "Produce a confidence-scored incident report with evidence and gaps.", Status: "pending"},
+		}
+	case "performance":
+		return []PlanStep{
+			{ID: "scope", Title: "Scope performance target", Status: "pending"},
+			{ID: "evidence", Title: "Compare telemetry signals", Status: "pending"},
+			{ID: "report", Title: "Summarize bottlenecks", Status: "pending"},
+		}
+	default:
+		return []PlanStep{
+			{ID: "understand", Title: "Understand request", Status: "pending"},
+			{ID: "evidence", Title: "Gather evidence", Status: "pending"},
+			{ID: "answer", Title: "Answer with citations", Status: "pending"},
+		}
+	}
+}
+
+func planObjective(conversationType string) string {
+	switch conversationType {
+	case "investigation":
+		return "Investigate the incident using live Grafana and MCP evidence."
+	case "performance":
+		return "Analyze performance using live observability evidence."
+	default:
+		return "Answer the request using available Grafana and MCP evidence."
+	}
+}
+
+func currentEvidenceStepID(plan []PlanStep) string {
+	for _, step := range plan {
+		if step.ID == "evidence" {
+			return step.ID
+		}
+	}
+	if len(plan) == 0 {
+		return ""
+	}
+	return plan[0].ID
+}
+
+func evidenceTitle(toolName string) string {
+	name := strings.ReplaceAll(toolName, "_", " ")
+	if len(name) > 80 {
+		name = name[:80]
+	}
+	return "Evidence from " + name
+}
+
+func summarizeToolEvidence(content string) string {
+	return truncateWhitespace(content, 600)
+}
+
+func summarizeFinalContent(content string) string {
+	return truncateWhitespace(content, 900)
+}
+
+func finalReportVerdict(conversationType string) string {
+	if conversationType == "investigation" {
+		return "Incident report generated"
+	}
+	return "Response generated"
+}
+
+func truncateWhitespace(s string, max int) string {
+	fields := strings.Fields(s)
+	trimmed := strings.Join(fields, " ")
+	if max > 0 && len(trimmed) > max {
+		return trimmed[:max] + "..."
+	}
+	return trimmed
+}
+
+func extractEvidenceQuery(arguments string) string {
+	var args map[string]interface{}
+	if err := json.Unmarshal([]byte(arguments), &args); err != nil {
+		return ""
+	}
+	for _, key := range []string{"query", "expr", "logql", "traceql", "promql"} {
+		if value, ok := args[key].(string); ok {
+			return value
+		}
+	}
+	return ""
 }
 
 func (a *AgentLoop) send(ctx context.Context, ch chan<- SSEEvent, event SSEEvent) {

@@ -16,9 +16,10 @@ import type { ChatMessage } from './types';
 import type { AppPluginSettings } from '../../types/plugin';
 import {
   formatModelLabel,
+  formatModelSelectionLabel,
   listLLMModelOptions,
-  type LLMModel,
   type LLMModelOption,
+  type LLMModelSelection,
 } from '../../services/llmModels';
 
 interface ChatProps {
@@ -43,7 +44,7 @@ function ChatComponent({
   const theme = useTheme2();
   const allowEmbedding = useEmbeddingAllowed();
   const [modelOptions, setModelOptions] = useState<LLMModelOption[]>([]);
-  const [selectedModel, setSelectedModel] = useState<LLMModel | undefined>(undefined);
+  const [selectedModel, setSelectedModel] = useState<LLMModelSelection>('auto');
 
   const kioskModeEnabled = pluginSettings?.kioskModeEnabled ?? true;
   const chatPanelPosition = pluginSettings?.chatPanelPosition || 'right';
@@ -56,7 +57,7 @@ function ChatComponent({
           return;
         }
         setModelOptions(options);
-        setSelectedModel((prev) => prev ?? options.find((option) => option.isDefault)?.value);
+        setSelectedModel((prev) => (options.some((option) => option.value === prev) ? prev : 'auto'));
       })
       .catch(() => {
         if (!cancelled) {
@@ -82,6 +83,7 @@ function ChatComponent({
     detectedPageRefs,
     messageQueue,
     stopGeneration,
+    resolveApproval,
   } = useChat(
     pluginSettings,
     sessionIdFromUrl,
@@ -129,8 +131,8 @@ function ChatComponent({
   const sessionModelOption = modelOptions.find((option) => option.value === sessionModel);
   const currentModelLabel = sessionModel
     ? sessionModelOption?.label || formatModelLabel(sessionModel)
-    : chatHistory.length > 0 && selectedModel
-      ? selectedModelOption?.label || formatModelLabel(selectedModel)
+    : chatHistory.length > 0
+      ? selectedModelOption?.label || formatModelSelectionLabel(selectedModel)
       : undefined;
   const hasMessages = chatHistory.length > 0;
   const graphitiEnabled = pluginSettings.mcpServers?.some((s) => s.id === 'graphiti' && s.enabled) ?? false;
@@ -177,6 +179,7 @@ function ChatComponent({
       onSuggestionClick: handleSuggestionClick,
       queuedMessageCount: messageQueue.length,
       onStopGeneration: stopGeneration,
+      onResolveApproval: resolveApproval,
     }),
     [
       chatHistory,
@@ -200,6 +203,7 @@ function ChatComponent({
       handleSuggestionClick,
       messageQueue.length,
       stopGeneration,
+      resolveApproval,
     ]
   );
 

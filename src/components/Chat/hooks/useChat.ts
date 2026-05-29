@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { config } from '@grafana/runtime';
-import { ChatMessage, GrafanaPageRef, RenderedToolCall } from '../types';
+import { AgentApprovalItem, ChatMessage, GrafanaPageRef, RenderedToolCall } from '../types';
 import { useSessionManager } from './useSessionManager';
 import { ValidationService } from '../../../services/validation';
 import { parseGrafanaLinks } from '../utils/grafanaLinkParser';
@@ -8,15 +8,22 @@ import {
   runAgentDetached,
   reconnectToAgentRun,
   cancelAgentRun,
+  resolveAgentApproval,
   type AgentCallbacks,
+  type ApprovalRequestEvent,
+  type ApprovalResolvedEvent,
   type ContentEvent,
+  type EvidenceEvent,
+  type FinalReportEvent,
   type MCPUnavailableEvent,
+  type RunPlanEvent,
+  type StepEvent,
   type ToolCallStartEvent,
   type ToolCallResultEvent,
 } from '../../../services/agentClient';
 import { getSession } from '../../../services/backendSessionClient';
 import type { AppPluginSettings } from '../../../types/plugin';
-import type { LLMModel } from '../../../services/llmModels';
+import type { LLMModelSelection } from '../../../services/llmModels';
 
 interface InitialSessionData {
   id?: string;
@@ -40,7 +47,7 @@ export function useChat(
   readOnly?: boolean,
   initialMessage?: string,
   initialMessageType?: 'chat' | 'investigation' | 'performance',
-  selectedModel?: LLMModel
+  selectedModel: LLMModelSelection = 'auto'
 ) {
   const orgId = String(config.bootData.user.orgId || '1');
 
@@ -260,8 +267,139 @@ export function useChat(
       onMCPUnavailable: (event: MCPUnavailableEvent) => {
         setMcpUnavailable(event.message);
       },
+      onRunPlan: (event: RunPlanEvent) => {
+        if (abortController.signal.aborted) {
+          return;
+        }
+        setChatHistory((prev) =>
+          updateLastAssistantMessage(prev, (msg) => ({
+            ...msg,
+            runPlan: event,
+          }))
+        );
+      },
+      onStep: (event: StepEvent) => {
+        if (abortController.signal.aborted) {
+          return;
+        }
+        setChatHistory((prev) =>
+          updateLastAssistantMessage(prev, (msg) => ({
+            ...msg,
+            runPlan: msg.runPlan
+              ? {
+                  ...msg.runPlan,
+                  steps: msg.runPlan.steps.map((step) =>
+                    step.id === event.id ? { ...step, status: event.status } : step
+                  ),
+                }
+              : msg.runPlan,
+          }))
+        );
+      },
+      onEvidence: (event: EvidenceEvent) => {
+        if (abortController.signal.aborted) {
+          return;
+        }
+        setChatHistory((prev) =>
+          updateLastAssistantMessage(prev, (msg) => {
+            const evidence = msg.evidence || [];
+            const existingIndex = evidence.findIndex((item) => item.id === event.id);
+            const nextEvidence =
+              existingIndex >= 0
+                ? evidence.map((item, index) => (index === existingIndex ? event : item))
+                : [...evidence, event];
+            return { ...msg, evidence: nextEvidence };
+          })
+        );
+      },
+      onApprovalRequest: (event: ApprovalRequestEvent) => {
+        if (abortController.signal.aborted) {
+          return;
+        }
+        const runId = activeRunIdRef.current || undefined;
+        setChatHistory((prev) =>
+          updateLastAssistantMessage(prev, (msg) => {
+            const approvals = msg.approvals || [];
+            if (approvals.some((approval) => approval.approvalId === event.approvalId)) {
+              return msg;
+            }
+            return { ...msg, approvals: [...approvals, { ...event, runId }] };
+          })
+        );
+      },
+      onApprovalResolved: (event: ApprovalResolvedEvent) => {
+        if (abortController.signal.aborted) {
+          return;
+        }
+        setChatHistory((prev) =>
+          updateLastAssistantMessage(prev, (msg) => ({
+            ...msg,
+            approvals: (msg.approvals || []).map((approval) =>
+              approval.approvalId === event.approvalId
+                ? {
+                    ...approval,
+                    decision: event.decision,
+                    comment: event.comment,
+                    resolvedAt: event.resolvedAt,
+                    resolving: false,
+                    error: undefined,
+                  }
+                : approval
+            ),
+          }))
+        );
+      },
+      onFinalReport: (event: FinalReportEvent) => {
+        if (abortController.signal.aborted) {
+          return;
+        }
+        setChatHistory((prev) =>
+          updateLastAssistantMessage(prev, (msg) => ({
+            ...msg,
+            finalReport: event,
+          }))
+        );
+      },
     }),
     []
+  );
+
+  const resolveApproval = useCallback(
+    async (approval: AgentApprovalItem, decision: 'approved' | 'rejected'): Promise<void> => {
+      const runId = approval.runId || activeRunIdRef.current;
+      if (!runId) {
+        return;
+      }
+
+      setChatHistory((prev) =>
+        updateLastAssistantMessage(prev, (msg) => ({
+          ...msg,
+          approvals: (msg.approvals || []).map((item) =>
+            item.approvalId === approval.approvalId ? { ...item, resolving: true, error: undefined } : item
+          ),
+        }))
+      );
+
+      try {
+        await resolveAgentApproval(runId, approval.approvalId, decision, undefined, orgId);
+      } catch (error) {
+        setChatHistory((prev) =>
+          updateLastAssistantMessage(prev, (msg) => ({
+            ...msg,
+            approvals: (msg.approvals || []).map((item) =>
+              item.approvalId === approval.approvalId
+                ? {
+                    ...item,
+                    resolving: false,
+                    error: error instanceof Error ? error.message : 'Failed to resolve approval',
+                  }
+                : item
+            ),
+          }))
+        );
+      }
+    },
+    [orgId]
   );
 
   const sendMessage = async (explicitInput?: string): Promise<void> => {
@@ -310,7 +448,7 @@ export function useChat(
       setConversationType('chat');
     }
     const sessionModel = sessionManager.sessions.find((s) => s.id === sessionManager.currentSessionId)?.model;
-    const runModel = sessionModel || selectedModel;
+    const runModel = sessionModel || (selectedModel === 'auto' ? undefined : selectedModel);
 
     try {
       const result = await runAgentDetached({
@@ -600,5 +738,6 @@ export function useChat(
     detectedPageRefs,
     messageQueue,
     stopGeneration,
+    resolveApproval,
   };
 }

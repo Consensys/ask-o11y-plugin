@@ -20,6 +20,7 @@ export interface ToolCallStartEvent {
 }
 
 export type ToolErrorKind = 'transport' | 'tool' | 'protocol' | '';
+export type AgentToolErrorKind = ToolErrorKind | 'approval_required' | 'approval_denied';
 
 export interface ToolCallResultEvent {
   id: string;
@@ -31,7 +32,7 @@ export interface ToolCallResultEvent {
    * the MCP sidecar was unreachable after retries — the UI should render a
    * distinct warning style for those to distinguish them from tool-logic errors.
    */
-  errorKind?: ToolErrorKind;
+  errorKind?: AgentToolErrorKind;
 }
 
 export interface DoneEvent {
@@ -51,6 +52,61 @@ export interface MCPUnavailableEvent {
   message: string;
 }
 
+export interface PlanStep {
+  id: string;
+  title: string;
+  description?: string;
+  status: 'pending' | 'running' | 'completed' | 'failed' | string;
+}
+
+export interface RunPlanEvent {
+  objective: string;
+  steps: PlanStep[];
+}
+
+export interface StepEvent {
+  id: string;
+  title?: string;
+  status: string;
+}
+
+export interface EvidenceEvent {
+  id: string;
+  stepId?: string;
+  title: string;
+  summary: string;
+  source?: string;
+  toolName?: string;
+  query?: string;
+  datasourceUid?: string;
+  timeRange?: string;
+}
+
+export interface ApprovalRequestEvent {
+  approvalId: string;
+  toolCallId: string;
+  toolName: string;
+  risk: string;
+  reason: string;
+  arguments: string;
+}
+
+export interface ApprovalResolvedEvent {
+  approvalId: string;
+  decision: 'approved' | 'rejected' | string;
+  comment?: string;
+  resolvedAt?: string;
+}
+
+export interface FinalReportEvent {
+  verdict?: string;
+  confidence?: string;
+  summary: string;
+  evidenceIds?: string[];
+  gaps?: string[];
+  nextSteps?: string[];
+}
+
 export type SSEEvent =
   | { type: 'content'; data: ContentEvent; sequence: number }
   | { type: 'tool_call_start'; data: ToolCallStartEvent; sequence: number }
@@ -58,7 +114,14 @@ export type SSEEvent =
   | { type: 'done'; data: DoneEvent; sequence: number }
   | { type: 'error'; data: ErrorEvent; sequence: number }
   | { type: 'run_started'; data: RunStartedEvent; sequence: number }
-  | { type: 'mcp_unavailable'; data: MCPUnavailableEvent; sequence: number };
+  | { type: 'mcp_unavailable'; data: MCPUnavailableEvent; sequence: number }
+  | { type: 'run_plan'; data: RunPlanEvent; sequence: number }
+  | { type: 'step_start'; data: StepEvent; sequence: number }
+  | { type: 'step_done'; data: StepEvent; sequence: number }
+  | { type: 'evidence'; data: EvidenceEvent; sequence: number }
+  | { type: 'approval_request'; data: ApprovalRequestEvent; sequence: number }
+  | { type: 'approval_resolved'; data: ApprovalResolvedEvent; sequence: number }
+  | { type: 'final_report'; data: FinalReportEvent; sequence: number };
 
 export interface AgentCallbacks {
   onContent: (event: ContentEvent) => void;
@@ -69,6 +132,12 @@ export interface AgentCallbacks {
   onRunStarted?: (event: RunStartedEvent) => void;
   onReconnect?: () => void;
   onMCPUnavailable?: (event: MCPUnavailableEvent) => void;
+  onRunPlan?: (event: RunPlanEvent) => void;
+  onStep?: (event: StepEvent) => void;
+  onEvidence?: (event: EvidenceEvent) => void;
+  onApprovalRequest?: (event: ApprovalRequestEvent) => void;
+  onApprovalResolved?: (event: ApprovalResolvedEvent) => void;
+  onFinalReport?: (event: FinalReportEvent) => void;
 }
 
 export interface AgentRunStatus {
@@ -79,6 +148,12 @@ export interface AgentRunStatus {
   createdAt: string;
   updatedAt: string;
   events: SSEEvent[];
+  trace?: {
+    plan?: PlanStep[];
+    evidence?: EvidenceEvent[];
+    approvals?: Array<ApprovalRequestEvent & { decision?: string; comment?: string; createdAt?: string; resolvedAt?: string }>;
+    finalReport?: FinalReportEvent;
+  };
   error?: string;
 }
 
@@ -210,15 +285,60 @@ function dispatchEvent(event: SSEEvent, callbacks: AgentCallbacks): void {
     case 'mcp_unavailable':
       callbacks.onMCPUnavailable?.(event.data);
       break;
+    case 'run_plan':
+      callbacks.onRunPlan?.(event.data);
+      break;
+    case 'step_start':
+    case 'step_done':
+      callbacks.onStep?.(event.data);
+      break;
+    case 'evidence':
+      callbacks.onEvidence?.(event.data);
+      break;
+    case 'approval_request':
+      callbacks.onApprovalRequest?.(event.data);
+      break;
+    case 'approval_resolved':
+      callbacks.onApprovalResolved?.(event.data);
+      break;
+    case 'final_report':
+      callbacks.onFinalReport?.(event.data);
+      break;
     default:
       break;
   }
+}
+
+export async function resolveAgentApproval(
+  runId: string,
+  approvalId: string,
+  decision: 'approved' | 'rejected',
+  comment?: string,
+  orgId?: string
+): Promise<ApprovalResolvedEvent> {
+  const resp = await fetch(`${AGENT_RUNS_URL}/${runId}/approvals/${approvalId}`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...orgIdHeaders(orgId),
+    },
+    body: JSON.stringify({ decision, comment }),
+  });
+
+  if (!resp.ok) {
+    const text = await resp.text();
+    throw new Error(`Failed to resolve approval (${resp.status}): ${text}`);
+  }
+
+  return resp.json();
 }
 
 export interface DetachedRunResult {
   runId: string;
   sessionId: string;
   status: string;
+  model?: 'base' | 'large';
+  modelSource?: 'auto' | 'request' | 'session' | string;
 }
 
 export async function runAgentDetached(request: AgentRunRequest): Promise<DetachedRunResult> {

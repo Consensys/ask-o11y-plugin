@@ -2,7 +2,9 @@ package plugin
 
 import (
 	"consensys-asko11y-app/pkg/agent"
+	"encoding/json"
 	"fmt"
+	"sort"
 	"sync"
 	"time"
 
@@ -26,8 +28,29 @@ type AgentRun struct {
 	CreatedAt    time.Time        `json:"createdAt"`
 	UpdatedAt    time.Time        `json:"updatedAt"`
 	Events       []agent.SSEEvent `json:"events"`
+	Trace        *AgentRunTrace   `json:"trace,omitempty"`
 	Error        string           `json:"error,omitempty"`
 	NextSequence int64            `json:"-"`
+}
+
+type AgentRunTrace struct {
+	Plan        []agent.PlanStep        `json:"plan,omitempty"`
+	Evidence    []agent.EvidenceEvent   `json:"evidence,omitempty"`
+	Approvals   []RunApproval           `json:"approvals,omitempty"`
+	FinalReport *agent.FinalReportEvent `json:"finalReport,omitempty"`
+}
+
+type RunApproval struct {
+	ApprovalID string     `json:"approvalId"`
+	ToolCallID string     `json:"toolCallId,omitempty"`
+	ToolName   string     `json:"toolName,omitempty"`
+	Risk       string     `json:"risk,omitempty"`
+	Reason     string     `json:"reason,omitempty"`
+	Arguments  string     `json:"arguments,omitempty"`
+	Decision   string     `json:"decision,omitempty"`
+	Comment    string     `json:"comment,omitempty"`
+	CreatedAt  time.Time  `json:"createdAt"`
+	ResolvedAt *time.Time `json:"resolvedAt,omitempty"`
 }
 
 type RunStoreInterface interface {
@@ -35,6 +58,7 @@ type RunStoreInterface interface {
 	AppendEvent(runID string, event agent.SSEEvent)
 	FinishRun(runID string, status RunStatus, errMsg string)
 	GetRun(runID string) (*AgentRun, error)
+	ListRuns(userID, orgID int64, limit int) ([]*AgentRun, error)
 	GetBroadcaster(runID string) *RunBroadcaster
 	SubscribeAndSnapshot(runID string) (*AgentRun, <-chan agent.SSEEvent, func(), error)
 	CleanupOld()
@@ -138,6 +162,7 @@ func (s *RunStore) CreateRun(runID string, userID, orgID int64) *AgentRun {
 		CreatedAt: now,
 		UpdatedAt: now,
 		Events:    []agent.SSEEvent{},
+		Trace:     &AgentRunTrace{},
 	}
 
 	s.runs[runID] = run
@@ -158,6 +183,7 @@ func (s *RunStore) AppendEvent(runID string, event agent.SSEEvent) {
 	if len(run.Events) > RunMaxEventsPerRun {
 		run.Events = run.Events[len(run.Events)-RunMaxEventsPerRun:]
 	}
+	applyTraceEvent(run, event)
 	run.UpdatedAt = time.Now()
 	b := s.broadcasters[runID]
 	s.mu.Unlock()
@@ -196,10 +222,32 @@ func (s *RunStore) GetRun(runID string) (*AgentRun, error) {
 		return nil, fmt.Errorf("run not found")
 	}
 
-	copied := *run
-	copied.Events = make([]agent.SSEEvent, len(run.Events))
-	copy(copied.Events, run.Events)
-	return &copied, nil
+	return copyRun(run), nil
+}
+
+func (s *RunStore) ListRuns(userID, orgID int64, limit int) ([]*AgentRun, error) {
+	if limit <= 0 || limit > 100 {
+		limit = 50
+	}
+
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	runs := make([]*AgentRun, 0, min(limit, len(s.runs)))
+	for _, run := range s.runs {
+		if run.UserID != userID || run.OrgID != orgID {
+			continue
+		}
+		runs = append(runs, copyRun(run))
+	}
+
+	sort.Slice(runs, func(i, j int) bool {
+		return runs[i].UpdatedAt.After(runs[j].UpdatedAt)
+	})
+	if len(runs) > limit {
+		runs = runs[:limit]
+	}
+	return runs, nil
 }
 
 func (s *RunStore) GetBroadcaster(runID string) *RunBroadcaster {
@@ -220,17 +268,165 @@ func (s *RunStore) SubscribeAndSnapshot(runID string) (*AgentRun, <-chan agent.S
 		return nil, nil, nil, fmt.Errorf("run not found")
 	}
 
-	copied := *run
-	copied.Events = make([]agent.SSEEvent, len(run.Events))
-	copy(copied.Events, run.Events)
+	copied := copyRun(run)
 
 	b := s.broadcasters[runID]
 	if b == nil || run.Status != RunStatusRunning {
-		return &copied, nil, nil, nil
+		return copied, nil, nil, nil
 	}
 
 	ch, unsub := b.Subscribe()
-	return &copied, ch, unsub, nil
+	return copied, ch, unsub, nil
+}
+
+func copyRun(run *AgentRun) *AgentRun {
+	if run == nil {
+		return nil
+	}
+	copied := *run
+	copied.Events = make([]agent.SSEEvent, len(run.Events))
+	copy(copied.Events, run.Events)
+	copied.Trace = copyTrace(run.Trace)
+	return &copied
+}
+
+func applyTraceEvent(run *AgentRun, event agent.SSEEvent) {
+	if run.Trace == nil {
+		run.Trace = &AgentRunTrace{}
+	}
+	switch event.Type {
+	case "run_plan":
+		if data, ok := decodeEventData[agent.RunPlanEvent](event.Data); ok {
+			run.Trace.Plan = append([]agent.PlanStep(nil), data.Steps...)
+		}
+	case "step_start", "step_done":
+		if data, ok := decodeEventData[agent.StepEvent](event.Data); ok {
+			updateTraceStep(run.Trace, data)
+		}
+	case "evidence":
+		if data, ok := decodeEventData[agent.EvidenceEvent](event.Data); ok {
+			upsertEvidence(run.Trace, data)
+		}
+	case "approval_request":
+		if data, ok := decodeEventData[agent.ApprovalRequestEvent](event.Data); ok {
+			upsertApproval(run.Trace, RunApproval{
+				ApprovalID: data.ApprovalID,
+				ToolCallID: data.ToolCallID,
+				ToolName:   data.ToolName,
+				Risk:       data.Risk,
+				Reason:     data.Reason,
+				Arguments:  data.Arguments,
+				CreatedAt:  time.Now().UTC(),
+			})
+		}
+	case "approval_resolved":
+		if data, ok := decodeEventData[agent.ApprovalResolvedEvent](event.Data); ok {
+			resolveTraceApproval(run.Trace, data)
+		}
+	case "final_report":
+		if data, ok := decodeEventData[agent.FinalReportEvent](event.Data); ok {
+			report := data
+			run.Trace.FinalReport = &report
+		}
+	}
+}
+
+func decodeEventData[T any](data interface{}) (T, bool) {
+	if typed, ok := data.(T); ok {
+		return typed, true
+	}
+	var out T
+	raw, err := json.Marshal(data)
+	if err != nil {
+		return out, false
+	}
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return out, false
+	}
+	return out, true
+}
+
+func updateTraceStep(trace *AgentRunTrace, event agent.StepEvent) {
+	for i := range trace.Plan {
+		if trace.Plan[i].ID == event.ID {
+			trace.Plan[i].Status = event.Status
+			return
+		}
+	}
+	if event.ID != "" {
+		trace.Plan = append(trace.Plan, agent.PlanStep{
+			ID:     event.ID,
+			Title:  event.Title,
+			Status: event.Status,
+		})
+	}
+}
+
+func upsertEvidence(trace *AgentRunTrace, evidence agent.EvidenceEvent) {
+	for i := range trace.Evidence {
+		if trace.Evidence[i].ID == evidence.ID {
+			trace.Evidence[i] = evidence
+			return
+		}
+	}
+	trace.Evidence = append(trace.Evidence, evidence)
+}
+
+func upsertApproval(trace *AgentRunTrace, approval RunApproval) {
+	for i := range trace.Approvals {
+		if trace.Approvals[i].ApprovalID == approval.ApprovalID {
+			if trace.Approvals[i].Decision != "" {
+				approval.Decision = trace.Approvals[i].Decision
+				approval.Comment = trace.Approvals[i].Comment
+				approval.ResolvedAt = trace.Approvals[i].ResolvedAt
+			}
+			trace.Approvals[i] = approval
+			return
+		}
+	}
+	trace.Approvals = append(trace.Approvals, approval)
+}
+
+func resolveTraceApproval(trace *AgentRunTrace, resolved agent.ApprovalResolvedEvent) {
+	resolvedAt := time.Now().UTC()
+	if resolved.ResolvedAt != "" {
+		if parsed, err := time.Parse(time.RFC3339, resolved.ResolvedAt); err == nil {
+			resolvedAt = parsed
+		}
+	}
+	for i := range trace.Approvals {
+		if trace.Approvals[i].ApprovalID == resolved.ApprovalID {
+			trace.Approvals[i].Decision = resolved.Decision
+			trace.Approvals[i].Comment = resolved.Comment
+			trace.Approvals[i].ResolvedAt = &resolvedAt
+			return
+		}
+	}
+	trace.Approvals = append(trace.Approvals, RunApproval{
+		ApprovalID: resolved.ApprovalID,
+		Decision:   resolved.Decision,
+		Comment:    resolved.Comment,
+		CreatedAt:  resolvedAt,
+		ResolvedAt: &resolvedAt,
+	})
+}
+
+func copyTrace(trace *AgentRunTrace) *AgentRunTrace {
+	if trace == nil {
+		return nil
+	}
+	copied := *trace
+	copied.Plan = append([]agent.PlanStep(nil), trace.Plan...)
+	copied.Evidence = append([]agent.EvidenceEvent(nil), trace.Evidence...)
+	copied.Approvals = append([]RunApproval(nil), trace.Approvals...)
+	if trace.FinalReport != nil {
+		report := *trace.FinalReport
+		report.EvidenceIDs = append([]string(nil), trace.FinalReport.EvidenceIDs...)
+		report.Gaps = append([]string(nil), trace.FinalReport.Gaps...)
+		report.NextSteps = append([]string(nil), trace.FinalReport.NextSteps...)
+		copied.FinalReport = &report
+	}
+	return &copied
 }
 
 func (s *RunStore) CleanupOld() {
