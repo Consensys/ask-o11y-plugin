@@ -85,9 +85,13 @@ function AgentTraceSummary({
   const hasEvidence = Boolean(message.evidence?.length);
   const hasApprovals = Boolean(message.approvals?.length);
   const [isPlanOpen, setIsPlanOpen] = React.useState(false);
+  const [isEvidenceOpen, setIsEvidenceOpen] = React.useState(false);
   const planSteps = message.runPlan?.steps || [];
-  const completedSteps = planSteps.filter((step) => step.status === 'completed').length;
-  const runningSteps = planSteps.filter((step) => step.status === 'running').length;
+  const isRunComplete = Boolean(message.finalReport);
+  const completedSteps = isRunComplete
+    ? planSteps.length
+    : planSteps.filter((step) => step.status === 'completed').length;
+  const runningSteps = isRunComplete ? 0 : planSteps.filter((step) => step.status === 'running').length;
   const planProgress = planSteps.length > 0 ? Math.round((completedSteps / planSteps.length) * 100) : 0;
 
   if (!hasPlan && !hasEvidence && !hasApprovals && !message.finalReport) {
@@ -226,19 +230,50 @@ function AgentTraceSummary({
 
       {hasEvidence && (
         <div className="px-3 py-2">
-          <div className="text-xs font-medium mb-2" style={{ color: theme.colors.text.secondary }}>
-            Evidence
-          </div>
-          <div className="space-y-2">
-            {message.evidence?.map((item) => (
-              <div key={item.id} className="text-xs leading-relaxed">
-                <div className="font-medium" style={{ color: theme.colors.text.primary }}>
-                  {item.title}
-                </div>
-                <div style={{ color: theme.colors.text.secondary }}>{item.summary}</div>
+          <button
+            type="button"
+            className="flex w-full items-center gap-3 text-left"
+            aria-expanded={isEvidenceOpen}
+            onClick={() => setIsEvidenceOpen((open) => !open)}
+            style={{
+              background: 'transparent',
+              border: 0,
+              color: 'inherit',
+              cursor: 'pointer',
+              padding: 0,
+            }}
+          >
+            <Icon name={isEvidenceOpen ? 'angle-down' : 'angle-right'} size="sm" />
+            <div className="flex min-w-0 flex-1 items-center justify-between gap-3">
+              <div className="text-xs font-medium truncate" style={{ color: theme.colors.text.secondary }}>
+                Evidence
               </div>
-            ))}
-          </div>
+              <div className="text-xs" style={{ color: theme.colors.text.secondary }}>
+                {message.evidence?.length || 0} collected
+              </div>
+            </div>
+          </button>
+          {isEvidenceOpen && (
+            <div className="mt-3 space-y-2">
+              {message.evidence?.map((item) => (
+                <div
+                  key={item.id}
+                  className="rounded px-3 py-2 text-xs leading-relaxed"
+                  style={{
+                    backgroundColor: theme.colors.background.primary,
+                    border: `1px solid ${theme.colors.border.weak}`,
+                  }}
+                >
+                  <div className="font-medium" style={{ color: theme.colors.text.primary }}>
+                    {item.title}
+                  </div>
+                  <div className="mt-1 break-words" style={{ color: theme.colors.text.secondary }}>
+                    {item.summary}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
     </div>

@@ -1,7 +1,12 @@
 import { act } from 'react';
 import { renderHook } from '@testing-library/react';
 import { useChat } from '../useChat';
-import { resolveAgentApproval, getAgentRunStatus } from '../../../../services/agentClient';
+import {
+  reconnectToAgentRun,
+  resolveAgentApproval,
+  getAgentRunStatus,
+  runAgentDetached,
+} from '../../../../services/agentClient';
 import type { AgentApprovalItem, ChatMessage } from '../../types';
 
 jest.mock('@grafana/runtime', () => ({
@@ -33,6 +38,8 @@ jest.mock('../../../../services/agentClient', () => ({
 
 const resolveAgentApprovalMock = resolveAgentApproval as jest.MockedFunction<typeof resolveAgentApproval>;
 const getAgentRunStatusMock = getAgentRunStatus as jest.MockedFunction<typeof getAgentRunStatus>;
+const runAgentDetachedMock = runAgentDetached as jest.MockedFunction<typeof runAgentDetached>;
+const reconnectToAgentRunMock = reconnectToAgentRun as jest.MockedFunction<typeof reconnectToAgentRun>;
 
 describe('useChat approval handling', () => {
   beforeEach(() => {
@@ -166,5 +173,34 @@ describe('useChat approval handling', () => {
     expect(updatedApproval?.decision).toBe('approved');
     expect(updatedApproval?.error).toBeUndefined();
     expect(updatedApproval?.resolving).toBe(false);
+  });
+
+  it('marks all non-failed plan steps complete when the run finishes', async () => {
+    runAgentDetachedMock.mockResolvedValueOnce({ runId: 'run-1', sessionId: 'session-1', status: 'running' });
+    reconnectToAgentRunMock.mockImplementationOnce(async (_runId, callbacks) => {
+      callbacks.onRunPlan?.({
+        objective: 'Answer the request using available Grafana and MCP evidence.',
+        steps: [
+          { id: 'understand', title: 'Understand request', status: 'completed' },
+          { id: 'evidence', title: 'Gather evidence', status: 'running' },
+          { id: 'answer', title: 'Answer with citations', status: 'pending' },
+        ],
+      });
+      callbacks.onContent({ content: 'Done' });
+      callbacks.onDone({ totalIterations: 2 });
+    });
+
+    const { result } = renderHook(() => useChat({}, null, jest.fn()));
+
+    await act(async () => {
+      result.current.setCurrentInput('Investigate alerts');
+    });
+    await act(async () => {
+      await result.current.sendMessage();
+    });
+
+    const assistantMessages = result.current.chatHistory.filter((message) => message.role === 'assistant');
+    const assistant = assistantMessages[assistantMessages.length - 1];
+    expect(assistant?.runPlan?.steps.map((step) => step.status)).toEqual(['completed', 'completed', 'completed']);
   });
 });

@@ -5,6 +5,12 @@ All notable changes to the Ask O11y Grafana plugin will be documented in this fi
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.32](https://github.com/Consensys/ask-o11y-plugin/compare/v0.2.31...v0.2.32) (2026-06-01)
+
+### Bug Fixes
+
+- **chat:** collapse evidence details by default and complete run progress on terminal events
+
 ## [0.2.31](https://github.com/Consensys/ask-o11y-plugin/compare/v0.2.30...v0.2.31) (2026-06-01)
 
 ### Bug Fixes

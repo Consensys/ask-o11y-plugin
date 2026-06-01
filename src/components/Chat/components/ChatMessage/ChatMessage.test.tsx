@@ -3,7 +3,7 @@
  */
 
 import React from 'react';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { ChatMessage } from './ChatMessage';
 import { ChatMessage as ChatMessageType } from '../../types';
 
@@ -210,6 +210,55 @@ describe('ChatMessage', () => {
       expect(
         screen.queryByText('Answer the request using available Grafana and MCP evidence.')
       ).not.toBeInTheDocument();
+    });
+
+    it('should show completed progress when a final report exists', () => {
+      const message: ChatMessageType = {
+        role: 'assistant',
+        content: 'Done',
+        runPlan: {
+          objective: 'Answer the request using available Grafana and MCP evidence.',
+          steps: [
+            { id: 'understand', title: 'Understand request', status: 'completed' },
+            { id: 'evidence', title: 'Gather evidence', status: 'running' },
+            { id: 'answer', title: 'Answer with citations', status: 'pending' },
+          ],
+        },
+        finalReport: {
+          summary: 'Complete',
+        },
+      };
+
+      render(<ChatMessage message={message} />);
+
+      expect(screen.getByText('3/3')).toBeInTheDocument();
+      expect(screen.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '100');
+    });
+
+    it('should collapse evidence details by default', () => {
+      const message: ChatMessageType = {
+        role: 'assistant',
+        content: 'Done',
+        evidence: [
+          {
+            id: 'tc_1',
+            title: 'Evidence from grafana query loki logs',
+            summary: '{"large":"raw payload"}',
+          },
+        ],
+      };
+
+      render(<ChatMessage message={message} />);
+
+      expect(screen.getByText('Evidence')).toBeInTheDocument();
+      expect(screen.getByText('1 collected')).toBeInTheDocument();
+      expect(screen.queryByText('Evidence from grafana query loki logs')).not.toBeInTheDocument();
+      expect(screen.queryByText('{"large":"raw payload"}')).not.toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole('button', { name: /Evidence 1 collected/i }));
+
+      expect(screen.getByText('Evidence from grafana query loki logs')).toBeInTheDocument();
+      expect(screen.getByText('{"large":"raw payload"}')).toBeInTheDocument();
     });
 
     it('should offer approve this time and approve for session for pending approvals', () => {

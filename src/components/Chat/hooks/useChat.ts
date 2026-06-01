@@ -245,7 +245,24 @@ export function useChat(
           return next;
         });
       },
-      onDone: () => {},
+      onDone: () => {
+        if (abortController.signal.aborted) {
+          return;
+        }
+        setChatHistory((prev) =>
+          updateLastAssistantMessage(prev, (msg) => ({
+            ...msg,
+            runPlan: msg.runPlan
+              ? {
+                  ...msg.runPlan,
+                  steps: msg.runPlan.steps.map((step) =>
+                    step.status === 'failed' ? step : { ...step, status: 'completed' }
+                  ),
+                }
+              : msg.runPlan,
+          }))
+        );
+      },
       onReconnect: () => {
         setChatHistory((prev) =>
           updateLastAssistantMessage(prev, (msg) => ({
@@ -358,6 +375,14 @@ export function useChat(
           updateLastAssistantMessage(prev, (msg) => ({
             ...msg,
             finalReport: event,
+            runPlan: msg.runPlan
+              ? {
+                  ...msg.runPlan,
+                  steps: msg.runPlan.steps.map((step) =>
+                    step.status === 'failed' ? step : { ...step, status: 'completed' }
+                  ),
+                }
+              : msg.runPlan,
           }))
         );
       },
