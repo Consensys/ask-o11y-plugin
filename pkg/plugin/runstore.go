@@ -22,6 +22,7 @@ const (
 
 type AgentRun struct {
 	RunID        string           `json:"runId"`
+	SessionID    string           `json:"sessionId,omitempty"`
 	Status       RunStatus        `json:"status"`
 	UserID       int64            `json:"userId"`
 	OrgID        int64            `json:"orgId"`
@@ -54,7 +55,7 @@ type RunApproval struct {
 }
 
 type RunStoreInterface interface {
-	CreateRun(runID string, userID, orgID int64) *AgentRun
+	CreateRun(runID string, userID, orgID int64, sessionID ...string) *AgentRun
 	AppendEvent(runID string, event agent.SSEEvent)
 	FinishRun(runID string, status RunStatus, errMsg string)
 	GetRun(runID string) (*AgentRun, error)
@@ -149,7 +150,7 @@ func NewRunStore(logger log.Logger) *RunStore {
 	}
 }
 
-func (s *RunStore) CreateRun(runID string, userID, orgID int64) *AgentRun {
+func (s *RunStore) CreateRun(runID string, userID, orgID int64, sessionID ...string) *AgentRun {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -163,6 +164,9 @@ func (s *RunStore) CreateRun(runID string, userID, orgID int64) *AgentRun {
 		UpdatedAt: now,
 		Events:    []agent.SSEEvent{},
 		Trace:     &AgentRunTrace{},
+	}
+	if len(sessionID) > 0 {
+		run.SessionID = sessionID[0]
 	}
 
 	s.runs[runID] = run

@@ -13,7 +13,7 @@ import (
 func TestRunStore_CreateRun(t *testing.T) {
 	store := NewRunStore(log.DefaultLogger)
 
-	run := store.CreateRun("run-1", 100, 1)
+	run := store.CreateRun("run-1", 100, 1, "session-1")
 
 	if run.RunID != "run-1" {
 		t.Errorf("expected RunID 'run-1', got '%s'", run.RunID)
@@ -26,6 +26,9 @@ func TestRunStore_CreateRun(t *testing.T) {
 	}
 	if run.OrgID != 1 {
 		t.Errorf("expected OrgID 1, got %d", run.OrgID)
+	}
+	if run.SessionID != "session-1" {
+		t.Errorf("expected SessionID session-1, got %q", run.SessionID)
 	}
 	if len(run.Events) != 0 {
 		t.Errorf("expected 0 events, got %d", len(run.Events))

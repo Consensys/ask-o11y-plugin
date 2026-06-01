@@ -165,6 +165,7 @@ type Plugin struct {
 	redisClient    *redis.Client
 	usingRedis     bool
 	approvalBroker ApprovalBroker
+	approvalGrants ApprovalGrantStore
 	useBuiltInMCP  bool
 	promptRegistry *PromptRegistry
 	settings       PluginSettings
@@ -266,11 +267,14 @@ func NewPlugin(ctx context.Context, settings backend.AppInstanceSettings) (insta
 	}
 
 	var approvalBroker ApprovalBroker
+	var approvalGrants ApprovalGrantStore
 	if usingRedis && redisClient != nil {
 		approvalBroker = NewRedisApprovalBroker(pluginCtx, redisClient, logger)
+		approvalGrants = NewRedisApprovalGrantStore(pluginCtx, redisClient, logger)
 		logger.Info("Using Redis for distributed approval coordination")
 	} else {
 		approvalBroker = NewInMemoryApprovalBroker()
+		approvalGrants = NewInMemoryApprovalGrantStore()
 		logger.Warn("Using in-memory approval coordination; approval routing is unsafe with multiple Grafana replicas. Configure Redis for production.")
 	}
 
@@ -307,6 +311,7 @@ func NewPlugin(ctx context.Context, settings backend.AppInstanceSettings) (insta
 		redisClient:    redisClient,
 		usingRedis:     usingRedis,
 		approvalBroker: approvalBroker,
+		approvalGrants: approvalGrants,
 		useBuiltInMCP:  pluginSettings.UseBuiltInMCP,
 		promptRegistry: promptRegistry,
 		settings:       pluginSettings,
@@ -363,6 +368,9 @@ func (p *Plugin) Dispose() {
 	p.runCancelsMu.Unlock()
 	if p.approvalBroker != nil {
 		p.approvalBroker.Close()
+	}
+	if p.approvalGrants != nil {
+		p.approvalGrants.Close()
 	}
 
 	// Stop the scout before closing the proxy so its in-flight scavenge can finish.
@@ -883,7 +891,7 @@ func (p *Plugin) handleAgentRun(w http.ResponseWriter, r *http.Request) {
 	if err := p.sessionStore.SetActiveRunID(sessionID, userID, numericOrgID, runID); err != nil {
 		p.logger.Warn("Failed to set active run ID", "error", err)
 	}
-	p.runStore.CreateRun(runID, userID, numericOrgID)
+	p.runStore.CreateRun(runID, userID, numericOrgID, sessionID)
 
 	p.logger.Info("Agent run request",
 		"role", userRole,
@@ -925,6 +933,7 @@ func (p *Plugin) handleAgentRun(w http.ResponseWriter, r *http.Request) {
 		MaxParallelToolCalls:    p.settings.MaxParallelToolCalls,
 		EnableProgressiveEvents: p.settings.AgentWorkflowVersion != "legacy",
 		RegisterApproval:        p.approvalRegistrar(runID),
+		CheckApprovalGrant:      p.approvalGrantChecker(sessionID),
 	}
 
 	detachedCtx := context.WithoutCancel(ctx)
@@ -1035,6 +1044,17 @@ func (p *Plugin) approvalRegistrar(runID string) agent.ApprovalRegistrar {
 	}
 }
 
+func (p *Plugin) approvalGrantChecker(sessionID string) agent.ApprovalGrantChecker {
+	return func(ctx context.Context, request agent.ApprovalRequestEvent) (bool, error) {
+		store := p.approvalGrants
+		if store == nil {
+			store = NewInMemoryApprovalGrantStore()
+			p.approvalGrants = store
+		}
+		return store.Has(ctx, sessionID, request.ToolName)
+	}
+}
+
 func (p *Plugin) handleAgentRuns(w http.ResponseWriter, r *http.Request) {
 	path := r.URL.Path
 	prefix := "/api/agent/runs/"
@@ -1107,8 +1127,9 @@ func (p *Plugin) handleAgentRuns(w http.ResponseWriter, r *http.Request) {
 }
 
 type approvalDecisionRequest struct {
-	Decision string `json:"decision"`
-	Comment  string `json:"comment,omitempty"`
+	Decision      string `json:"decision"`
+	Comment       string `json:"comment,omitempty"`
+	ApprovalScope string `json:"approvalScope,omitempty"`
 }
 
 func (p *Plugin) handleAgentApproval(w http.ResponseWriter, r *http.Request, runID, approvalID string) {
@@ -1138,6 +1159,10 @@ func (p *Plugin) handleAgentApproval(w http.ResponseWriter, r *http.Request, run
 		Decision:   decision,
 		Comment:    strings.TrimSpace(req.Comment),
 		ResolvedAt: time.Now().UTC().Format(time.RFC3339),
+	}
+	approveAlways := decision == "approved" && normalizeApprovalScope(req.ApprovalScope) == "always"
+	if approveAlways && resolved.Comment == "" {
+		resolved.Comment = "approved always for this session"
 	}
 
 	broker := p.approvalBroker
@@ -1175,9 +1200,43 @@ func (p *Plugin) handleAgentApproval(w http.ResponseWriter, r *http.Request, run
 		http.Error(w, approvalAlreadyResolvedMessage(delivered.Decision), http.StatusConflict)
 		return
 	}
+	if approveAlways {
+		if err := p.grantToolApproval(r.Context(), run, approvalID); err != nil {
+			p.logger.Warn("Failed to persist approval grant", "error", err, "runId", runID, "approvalId", approvalID)
+		}
+	}
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(delivered)
+}
+
+func (p *Plugin) grantToolApproval(ctx context.Context, run *AgentRun, approvalID string) error {
+	if run == nil || run.Trace == nil {
+		return fmt.Errorf("run trace is unavailable")
+	}
+	var matched *RunApproval
+	for i := range run.Trace.Approvals {
+		if run.Trace.Approvals[i].ApprovalID == approvalID {
+			matched = &run.Trace.Approvals[i]
+			break
+		}
+	}
+	if matched == nil || strings.TrimSpace(matched.ToolName) == "" {
+		return fmt.Errorf("approval request metadata is unavailable")
+	}
+
+	store := p.approvalGrants
+	if store == nil {
+		store = NewInMemoryApprovalGrantStore()
+		p.approvalGrants = store
+	}
+	return store.Grant(ctx, ApprovalGrant{
+		ToolName:  matched.ToolName,
+		Risk:      matched.Risk,
+		Reason:    matched.Reason,
+		SessionID: run.SessionID,
+		CreatedAt: time.Now().UTC(),
+	})
 }
 
 func resolvedApprovalFromRun(run *AgentRun, approvalID string) (agent.ApprovalResolvedEvent, bool) {
@@ -1773,6 +1832,15 @@ func normalizeApprovalDecision(decision string) string {
 		return "rejected"
 	default:
 		return ""
+	}
+}
+
+func normalizeApprovalScope(scope string) string {
+	switch strings.ToLower(strings.TrimSpace(scope)) {
+	case "always", "tool", "approve_always", "approve-always":
+		return "always"
+	default:
+		return "once"
 	}
 }
 

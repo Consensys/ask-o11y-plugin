@@ -118,7 +118,11 @@ export interface ChatInterfaceProps {
   onSuggestionClick?: (message: string) => void;
   queuedMessageCount: number;
   onStopGeneration?: () => void;
-  onResolveApproval?: (approval: AgentApprovalItem, decision: 'approved' | 'rejected') => Promise<void>;
+  onResolveApproval?: (
+    approval: AgentApprovalItem,
+    decision: 'approved' | 'rejected',
+    approvalScope?: 'once' | 'always'
+  ) => Promise<void>;
 }
 
 /** Props for the Grafana page panel */

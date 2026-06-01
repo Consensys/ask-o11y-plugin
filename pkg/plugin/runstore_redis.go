@@ -38,7 +38,7 @@ func NewRedisRunStore(ctx context.Context, client *redis.Client, logger log.Logg
 	}
 }
 
-func (s *RedisRunStore) CreateRun(runID string, userID, orgID int64) *AgentRun {
+func (s *RedisRunStore) CreateRun(runID string, userID, orgID int64, sessionID ...string) *AgentRun {
 	now := time.Now()
 	run := &AgentRun{
 		RunID:     runID,
@@ -49,6 +49,9 @@ func (s *RedisRunStore) CreateRun(runID string, userID, orgID int64) *AgentRun {
 		UpdatedAt: now,
 		Events:    []agent.SSEEvent{},
 		Trace:     &AgentRunTrace{},
+	}
+	if len(sessionID) > 0 {
+		run.SessionID = sessionID[0]
 	}
 
 	runJSON, err := json.Marshal(run)

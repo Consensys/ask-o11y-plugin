@@ -13,7 +13,11 @@ interface ChatMessageProps {
   message: ChatMessageType;
   isGenerating?: boolean;
   isLastMessage?: boolean;
-  onResolveApproval?: (approval: AgentApprovalItem, decision: 'approved' | 'rejected') => Promise<void>;
+  onResolveApproval?: (
+    approval: AgentApprovalItem,
+    decision: 'approved' | 'rejected',
+    approvalScope?: 'once' | 'always'
+  ) => Promise<void>;
 }
 
 function buildTimeRange(query: ContentSection['query']): { from: string; to: string } | undefined {
@@ -70,12 +74,21 @@ function AgentTraceSummary({
   onResolveApproval,
 }: {
   message: ChatMessageType;
-  onResolveApproval?: (approval: AgentApprovalItem, decision: 'approved' | 'rejected') => Promise<void>;
+  onResolveApproval?: (
+    approval: AgentApprovalItem,
+    decision: 'approved' | 'rejected',
+    approvalScope?: 'once' | 'always'
+  ) => Promise<void>;
 }): React.ReactElement | null {
   const theme = useTheme2();
   const hasPlan = Boolean(message.runPlan?.steps?.length);
   const hasEvidence = Boolean(message.evidence?.length);
   const hasApprovals = Boolean(message.approvals?.length);
+  const [isPlanOpen, setIsPlanOpen] = React.useState(false);
+  const planSteps = message.runPlan?.steps || [];
+  const completedSteps = planSteps.filter((step) => step.status === 'completed').length;
+  const runningSteps = planSteps.filter((step) => step.status === 'running').length;
+  const planProgress = planSteps.length > 0 ? Math.round((completedSteps / planSteps.length) * 100) : 0;
 
   if (!hasPlan && !hasEvidence && !hasApprovals && !message.finalReport) {
     return null;
@@ -91,28 +104,71 @@ function AgentTraceSummary({
     >
       {hasPlan && (
         <div className="px-3 py-2 border-b border-weak">
-          <div className="text-xs font-medium mb-2" style={{ color: theme.colors.text.secondary }}>
-            {message.runPlan?.objective}
-          </div>
-          <div className="flex flex-wrap gap-2">
-            {message.runPlan?.steps.map((step) => (
-              <span
-                key={step.id}
-                className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs"
-                style={{
-                  backgroundColor: theme.colors.background.primary,
-                  color: theme.colors.text.primary,
-                  border: `1px solid ${theme.colors.border.weak}`,
-                }}
+          <button
+            type="button"
+            className="flex w-full items-center gap-3 text-left"
+            aria-expanded={isPlanOpen}
+            onClick={() => setIsPlanOpen((open) => !open)}
+            style={{
+              background: 'transparent',
+              border: 0,
+              color: 'inherit',
+              cursor: 'pointer',
+              padding: 0,
+            }}
+          >
+            <Icon name={isPlanOpen ? 'angle-down' : 'angle-right'} size="sm" />
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center justify-between gap-3">
+                <div className="text-xs font-medium truncate" style={{ color: theme.colors.text.secondary }}>
+                  Run progress
+                </div>
+                <div className="text-xs" style={{ color: theme.colors.text.secondary }}>
+                  {completedSteps}/{planSteps.length}
+                  {runningSteps > 0 ? ' running' : ''}
+                </div>
+              </div>
+              <div
+                className="mt-2 h-1.5 overflow-hidden rounded"
+                style={{ backgroundColor: theme.colors.background.primary }}
+                role="progressbar"
+                aria-valuemin={0}
+                aria-valuemax={100}
+                aria-valuenow={planProgress}
               >
-                <Icon
-                  name={step.status === 'completed' ? 'check' : step.status === 'running' ? 'spinner' : 'circle'}
-                  size="xs"
+                <div
+                  className="h-full rounded"
+                  style={{ width: `${planProgress}%`, backgroundColor: theme.colors.primary.main }}
                 />
-                {step.title}
-              </span>
-            ))}
-          </div>
+              </div>
+            </div>
+          </button>
+          {isPlanOpen && (
+            <div className="mt-3">
+              <div className="text-xs font-medium mb-2" style={{ color: theme.colors.text.secondary }}>
+                {message.runPlan?.objective}
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {planSteps.map((step) => (
+                  <span
+                    key={step.id}
+                    className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs"
+                    style={{
+                      backgroundColor: theme.colors.background.primary,
+                      color: theme.colors.text.primary,
+                      border: `1px solid ${theme.colors.border.weak}`,
+                    }}
+                  >
+                    <Icon
+                      name={step.status === 'completed' ? 'check' : step.status === 'running' ? 'spinner' : 'circle'}
+                      size="xs"
+                    />
+                    {step.title}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -133,14 +189,23 @@ function AgentTraceSummary({
                 {approval.decision ? (
                   <span className="text-xs font-medium text-secondary">{approval.decision}</span>
                 ) : (
-                  <div className="flex gap-2">
+                  <div className="flex flex-wrap justify-end gap-2">
                     <Button
                       size="sm"
                       icon="check"
                       disabled={approval.resolving || !onResolveApproval}
-                      onClick={() => onResolveApproval?.(approval, 'approved')}
+                      onClick={() => onResolveApproval?.(approval, 'approved', 'once')}
                     >
-                      Approve
+                      Approve this time
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      icon="check"
+                      disabled={approval.resolving || !onResolveApproval}
+                      onClick={() => onResolveApproval?.(approval, 'approved', 'always')}
+                    >
+                      Approve for session
                     </Button>
                     <Button
                       size="sm"
@@ -187,8 +252,7 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
   onResolveApproval,
 }) => {
   const theme = useTheme2();
-  const showThinking =
-    message.role === 'assistant' && isGenerating && isLastMessage && !message.content;
+  const showThinking = message.role === 'assistant' && isGenerating && isLastMessage && !message.content;
   const isUser = message.role === 'user';
 
   if (isUser) {
@@ -203,79 +267,77 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
             }}
             tabIndex={0}
             aria-live="polite"
-           >
+          >
             <span className="sr-only">User message</span>
             <div className="text-sm leading-relaxed whitespace-pre-wrap break-words">{message.content}</div>
-           </div>
-         </div>
-       </div>
-     );
+          </div>
+        </div>
+      </div>
+    );
   }
 
   const contentSections = message.content ? splitContentByPromQL(message.content) : [];
 
   return (
     <div className="flex w-full mb-6 animate-fadeIn" role="article" aria-label="Assistant message">
-       <div className="w-full max-w-none" tabIndex={0}>
-         <span className="sr-only">Assistant message</span>
-         {message.toolCalls && message.toolCalls.length > 0 && (
-           <div className="mb-4">
-             <ToolCallsSection toolCalls={message.toolCalls} />
-           </div>
-         )}
+      <div className="w-full max-w-none" tabIndex={0}>
+        <span className="sr-only">Assistant message</span>
+        {message.toolCalls && message.toolCalls.length > 0 && (
+          <div className="mb-4">
+            <ToolCallsSection toolCalls={message.toolCalls} />
+          </div>
+        )}
 
-         <AgentTraceSummary message={message} onResolveApproval={onResolveApproval} />
+        <AgentTraceSummary message={message} onResolveApproval={onResolveApproval} />
 
-         {showThinking && (
-           <div className="flex items-center gap-3 px-4 py-3 rounded-lg animate-pulse bg-surface text-secondary">
-             <div className="flex gap-1.5">
-               {[0, 150, 300].map((delay) => (
-                 <div
-                   key={delay}
-                   className="w-2 h-2 rounded-full animate-pulse"
-                   style={{
-                     backgroundColor: theme.colors.primary.main,
-                     animationDelay: `${delay}ms`,
-                    }}
-                 />
-               ))}
-             </div>
-             <span className="text-sm font-medium">Thinking...</span>
-           </div>
-         )}
+        {showThinking && (
+          <div className="flex items-center gap-3 px-4 py-3 rounded-lg animate-pulse bg-surface text-secondary">
+            <div className="flex gap-1.5">
+              {[0, 150, 300].map((delay) => (
+                <div
+                  key={delay}
+                  className="w-2 h-2 rounded-full animate-pulse"
+                  style={{
+                    backgroundColor: theme.colors.primary.main,
+                    animationDelay: `${delay}ms`,
+                  }}
+                />
+              ))}
+            </div>
+            <span className="text-sm font-medium">Thinking...</span>
+          </div>
+        )}
 
-         {!showThinking && contentSections.length > 0 && (
-           <div className="text-sm leading-relaxed whitespace-normal break-words text-primary">
-             {contentSections.map((section, index) => {
-               if (section.type === 'text') {
-                 return (
-                   <div key={index} className="prose prose-sm max-w-none">
-                     <MarkdownContent content={section.content} />
-                   </div>
-                 );
-               }
+        {!showThinking && contentSections.length > 0 && (
+          <div className="text-sm leading-relaxed whitespace-normal break-words text-primary">
+            {contentSections.map((section, index) => {
+              if (section.type === 'text') {
+                return (
+                  <div key={index} className="prose prose-sm max-w-none">
+                    <MarkdownContent content={section.content} />
+                  </div>
+                );
+              }
 
-               if (section.query) {
-                 return (
-                   <div key={index} className="my-3">
-                     <QuerySection section={section} />
-                   </div>
-                 );
-               }
+              if (section.query) {
+                return (
+                  <div key={index} className="my-3">
+                    <QuerySection section={section} />
+                  </div>
+                );
+              }
 
-               return null;
-             })}
-           </div>
-         )}
+              return null;
+            })}
+          </div>
+        )}
 
-         {!showThinking && contentSections.length === 0 && (
-           <div
-           className="text-sm leading-relaxed whitespace-normal break-words prose prose-sm max-w-none text-primary"
-          >
-             <MarkdownContent content={message.content} />
-           </div>
-         )}
-       </div>
-     </div>
-   );
+        {!showThinking && contentSections.length === 0 && (
+          <div className="text-sm leading-relaxed whitespace-normal break-words prose prose-sm max-w-none text-primary">
+            <MarkdownContent content={message.content} />
+          </div>
+        )}
+      </div>
+    </div>
+  );
 };

@@ -71,6 +71,7 @@ describe('useChat approval handling', () => {
     });
 
     expect(resolveAgentApprovalMock).toHaveBeenCalledTimes(1);
+    expect(resolveAgentApprovalMock).toHaveBeenCalledWith('run-1', 'tc_1', 'approved', undefined, '2', 'once');
 
     await act(async () => {
       resolveDecision({
@@ -85,8 +86,38 @@ describe('useChat approval handling', () => {
     expect(result.current.chatHistory[0].approvals?.[0].decision).toBe('approved');
   });
 
+  it('passes approve-always scope to the approval API', async () => {
+    resolveAgentApprovalMock.mockResolvedValueOnce({
+      approvalId: 'tc_1',
+      decision: 'approved',
+      resolvedAt: '2026-05-29T12:00:00Z',
+    });
+    const approval: AgentApprovalItem = {
+      approvalId: 'tc_1',
+      runId: 'run-1',
+      toolCallId: 'tc_1',
+      toolName: 'grafana_alerting_manage_rules',
+      risk: 'destructive',
+      reason: 'Tool is destructive',
+      arguments: '{}',
+    };
+    const { result } = renderHook(() =>
+      useChat({}, null, jest.fn(), {
+        messages: [{ role: 'assistant', content: '', approvals: [approval] }],
+      })
+    );
+
+    await act(async () => {
+      await result.current.resolveApproval(approval, 'approved', 'always');
+    });
+
+    expect(resolveAgentApprovalMock).toHaveBeenCalledWith('run-1', 'tc_1', 'approved', undefined, '2', 'always');
+  });
+
   it('refreshes the run and clears stale approval cards after a resolved 409', async () => {
-    resolveAgentApprovalMock.mockRejectedValueOnce(new Error('Failed to resolve approval (409): Approval is not pending'));
+    resolveAgentApprovalMock.mockRejectedValueOnce(
+      new Error('Failed to resolve approval (409): Approval is not pending')
+    );
     getAgentRunStatusMock.mockResolvedValueOnce({
       runId: 'run-1',
       status: 'running',

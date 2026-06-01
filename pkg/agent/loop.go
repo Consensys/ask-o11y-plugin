@@ -71,6 +71,7 @@ type LoopRequest struct {
 	MaxParallelToolCalls    int
 	EnableProgressiveEvents bool
 	RegisterApproval        ApprovalRegistrar
+	CheckApprovalGrant      ApprovalGrantChecker
 }
 
 func (a *AgentLoop) Run(ctx context.Context, req LoopRequest, eventCh chan<- SSEEvent) {
@@ -417,6 +418,23 @@ func (a *AgentLoop) executeToolWithApproval(ctx context.Context, eventCh chan<- 
 		Risk:       riskLabel(risk),
 		Reason:     risk.Reason,
 		Arguments:  tc.Function.Arguments,
+	}
+
+	if req.CheckApprovalGrant != nil {
+		granted, err := req.CheckApprovalGrant(ctx, approval)
+		if err != nil {
+			a.logger.Warn("Failed to check saved approval grant", "error", err, "tool", tc.Function.Name)
+		} else if granted {
+			resolved := ApprovalResolvedEvent{
+				ApprovalID: approval.ApprovalID,
+				Decision:   "approved",
+				Comment:    "approved by saved tool grant",
+				ResolvedAt: time.Now().UTC().Format(time.RFC3339),
+			}
+			a.send(ctx, eventCh, SSEEvent{Type: "approval_request", Data: approval})
+			a.send(ctx, eventCh, SSEEvent{Type: "approval_resolved", Data: resolved})
+			return a.executeTool(ctx, tc, req)
+		}
 	}
 
 	if req.RegisterApproval == nil {

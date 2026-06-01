@@ -2606,6 +2606,14 @@
           },
           "comment": {
             "type": "string"
+          },
+          "approvalScope": {
+            "type": "string",
+            "enum": [
+              "once",
+              "always"
+            ],
+            "description": "Use always to save a session-scoped grant for this tool after approving it."
           }
         },
         "required": [
@@ -2732,6 +2740,10 @@
         "properties": {
           "runId": {
             "type": "string"
+          },
+          "sessionId": {
+            "type": "string",
+            "description": "Chat session that owns this agent run."
           },
           "status": {
             "type": "string",

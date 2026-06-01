@@ -189,3 +189,4 @@ func MarshalSSE(event SSEEvent) ([]byte, error) {
 
 type ApprovalWaitFunc func(context.Context) (ApprovalResolvedEvent, error)
 type ApprovalRegistrar func(context.Context, ApprovalRequestEvent) (ApprovalWaitFunc, error)
+type ApprovalGrantChecker func(context.Context, ApprovalRequestEvent) (bool, error)

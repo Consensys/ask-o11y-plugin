@@ -33,7 +33,6 @@ jest.mock('../ToolCallsSection/ToolCallsSection', () => ({
   ),
 }));
 
-
 jest.mock('../GraphRenderer/GraphRenderer', () => ({
   GraphRenderer: () => <div data-testid="graph-renderer">Graph</div>,
 }));
@@ -189,6 +188,54 @@ describe('ChatMessage', () => {
       expect(screen.getByText('approved')).toBeInTheDocument();
       expect(screen.queryByText('Approve')).not.toBeInTheDocument();
       expect(screen.queryByText('Reject')).not.toBeInTheDocument();
+    });
+
+    it('should collapse run plan details behind progress by default', () => {
+      const message: ChatMessageType = {
+        role: 'assistant',
+        content: '',
+        runPlan: {
+          objective: 'Answer the request using available Grafana and MCP evidence.',
+          steps: [
+            { id: 'plan', title: 'Plan', status: 'completed' },
+            { id: 'evidence', title: 'Gather evidence', status: 'running' },
+          ],
+        },
+      };
+
+      render(<ChatMessage message={message} />);
+
+      expect(screen.getByText('Run progress')).toBeInTheDocument();
+      expect(screen.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '50');
+      expect(
+        screen.queryByText('Answer the request using available Grafana and MCP evidence.')
+      ).not.toBeInTheDocument();
+    });
+
+    it('should offer approve this time and approve for session for pending approvals', () => {
+      const onResolveApproval = jest.fn();
+      const message: ChatMessageType = {
+        role: 'assistant',
+        content: 'Waiting on approval',
+        approvals: [
+          {
+            approvalId: 'tc_1',
+            toolCallId: 'tc_1',
+            toolName: 'grafana_alerting_manage_rules',
+            risk: 'destructive',
+            reason: 'Tool is destructive',
+            arguments: '{}',
+          },
+        ],
+      };
+
+      render(<ChatMessage message={message} onResolveApproval={onResolveApproval} />);
+
+      screen.getByText('Approve this time').click();
+      expect(onResolveApproval).toHaveBeenCalledWith(message.approvals?.[0], 'approved', 'once');
+
+      screen.getByText('Approve for session').click();
+      expect(onResolveApproval).toHaveBeenCalledWith(message.approvals?.[0], 'approved', 'always');
     });
   });
 

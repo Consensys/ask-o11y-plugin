@@ -34,6 +34,7 @@ func newAgentRunTestPlugin(t *testing.T) *Plugin {
 		runStore:       NewRunStore(logger),
 		sessionStore:   NewSessionStore(logger),
 		approvalBroker: NewInMemoryApprovalBroker(),
+		approvalGrants: NewInMemoryApprovalGrantStore(),
 		promptRegistry: promptRegistry,
 		settings: PluginSettings{
 			MaxTotalTokens:     agent.DefaultMaxTotalTokens,
@@ -119,7 +120,7 @@ func receiveAgentRunLLMRequest(t *testing.T, ch <-chan agent.ChatCompletionReque
 
 func TestHandleAgentApprovalRequiresEditorOrAdmin(t *testing.T) {
 	p := newAgentRunTestPlugin(t)
-	p.runStore.CreateRun("run-1", 7, 2)
+	p.runStore.CreateRun("run-1", 7, 2, "session-1")
 
 	req := httptest.NewRequest(http.MethodPost, "/api/agent/runs/run-1/approvals/tc_1", strings.NewReader(`{"decision":"approved"}`))
 	req.Header.Set("X-Grafana-Org-Id", "2")
@@ -140,7 +141,7 @@ func TestHandleAgentApprovalDeliversDecision(t *testing.T) {
 	if err != nil {
 		t.Fatalf("register approval failed: %v", err)
 	}
-	p.runStore.CreateRun("run-1", 7, 2)
+	p.runStore.CreateRun("run-1", 7, 2, "session-1")
 
 	req := httptest.NewRequest(http.MethodPost, "/api/agent/runs/run-1/approvals/tc_1", strings.NewReader(`{"decision":"approved"}`))
 	req.Header.Set("X-Grafana-Org-Id", "2")
@@ -161,6 +162,51 @@ func TestHandleAgentApprovalDeliversDecision(t *testing.T) {
 	}
 	if resolved.Decision != "approved" {
 		t.Fatalf("decision = %q, want approved", resolved.Decision)
+	}
+}
+
+func TestHandleAgentApprovalApproveAlwaysPersistsToolGrant(t *testing.T) {
+	p := newAgentRunTestPlugin(t)
+	wait, err := p.approvalBroker.Register(context.Background(), "run-1", agent.ApprovalRequestEvent{ApprovalID: "tc_1"})
+	if err != nil {
+		t.Fatalf("register approval failed: %v", err)
+	}
+	p.runStore.CreateRun("run-1", 7, 2, "session-1")
+	p.runStore.AppendEvent("run-1", agent.SSEEvent{Type: "approval_request", Data: agent.ApprovalRequestEvent{
+		ApprovalID: "tc_1",
+		ToolCallID: "tc_1",
+		ToolName:   "grafana_alerting_manage_rules",
+		Risk:       "destructive",
+		Reason:     "Tool is destructive or can delete/clear data.",
+	}})
+
+	req := httptest.NewRequest(http.MethodPost, "/api/agent/runs/run-1/approvals/tc_1", strings.NewReader(`{"decision":"approved","approvalScope":"always"}`))
+	req.Header.Set("X-Grafana-Org-Id", "2")
+	req.Header.Set("X-Grafana-User-Id", "7")
+	req.Header.Set("X-Grafana-User-Role", "Editor")
+	rec := httptest.NewRecorder()
+
+	p.handleAgentApproval(rec, req, "run-1", "tc_1")
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if _, err := wait(context.Background()); err != nil {
+		t.Fatalf("wait failed: %v", err)
+	}
+	granted, err := p.approvalGrants.Has(context.Background(), "session-1", "grafana_alerting_manage_rules")
+	if err != nil {
+		t.Fatalf("grant lookup failed: %v", err)
+	}
+	if !granted {
+		t.Fatal("expected approve-always to persist a tool grant")
+	}
+	otherSessionGranted, err := p.approvalGrants.Has(context.Background(), "session-2", "grafana_alerting_manage_rules")
+	if err != nil {
+		t.Fatalf("other session grant lookup failed: %v", err)
+	}
+	if otherSessionGranted {
+		t.Fatal("approve-always grant leaked into another session")
 	}
 }
 

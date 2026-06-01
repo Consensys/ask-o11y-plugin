@@ -146,6 +146,7 @@ export interface AgentCallbacks {
 
 export interface AgentRunStatus {
   runId: string;
+  sessionId?: string;
   status: 'running' | 'completed' | 'failed' | 'cancelled';
   userId: number;
   orgId: number;
@@ -155,7 +156,9 @@ export interface AgentRunStatus {
   trace?: {
     plan?: PlanStep[];
     evidence?: EvidenceEvent[];
-    approvals?: Array<ApprovalRequestEvent & { decision?: string; comment?: string; createdAt?: string; resolvedAt?: string }>;
+    approvals?: Array<
+      ApprovalRequestEvent & { decision?: string; comment?: string; createdAt?: string; resolvedAt?: string }
+    >;
     finalReport?: FinalReportEvent;
   };
   error?: string;
@@ -235,7 +238,7 @@ export async function readSSEStream(
         try {
           event = JSON.parse(jsonStr);
         } catch {
-            continue;
+          continue;
         }
 
         if (event.sequence <= lastSeenSequence) {
@@ -255,7 +258,11 @@ export async function readSSEStream(
       return true;
     }
     if (err instanceof SSEIdleTimeoutError) {
-      try { await reader.cancel(); } catch { /* best-effort */ }
+      try {
+        await reader.cancel();
+      } catch {
+        /* best-effort */
+      }
       return false;
     }
     throw err;
@@ -318,7 +325,8 @@ export async function resolveAgentApproval(
   approvalId: string,
   decision: 'approved' | 'rejected',
   comment?: string,
-  orgId?: string
+  orgId?: string,
+  approvalScope: 'once' | 'always' = 'once'
 ): Promise<ApprovalResolvedEvent> {
   const resp = await fetch(`${AGENT_RUNS_URL}/${runId}/approvals/${approvalId}`, {
     method: 'POST',
@@ -326,7 +334,7 @@ export async function resolveAgentApproval(
       'Content-Type': 'application/json',
       ...orgIdHeaders(orgId),
     },
-    body: JSON.stringify({ decision, comment }),
+    body: JSON.stringify({ decision, comment, approvalScope }),
   });
 
   if (!resp.ok) {

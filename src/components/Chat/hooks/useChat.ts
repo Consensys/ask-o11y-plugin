@@ -31,13 +31,8 @@ interface InitialSessionData {
   messages?: ChatMessage[];
 }
 
-function updateLastAssistantMessage(
-  history: ChatMessage[],
-  updater: (msg: ChatMessage) => ChatMessage
-): ChatMessage[] {
-  return history.map((msg, idx) =>
-    idx === history.length - 1 && msg.role === 'assistant' ? updater(msg) : msg
-  );
+function updateLastAssistantMessage(history: ChatMessage[], updater: (msg: ChatMessage) => ChatMessage): ChatMessage[] {
+  return history.map((msg, idx) => (idx === history.length - 1 && msg.role === 'assistant' ? updater(msg) : msg));
 }
 
 export function useChat(
@@ -148,7 +143,12 @@ export function useChat(
     };
   }, []);
 
-  useEffect(() => () => { cleanupRef.current?.(); }, []);
+  useEffect(
+    () => () => {
+      cleanupRef.current?.();
+    },
+    []
+  );
 
   const bottomSpacerRef = useRef<HTMLDivElement>(null);
   const [isAutoScroll, setIsAutoScroll] = useState(true);
@@ -184,7 +184,6 @@ export function useChat(
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionIdFromUrl, readOnly, initialMessage]);
-
 
   useEffect(() => {
     return () => {
@@ -367,7 +366,11 @@ export function useChat(
   );
 
   const resolveApproval = useCallback(
-    async (approval: AgentApprovalItem, decision: 'approved' | 'rejected'): Promise<void> => {
+    async (
+      approval: AgentApprovalItem,
+      decision: 'approved' | 'rejected',
+      approvalScope: 'once' | 'always' = 'once'
+    ): Promise<void> => {
       const runId = approval.runId || activeRunIdRef.current;
       if (!runId || approval.decision) {
         return;
@@ -388,7 +391,14 @@ export function useChat(
       );
 
       try {
-        const resolved = await resolveAgentApproval(runId, approval.approvalId, decision, undefined, orgId);
+        const resolved = await resolveAgentApproval(
+          runId,
+          approval.approvalId,
+          decision,
+          undefined,
+          orgId,
+          approvalScope
+        );
         setChatHistory((prev) =>
           updateLastAssistantMessage(prev, (msg) => ({
             ...msg,
@@ -409,7 +419,9 @@ export function useChat(
       } catch (error) {
         try {
           const run = await getAgentRunStatus(runId, orgId);
-          const resolved = run.trace?.approvals?.find((item) => item.approvalId === approval.approvalId && item.decision);
+          const resolved = run.trace?.approvals?.find(
+            (item) => item.approvalId === approval.approvalId && item.decision
+          );
           if (resolved) {
             setChatHistory((prev) =>
               updateLastAssistantMessage(prev, (msg) => ({
@@ -570,9 +582,7 @@ export function useChat(
   useEffect(() => {
     if (toolCalls.size > 0) {
       const toolCallsArray = Array.from(toolCalls.values());
-      setChatHistory((prev) =>
-        updateLastAssistantMessage(prev, (msg) => ({ ...msg, toolCalls: toolCallsArray }))
-      );
+      setChatHistory((prev) => updateLastAssistantMessage(prev, (msg) => ({ ...msg, toolCalls: toolCallsArray })));
     }
   }, [toolCalls]);
 
@@ -637,7 +647,8 @@ export function useChat(
           setChatHistory((prev) =>
             updateLastAssistantMessage(prev, (msg) => ({
               ...msg,
-              content: msg.content || 'Failed to reconnect to the previous response. Please try sending your message again.',
+              content:
+                msg.content || 'Failed to reconnect to the previous response. Please try sending your message again.',
             }))
           );
         }
@@ -693,7 +704,10 @@ export function useChat(
       return;
     }
 
-    if (prevSessionId !== nextSessionId && (abortControllerRef.current || activeRunIdRef.current || messageQueue.length > 0)) {
+    if (
+      prevSessionId !== nextSessionId &&
+      (abortControllerRef.current || activeRunIdRef.current || messageQueue.length > 0)
+    ) {
       if (abortControllerRef.current) {
         abortControllerRef.current.abort();
         abortControllerRef.current = null;

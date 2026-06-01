@@ -6,7 +6,11 @@ import { AgentApprovalItem, ChatMessage as ChatMessageType } from '../../types';
 interface ChatHistoryProps {
   chatHistory: ChatMessageType[];
   isGenerating: boolean;
-  onResolveApproval?: (approval: AgentApprovalItem, decision: 'approved' | 'rejected') => Promise<void>;
+  onResolveApproval?: (
+    approval: AgentApprovalItem,
+    decision: 'approved' | 'rejected',
+    approvalScope?: 'once' | 'always'
+  ) => Promise<void>;
 }
 
 export const ChatHistory: React.FC<ChatHistoryProps> = ({ chatHistory, isGenerating, onResolveApproval }) => (
