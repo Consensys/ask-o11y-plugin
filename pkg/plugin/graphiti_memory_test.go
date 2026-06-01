@@ -46,8 +46,9 @@ func TestGraphitiKnowledgePrompt_RequiresScopedGroupID(t *testing.T) {
 	prompt := graphitiKnowledgePrompt("org_42")
 
 	required := []string{
+		"always pass group_ids exactly [\"org_42\"]",
 		"always pass group_id exactly \"org_42\"",
-		"never omit group_id",
+		"Never omit the org scope",
 		"server-prefixed",
 	}
 	for _, text := range required {

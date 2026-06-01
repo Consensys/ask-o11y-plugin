@@ -74,64 +74,93 @@ func TestFilterToolsBySelection_NoServers(t *testing.T) {
 }
 
 func TestEnsureScopedGraphitiArgs(t *testing.T) {
-	toolSchema := map[string]interface{}{
-		"properties": map[string]interface{}{
-			"group_id": map[string]interface{}{"type": "string"},
-			"query":    map[string]interface{}{"type": "string"},
-		},
-	}
-
 	tests := []struct {
-		name     string
-		toolName string
-		orgID    string
-		args     map[string]interface{}
-		want     interface{}
+		name       string
+		toolName   string
+		orgID      string
+		schema     map[string]interface{}
+		args       map[string]interface{}
+		wantID     interface{}
+		wantIDs    interface{}
+		wantAbsent bool
 	}{
 		{
 			name:     "unprefixed graphiti tool",
 			toolName: "graphiti_search_memory_facts",
 			orgID:    "42",
+			schema:   map[string]interface{}{"group_id": map[string]interface{}{"type": "string"}},
 			args:     map[string]interface{}{"query": "payments"},
-			want:     "org_42",
+			wantID:   "org_42",
 		},
 		{
 			name:     "server-prefixed graphiti tool name",
 			toolName: "kg_graphiti_search_memory_facts",
 			orgID:    "7",
+			schema:   map[string]interface{}{"group_id": map[string]interface{}{"type": "string"}},
 			args:     map[string]interface{}{"query": "checkout", "group_id": "wrong"},
-			want:     "org_7",
+			wantID:   "org_7",
 		},
 		{
 			name:     "server-prefixed graphiti base tool name",
 			toolName: "kg_search_memory_facts",
 			orgID:    "9",
+			schema:   map[string]interface{}{"group_id": map[string]interface{}{"type": "string"}},
 			args:     map[string]interface{}{"query": "checkout"},
-			want:     "org_9",
+			wantID:   "org_9",
 		},
 		{
-			name:     "non-graphiti tool with group_id",
-			toolName: "other_search",
-			orgID:    "7",
-			args:     map[string]interface{}{"query": "checkout"},
-			want:     nil,
-		},
-		{
-			name:     "missing org id",
+			name:     "plural graphiti group ids schema",
 			toolName: "graphiti_search_memory_facts",
-			orgID:    "",
-			args:     map[string]interface{}{"query": "payments"},
-			want:     nil,
+			orgID:    "6",
+			schema:   map[string]interface{}{"group_ids": map[string]interface{}{"type": "array"}},
+			args:     map[string]interface{}{"query": "topology", "group_ids": []string{"wrong"}},
+			wantIDs:  []string{"org_6"},
+		},
+		{
+			name:       "non-graphiti tool with group_id",
+			toolName:   "other_search",
+			orgID:      "7",
+			schema:     map[string]interface{}{"group_id": map[string]interface{}{"type": "string"}},
+			args:       map[string]interface{}{"query": "checkout"},
+			wantAbsent: true,
+		},
+		{
+			name:       "missing org id",
+			toolName:   "graphiti_search_memory_facts",
+			orgID:      "",
+			schema:     map[string]interface{}{"group_id": map[string]interface{}{"type": "string"}},
+			args:       map[string]interface{}{"query": "payments"},
+			wantAbsent: true,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			toolSchema := map[string]interface{}{"properties": tt.schema}
 			tool := Tool{Name: tt.toolName, InputSchema: toolSchema}
 			EnsureScopedGraphitiArgs(tool, tt.args, tt.orgID)
 
-			if got := tt.args["group_id"]; got != tt.want {
-				t.Fatalf("group_id = %v, want %v", got, tt.want)
+			if tt.wantAbsent {
+				if got := tt.args["group_id"]; got != nil {
+					t.Fatalf("group_id = %v, want nil", got)
+				}
+				if got := tt.args["group_ids"]; got != nil {
+					t.Fatalf("group_ids = %v, want nil", got)
+				}
+				return
+			}
+			if tt.wantID != nil && tt.args["group_id"] != tt.wantID {
+				t.Fatalf("group_id = %v, want %v", tt.args["group_id"], tt.wantID)
+			}
+			if tt.wantIDs != nil {
+				got, ok := tt.args["group_ids"].([]string)
+				if !ok {
+					t.Fatalf("group_ids = %T(%v), want []string", tt.args["group_ids"], tt.args["group_ids"])
+				}
+				want := tt.wantIDs.([]string)
+				if len(got) != len(want) || got[0] != want[0] {
+					t.Fatalf("group_ids = %v, want %v", got, want)
+				}
 			}
 		})
 	}

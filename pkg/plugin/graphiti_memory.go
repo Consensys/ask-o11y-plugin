@@ -38,7 +38,8 @@ func hasGraphitiMemoryTool(tools []mcp.Tool) bool {
 
 func graphitiKnowledgePrompt(groupID string) string {
 	return fmt.Sprintf(
-		"\n\nKnowledge graph tools are available. Use graphiti_search_memory_facts to look up service topology, dependencies, and historical incidents. When calling any Graphiti tool that accepts group_id, always pass group_id exactly %q; never omit group_id, invent another group_id, or reuse a group_id from prior context. This also applies if the tool name is server-prefixed, for example graphiti_graphiti_search_memory_facts. Pass center_node_uuid from search results for focused graph traversal.",
+		"\n\nKnowledge graph tools are available. Use graphiti_search_memory_facts to look up service topology, dependencies, and historical incidents. When calling a Graphiti search tool that accepts group_ids, always pass group_ids exactly [%q]. When calling a Graphiti write tool that accepts group_id, always pass group_id exactly %q. Never omit the org scope, invent another org scope, or reuse one from prior context. This also applies if the tool name is server-prefixed, for example graphiti_graphiti_search_memory_facts. Pass center_node_uuid from search results for focused graph traversal.",
+		groupID,
 		groupID,
 	)
 }

@@ -40,20 +40,27 @@ func FilterToolsBySelection(tools []Tool, servers []ServerConfig) []Tool {
 }
 
 // EnsureScopedGraphitiArgs forces org-scoped Graphiti tools to use the current
-// Grafana org group when the tool schema accepts group_id.
+// Grafana org group when the tool schema accepts group_id or group_ids.
 func EnsureScopedGraphitiArgs(tool Tool, args map[string]interface{}, orgID string) {
 	if orgID == "" || args == nil || !isGraphitiTool(tool.Name) {
 		return
 	}
 
 	properties, ok := tool.InputSchema["properties"].(map[string]interface{})
-	if !ok || properties["group_id"] == nil {
+	if !ok {
 		return
 	}
 
-	// Always force group_id to the org-scoped value. LLM-supplied values are not
-	// trusted because they could break multi-org data isolation.
-	args["group_id"] = "org_" + orgID
+	groupID := "org_" + orgID
+
+	// Always force org scope. LLM-supplied values are not trusted because they
+	// could break multi-org data isolation.
+	if properties["group_id"] != nil {
+		args["group_id"] = groupID
+	}
+	if properties["group_ids"] != nil {
+		args["group_ids"] = []string{groupID}
+	}
 }
 
 func isGraphitiTool(name string) bool {

@@ -1490,10 +1490,13 @@ func (p *Plugin) handleAgentTopology(w http.ResponseWriter, r *http.Request) {
 	if query == "" {
 		query = "service topology dependencies incidents upstream downstream"
 	}
-	result, err := p.mcpProxy.CallToolWithContext(toolName, map[string]interface{}{
-		"query":    query,
-		"group_id": orgGroupID(orgID),
-	}, strconv.FormatInt(orgID, 10), "Org"+strconv.FormatInt(orgID, 10), "")
+	result, err := p.mcpProxy.CallToolWithContext(
+		toolName,
+		graphitiSearchFactsArgs(tools, toolName, orgID, query, maxEdges),
+		strconv.FormatInt(orgID, 10),
+		"Org"+strconv.FormatInt(orgID, 10),
+		"",
+	)
 	if err != nil {
 		p.logger.Warn("Failed to query Graphiti topology", "error", err)
 		http.Error(w, "Failed to load topology", http.StatusInternalServerError)

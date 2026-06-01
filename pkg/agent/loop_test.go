@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -447,8 +448,8 @@ func TestEnsureScopedGraphitiArgs(t *testing.T) {
 		Name: "graphiti_search_memory_facts",
 		InputSchema: map[string]interface{}{
 			"properties": map[string]interface{}{
-				"group_id": map[string]interface{}{"type": "string"},
-				"query":    map[string]interface{}{"type": "string"},
+				"group_ids": map[string]interface{}{"type": "array"},
+				"query":     map[string]interface{}{"type": "string"},
 			},
 		},
 	}
@@ -456,14 +457,14 @@ func TestEnsureScopedGraphitiArgs(t *testing.T) {
 	args := map[string]interface{}{"query": "payments"}
 	mcp.EnsureScopedGraphitiArgs(tool, args, "42")
 
-	if got := args["group_id"]; got != "org_42" {
-		t.Fatalf("group_id = %v, want %q", got, "org_42")
+	if got := args["group_ids"]; fmt.Sprint(got) != "[org_42]" {
+		t.Fatalf("group_ids = %v, want %q", got, "[org_42]")
 	}
 
-	// Org-scoped group_id must always be forced — even if the LLM supplied one.
+	// Org-scoped group_ids must always be forced — even if the LLM supplied one.
 	mcp.EnsureScopedGraphitiArgs(tool, args, "7")
-	if got := args["group_id"]; got != "org_7" {
-		t.Fatalf("group_id should be overwritten to current org, got %v", got)
+	if got := args["group_ids"]; fmt.Sprint(got) != "[org_7]" {
+		t.Fatalf("group_ids should be overwritten to current org, got %v", got)
 	}
 }
 

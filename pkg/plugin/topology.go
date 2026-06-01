@@ -44,10 +44,15 @@ type topologyBuilder struct {
 }
 
 var (
-	arrowEdgeRe = regexp.MustCompile(`(?i)\b([A-Za-z0-9][A-Za-z0-9_.:/-]{1,80})\s*(?:->|-->)\s*([A-Za-z0-9][A-Za-z0-9_.:/-]{1,80})\b`)
-	callsEdgeRe = regexp.MustCompile(`(?i)\b([A-Za-z0-9][A-Za-z0-9_.:/-]{1,80})\s+(?:calls|uses|queries|depends on|connects to|talks to|publishes to|sends to)\s+([A-Za-z0-9][A-Za-z0-9_.:/-]{1,80})\b`)
-	calledByRe  = regexp.MustCompile(`(?i)\b([A-Za-z0-9][A-Za-z0-9_.:/-]{1,80})\s+(?:is called by|receives from|is used by)\s+([A-Za-z0-9][A-Za-z0-9_.:/-]{1,80})\b`)
-	serviceRe   = regexp.MustCompile(`(?i)\b(?:service|app|application|job|workload)\s+["']?([A-Za-z0-9][A-Za-z0-9_.:/-]{1,80})["']?`)
+	arrowEdgeRe         = regexp.MustCompile(`(?i)\b([A-Za-z0-9][A-Za-z0-9_.:/-]{1,80})\s*(?:->|-->)\s*([A-Za-z0-9][A-Za-z0-9_.:/-]{1,80})\b`)
+	serviceActionEdgeRe = regexp.MustCompile(`(?i)\b([A-Za-z0-9][A-Za-z0-9_.:/-]{1,80})\s+(?:service|app|application|job|workload)\s+(?:calls|uses|queries|depends on|connects to|talks to|sends to)\s+([A-Za-z0-9][A-Za-z0-9_.:/-]{1,80})\b`)
+	callsEdgeRe         = regexp.MustCompile(`(?i)\b([A-Za-z0-9][A-Za-z0-9_.:/-]{1,80})\s+(?:calls|uses|queries|depends on|connects to|talks to|sends to|forwards requests to)\s+([A-Za-z0-9][A-Za-z0-9_.:/-]{1,80})\b`)
+	calledByRe          = regexp.MustCompile(`(?i)\b([A-Za-z0-9][A-Za-z0-9_.:/-]{1,80})\s+(?:is called by|receives from|is used by)\s+([A-Za-z0-9][A-Za-z0-9_.:/-]{1,80})\b`)
+	deployedInRe        = regexp.MustCompile(`(?i)\b([A-Za-z0-9][A-Za-z0-9_.:/-]{1,80})\s+(?:service|app|application|job|workload)\s+is deployed in\s+([A-Za-z0-9][A-Za-z0-9_.:/-]{1,80})\s+namespace\b`)
+	runsOnRe            = regexp.MustCompile(`(?i)\b([A-Za-z0-9][A-Za-z0-9_.:/-]{1,80})\s+(?:service|app|application|job|workload)\s+runs on\s+([A-Za-z0-9][A-Za-z0-9_.:/-]{1,80})\s+cluster\b`)
+	publishesToQueueRe  = regexp.MustCompile(`(?i)\b([A-Za-z0-9][A-Za-z0-9_.:/-]{1,80})\s+(?:service|app|application|job|workload)\s+publishes .* to\s+([A-Za-z0-9][A-Za-z0-9_.:/-]{1,80})\s+(?:message queue|queue)\b`)
+	consumesFromQueueRe = regexp.MustCompile(`(?i)\b([A-Za-z0-9][A-Za-z0-9_.:/-]{1,80})\s+(?:service|app|application|job|workload)\s+consumes .* from\s+([A-Za-z0-9][A-Za-z0-9_.:/-]{1,80})\s+(?:message queue|queue)\b`)
+	serviceRe           = regexp.MustCompile(`(?i)\b(?:service|app|application|job|workload)\s+["']?([A-Za-z0-9][A-Za-z0-9_.:/-]{1,80})["']?`)
 )
 
 var topologyInfraNames = map[string]struct{}{
@@ -63,6 +68,19 @@ var topologyInfraNames = map[string]struct{}{
 	"prometheus":      {},
 	"pushgateway":     {},
 	"tempo":           {},
+}
+
+var topologyNoiseNames = map[string]struct{}{
+	"calls":     {},
+	"deployed":  {},
+	"is":        {},
+	"publishes": {},
+	"for":       {},
+	"from":      {},
+	"runs":      {},
+	"service":   {},
+	"to":        {},
+	"via":       {},
 }
 
 func parseGraphitiTopology(body string) AgentTopologyResponse {
@@ -218,14 +236,39 @@ func stringField(m map[string]interface{}, keys ...string) (string, bool) {
 }
 
 func (b *topologyBuilder) ingestFact(fact string) {
+	matchedStructuredFact := false
 	for _, match := range arrowEdgeRe.FindAllStringSubmatch(fact, -1) {
 		b.addEdge(match[1], match[2], "depends")
+		matchedStructuredFact = true
 	}
-	for _, match := range callsEdgeRe.FindAllStringSubmatch(fact, -1) {
+	for _, match := range serviceActionEdgeRe.FindAllStringSubmatch(fact, -1) {
 		b.addEdge(match[1], match[2], "calls")
+		matchedStructuredFact = true
 	}
-	for _, match := range calledByRe.FindAllStringSubmatch(fact, -1) {
-		b.addEdge(match[2], match[1], "calls")
+	for _, match := range deployedInRe.FindAllStringSubmatch(fact, -1) {
+		b.addEdge(match[1], match[2], "deployed in")
+		matchedStructuredFact = true
+	}
+	for _, match := range runsOnRe.FindAllStringSubmatch(fact, -1) {
+		b.addEdge(match[1], match[2], "runs on")
+		matchedStructuredFact = true
+	}
+	for _, match := range publishesToQueueRe.FindAllStringSubmatch(fact, -1) {
+		b.addEdge(match[1], match[2], "publishes to")
+		matchedStructuredFact = true
+	}
+	for _, match := range consumesFromQueueRe.FindAllStringSubmatch(fact, -1) {
+		b.addEdge(match[2], match[1], "consumed by")
+		matchedStructuredFact = true
+	}
+
+	if !matchedStructuredFact {
+		for _, match := range callsEdgeRe.FindAllStringSubmatch(fact, -1) {
+			b.addEdge(match[1], match[2], "calls")
+		}
+		for _, match := range calledByRe.FindAllStringSubmatch(fact, -1) {
+			b.addEdge(match[2], match[1], "calls")
+		}
 	}
 	for _, match := range serviceRe.FindAllStringSubmatch(fact, -1) {
 		b.addNode(match[1])
@@ -255,7 +298,7 @@ func (b *topologyBuilder) addEdge(source, target, label string) {
 
 func (b *topologyBuilder) addNode(raw string) (TopologyNode, bool) {
 	label := cleanTopologyName(raw)
-	if label == "" || isTopologyInfra(label) {
+	if label == "" || isTopologyInfra(label) || isTopologyNoise(label) {
 		return TopologyNode{}, false
 	}
 	id := topologyNodeID(label)
@@ -298,6 +341,11 @@ func isTopologyInfra(label string) bool {
 	return found
 }
 
+func isTopologyNoise(label string) bool {
+	_, found := topologyNoiseNames[strings.ToLower(strings.TrimSpace(label))]
+	return found
+}
+
 func graphitiToolBody(result *mcp.CallToolResult) string {
 	text := callToolText(result)
 	if text != "" {
@@ -329,4 +377,36 @@ func findGraphitiSearchFactsTool(tools []mcp.Tool) string {
 		}
 	}
 	return ""
+}
+
+func graphitiSearchFactsArgs(tools []mcp.Tool, toolName string, orgID int64, query string, maxFacts int) map[string]interface{} {
+	args := map[string]interface{}{
+		"query": query,
+	}
+	properties := graphitiToolProperties(tools, toolName)
+	groupID := orgGroupID(orgID)
+
+	if properties["group_ids"] != nil {
+		args["group_ids"] = []string{groupID}
+	} else {
+		args["group_id"] = groupID
+	}
+	if properties["max_facts"] != nil && maxFacts > 0 {
+		args["max_facts"] = maxFacts
+	}
+
+	return args
+}
+
+func graphitiToolProperties(tools []mcp.Tool, toolName string) map[string]interface{} {
+	for _, tool := range tools {
+		if tool.Name != toolName {
+			continue
+		}
+		properties, _ := tool.InputSchema["properties"].(map[string]interface{})
+		if properties != nil {
+			return properties
+		}
+	}
+	return map[string]interface{}{}
 }
