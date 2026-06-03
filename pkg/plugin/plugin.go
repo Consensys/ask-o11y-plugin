@@ -96,7 +96,6 @@ type PluginSettings struct {
 	ServiceGraphMaxNodes int    `json:"serviceGraphMaxNodes,omitempty"`
 	ServiceGraphMaxEdges int    `json:"serviceGraphMaxEdges,omitempty"`
 
-	AgentWorkflowVersion    string `json:"agentWorkflowVersion,omitempty"`
 	ApprovalPolicy          string `json:"approvalPolicy,omitempty"`
 	MaxParallelToolCalls    int    `json:"maxParallelToolCalls,omitempty"`
 	AgentEvalCaptureEnabled bool   `json:"agentEvalCaptureEnabled,omitempty"`
@@ -134,9 +133,6 @@ func applySecureHeaders(servers []mcp.ServerConfig, secure map[string]string) {
 }
 
 func applyAgentRuntimeSettings(settings *PluginSettings) {
-	if settings.AgentWorkflowVersion == "" {
-		settings.AgentWorkflowVersion = "v2"
-	}
 	if settings.ApprovalPolicy == "" {
 		settings.ApprovalPolicy = "approval-gated-writes"
 	}
@@ -913,27 +909,26 @@ func (p *Plugin) handleAgentRun(w http.ResponseWriter, r *http.Request) {
 	eventCh := make(chan agent.SSEEvent, 16)
 
 	loopReq := agent.LoopRequest{
-		Messages:                messages,
-		SystemPrompt:            systemPrompt,
-		MaxTotalTokens:          p.settings.MaxTotalTokens,
-		RecentMessageCount:      p.settings.RecentMessageCount,
-		MaxIterations:           resolveMaxIterations(req.Type, req.Message),
-		Model:                   effectiveRunModel,
-		AllowModelFallback:      modelSource == "auto" && effectiveRunModel == "large",
-		ConversationType:        req.Type,
-		GrafanaURL:              grafanaURL,
-		AuthToken:               saToken,
-		UserRole:                userRole,
-		OrgID:                   orgID,
-		OrgName:                 req.OrgName,
-		ScopeOrgID:              req.ScopeOrgID,
-		ExcludeToolNames:        graphitiWriteToolNames,
-		MCPServers:              p.settingsForFilter(),
-		ApprovalPolicy:          p.settings.ApprovalPolicy,
-		MaxParallelToolCalls:    p.settings.MaxParallelToolCalls,
-		EnableProgressiveEvents: p.settings.AgentWorkflowVersion != "legacy",
-		RegisterApproval:        p.approvalRegistrar(runID),
-		CheckApprovalGrant:      p.approvalGrantChecker(sessionID),
+		Messages:             messages,
+		SystemPrompt:         systemPrompt,
+		MaxTotalTokens:       p.settings.MaxTotalTokens,
+		RecentMessageCount:   p.settings.RecentMessageCount,
+		MaxIterations:        resolveMaxIterations(req.Type, req.Message),
+		Model:                effectiveRunModel,
+		AllowModelFallback:   modelSource == "auto" && effectiveRunModel == "large",
+		ConversationType:     req.Type,
+		GrafanaURL:           grafanaURL,
+		AuthToken:            saToken,
+		UserRole:             userRole,
+		OrgID:                orgID,
+		OrgName:              req.OrgName,
+		ScopeOrgID:           req.ScopeOrgID,
+		ExcludeToolNames:     graphitiWriteToolNames,
+		MCPServers:           p.settingsForFilter(),
+		ApprovalPolicy:       p.settings.ApprovalPolicy,
+		MaxParallelToolCalls: p.settings.MaxParallelToolCalls,
+		RegisterApproval:     p.approvalRegistrar(runID),
+		CheckApprovalGrant:   p.approvalGrantChecker(sessionID),
 	}
 
 	detachedCtx := context.WithoutCancel(ctx)

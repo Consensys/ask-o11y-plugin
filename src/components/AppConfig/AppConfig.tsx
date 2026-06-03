@@ -100,7 +100,6 @@ type State = {
   graphitiError: string | null;
   serviceGraphMaxNodes: number;
   serviceGraphMaxEdges: number;
-  agentWorkflowVersion: string;
   approvalPolicy: string;
   maxParallelToolCalls: number;
   agentEvalCaptureEnabled: boolean;
@@ -273,7 +272,6 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
     graphitiError: null,
     serviceGraphMaxNodes: jsonData?.serviceGraphMaxNodes || DEFAULT_SERVICE_GRAPH_MAX_NODES,
     serviceGraphMaxEdges: jsonData?.serviceGraphMaxEdges || DEFAULT_SERVICE_GRAPH_MAX_EDGES,
-    agentWorkflowVersion: jsonData?.agentWorkflowVersion || 'v2',
     approvalPolicy: jsonData?.approvalPolicy || 'approval-gated-writes',
     maxParallelToolCalls: jsonData?.maxParallelToolCalls || 4,
     agentEvalCaptureEnabled: jsonData?.agentEvalCaptureEnabled ?? false,
@@ -384,7 +382,6 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
         state.kioskModeEnabled !== (savedJsonData.kioskModeEnabled ?? true) ||
         state.chatPanelPosition !== (savedJsonData.chatPanelPosition || 'right'),
       'agent-runtime':
-        state.agentWorkflowVersion !== (savedJsonData.agentWorkflowVersion || 'v2') ||
         state.approvalPolicy !== (savedJsonData.approvalPolicy || 'approval-gated-writes') ||
         state.maxParallelToolCalls !== (savedJsonData.maxParallelToolCalls || 4) ||
         state.agentEvalCaptureEnabled !== (savedJsonData.agentEvalCaptureEnabled ?? false),
@@ -870,7 +867,6 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
       pinned,
       jsonData: {
         ...savedJsonData,
-        agentWorkflowVersion: state.agentWorkflowVersion,
         approvalPolicy: state.approvalPolicy,
         maxParallelToolCalls: state.maxParallelToolCalls,
         agentEvalCaptureEnabled: state.agentEvalCaptureEnabled,
@@ -1044,23 +1040,8 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
         {activeTab === 'agent-runtime' && (
           <FieldSet label="Agent Runtime">
             <Field
-              label="Workflow version"
-              description="Use the Grafana-aligned runtime with typed plans, evidence, approvals, and final reports."
-            >
-              <RadioButtonGroup
-                value={state.agentWorkflowVersion}
-                onChange={(value) => setState({ ...state, agentWorkflowVersion: value })}
-                options={[
-                  { label: 'v2 agent runtime', value: 'v2' },
-                  { label: 'Legacy loop', value: 'legacy' },
-                ]}
-              />
-            </Field>
-
-            <Field
               label="Approval policy"
               description="Controls whether risky tool calls pause until the user approves them."
-              className="mt-2"
             >
               <RadioButtonGroup
                 value={state.approvalPolicy}

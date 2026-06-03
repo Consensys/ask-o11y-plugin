@@ -67,11 +67,10 @@ type LoopRequest struct {
 	// user's Manage Tools choices inside the agent loop (not just at HTTP edges).
 	MCPServers []mcp.ServerConfig
 
-	ApprovalPolicy          string
-	MaxParallelToolCalls    int
-	EnableProgressiveEvents bool
-	RegisterApproval        ApprovalRegistrar
-	CheckApprovalGrant      ApprovalGrantChecker
+	ApprovalPolicy       string
+	MaxParallelToolCalls int
+	RegisterApproval     ApprovalRegistrar
+	CheckApprovalGrant   ApprovalGrantChecker
 }
 
 func (a *AgentLoop) Run(ctx context.Context, req LoopRequest, eventCh chan<- SSEEvent) {
@@ -112,15 +111,13 @@ func (a *AgentLoop) Run(ctx context.Context, req LoopRequest, eventCh chan<- SSE
 
 	messages := BuildContextWindow(req.SystemPrompt, req.Messages, req.Summary, req.RecentMessageCount)
 	plan := buildRunPlan(req.ConversationType)
-	if req.EnableProgressiveEvents {
-		a.send(ctx, eventCh, SSEEvent{
-			Type: "run_plan",
-			Data: RunPlanEvent{
-				Objective: planObjective(req.ConversationType),
-				Steps:     plan,
-			},
-		})
-	}
+	a.send(ctx, eventCh, SSEEvent{
+		Type: "run_plan",
+		Data: RunPlanEvent{
+			Objective: planObjective(req.ConversationType),
+			Steps:     plan,
+		},
+	})
 
 	// Per-run state for transport-failure aggregation. We emit at most one
 	// mcp_unavailable event per run, once at least 2 distinct tools have hit
@@ -133,7 +130,7 @@ func (a *AgentLoop) Run(ctx context.Context, req LoopRequest, eventCh chan<- SSE
 		if ctx.Err() != nil {
 			return
 		}
-		if req.EnableProgressiveEvents && iteration == 0 && len(plan) > 0 {
+		if iteration == 0 && len(plan) > 0 {
 			a.send(ctx, eventCh, SSEEvent{
 				Type: "step_start",
 				Data: StepEvent{ID: plan[0].ID, Title: plan[0].Title, Status: "running"},
@@ -180,7 +177,7 @@ func (a *AgentLoop) Run(ctx context.Context, req LoopRequest, eventCh chan<- SSE
 
 		if len(msg.ToolCalls) == 0 {
 			if msg.Content != "" {
-				if req.EnableProgressiveEvents && len(plan) > 0 {
+				if len(plan) > 0 {
 					a.send(ctx, eventCh, SSEEvent{
 						Type: "step_done",
 						Data: StepEvent{ID: plan[len(plan)-1].ID, Title: plan[len(plan)-1].Title, Status: "completed"},
@@ -260,7 +257,7 @@ func (a *AgentLoop) Run(ctx context.Context, req LoopRequest, eventCh chan<- SSE
 					},
 				})
 			}
-			if req.EnableProgressiveEvents && !isError {
+			if !isError {
 				a.send(ctx, eventCh, SSEEvent{
 					Type: "evidence",
 					Data: EvidenceEvent{

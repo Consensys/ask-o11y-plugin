@@ -5,6 +5,12 @@ All notable changes to the Ask O11y Grafana plugin will be documented in this fi
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.34](https://github.com/Consensys/ask-o11y-plugin/compare/v0.2.33...v0.2.34) (2026-06-03)
+
+### Bug Fixes
+
+- **agent:** remove legacy runtime mode and always emit structured agent events
+
 ## [0.2.32](https://github.com/Consensys/ask-o11y-plugin/compare/v0.2.31...v0.2.32) (2026-06-01)
 
 ### Bug Fixes

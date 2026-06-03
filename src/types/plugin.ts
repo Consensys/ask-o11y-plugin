@@ -39,7 +39,6 @@ export type AppPluginSettings = {
   serviceGraphMaxNodes?: number;
   serviceGraphMaxEdges?: number;
 
-  agentWorkflowVersion?: string;
   approvalPolicy?: string;
   maxParallelToolCalls?: number;
   agentEvalCaptureEnabled?: boolean;
