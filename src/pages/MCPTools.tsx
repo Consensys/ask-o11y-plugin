@@ -10,8 +10,9 @@ import { SelectableValue } from '@grafana/data';
 import { PluginPage, config } from '@grafana/runtime';
 import { css } from '@emotion/css';
 import { backendMCPClient } from '../services/backendMCPClient';
+import { getPluginStorageKey } from '../utils/storageKeys';
 
-const TOOL_SETTINGS_KEY = 'consensys-asko11y-app:mcp-tool-settings';
+export const TOOL_SETTINGS_KEY = getPluginStorageKey('mcp-tool-settings');
 
 interface Tool {
   name: string;

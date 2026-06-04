@@ -1,9 +1,11 @@
-import React, { forwardRef, useImperativeHandle, useRef, useEffect, useState } from 'react';
+import React, { forwardRef, useImperativeHandle, useRef, useEffect, useState, useCallback } from 'react';
 import { Icon, Alert, useStyles2, useTheme2 } from '@grafana/ui';
 import { css, cx, keyframes } from '@emotion/css';
 import { GrafanaTheme2 } from '@grafana/data';
 import { ValidationService } from '../../../../services/validation';
 import { getHoverButtonStyle } from '../../../../theme';
+
+const TEXTAREA_MAX_ROWS = 25;
 
 interface ChatInputProps {
   currentInput: string;
@@ -42,6 +44,7 @@ export const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(
     const theme = useTheme2();
     const styles = useStyles2(getStyles);
     const isComposingRef = useRef(false);
+    const maxTextareaHeight = theme.spacing(TEXTAREA_MAX_ROWS);
 
     useImperativeHandle(ref, () => ({
       focus: () => {
@@ -58,12 +61,15 @@ export const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(
     }));
 
     // Auto-resize textarea
-    const autoResize = () => {
+    const autoResize = useCallback(() => {
       if (textareaRef.current) {
         textareaRef.current.style.height = 'auto';
-        textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 200)}px`;
+        textareaRef.current.style.height = `${Math.min(
+          textareaRef.current.scrollHeight,
+          parseFloat(maxTextareaHeight)
+        )}px`;
       }
-    };
+    }, [maxTextareaHeight]);
 
     // Sync external changes to textarea (e.g., from suggestion clicks, clearing chat)
     useEffect(() => {
@@ -72,7 +78,7 @@ export const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(
         textareaRef.current.value = currentInput;
         autoResize();
       }
-    }, [currentInput]);
+    }, [autoResize, currentInput]);
 
     const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
       const rawValue = e.target.value;
@@ -144,7 +150,10 @@ export const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(
               }}
               placeholder="Ask me anything about your metrics, logs, or observability..."
               rows={1}
-              className="w-full resize-none bg-transparent border-0 text-base placeholder-secondary focus:outline-none focus:ring-0 min-h-[28px] max-h-[200px]"
+              className={cx(
+                'w-full resize-none bg-transparent border-0 text-base placeholder-secondary focus:outline-none focus:ring-0',
+                styles.textarea
+              )}
               style={{
                 lineHeight: '1.6',
                 height: 'auto',
@@ -278,6 +287,10 @@ const getStyles = (theme: GrafanaTheme2) => {
       borderRadius: innerRadius,
       position: 'relative',
       zIndex: 1,
+    }),
+    textarea: css({
+      minHeight: theme.spacing(3.5),
+      maxHeight: theme.spacing(TEXTAREA_MAX_ROWS),
     }),
     hoverButton: getHoverButtonStyle(theme),
   };

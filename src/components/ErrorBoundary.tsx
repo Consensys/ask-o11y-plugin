@@ -1,5 +1,6 @@
 import React, { Component, ErrorInfo, ReactNode } from 'react';
 import { Alert, Button, Icon } from '@grafana/ui';
+import { getPluginSessionStorageKeys } from '../utils/storageKeys';
 
 interface Props {
   children: ReactNode;
@@ -178,13 +179,7 @@ export class ChatErrorBoundary extends Component<{ children: ReactNode }, State>
                 </Button>
                 <Button
                   onClick={() => {
-                    const keysToRemove: string[] = [];
-                    for (let i = 0; i < sessionStorage.length; i++) {
-                      const key = sessionStorage.key(i);
-                      if (key?.startsWith('asko11y-') || key?.startsWith('consensys-asko11y')) {
-                        keysToRemove.push(key);
-                      }
-                    }
+                    const keysToRemove = getPluginSessionStorageKeys(sessionStorage);
                     keysToRemove.forEach((key) => sessionStorage.removeItem(key));
                     window.location.reload();
                   }}

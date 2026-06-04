@@ -8,6 +8,10 @@ import { TabCloseButton } from './TabCloseButton';
 import { useEmbeddingAllowed } from '../../hooks/useEmbeddingAllowed';
 import { getTabLabel, toRelativeUrl } from '../../utils/urlUtils';
 
+const SIDE_PANEL_MIN_WIDTH_UNITS = 50;
+const SIDE_PANEL_TARGET_WIDTH = '50vw';
+const SIDE_PANEL_MAX_WIDTH = '65%';
+
 export interface SidePanelProps {
   isOpen: boolean;
   onClose: () => void;
@@ -17,7 +21,14 @@ export interface SidePanelProps {
   kioskModeEnabled?: boolean;
 }
 
-export const SidePanel: React.FC<SidePanelProps> = ({ isOpen, onClose, pageRefs, onRemoveTab, embedded = false, kioskModeEnabled = true }) => {
+export const SidePanel: React.FC<SidePanelProps> = ({
+  isOpen,
+  onClose,
+  pageRefs,
+  onRemoveTab,
+  embedded = false,
+  kioskModeEnabled = true,
+}) => {
   const theme = useTheme2();
   const styles = useStyles2(getStyles);
   const [activeIndex, setActiveIndex] = useState(0);
@@ -53,18 +64,15 @@ export const SidePanel: React.FC<SidePanelProps> = ({ isOpen, onClose, pageRefs,
         borderColor: theme.colors.border.weak,
       }
     : {
-        width: 'clamp(400px, 50vw, 65%)',
+        width: `clamp(${theme.spacing(
+          SIDE_PANEL_MIN_WIDTH_UNITS
+        )}, ${SIDE_PANEL_TARGET_WIDTH}, ${SIDE_PANEL_MAX_WIDTH})`,
         backgroundColor: theme.colors.background.primary,
         borderColor: theme.colors.border.weak,
       };
 
   return (
-    <div
-      className={containerClassName}
-      style={containerStyle}
-      role="complementary"
-      aria-label="Grafana page preview"
-    >
+    <div className={containerClassName} style={containerStyle} role="complementary" aria-label="Grafana page preview">
       {/* Header */}
       <div
         className="flex items-center justify-between px-4 py-3 border-b flex-shrink-0"
@@ -104,10 +112,7 @@ export const SidePanel: React.FC<SidePanelProps> = ({ isOpen, onClose, pageRefs,
               key={`${ref.url}-${idx}`}
               className="flex items-center gap-1 flex-1 min-w-0 rounded-md transition-colors"
               style={{
-                backgroundColor:
-                  idx === safeActiveIndex
-                    ? theme.colors.primary.main
-                    : theme.colors.action.hover,
+                backgroundColor: idx === safeActiveIndex ? theme.colors.primary.main : theme.colors.action.hover,
               }}
               role="tab"
               aria-selected={idx === safeActiveIndex}

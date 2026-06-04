@@ -1,0 +1,68 @@
+# Example values for the upstream grafana/grafana Helm chart.
+# Validate with:
+#   helm repo add grafana https://grafana.github.io/helm-charts
+#   helm template ask-o11y grafana/grafana -f deploy/helm/grafana-values-ask-o11y-ha.yaml
+
+replicas: 2
+
+plugins:
+  - grafana-llm-app
+  - consensys-asko11y-app
+
+env:
+  GF_AUTH_MANAGED_SERVICE_ACCOUNTS_ENABLED: 'true'
+  GF_FEATURE_TOGGLES_ENABLE: externalServiceAccounts
+  ASK_O11Y_REDIS_URL: redis://ask-o11y-redis:6379/0
+
+# Store provider API keys in a Kubernetes Secret named ask-o11y-grafana-secrets.
+# Example key: LLM_API_KEY=<provider API key>
+envFromSecret: ask-o11y-grafana-secrets
+
+extraConfigmapMounts:
+  - name: ask-o11y-plugin-provisioning
+    mountPath: /etc/grafana/provisioning/plugins/ask-o11y-app.yaml
+    subPath: ask-o11y-app.yaml
+    configMap: ask-o11y-plugin-provisioning
+    readOnly: true
+
+extraObjects:
+  - apiVersion: v1
+    kind: ConfigMap
+    metadata:
+      name: ask-o11y-plugin-provisioning
+    data:
+      ask-o11y-app.yaml: |
+        apiVersion: 1
+
+        apps:
+          - type: grafana-llm-app
+            org_id: 1
+            jsonData:
+              enableDevSandbox: false
+              provider: anthropic
+              models:
+                default: large
+                mapping:
+                  base: claude-haiku-4-5-20251001
+                  large: claude-haiku-4-5-20251001
+            secureJsonData:
+              anthropicKey: $LLM_API_KEY
+
+          - type: consensys-asko11y-app
+            org_id: 1
+            jsonData:
+              useBuiltInMCP: true
+              maxTotalTokens: 128000
+              mcpServers: []
+            secureJsonData:
+              redisURL: $ASK_O11Y_REDIS_URL
+
+        # Optional Graphiti MCP dependency:
+        # Deploy Graphiti and Neo4j separately, then add this server under
+        # consensys-asko11y-app jsonData.mcpServers.
+        #
+        # - id: graphiti
+        #   name: Graphiti Knowledge Graph
+        #   url: http://graphiti:8000/mcp
+        #   enabled: true
+        #   type: streamable-http

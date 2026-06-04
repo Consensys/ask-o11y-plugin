@@ -57,11 +57,13 @@
 ### Plugin Not Appearing
 
 1. Verify the plugin directory exists:
+
    ```bash
    ls /var/lib/grafana/plugins/consensys-asko11y-app/
    ```
 
 2. Check Grafana logs:
+
    ```bash
    docker logs grafana 2>&1 | grep -i ask-o11y
    ```
@@ -74,11 +76,13 @@
 ### LLM Not Responding
 
 1. Verify the Grafana LLM plugin is installed:
+
    ```bash
    grafana-cli plugins list | grep llm
    ```
 
 2. Check AI provider connectivity from the Grafana host:
+
    ```bash
    curl https://api.openai.com/v1/models -H "Authorization: Bearer $YOUR_KEY"
    ```
@@ -91,26 +95,31 @@
 ### MCP Server Connection Errors
 
 1. Verify MCP server is running:
+
    ```bash
    docker ps | grep mcp-grafana
    ```
 
 2. Ensure service account feature toggles are enabled:
+
    ```yaml
    environment:
      - GF_FEATURE_TOGGLES_ENABLE=externalServiceAccounts
      - GF_AUTH_MANAGED_SERVICE_ACCOUNTS_ENABLED=true
    ```
+
    Restart Grafana after changing these.
 
 3. Verify your service account token under **Configuration → Service Accounts** (tokens can't be retrieved—create a new one if lost)
 
 4. Test MCP connectivity:
+
    ```bash
    docker exec grafana curl http://mcp-grafana:8000/mcp/health
    ```
 
 5. Check containers are on the same Docker network:
+
    ```bash
    docker network inspect <your-network-name>
    ```
@@ -122,6 +131,7 @@
 ### Visualization Not Displaying
 
 1. Test datasource connectivity:
+
    ```bash
    curl http://prometheus:9090/api/v1/query?q=up
    curl http://loki:3100/loki/api/v1/labels
@@ -137,14 +147,35 @@
 2. Check the MCP service account has the appropriate role (Editor or Admin for full access)
 3. Check datasource-level permissions
 
-### Session Storage Issues
+### Session Storage And Multi-Replica Issues
 
-Sessions are stored in-memory by default and lost on restart. For persistence, configure Redis:
+Sessions are stored in-memory by default and lost on restart. In multi-replica Grafana deployments, in-memory state is also local to each replica. If a detached run starts on one replica and a later request reaches another replica, users can intermittently see:
+
+```text
+Agent detached request failed (404): session not found
+```
+
+This is not a Grafana OSS limitation. Configure Redis for Ask O11y state, or use sticky sessions as a short-term load-balancer mitigation.
+
+Redis backs chat sessions, active agent runs, share links, share rate limits, and approval coordination. Configure it through Grafana plugin provisioning:
 
 ```yaml
-# In docker-compose.yaml
-environment:
-  - GF_PLUGIN_ASKO11Y_REDIS=redis://redis:6379/0
+apiVersion: 1
+
+apps:
+  - type: consensys-asko11y-app
+    org_id: 1
+    jsonData:
+      useBuiltInMCP: true
+    secureJsonData:
+      redisURL: redis://redis:6379/0
+```
+
+For Kubernetes examples, see `deploy/helm/grafana-values-ask-o11y-ha.yaml` and `deploy/helm/redis.yaml`. Validate the Grafana values example with:
+
+```bash
+helm repo add grafana https://grafana.github.io/helm-charts
+helm template ask-o11y grafana/grafana -f deploy/helm/grafana-values-ask-o11y-ha.yaml
 ```
 
 To free space, delete old sessions from the sidebar or export them first.
@@ -211,10 +242,10 @@ When reporting issues on [GitHub](https://github.com/Consensys/ask-o11y-plugin/i
 
 ## Quick Reference
 
-| Issue | Grafana Cloud | Self-Hosted |
-|-------|---------------|-------------|
-| Service Account | Enabled by default | Must enable feature toggle |
-| MCP URL | `https://<instance>.grafana.net/...` | `http://grafana:3000/...` |
-| Logs | Grafana Cloud UI | `docker logs grafana` |
-| Session Storage | Managed | In-memory (default) or Redis |
-| Updates | Automatic | Manual plugin update |
+| Issue           | Grafana Cloud                        | Self-Hosted                                         |
+| --------------- | ------------------------------------ | --------------------------------------------------- |
+| Service Account | Enabled by default                   | Must enable feature toggle                          |
+| MCP URL         | `https://<instance>.grafana.net/...` | `http://grafana:3000/...`                           |
+| Logs            | Grafana Cloud UI                     | `docker logs grafana`                               |
+| Session Storage | Managed                              | In-memory (single replica) or Redis (multi-replica) |
+| Updates         | Automatic                            | Manual plugin update                                |

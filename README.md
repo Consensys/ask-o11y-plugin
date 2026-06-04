@@ -7,6 +7,7 @@
 [![CI](https://github.com/Consensys/ask-o11y-plugin/actions/workflows/ci.yml/badge.svg)](https://github.com/Consensys/ask-o11y-plugin/actions/workflows/ci.yml)
 [![GitHub release](https://img.shields.io/github/v/release/Consensys/ask-o11y-plugin)](https://github.com/Consensys/ask-o11y-plugin/releases)
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/Consensys/ask-o11y-plugin)
+
 ---
 
 ## Prerequisites
@@ -53,6 +54,34 @@ See [AGENTS.md](AGENTS.md) for detailed development documentation.
 
 ---
 
+## Production High Availability
+
+Ask O11y works with Grafana OSS. In multi-replica Grafana deployments, configure Redis for Ask O11y state or use sticky sessions at the load balancer.
+
+Without shared state, a request can create a detached run on one Grafana replica while a later poll or session update lands on another replica. The common symptom is:
+
+```text
+Agent detached request failed (404): session not found
+```
+
+Redis is the recommended production fix. It backs chat sessions, active agent runs, share links, share rate limits, and approval coordination across replicas. Sticky sessions can reduce the symptom, but Redis is still preferred for restarts, rollouts, and approval routing.
+
+For Kubernetes examples, see:
+
+- `deploy/helm/grafana-values-ask-o11y-ha.yaml`
+- `deploy/helm/redis.yaml`
+
+Validate the Grafana values example with:
+
+```bash
+helm repo add grafana https://grafana.github.io/helm-charts
+helm template ask-o11y grafana/grafana -f deploy/helm/grafana-values-ask-o11y-ha.yaml
+```
+
+The Redis URL is configured through Grafana plugin provisioning as `secureJsonData.redisURL`.
+
+---
+
 ## Architecture
 
 ```
@@ -82,13 +111,13 @@ OpenAPI 3.0.3 spec available at: `/api/plugins/consensys-asko11y-app/resources/o
 
 Key endpoints:
 
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| POST | `/api/agent/run` | Start AI conversation (SSE streaming) |
-| GET | `/api/sessions` | List user sessions |
-| GET | `/api/mcp/tools` | List available MCP tools (RBAC-filtered) |
-| POST | `/api/mcp/call-tool` | Execute MCP tool |
-| POST | `/api/sessions/share` | Create share link |
+| Method | Endpoint              | Description                              |
+| ------ | --------------------- | ---------------------------------------- |
+| POST   | `/api/agent/run`      | Start AI conversation (SSE streaming)    |
+| GET    | `/api/sessions`       | List user sessions                       |
+| GET    | `/api/mcp/tools`      | List available MCP tools (RBAC-filtered) |
+| POST   | `/api/mcp/call-tool`  | Execute MCP tool                         |
+| POST   | `/api/sessions/share` | Create share link                        |
 
 All endpoints require Grafana session authentication. See the OpenAPI spec for the full list.
 
@@ -99,6 +128,7 @@ All endpoints require Grafana session authentication. See the OpenAPI spec for t
 You can configure ask-o11y as a remote MCP server in your MCP client (e.g., Claude Code) to access all Grafana observability tools:
 
 **Claude Code configuration (`.claude/settings.json`):**
+
 ```json
 "ask-o11y-tools": {
   "command": "npx",
@@ -111,6 +141,7 @@ You can configure ask-o11y as a remote MCP server in your MCP client (e.g., Clau
 ```
 
 **Requirements:**
+
 - `mcp-remote` npm package (install via `npm install -g mcp-remote`)
 - Grafana service account token (format: `glsa_XXXXXXXXX`)
 - Token must have permissions to access the ask-o11y plugin

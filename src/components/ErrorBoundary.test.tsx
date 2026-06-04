@@ -4,7 +4,7 @@
 
 import React from 'react';
 import { render, screen, fireEvent } from '@testing-library/react';
-import { ErrorBoundary } from './ErrorBoundary';
+import { ChatErrorBoundary, ErrorBoundary } from './ErrorBoundary';
 
 // Mock Grafana UI
 jest.mock('@grafana/ui', () => ({
@@ -176,3 +176,41 @@ describe('ErrorBoundary', () => {
   });
 });
 
+describe('ChatErrorBoundary', () => {
+  const originalLocation = window.location;
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    window.sessionStorage.clear();
+    Object.defineProperty(window, 'location', {
+      configurable: true,
+      value: { reload: jest.fn() },
+    });
+  });
+
+  afterAll(() => {
+    Object.defineProperty(window, 'location', {
+      configurable: true,
+      value: originalLocation,
+    });
+  });
+
+  it('clears current and legacy plugin session storage keys before reload', () => {
+    window.sessionStorage.setItem('consensys-asko11y-app:active-run', '1');
+    window.sessionStorage.setItem('asko11y-settings', '1');
+    window.sessionStorage.setItem('grafana:other', '1');
+
+    render(
+      <ChatErrorBoundary>
+        <ThrowError />
+      </ChatErrorBoundary>
+    );
+
+    fireEvent.click(screen.getByText('Clear & Reload'));
+
+    expect(window.sessionStorage.getItem('consensys-asko11y-app:active-run')).toBeNull();
+    expect(window.sessionStorage.getItem('asko11y-settings')).toBeNull();
+    expect(window.sessionStorage.getItem('grafana:other')).toBe('1');
+    expect(window.location.reload).toHaveBeenCalled();
+  });
+});

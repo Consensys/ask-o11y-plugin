@@ -134,6 +134,24 @@ Use an external [mcp-grafana](https://github.com/grafana/mcp-grafana) sidecar wh
 
 Unsaved changes are shown per settings tab so admins know exactly what still needs to be saved.
 
+## High Availability
+
+Ask O11y supports Grafana OSS and does not require Grafana Enterprise for the chat workflow. For multiple Grafana replicas, configure Redis in the Ask O11y plugin provisioning:
+
+```yaml
+apps:
+  - type: consensys-asko11y-app
+    org_id: 1
+    jsonData:
+      useBuiltInMCP: true
+    secureJsonData:
+      redisURL: redis://redis:6379/0
+```
+
+Redis shares sessions, detached agent runs, share metadata, rate limits, and approval coordination between replicas. If Redis is not configured, in-memory state is local to each Grafana process and users may intermittently see `Agent detached request failed (404): session not found` when load balancing sends related requests to different replicas.
+
+Sticky sessions are an acceptable short-term mitigation, but Redis is the recommended production configuration. See `deploy/helm/` in the repository for Grafana Helm chart examples and optional Graphiti MCP wiring.
+
 ## Alert Investigation Links
 
 Add Ask O11y investigation links to Grafana alert notifications for one-click RCA:

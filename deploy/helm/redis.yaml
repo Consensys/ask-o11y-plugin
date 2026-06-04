@@ -1,0 +1,63 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ask-o11y-redis
+  labels:
+    app.kubernetes.io/name: ask-o11y-redis
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: ask-o11y-redis
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: ask-o11y-redis
+    spec:
+      containers:
+        - name: redis
+          image: redis:7-alpine
+          args: ['redis-server', '--appendonly', 'yes']
+          ports:
+            - name: redis
+              containerPort: 6379
+          readinessProbe:
+            exec:
+              command: ['redis-cli', 'ping']
+          livenessProbe:
+            exec:
+              command: ['redis-cli', 'ping']
+          volumeMounts:
+            - name: data
+              mountPath: /data
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: ask-o11y-redis-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ask-o11y-redis
+  labels:
+    app.kubernetes.io/name: ask-o11y-redis
+spec:
+  ports:
+    - name: redis
+      port: 6379
+      targetPort: redis
+  selector:
+    app.kubernetes.io/name: ask-o11y-redis
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: ask-o11y-redis-data
+  labels:
+    app.kubernetes.io/name: ask-o11y-redis
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
