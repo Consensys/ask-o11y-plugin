@@ -76,6 +76,7 @@ function ChatComponent({
     chatContainerRef,
     setCurrentInput,
     sendMessage,
+    retryLastMessage,
     handleKeyPress,
     clearChat,
     sessionManager,
@@ -96,7 +97,9 @@ function ChatComponent({
   );
 
   const chatInputRef = useRef<ChatInputRef>(null);
-  const [isHistoryOpen, setIsHistoryOpen] = useState(false);
+  // Docked history panel is shown by default in the interactive chat so past
+  // conversations are discoverable; hidden in read-only/shared views.
+  const [isHistoryOpen, setIsHistoryOpen] = useState(!readOnly);
 
   const {
     visiblePageRefs,
@@ -180,6 +183,7 @@ function ChatComponent({
       queuedMessageCount: messageQueue.length,
       onStopGeneration: stopGeneration,
       onResolveApproval: resolveApproval,
+      onRetry: retryLastMessage,
     }),
     [
       chatHistory,
@@ -204,6 +208,7 @@ function ChatComponent({
       messageQueue.length,
       stopGeneration,
       resolveApproval,
+      retryLastMessage,
     ]
   );
 
@@ -230,18 +235,19 @@ function ChatComponent({
         backgroundColor: theme.colors.background.canvas,
       }}
     >
-      {chatScene && (
-        <div data-plugin-split-layout style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
-          <chatScene.Component model={chatScene} />
-        </div>
-      )}
-
       <SessionSidebar
         sessionManager={sessionManager}
         currentSessionId={sessionManager.currentSessionId}
         isOpen={isHistoryOpen}
         onClose={() => setIsHistoryOpen(false)}
+        docked={!readOnly}
       />
+
+      {chatScene && (
+        <div data-plugin-split-layout style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+          <chatScene.Component model={chatScene} />
+        </div>
+      )}
     </div>
   );
 }

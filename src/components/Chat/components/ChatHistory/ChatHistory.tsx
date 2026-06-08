@@ -11,9 +11,15 @@ interface ChatHistoryProps {
     decision: 'approved' | 'rejected',
     approvalScope?: 'once' | 'always'
   ) => Promise<void>;
+  onRetry?: () => void;
 }
 
-export const ChatHistory: React.FC<ChatHistoryProps> = ({ chatHistory, isGenerating, onResolveApproval }) => (
+export const ChatHistory: React.FC<ChatHistoryProps> = ({
+  chatHistory,
+  isGenerating,
+  onResolveApproval,
+  onRetry,
+}) => (
   <div>
     {chatHistory.map((message, index) => (
       <ChatMessage
@@ -22,6 +28,7 @@ export const ChatHistory: React.FC<ChatHistoryProps> = ({ chatHistory, isGenerat
         isGenerating={isGenerating}
         isLastMessage={index === chatHistory.length - 1}
         onResolveApproval={onResolveApproval}
+        onRetry={onRetry}
       />
     ))}
   </div>

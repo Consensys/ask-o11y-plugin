@@ -278,7 +278,7 @@ export function useChat(
         setChatHistory((prev) =>
           updateLastAssistantMessage(prev, (msg) => ({
             ...msg,
-            content: msg.content ? msg.content + '\n\n**Error:** ' + message : message,
+            error: message,
           }))
         );
       },
@@ -592,7 +592,7 @@ export function useChat(
       setChatHistory((prev) =>
         updateLastAssistantMessage(prev, (msg) => ({
           ...msg,
-          content: error instanceof Error ? error.message : 'An unexpected error occurred',
+          error: error instanceof Error ? error.message : 'An unexpected error occurred',
         }))
       );
       setRetryCount((prev) => prev + 1);
@@ -602,6 +602,20 @@ export function useChat(
         abortControllerRef.current = null;
       }
     }
+  };
+
+  // Re-send the most recent user prompt after a failed run. Appends a fresh
+  // turn rather than mutating the failed one, avoiding stale-closure issues
+  // with sendMessage's history handling.
+  const retryLastMessage = (): void => {
+    if (isGenerating) {
+      return;
+    }
+    const lastUserMessage = [...chatHistory].reverse().find((message) => message.role === 'user');
+    if (!lastUserMessage?.content) {
+      return;
+    }
+    void sendMessage(lastUserMessage.content);
   };
 
   useEffect(() => {
@@ -817,6 +831,7 @@ export function useChat(
     setConversationType,
     setCurrentInput,
     sendMessage,
+    retryLastMessage,
     handleKeyPress,
     clearChat,
     getRunningToolCallsCount,

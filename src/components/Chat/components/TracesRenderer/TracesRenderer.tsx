@@ -273,7 +273,10 @@ export const TracesRenderer: React.FC<TracesRendererProps> = ({
         }}
       >
         <div className="flex items-center justify-between">
-          <code className="text-xs flex-1" style={{ color: theme.colors.text.secondary }}>
+          <code
+            className="text-xs flex-1 min-w-0 whitespace-pre-wrap break-all max-h-24 overflow-y-auto"
+            style={{ color: theme.colors.text.secondary }}
+          >
             {query.query}
           </code>
           <span className="text-xs ml-4" style={{ color: theme.colors.text.secondary }}>

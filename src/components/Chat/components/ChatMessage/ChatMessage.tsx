@@ -1,7 +1,8 @@
 import React from 'react';
 import DOMPurify from 'dompurify';
 import { marked } from 'marked';
-import { Button, Icon, useTheme2 } from '@grafana/ui';
+import { Alert, Button, Icon, useTheme2 } from '@grafana/ui';
+import { testIds } from '../../../testIds';
 import { ToolCallsSection } from '../ToolCallsSection/ToolCallsSection';
 import { GraphRenderer } from '../GraphRenderer/GraphRenderer';
 import { LogsRenderer } from '../LogsRenderer/LogsRenderer';
@@ -18,6 +19,7 @@ interface ChatMessageProps {
     decision: 'approved' | 'rejected',
     approvalScope?: 'once' | 'always'
   ) => Promise<void>;
+  onRetry?: () => void;
 }
 
 function buildTimeRange(query: ContentSection['query']): { from: string; to: string } | undefined {
@@ -285,6 +287,7 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
   isGenerating = false,
   isLastMessage = false,
   onResolveApproval,
+  onRetry,
 }) => {
   const theme = useTheme2();
   const showThinking = message.role === 'assistant' && isGenerating && isLastMessage && !message.content;
@@ -370,6 +373,27 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
         {!showThinking && contentSections.length === 0 && (
           <div className="text-sm leading-relaxed whitespace-normal break-words prose prose-sm max-w-none text-primary">
             <MarkdownContent content={message.content} />
+          </div>
+        )}
+
+        {message.error && (
+          <div className="mt-3">
+            <Alert title="Something went wrong" severity="error">
+              <div className="flex flex-col items-start gap-2">
+                <span className="break-words">{message.error}</span>
+                {isLastMessage && onRetry && (
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    icon="sync"
+                    onClick={onRetry}
+                    data-testid={testIds.chat.retryButton}
+                  >
+                    Retry
+                  </Button>
+                )}
+              </div>
+            </Alert>
           </div>
         )}
       </div>

@@ -90,6 +90,8 @@ export interface ChatMessage {
   finalReport?: AgentFinalReport;
   pageRefs?: GrafanaPageRef[];
   timestamp?: Date;
+  /** Set when the agent run for this assistant turn failed; surfaced as a retryable error in the UI. */
+  error?: string;
 }
 
 /** Content section returned by splitContentByPromQL */
@@ -123,6 +125,8 @@ export interface ChatInterfaceProps {
     decision: 'approved' | 'rejected',
     approvalScope?: 'once' | 'always'
   ) => Promise<void>;
+  /** Re-send the most recent user prompt after a failed run. */
+  onRetry?: () => void;
 }
 
 /** Props for the Grafana page panel */
