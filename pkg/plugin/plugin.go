@@ -1483,7 +1483,7 @@ func (p *Plugin) handleAgentTopology(w http.ResponseWriter, r *http.Request) {
 	orgID := getOrgID(r)
 	query := strings.TrimSpace(r.URL.Query().Get("query"))
 	if query == "" {
-		query = "service topology dependencies incidents upstream downstream"
+		query = graphitiTopologyFactQuery()
 	}
 	result, err := p.mcpProxy.CallToolWithContext(
 		toolName,
@@ -1498,12 +1498,69 @@ func (p *Plugin) handleAgentTopology(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	response := parseGraphitiTopology(graphitiToolBody(result))
+	factBodies := []string{graphitiToolBody(result)}
+	nodeBodies := []string{}
+	topologyNodes := []graphitiTopologyNode{}
+	nodeToolName := findGraphitiSearchNodesTool(tools)
+	nodeWarnings := []string{}
+	if nodeToolName == "" {
+		nodeWarnings = append(nodeWarnings, "graphiti_search_nodes tool is not available; falling back to text-only topology parsing")
+	} else {
+		for _, nodeQuery := range graphitiTopologyNodeQueries() {
+			nodeResult, nodeErr := p.mcpProxy.CallToolWithContext(
+				nodeToolName,
+				graphitiSearchNodesArgs(tools, nodeToolName, orgID, nodeQuery.query, hardTopologyMaxNodes, nodeQuery.entityTypes),
+				strconv.FormatInt(orgID, 10),
+				"Org"+strconv.FormatInt(orgID, 10),
+				"",
+			)
+			if nodeErr != nil {
+				p.logger.Warn("Failed to query Graphiti topology nodes", "error", nodeErr, "query", nodeQuery.query)
+				nodeWarnings = append(nodeWarnings, "Graphiti topology node lookup failed; some relationships may be inferred from text")
+				continue
+			}
+			if nodeResult != nil && nodeResult.IsError {
+				nodeWarnings = append(nodeWarnings, "Graphiti topology node lookup returned an error; some relationships may be inferred from text")
+			}
+			if body := graphitiToolBody(nodeResult); body != "" {
+				nodeBodies = append(nodeBodies, body)
+				topologyNodes = append(topologyNodes, extractGraphitiTopologyNodes(body)...)
+			}
+		}
+	}
+
+	if graphitiSearchFactsSupportsCenterNode(tools, toolName) && len(topologyNodes) > 0 {
+		centerNodes := topologyCenterNodes(topologyNodes, maxNodes)
+		centerFactLimit := topologyCenteredFactLimit(maxEdges, len(centerNodes))
+		for _, node := range centerNodes {
+			nodeResult, nodeErr := p.mcpProxy.CallToolWithContext(
+				toolName,
+				graphitiSearchFactsForNodeArgs(tools, toolName, orgID, graphitiTopologyFactQuery(), centerFactLimit, node.UUID),
+				strconv.FormatInt(orgID, 10),
+				"Org"+strconv.FormatInt(orgID, 10),
+				"",
+			)
+			if nodeErr != nil {
+				p.logger.Warn("Failed to query Graphiti centered topology facts", "error", nodeErr, "node", node.Name)
+				nodeWarnings = append(nodeWarnings, "Graphiti centered topology lookup failed; some relationships may be missing")
+				continue
+			}
+			if nodeResult != nil && nodeResult.IsError {
+				nodeWarnings = append(nodeWarnings, "Graphiti centered topology lookup returned an error; some relationships may be missing")
+			}
+			if body := graphitiToolBody(nodeResult); body != "" {
+				factBodies = append(factBodies, body)
+			}
+		}
+	}
+
+	response := parseGraphitiTopologyBodies(factBodies, nodeBodies)
 	response.Enabled = true
 	response.Source = "graphiti"
 	if result != nil && result.IsError {
 		response.Warnings = append(response.Warnings, "Graphiti topology query returned an error")
 	}
+	response.Warnings = append(response.Warnings, uniqueStrings(nodeWarnings)...)
 	response = limitTopologyResponse(response, maxNodes, maxEdges)
 	if len(response.Nodes) == 0 {
 		response.Warnings = append(response.Warnings, "No service topology facts matched the current organization")

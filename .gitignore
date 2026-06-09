@@ -71,3 +71,6 @@ exports/
 
 # Local secrets / prod data extractions (do not commit)
 local/prod-redis-sessions/
+local/asko11y-feedback/
+local/
+docs/

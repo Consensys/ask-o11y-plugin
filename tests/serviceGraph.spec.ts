@@ -22,13 +22,15 @@ test.describe('Service Graph settings', () => {
           nodes: [
             { id: 'checkout', label: 'checkout', type: 'service' },
             { id: 'payments', label: 'payments', type: 'service' },
-            { id: 'ledger', label: 'ledger', type: 'service' },
+            { id: 'checkout-ns', label: 'checkout-ns', type: 'namespace' },
+            { id: 'mmcx-prod-us', label: 'mmcx-prod-us', type: 'cluster' },
           ],
           edges: [
             { id: 'checkout->payments', source: 'checkout', target: 'payments', label: 'calls' },
-            { id: 'payments->ledger', source: 'payments', target: 'ledger', label: 'depends' },
+            { id: 'checkout->checkout-ns', source: 'checkout', target: 'checkout-ns', label: 'deployed in' },
+            { id: 'checkout->mmcx-prod-us', source: 'checkout', target: 'mmcx-prod-us', label: 'runs on' },
           ],
-          rawFactCount: 2,
+          rawFactCount: 3,
         }),
       });
     });
@@ -36,8 +38,9 @@ test.describe('Service Graph settings', () => {
     await openSettingsTab(page, 'service-graph');
 
     await expect(page.getByRole('group', { name: /service graph/i })).toBeVisible();
-    await expect(page.locator('[data-testid="data-testid ac-service-graph-summary"]')).toContainText('3 services');
-    await expect(page.locator('[data-testid="data-testid ac-service-graph-summary"]')).toContainText('2 links');
+    await expect(page.locator('[data-testid="data-testid ac-service-graph-summary"]')).toContainText('2 services');
+    await expect(page.locator('[data-testid="data-testid ac-service-graph-summary"]')).toContainText('4 nodes');
+    await expect(page.locator('[data-testid="data-testid ac-service-graph-summary"]')).toContainText('3 links');
     await expect(page.getByTestId('service-graph-scene')).toBeVisible();
     await expect
       .poll(() => topologyRequests.some((url) => url.includes('maxNodes=100') && url.includes('maxEdges=200')))
