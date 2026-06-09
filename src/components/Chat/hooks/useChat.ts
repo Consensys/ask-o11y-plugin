@@ -632,8 +632,7 @@ export function useChat(
           setChatHistory((prev) =>
             updateLastAssistantMessage(prev, (msg) => ({
               ...msg,
-              content:
-                msg.content || 'Failed to reconnect to the previous response. Please try sending your message again.',
+              error: err instanceof Error ? err.message : 'Failed to reconnect to the previous response.',
             }))
           );
         }
