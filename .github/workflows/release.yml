@@ -21,7 +21,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: grafana/plugin-actions/build-plugin@main # zizmor: ignore[unpinned-uses] provided by grafana
+      - uses: grafana/plugin-actions/build-plugin@2ecc2ba7168309f04010b5b637530b877d67e4ff # zizmor: ignore[unpinned-uses] provided by grafana
         with:
           node-version: '22'
           go-version: '1.25.7'
