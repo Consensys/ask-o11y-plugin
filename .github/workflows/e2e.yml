@@ -130,7 +130,7 @@ jobs:
           docker compose up -d grafana
 
       - name: Wait for Grafana server
-        uses: grafana/plugin-actions/wait-for-grafana@main
+        uses: grafana/plugin-actions/wait-for-grafana@2ecc2ba7168309f04010b5b637530b877d67e4ff # main
         with:
           url: http://localhost:3000/login
 
