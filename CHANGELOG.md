@@ -5,6 +5,14 @@ All notable changes to the Ask O11y Grafana plugin will be documented in this fi
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.36](https://github.com/Consensys/ask-o11y-plugin/compare/v0.2.35...v0.2.36) (2026-06-09)
+
+
+### Bug Fixes
+
+* **backend:** add prompt guardrails ([#144](https://github.com/Consensys/ask-o11y-plugin/issues/144)) ([a6f0aaa](https://github.com/Consensys/ask-o11y-plugin/commit/a6f0aaa9c06502fd1907fc4c1f27b586f67acfec))
+* feedback UX quick wins, run-plan cleanup, and topology improvements ([#143](https://github.com/Consensys/ask-o11y-plugin/issues/143)) ([61d5515](https://github.com/Consensys/ask-o11y-plugin/commit/61d5515ee2d5c18256d402a886e0c59f9d4aaa89))
+
 ## [0.2.34](https://github.com/Consensys/ask-o11y-plugin/compare/v0.2.33...v0.2.34) (2026-06-03)
 
 ### Bug Fixes
