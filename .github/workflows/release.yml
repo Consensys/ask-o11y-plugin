@@ -21,7 +21,10 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: grafana/plugin-actions/build-plugin@2ecc2ba7168309f04010b5b637530b877d67e4ff # zizmor: ignore[unpinned-uses] provided by grafana
+      # Vendored locally (.github/actions/build-plugin) to satisfy the org's
+      # "require full-length commit SHA" policy, which rejects the upstream
+      # action's transitive package-plugin@main ref.
+      - uses: ./.github/actions/build-plugin
         with:
           node-version: '22'
           go-version: '1.25.7'

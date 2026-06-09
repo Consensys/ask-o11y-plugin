@@ -1,0 +1,159 @@
+# Vendored from grafana/plugin-actions/create-plugin-update
+# Source commit: 2ecc2ba7168309f04010b5b637530b877d67e4ff
+# Reason: the org policy "Require actions pinned to a full-length commit SHA"
+# rejects the upstream `create-plugin-update@main` ref and its transitive
+# `package-manager-detect@<tag>` ref. We vendor this composite action and pin
+# the nested ref to a SHA. Re-sync from upstream when bumping; keep all nested
+# `uses:` pinned to SHAs.
+name: "Grafana Create Plugin Update"
+description: "Runs create-plugin update within a Grafana plugin and opens a PR with the changes"
+
+inputs:
+  token:
+    description: "Token for the repository. Can be passed in using `{{ secrets.GITHUB_TOKEN }}`."
+    required: true
+  base:
+    description: "Sets the pull request base branch"
+    required: false
+    default: "main"
+  node-version:
+    description: "Version of node"
+    required: false
+    default: "20"
+
+runs:
+  using: "composite"
+  steps:
+    - name: Checkout Repository
+      uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+      with:
+        persist-credentials: false
+        ref: ${{ inputs.base }}
+
+    - name: Detect package manager
+      id: package-manager
+      uses: grafana/plugin-actions/package-manager-detect@b33da838ef709061a6b6f69308d54925520dd433 # package-manager-detect/v1.0.1
+
+    - name: Install pnpm
+      if: steps.package-manager.outputs.name == 'pnpm'
+      uses: pnpm/action-setup@41ff72655975bd51cab0327fa583b6e92b6d3061 # v4.2.0
+      with:
+        version: ${{ steps.package-manager.outputs.version }}
+
+    - name: Setup Node.js
+      uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903 # v6.0.0
+      with:
+        node-version: "${{ inputs.node-version }}"
+        cache: ${{ steps.package-manager.outputs.name }}
+        cache-dependency-path: ${{ steps.package-manager.outputs.lockFilePath }}
+
+    - name: Get latest version of create-plugin package
+      id: get-latest-version
+      run: |
+        echo "latest_version=$(npx -y @grafana/create-plugin@latest version | sed 's/.*@//' | sed 's/ *$//' | sed '/^$/d')" >> "$GITHUB_OUTPUT"
+      shell: bash
+
+    - name: Get version from .config/.cprc.json
+      id: get-config-version
+      run: |
+        echo "config_version=$(jq -r '.version' .config/.cprc.json)" >> "$GITHUB_OUTPUT"
+      shell: bash
+
+    - name: Compare versions
+      id: compare-versions
+      run: |
+        if [ "$LATEST_VERSION" != "$CONFIG_VERSION" ]; then
+          echo "update_needed=true" >> "$GITHUB_OUTPUT"
+        else
+          echo "update_needed=false" >> "$GITHUB_OUTPUT"
+        fi
+      shell: bash
+      env:
+        LATEST_VERSION: ${{ steps.get-latest-version.outputs.latest_version }}
+        CONFIG_VERSION: ${{ steps.get-config-version.outputs.config_version }}
+
+    - name: Exit if version is already up to date
+      if: steps.compare-versions.outputs.update_needed == 'false'
+      run: echo "::notice::Plugin is already using the latest create-plugin version. No update needed."
+      shell: bash
+
+    - name: Install dependencies
+      if: steps.compare-versions.outputs.update_needed == 'true'
+      run: ${{ steps.package-manager.outputs.frozenInstallCmd }}
+      shell: bash
+
+    - name: Create branch
+      if: steps.compare-versions.outputs.update_needed == 'true'
+      run: |
+        git config --local user.name grafana-plugins-platform-bot[bot]
+        git config --local user.email 144369747+grafana-plugins-platform-bot[bot]@users.noreply.github.com
+
+        git checkout -b update-grafana-create-plugin-${LATEST_VERSION}
+      shell: bash
+      env:
+        LATEST_VERSION: ${{ steps.get-latest-version.outputs.latest_version }}
+        GITHUB_TOKEN: ${{ inputs.token }}
+
+    - name: Update the configs
+      if: steps.compare-versions.outputs.update_needed == 'true'
+      run: |
+        ${{ steps.package-manager.outputs.execCmd }} @grafana/create-plugin update --commit
+      shell: bash
+
+    # check if the update command created any commits in the current branch,
+    # if not we can skip pushing the branch and PR creation
+    - name: Check branch status
+      id: check-changes
+      if: steps.compare-versions.outputs.update_needed == 'true'
+      run: |
+        if [ -n "$(git log ${BASE}..HEAD --oneline)" ]; then
+          echo "should_push=true" >> "$GITHUB_OUTPUT"
+        else
+          echo "should_push=false" >> "$GITHUB_OUTPUT"
+        fi
+      shell: bash
+      env:
+        BASE: ${{ inputs.base }}
+
+    - name: Exit if no update is needed
+      if: steps.compare-versions.outputs.update_needed == 'true' && steps.check-changes.outputs.should_push == 'false'
+      run: echo "::notice::create-plugin update produced no file changes (only a version bump in .cprc.json). Skipping branch push."
+      shell: bash
+
+    - name: Push branch
+      if: steps.compare-versions.outputs.update_needed == 'true' && steps.check-changes.outputs.should_push == 'true'
+      run: |
+        git config --global --type bool push.autoSetupRemote true
+        git push https://x-access-token:${GITHUB_TOKEN}@github.com/${{ github.repository }}
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ inputs.token }}
+
+    - name: Create or Update PR
+      if: steps.compare-versions.outputs.update_needed == 'true' && steps.check-changes.outputs.should_push == 'true'
+      env:
+        GH_TOKEN: ${{ inputs.token }}
+        LATEST_VERSION: ${{ steps.get-latest-version.outputs.latest_version }}
+        CONFIG_VERSION: ${{ steps.get-config-version.outputs.config_version }}
+        BASE: ${{ inputs.base }}
+      run: |
+        PR_NUMBER=$(gh pr list --base $BASE --head update-grafana-create-plugin-${LATEST_VERSION} --json number -q '.[0].number')
+
+        PR_TITLE="chore: bump @grafana/create-plugin configuration to $LATEST_VERSION"
+
+        PR_BODY=$(cat <<EOF
+        Bumps [\`@grafana/create-plugin\`](https://github.com/grafana/plugin-tools/tree/main/packages/create-plugin) configuration from $CONFIG_VERSION to $LATEST_VERSION.
+
+        **Notes for reviewer:**
+        This is an auto-generated PR which ran \`@grafana/create-plugin update\`.
+        Please consult the create-plugin [CHANGELOG.md](https://github.com/grafana/plugin-tools/blob/main/packages/create-plugin/CHANGELOG.md) to understand what may have changed.
+        Please review the changes thoroughly before merging.
+        EOF
+        )
+
+        if [ -z "$PR_NUMBER" ]; then
+          gh pr create --base $BASE --head update-grafana-create-plugin-${LATEST_VERSION} --title "$PR_TITLE" --body "$PR_BODY"
+        else
+          gh pr edit $PR_NUMBER --title "$PR_TITLE" --body "$PR_BODY"
+        fi
+      shell: bash
