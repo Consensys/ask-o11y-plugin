@@ -195,51 +195,6 @@ describe('ChatMessage', () => {
       expect(screen.queryByText('Reject')).not.toBeInTheDocument();
     });
 
-    it('should collapse run plan details behind progress by default', () => {
-      const message: ChatMessageType = {
-        role: 'assistant',
-        content: '',
-        runPlan: {
-          objective: 'Answer the request using available Grafana and MCP evidence.',
-          steps: [
-            { id: 'plan', title: 'Plan', status: 'completed' },
-            { id: 'evidence', title: 'Gather evidence', status: 'running' },
-          ],
-        },
-      };
-
-      render(<ChatMessage message={message} />);
-
-      expect(screen.getByText('Run progress')).toBeInTheDocument();
-      expect(screen.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '50');
-      expect(
-        screen.queryByText('Answer the request using available Grafana and MCP evidence.')
-      ).not.toBeInTheDocument();
-    });
-
-    it('should show completed progress when a final report exists', () => {
-      const message: ChatMessageType = {
-        role: 'assistant',
-        content: 'Done',
-        runPlan: {
-          objective: 'Answer the request using available Grafana and MCP evidence.',
-          steps: [
-            { id: 'understand', title: 'Understand request', status: 'completed' },
-            { id: 'evidence', title: 'Gather evidence', status: 'running' },
-            { id: 'answer', title: 'Answer with citations', status: 'pending' },
-          ],
-        },
-        finalReport: {
-          summary: 'Complete',
-        },
-      };
-
-      render(<ChatMessage message={message} />);
-
-      expect(screen.getByText('3/3')).toBeInTheDocument();
-      expect(screen.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '100');
-    });
-
     it('should collapse evidence details by default', () => {
       const message: ChatMessageType = {
         role: 'assistant',

@@ -83,20 +83,11 @@ function AgentTraceSummary({
   ) => Promise<void>;
 }): React.ReactElement | null {
   const theme = useTheme2();
-  const hasPlan = Boolean(message.runPlan?.steps?.length);
   const hasEvidence = Boolean(message.evidence?.length);
   const hasApprovals = Boolean(message.approvals?.length);
-  const [isPlanOpen, setIsPlanOpen] = React.useState(false);
   const [isEvidenceOpen, setIsEvidenceOpen] = React.useState(false);
-  const planSteps = message.runPlan?.steps || [];
-  const isRunComplete = Boolean(message.finalReport);
-  const completedSteps = isRunComplete
-    ? planSteps.length
-    : planSteps.filter((step) => step.status === 'completed').length;
-  const runningSteps = isRunComplete ? 0 : planSteps.filter((step) => step.status === 'running').length;
-  const planProgress = planSteps.length > 0 ? Math.round((completedSteps / planSteps.length) * 100) : 0;
 
-  if (!hasPlan && !hasEvidence && !hasApprovals && !message.finalReport) {
+  if (!hasEvidence && !hasApprovals) {
     return null;
   }
 
@@ -108,76 +99,6 @@ function AgentTraceSummary({
         border: `1px solid ${theme.colors.border.weak}`,
       }}
     >
-      {hasPlan && (
-        <div className="px-3 py-2 border-b border-weak">
-          <button
-            type="button"
-            className="flex w-full items-center gap-3 text-left"
-            aria-expanded={isPlanOpen}
-            onClick={() => setIsPlanOpen((open) => !open)}
-            style={{
-              background: 'transparent',
-              border: 0,
-              color: 'inherit',
-              cursor: 'pointer',
-              padding: 0,
-            }}
-          >
-            <Icon name={isPlanOpen ? 'angle-down' : 'angle-right'} size="sm" />
-            <div className="min-w-0 flex-1">
-              <div className="flex items-center justify-between gap-3">
-                <div className="text-xs font-medium truncate" style={{ color: theme.colors.text.secondary }}>
-                  Run progress
-                </div>
-                <div className="text-xs" style={{ color: theme.colors.text.secondary }}>
-                  {completedSteps}/{planSteps.length}
-                  {runningSteps > 0 ? ' running' : ''}
-                </div>
-              </div>
-              <div
-                className="mt-2 h-1.5 overflow-hidden rounded"
-                style={{ backgroundColor: theme.colors.background.primary }}
-                role="progressbar"
-                aria-valuemin={0}
-                aria-valuemax={100}
-                aria-valuenow={planProgress}
-              >
-                <div
-                  className="h-full rounded"
-                  style={{ width: `${planProgress}%`, backgroundColor: theme.colors.primary.main }}
-                />
-              </div>
-            </div>
-          </button>
-          {isPlanOpen && (
-            <div className="mt-3">
-              <div className="text-xs font-medium mb-2" style={{ color: theme.colors.text.secondary }}>
-                {message.runPlan?.objective}
-              </div>
-              <div className="flex flex-wrap gap-2">
-                {planSteps.map((step) => (
-                  <span
-                    key={step.id}
-                    className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs"
-                    style={{
-                      backgroundColor: theme.colors.background.primary,
-                      color: theme.colors.text.primary,
-                      border: `1px solid ${theme.colors.border.weak}`,
-                    }}
-                  >
-                    <Icon
-                      name={step.status === 'completed' ? 'check' : step.status === 'running' ? 'spinner' : 'circle'}
-                      size="xs"
-                    />
-                    {step.title}
-                  </span>
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-
       {hasApprovals && (
         <div className="px-3 py-2 border-b border-weak">
           {message.approvals?.map((approval) => (
