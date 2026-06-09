@@ -52,6 +52,7 @@ function StatusBadge({ status }: { status?: ServerStatusKind }) {
   if (!status) {
     return <span className="text-xs text-secondary">Status unknown</span>;
   }
+
   return (
     <span className={`inline-block px-2 py-0.5 rounded text-xs font-medium ${STATUS_BADGE_CLASSES[status]}`}>
       {STATUS_LABELS[status]}
@@ -971,6 +972,9 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
     });
   }
 
+  const topologyServiceCount = topology?.nodes.filter((node) => node.type === 'service').length ?? 0;
+  const topologyHasTypedNodes = topology ? topologyServiceCount !== topology.nodes.length : false;
+
   return (
     <div>
       <TabsBar>
@@ -1587,7 +1591,10 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
                   data-testid={testIds.appConfig.serviceGraphSummary}
                 >
                   <Badge text={topology.source} color="blue" />
-                  <span className="text-sm text-secondary">{topology.nodes.length} services</span>
+                  <span className="text-sm text-secondary">{topologyServiceCount} services</span>
+                  {topologyHasTypedNodes && (
+                    <span className="text-sm text-secondary">{topology.nodes.length} nodes</span>
+                  )}
                   <span className="text-sm text-secondary">{topology.edges.length} links</span>
                 </div>
               )}

@@ -35,7 +35,6 @@ type AgentRun struct {
 }
 
 type AgentRunTrace struct {
-	Plan        []agent.PlanStep        `json:"plan,omitempty"`
 	Evidence    []agent.EvidenceEvent   `json:"evidence,omitempty"`
 	Approvals   []RunApproval           `json:"approvals,omitempty"`
 	FinalReport *agent.FinalReportEvent `json:"finalReport,omitempty"`
@@ -299,14 +298,6 @@ func applyTraceEvent(run *AgentRun, event agent.SSEEvent) {
 		run.Trace = &AgentRunTrace{}
 	}
 	switch event.Type {
-	case "run_plan":
-		if data, ok := decodeEventData[agent.RunPlanEvent](event.Data); ok {
-			run.Trace.Plan = append([]agent.PlanStep(nil), data.Steps...)
-		}
-	case "step_start", "step_done":
-		if data, ok := decodeEventData[agent.StepEvent](event.Data); ok {
-			updateTraceStep(run.Trace, data)
-		}
 	case "evidence":
 		if data, ok := decodeEventData[agent.EvidenceEvent](event.Data); ok {
 			upsertEvidence(run.Trace, data)
@@ -348,22 +339,6 @@ func decodeEventData[T any](data interface{}) (T, bool) {
 		return out, false
 	}
 	return out, true
-}
-
-func updateTraceStep(trace *AgentRunTrace, event agent.StepEvent) {
-	for i := range trace.Plan {
-		if trace.Plan[i].ID == event.ID {
-			trace.Plan[i].Status = event.Status
-			return
-		}
-	}
-	if event.ID != "" {
-		trace.Plan = append(trace.Plan, agent.PlanStep{
-			ID:     event.ID,
-			Title:  event.Title,
-			Status: event.Status,
-		})
-	}
 }
 
 func upsertEvidence(trace *AgentRunTrace, evidence agent.EvidenceEvent) {
@@ -420,7 +395,6 @@ func copyTrace(trace *AgentRunTrace) *AgentRunTrace {
 		return nil
 	}
 	copied := *trace
-	copied.Plan = append([]agent.PlanStep(nil), trace.Plan...)
 	copied.Evidence = append([]agent.EvidenceEvent(nil), trace.Evidence...)
 	copied.Approvals = append([]RunApproval(nil), trace.Approvals...)
 	if trace.FinalReport != nil {

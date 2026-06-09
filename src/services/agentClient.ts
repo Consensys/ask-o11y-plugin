@@ -56,27 +56,8 @@ export interface MCPUnavailableEvent {
   message: string;
 }
 
-export interface PlanStep {
-  id: string;
-  title: string;
-  description?: string;
-  status: 'pending' | 'running' | 'completed' | 'failed' | string;
-}
-
-export interface RunPlanEvent {
-  objective: string;
-  steps: PlanStep[];
-}
-
-export interface StepEvent {
-  id: string;
-  title?: string;
-  status: string;
-}
-
 export interface EvidenceEvent {
   id: string;
-  stepId?: string;
   title: string;
   summary: string;
   source?: string;
@@ -119,9 +100,6 @@ export type SSEEvent =
   | { type: 'error'; data: ErrorEvent; sequence: number }
   | { type: 'run_started'; data: RunStartedEvent; sequence: number }
   | { type: 'mcp_unavailable'; data: MCPUnavailableEvent; sequence: number }
-  | { type: 'run_plan'; data: RunPlanEvent; sequence: number }
-  | { type: 'step_start'; data: StepEvent; sequence: number }
-  | { type: 'step_done'; data: StepEvent; sequence: number }
   | { type: 'evidence'; data: EvidenceEvent; sequence: number }
   | { type: 'approval_request'; data: ApprovalRequestEvent; sequence: number }
   | { type: 'approval_resolved'; data: ApprovalResolvedEvent; sequence: number }
@@ -136,8 +114,6 @@ export interface AgentCallbacks {
   onRunStarted?: (event: RunStartedEvent) => void;
   onReconnect?: () => void;
   onMCPUnavailable?: (event: MCPUnavailableEvent) => void;
-  onRunPlan?: (event: RunPlanEvent) => void;
-  onStep?: (event: StepEvent) => void;
   onEvidence?: (event: EvidenceEvent) => void;
   onApprovalRequest?: (event: ApprovalRequestEvent) => void;
   onApprovalResolved?: (event: ApprovalResolvedEvent) => void;
@@ -154,7 +130,6 @@ export interface AgentRunStatus {
   updatedAt: string;
   events: SSEEvent[];
   trace?: {
-    plan?: PlanStep[];
     evidence?: EvidenceEvent[];
     approvals?: Array<
       ApprovalRequestEvent & { decision?: string; comment?: string; createdAt?: string; resolvedAt?: string }
@@ -295,13 +270,6 @@ function dispatchEvent(event: SSEEvent, callbacks: AgentCallbacks): void {
       break;
     case 'mcp_unavailable':
       callbacks.onMCPUnavailable?.(event.data);
-      break;
-    case 'run_plan':
-      callbacks.onRunPlan?.(event.data);
-      break;
-    case 'step_start':
-    case 'step_done':
-      callbacks.onStep?.(event.data);
       break;
     case 'evidence':
       callbacks.onEvidence?.(event.data);

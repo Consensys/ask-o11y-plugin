@@ -17,8 +17,6 @@ import {
   type EvidenceEvent,
   type FinalReportEvent,
   type MCPUnavailableEvent,
-  type RunPlanEvent,
-  type StepEvent,
   type ToolCallStartEvent,
   type ToolCallResultEvent,
 } from '../../../services/agentClient';
@@ -246,22 +244,7 @@ export function useChat(
         });
       },
       onDone: () => {
-        if (abortController.signal.aborted) {
-          return;
-        }
-        setChatHistory((prev) =>
-          updateLastAssistantMessage(prev, (msg) => ({
-            ...msg,
-            runPlan: msg.runPlan
-              ? {
-                  ...msg.runPlan,
-                  steps: msg.runPlan.steps.map((step) =>
-                    step.status === 'failed' ? step : { ...step, status: 'completed' }
-                  ),
-                }
-              : msg.runPlan,
-          }))
-        );
+        // Terminal event; stream completion is handled by the reconnect loop.
       },
       onReconnect: () => {
         setChatHistory((prev) =>
@@ -278,41 +261,12 @@ export function useChat(
         setChatHistory((prev) =>
           updateLastAssistantMessage(prev, (msg) => ({
             ...msg,
-            content: msg.content ? msg.content + '\n\n**Error:** ' + message : message,
+            error: message,
           }))
         );
       },
       onMCPUnavailable: (event: MCPUnavailableEvent) => {
         setMcpUnavailable(event.message);
-      },
-      onRunPlan: (event: RunPlanEvent) => {
-        if (abortController.signal.aborted) {
-          return;
-        }
-        setChatHistory((prev) =>
-          updateLastAssistantMessage(prev, (msg) => ({
-            ...msg,
-            runPlan: event,
-          }))
-        );
-      },
-      onStep: (event: StepEvent) => {
-        if (abortController.signal.aborted) {
-          return;
-        }
-        setChatHistory((prev) =>
-          updateLastAssistantMessage(prev, (msg) => ({
-            ...msg,
-            runPlan: msg.runPlan
-              ? {
-                  ...msg.runPlan,
-                  steps: msg.runPlan.steps.map((step) =>
-                    step.id === event.id ? { ...step, status: event.status } : step
-                  ),
-                }
-              : msg.runPlan,
-          }))
-        );
       },
       onEvidence: (event: EvidenceEvent) => {
         if (abortController.signal.aborted) {
@@ -375,14 +329,6 @@ export function useChat(
           updateLastAssistantMessage(prev, (msg) => ({
             ...msg,
             finalReport: event,
-            runPlan: msg.runPlan
-              ? {
-                  ...msg.runPlan,
-                  steps: msg.runPlan.steps.map((step) =>
-                    step.status === 'failed' ? step : { ...step, status: 'completed' }
-                  ),
-                }
-              : msg.runPlan,
           }))
         );
       },
@@ -592,7 +538,7 @@ export function useChat(
       setChatHistory((prev) =>
         updateLastAssistantMessage(prev, (msg) => ({
           ...msg,
-          content: error instanceof Error ? error.message : 'An unexpected error occurred',
+          error: error instanceof Error ? error.message : 'An unexpected error occurred',
         }))
       );
       setRetryCount((prev) => prev + 1);
@@ -602,6 +548,20 @@ export function useChat(
         abortControllerRef.current = null;
       }
     }
+  };
+
+  // Re-send the most recent user prompt after a failed run. Appends a fresh
+  // turn rather than mutating the failed one, avoiding stale-closure issues
+  // with sendMessage's history handling.
+  const retryLastMessage = (): void => {
+    if (isGenerating) {
+      return;
+    }
+    const lastUserMessage = [...chatHistory].reverse().find((message) => message.role === 'user');
+    if (!lastUserMessage?.content) {
+      return;
+    }
+    void sendMessage(lastUserMessage.content);
   };
 
   useEffect(() => {
@@ -672,8 +632,7 @@ export function useChat(
           setChatHistory((prev) =>
             updateLastAssistantMessage(prev, (msg) => ({
               ...msg,
-              content:
-                msg.content || 'Failed to reconnect to the previous response. Please try sending your message again.',
+              error: err instanceof Error ? err.message : 'Failed to reconnect to the previous response.',
             }))
           );
         }
@@ -817,6 +776,7 @@ export function useChat(
     setConversationType,
     setCurrentInput,
     sendMessage,
+    retryLastMessage,
     handleKeyPress,
     clearChat,
     getRunningToolCallsCount,

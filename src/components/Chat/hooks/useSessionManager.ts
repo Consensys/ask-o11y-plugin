@@ -5,7 +5,6 @@ import {
   getSession,
   deleteSession as deleteBackendSession,
   deleteAllSessions as deleteAllBackendSessions,
-  getCurrentSessionId,
   setCurrentSessionId,
   type SessionMetadata,
 } from '../../../services/backendSessionClient';
@@ -35,16 +34,6 @@ export function useSessionManager(
   const [sessions, setSessions] = useState<SessionMetadata[]>([]);
 
   const lastInitializedOrgIdRef = useRef<string | null>(null);
-  const initialChatHistoryLengthRef = useRef<number>(chatHistory.length);
-
-  useEffect(() => {
-    if (chatHistory.length === 0) {
-      initialChatHistoryLengthRef.current = 0;
-    } else if (initialChatHistoryLengthRef.current === 0) {
-      initialChatHistoryLengthRef.current = chatHistory.length;
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [orgId]);
 
   useEffect(() => {
     if (sessionIdFromUrl !== null && sessionIdFromUrl !== currentSessionId) {
@@ -61,7 +50,10 @@ export function useSessionManager(
     }
   }, []);
 
-  // On org change: list sessions and restore last-active session if no URL session
+  // On org change: populate the history sidebar. We intentionally do NOT
+  // restore the last-active session — opening Ask O11y always starts a fresh
+  // chat with past conversations available in the sidebar. URL-driven loading
+  // (shared links, alert investigations) is handled separately in useChat.
   useEffect(() => {
     if (lastInitializedOrgIdRef.current === orgId) {
       return;
@@ -77,22 +69,9 @@ export function useSessionManager(
         if (!cancelled) {
           setSessions(loaded);
         }
-
-        if (initialChatHistoryLengthRef.current === 0 && !sessionIdFromUrl) {
-          const id = await getCurrentSessionId();
-          if (!cancelled && id) {
-            const session = await getSession(id);
-            if (!cancelled) {
-              setCurrentSessionId_(session.id);
-              setChatHistory(session.messages as ChatMessage[]);
-            }
-          }
-        }
       } catch {
-        if (!cancelled) {
-          if (lastInitializedOrgIdRef.current === orgId) {
-            lastInitializedOrgIdRef.current = null;
-          }
+        if (!cancelled && lastInitializedOrgIdRef.current === orgId) {
+          lastInitializedOrgIdRef.current = null;
         }
       }
     };
@@ -102,8 +81,7 @@ export function useSessionManager(
     return () => {
       cancelled = true;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [orgId, sessionIdFromUrl]);
+  }, [orgId]);
 
   const createNewSession = useCallback(async () => {
     setChatHistory([]);

@@ -11,9 +11,11 @@ interface SessionSidebarProps {
   currentSessionId: string | null;
   isOpen: boolean;
   onClose: () => void;
+  /** When true, render as a persistent panel docked beside the chat instead of a modal overlay. */
+  docked?: boolean;
 }
 
-export function SessionSidebar({ sessionManager, currentSessionId, isOpen, onClose }: SessionSidebarProps) {
+export function SessionSidebar({ sessionManager, currentSessionId, isOpen, onClose, docked = false }: SessionSidebarProps) {
   const theme = useTheme2();
   const [showDeleteConfirm, setShowDeleteConfirm] = useState<string | null>(null);
   const [loadingAction, setLoadingAction] = useState<string | null>(null);
@@ -85,7 +87,9 @@ export function SessionSidebar({ sessionManager, currentSessionId, isOpen, onClo
     try {
       await new Promise((resolve) => setTimeout(resolve, 300)); // Small delay for UX
       await sessionManager.loadSession(sessionId);
-      onClose();
+      if (!docked) {
+        onClose();
+      }
     } finally {
       setLoadingAction(null);
     }
@@ -112,16 +116,18 @@ export function SessionSidebar({ sessionManager, currentSessionId, isOpen, onClo
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex">
-      {/* Backdrop - theme-aware overlay */}
-      <div 
-        className="absolute inset-0" 
-        onClick={onClose}
-        style={{ 
-          backgroundColor: theme.colors.background.canvas,
-          opacity: theme.isDark ? 0.9 : 0.8
-        }}
-      />
+    <div className={docked ? 'flex h-full' : 'fixed inset-0 z-50 flex'}>
+      {/* Backdrop - theme-aware overlay (modal mode only) */}
+      {!docked && (
+        <div
+          className="absolute inset-0"
+          onClick={onClose}
+          style={{
+            backgroundColor: theme.colors.background.canvas,
+            opacity: theme.isDark ? 0.9 : 0.8,
+          }}
+        />
+      )}
 
       {/* Sidebar */}
       <div 
@@ -150,7 +156,9 @@ export function SessionSidebar({ sessionManager, currentSessionId, isOpen, onClo
                 setCreatingSession(true);
                 try {
                   await sessionManager.createNewSession();
-                  onClose();
+                  if (!docked) {
+                    onClose();
+                  }
                 } catch {
                   // Session creation is best-effort; UI resets on next interaction
                 } finally {

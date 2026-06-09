@@ -47,7 +47,10 @@ export const testIds = {
   home: {
     container: 'data-testid home-container',
   },
-  chat: {},
+  chat: {
+    newChatButton: 'data-testid chat-new-chat-button',
+    retryButton: 'data-testid chat-retry-button',
+  },
   investigation: {
     error: 'data-testid investigation-error',
   },

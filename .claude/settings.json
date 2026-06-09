@@ -19,7 +19,8 @@
       "Bash(go test*)",
       "Bash(mage test*)",
       "Bash(nvm use 22 && npx jest*)",
-      "Bash(nvm use 22 && npm run e2e*)"
+      "Bash(nvm use 22 && npm run e2e*)",
+      "Bash(git *)"
     ]
   }
 }

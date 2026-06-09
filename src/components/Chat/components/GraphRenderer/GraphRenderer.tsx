@@ -45,6 +45,7 @@ const GraphRendererComponent: React.FC<GraphRendererProps> = ({
   const [currentVizType, setCurrentVizType] = useState(visualizationType);
   const [isExpanded, setIsExpanded] = useState(false);
   const [datasourceError, setDatasourceError] = useState<string | null>(null);
+  const [isCopied, setIsCopied] = useState(false);
 
   const vizTypeOptions = [
     { label: 'Time Series', value: 'timeseries' },
@@ -60,6 +61,19 @@ const GraphRendererComponent: React.FC<GraphRendererProps> = ({
   const handleVizTypeChange = useCallback((value: string) => {
     setCurrentVizType(value as typeof visualizationType);
   }, []);
+
+  const handleCopyQuery = useCallback(() => {
+    navigator.clipboard.writeText(query.query).catch(() => {});
+    setIsCopied(true);
+  }, [query.query]);
+
+  useEffect(() => {
+    if (!isCopied) {
+      return;
+    }
+    const timer = setTimeout(() => setIsCopied(false), 2000);
+    return () => clearTimeout(timer);
+  }, [isCopied]);
 
   useEffect(() => {
     setIsLoading(true);
@@ -312,16 +326,17 @@ const GraphRendererComponent: React.FC<GraphRendererProps> = ({
           borderTop: `1px solid ${theme.colors.border.weak}`,
         }}
       >
-        <code className="text-xs flex-1" style={{ color: theme.colors.text.secondary }}>
+        <code
+          className="text-xs flex-1 min-w-0 whitespace-pre-wrap break-all max-h-24 overflow-y-auto"
+          style={{ color: theme.colors.text.secondary }}
+        >
           {query.query}
         </code>
-        <Tooltip content="Copy query">
+        <Tooltip content={isCopied ? 'Copied!' : 'Copy query'}>
           <IconButton
-            name="copy"
+            name={isCopied ? 'check' : 'copy'}
             size="sm"
-            onClick={() => {
-              navigator.clipboard.writeText(query.query);
-            }}
+            onClick={handleCopyQuery}
             aria-label="Copy query to clipboard"
           />
         </Tooltip>

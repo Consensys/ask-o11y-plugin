@@ -23,21 +23,8 @@ export interface RenderedToolCall {
   response?: ToolCallResponse;
 }
 
-export interface AgentPlanStep {
-  id: string;
-  title: string;
-  description?: string;
-  status: string;
-}
-
-export interface AgentRunPlan {
-  objective: string;
-  steps: AgentPlanStep[];
-}
-
 export interface AgentEvidenceItem {
   id: string;
-  stepId?: string;
   title: string;
   summary: string;
   source?: string;
@@ -84,12 +71,13 @@ export interface ChatMessage {
   role: 'user' | 'assistant';
   content: string;
   toolCalls?: RenderedToolCall[];
-  runPlan?: AgentRunPlan;
   evidence?: AgentEvidenceItem[];
   approvals?: AgentApprovalItem[];
   finalReport?: AgentFinalReport;
   pageRefs?: GrafanaPageRef[];
   timestamp?: Date;
+  /** Set when the agent run for this assistant turn failed; surfaced as a retryable error in the UI. */
+  error?: string;
 }
 
 /** Content section returned by splitContentByPromQL */
@@ -123,6 +111,8 @@ export interface ChatInterfaceProps {
     decision: 'approved' | 'rejected',
     approvalScope?: 'once' | 'always'
   ) => Promise<void>;
+  /** Re-send the most recent user prompt after a failed run. */
+  onRetry?: () => void;
 }
 
 /** Props for the Grafana page panel */

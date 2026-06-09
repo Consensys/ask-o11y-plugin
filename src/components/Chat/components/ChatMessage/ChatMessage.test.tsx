@@ -18,12 +18,17 @@ jest.mock('@grafana/ui', () => ({
       primary: { main: '#7c3aed' },
     },
   }),
-  Button: ({ children, disabled, onClick }: any) => (
-    <button disabled={disabled} onClick={onClick}>
+  Button: ({ children, disabled, onClick, 'data-testid': dataTestId }: any) => (
+    <button disabled={disabled} onClick={onClick} data-testid={dataTestId}>
       {children}
     </button>
   ),
   Icon: ({ name }: any) => <span data-testid={`icon-${name}`} />,
+  Alert: ({ children, title }: any) => (
+    <div role="alert" aria-label={title}>
+      {children}
+    </div>
+  ),
 }));
 
 // Mock child components to simplify testing
@@ -188,51 +193,6 @@ describe('ChatMessage', () => {
       expect(screen.getByText('approved')).toBeInTheDocument();
       expect(screen.queryByText('Approve')).not.toBeInTheDocument();
       expect(screen.queryByText('Reject')).not.toBeInTheDocument();
-    });
-
-    it('should collapse run plan details behind progress by default', () => {
-      const message: ChatMessageType = {
-        role: 'assistant',
-        content: '',
-        runPlan: {
-          objective: 'Answer the request using available Grafana and MCP evidence.',
-          steps: [
-            { id: 'plan', title: 'Plan', status: 'completed' },
-            { id: 'evidence', title: 'Gather evidence', status: 'running' },
-          ],
-        },
-      };
-
-      render(<ChatMessage message={message} />);
-
-      expect(screen.getByText('Run progress')).toBeInTheDocument();
-      expect(screen.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '50');
-      expect(
-        screen.queryByText('Answer the request using available Grafana and MCP evidence.')
-      ).not.toBeInTheDocument();
-    });
-
-    it('should show completed progress when a final report exists', () => {
-      const message: ChatMessageType = {
-        role: 'assistant',
-        content: 'Done',
-        runPlan: {
-          objective: 'Answer the request using available Grafana and MCP evidence.',
-          steps: [
-            { id: 'understand', title: 'Understand request', status: 'completed' },
-            { id: 'evidence', title: 'Gather evidence', status: 'running' },
-            { id: 'answer', title: 'Answer with citations', status: 'pending' },
-          ],
-        },
-        finalReport: {
-          summary: 'Complete',
-        },
-      };
-
-      render(<ChatMessage message={message} />);
-
-      expect(screen.getByText('3/3')).toBeInTheDocument();
-      expect(screen.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '100');
     });
 
     it('should collapse evidence details by default', () => {
@@ -449,6 +409,47 @@ describe('ChatMessage', () => {
       render(<ChatMessage message={message} />);
 
       expect(screen.getByText('Assistant message', { selector: '.sr-only' })).toBeInTheDocument();
+    });
+  });
+
+  describe('error and retry', () => {
+    it('should render the error message when message.error is set', () => {
+      const message: ChatMessageType = {
+        role: 'assistant',
+        content: '',
+        error: 'The data is currently unavailable',
+      };
+
+      render(<ChatMessage message={message} />);
+
+      expect(screen.getByText('The data is currently unavailable')).toBeInTheDocument();
+    });
+
+    it('should render a Retry button for the last message and invoke onRetry', () => {
+      const message: ChatMessageType = {
+        role: 'assistant',
+        content: '',
+        error: 'Run failed',
+      };
+      const onRetry = jest.fn();
+
+      render(<ChatMessage message={message} isLastMessage={true} onRetry={onRetry} />);
+
+      const retryButton = screen.getByTestId('data-testid chat-retry-button');
+      fireEvent.click(retryButton);
+      expect(onRetry).toHaveBeenCalledTimes(1);
+    });
+
+    it('should not render a Retry button for non-last messages', () => {
+      const message: ChatMessageType = {
+        role: 'assistant',
+        content: '',
+        error: 'Run failed',
+      };
+
+      render(<ChatMessage message={message} isLastMessage={false} onRetry={jest.fn()} />);
+
+      expect(screen.queryByTestId('data-testid chat-retry-button')).not.toBeInTheDocument();
     });
   });
 });
