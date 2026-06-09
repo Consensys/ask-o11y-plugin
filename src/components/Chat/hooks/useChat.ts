@@ -17,8 +17,6 @@ import {
   type EvidenceEvent,
   type FinalReportEvent,
   type MCPUnavailableEvent,
-  type RunPlanEvent,
-  type StepEvent,
   type ToolCallStartEvent,
   type ToolCallResultEvent,
 } from '../../../services/agentClient';
@@ -246,22 +244,7 @@ export function useChat(
         });
       },
       onDone: () => {
-        if (abortController.signal.aborted) {
-          return;
-        }
-        setChatHistory((prev) =>
-          updateLastAssistantMessage(prev, (msg) => ({
-            ...msg,
-            runPlan: msg.runPlan
-              ? {
-                  ...msg.runPlan,
-                  steps: msg.runPlan.steps.map((step) =>
-                    step.status === 'failed' ? step : { ...step, status: 'completed' }
-                  ),
-                }
-              : msg.runPlan,
-          }))
-        );
+        // Terminal event; stream completion is handled by the reconnect loop.
       },
       onReconnect: () => {
         setChatHistory((prev) =>
@@ -284,35 +267,6 @@ export function useChat(
       },
       onMCPUnavailable: (event: MCPUnavailableEvent) => {
         setMcpUnavailable(event.message);
-      },
-      onRunPlan: (event: RunPlanEvent) => {
-        if (abortController.signal.aborted) {
-          return;
-        }
-        setChatHistory((prev) =>
-          updateLastAssistantMessage(prev, (msg) => ({
-            ...msg,
-            runPlan: event,
-          }))
-        );
-      },
-      onStep: (event: StepEvent) => {
-        if (abortController.signal.aborted) {
-          return;
-        }
-        setChatHistory((prev) =>
-          updateLastAssistantMessage(prev, (msg) => ({
-            ...msg,
-            runPlan: msg.runPlan
-              ? {
-                  ...msg.runPlan,
-                  steps: msg.runPlan.steps.map((step) =>
-                    step.id === event.id ? { ...step, status: event.status } : step
-                  ),
-                }
-              : msg.runPlan,
-          }))
-        );
       },
       onEvidence: (event: EvidenceEvent) => {
         if (abortController.signal.aborted) {
@@ -375,14 +329,6 @@ export function useChat(
           updateLastAssistantMessage(prev, (msg) => ({
             ...msg,
             finalReport: event,
-            runPlan: msg.runPlan
-              ? {
-                  ...msg.runPlan,
-                  steps: msg.runPlan.steps.map((step) =>
-                    step.status === 'failed' ? step : { ...step, status: 'completed' }
-                  ),
-                }
-              : msg.runPlan,
           }))
         );
       },

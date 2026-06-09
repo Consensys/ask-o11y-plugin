@@ -141,7 +141,7 @@ func TestAgentLoop_SimpleTextResponse(t *testing.T) {
 	go loop.Run(context.Background(), req, eventCh)
 	events := collectEvents(eventCh)
 
-	expectedTypes := []string{"run_plan", "step_start", "step_done", "final_report", "content", "done"}
+	expectedTypes := []string{"final_report", "content", "done"}
 	if len(events) != len(expectedTypes) {
 		t.Fatalf("expected event types %v, got %+v", expectedTypes, events)
 	}
@@ -151,7 +151,7 @@ func TestAgentLoop_SimpleTextResponse(t *testing.T) {
 		}
 	}
 
-	content := events[4].Data.(ContentEvent)
+	content := events[1].Data.(ContentEvent)
 	if content.Content != "Here is your answer." {
 		t.Errorf("unexpected content: %q", content.Content)
 	}
@@ -244,7 +244,7 @@ func TestAgentLoop_FallsBackFromAutoLargeToBaseOnLLM5xx(t *testing.T) {
 	if len(models) != 3 || models[0] != "large" || models[1] != "large" || models[2] != "base" {
 		t.Fatalf("models = %v, want large retry then base fallback", models)
 	}
-	expectedTypes := []string{"run_plan", "step_start", "step_done", "final_report", "content", "done"}
+	expectedTypes := []string{"final_report", "content", "done"}
 	if len(events) != len(expectedTypes) {
 		t.Fatalf("expected event types %v, got %+v", expectedTypes, events)
 	}
@@ -253,7 +253,7 @@ func TestAgentLoop_FallsBackFromAutoLargeToBaseOnLLM5xx(t *testing.T) {
 			t.Errorf("event[%d]: expected %q, got %q", i, expected, events[i].Type)
 		}
 	}
-	if content := events[4].Data.(ContentEvent).Content; content != "base recovered" {
+	if content := events[1].Data.(ContentEvent).Content; content != "base recovered" {
 		t.Fatalf("content = %q, want base recovered", content)
 	}
 }
@@ -284,7 +284,7 @@ func TestAgentLoop_SendsDiagnosticErrorForLLMStatus(t *testing.T) {
 	go loop.Run(context.Background(), req, eventCh)
 	events := collectEvents(eventCh)
 
-	expectedTypes := []string{"run_plan", "step_start", "error"}
+	expectedTypes := []string{"error"}
 	if len(events) != len(expectedTypes) {
 		t.Fatalf("expected event types %v, got %+v", expectedTypes, events)
 	}
@@ -293,7 +293,7 @@ func TestAgentLoop_SendsDiagnosticErrorForLLMStatus(t *testing.T) {
 			t.Errorf("event[%d]: expected %q, got %q", i, expected, events[i].Type)
 		}
 	}
-	errEvent := events[2].Data.(ErrorEvent)
+	errEvent := events[0].Data.(ErrorEvent)
 	if errEvent.Code != "llm_http_500" || errEvent.StatusCode != http.StatusInternalServerError {
 		t.Fatalf("unexpected error event: %+v", errEvent)
 	}
@@ -355,7 +355,7 @@ func TestAgentLoop_ToolCallThenText(t *testing.T) {
 		types[i] = e.Type
 	}
 
-	expected := []string{"run_plan", "step_start", "tool_call_start", "tool_call_result", "step_done", "final_report", "content", "done"}
+	expected := []string{"tool_call_start", "tool_call_result", "final_report", "content", "done"}
 	if len(types) != len(expected) {
 		t.Fatalf("expected event types %v, got %v", expected, types)
 	}
@@ -417,7 +417,7 @@ func TestAgentLoop_ContentWithToolCalls_DropsContent(t *testing.T) {
 	}
 
 	// The "thinking" content from iteration 1 must NOT appear.
-	expected := []string{"run_plan", "step_start", "tool_call_start", "tool_call_result", "step_done", "final_report", "content", "done"}
+	expected := []string{"tool_call_start", "tool_call_result", "final_report", "content", "done"}
 	if len(types) != len(expected) {
 		t.Fatalf("expected event types %v, got %v", expected, types)
 	}
@@ -428,7 +428,7 @@ func TestAgentLoop_ContentWithToolCalls_DropsContent(t *testing.T) {
 	}
 
 	// Verify only the final answer content is sent
-	content := events[6].Data.(ContentEvent)
+	content := events[3].Data.(ContentEvent)
 	if content.Content != "Here are the results." {
 		t.Errorf("expected final answer, got %q", content.Content)
 	}

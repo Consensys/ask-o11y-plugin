@@ -110,14 +110,6 @@ func (a *AgentLoop) Run(ctx context.Context, req LoopRequest, eventCh chan<- SSE
 	openAITools := ConvertMCPToolsToOpenAI(mcpTools)
 
 	messages := BuildContextWindow(req.SystemPrompt, req.Messages, req.Summary, req.RecentMessageCount)
-	plan := buildRunPlan(req.ConversationType)
-	a.send(ctx, eventCh, SSEEvent{
-		Type: "run_plan",
-		Data: RunPlanEvent{
-			Objective: planObjective(req.ConversationType),
-			Steps:     plan,
-		},
-	})
 
 	// Per-run state for transport-failure aggregation. We emit at most one
 	// mcp_unavailable event per run, once at least 2 distinct tools have hit
@@ -129,12 +121,6 @@ func (a *AgentLoop) Run(ctx context.Context, req LoopRequest, eventCh chan<- SSE
 	for iteration := 0; iteration < maxIter; iteration++ {
 		if ctx.Err() != nil {
 			return
-		}
-		if iteration == 0 && len(plan) > 0 {
-			a.send(ctx, eventCh, SSEEvent{
-				Type: "step_start",
-				Data: StepEvent{ID: plan[0].ID, Title: plan[0].Title, Status: "running"},
-			})
 		}
 
 		messages = TrimMessagesToTokenLimit(messages, openAITools, promptBudget)
@@ -177,20 +163,14 @@ func (a *AgentLoop) Run(ctx context.Context, req LoopRequest, eventCh chan<- SSE
 
 		if len(msg.ToolCalls) == 0 {
 			if msg.Content != "" {
-				if len(plan) > 0 {
-					a.send(ctx, eventCh, SSEEvent{
-						Type: "step_done",
-						Data: StepEvent{ID: plan[len(plan)-1].ID, Title: plan[len(plan)-1].Title, Status: "completed"},
-					})
-					a.send(ctx, eventCh, SSEEvent{
-						Type: "final_report",
-						Data: FinalReportEvent{
-							Verdict:    finalReportVerdict(req.ConversationType),
-							Confidence: "medium",
-							Summary:    summarizeFinalContent(msg.Content),
-						},
-					})
-				}
+				a.send(ctx, eventCh, SSEEvent{
+					Type: "final_report",
+					Data: FinalReportEvent{
+						Verdict:    finalReportVerdict(req.ConversationType),
+						Confidence: "medium",
+						Summary:    summarizeFinalContent(msg.Content),
+					},
+				})
 				a.send(ctx, eventCh, SSEEvent{
 					Type: "content",
 					Data: ContentEvent{Content: msg.Content},
@@ -262,7 +242,6 @@ func (a *AgentLoop) Run(ctx context.Context, req LoopRequest, eventCh chan<- SSE
 					Type: "evidence",
 					Data: EvidenceEvent{
 						ID:       tc.ID,
-						StepID:   currentEvidenceStepID(plan),
 						Title:    evidenceTitle(tc.Function.Name),
 						Summary:  summarizeToolEvidence(toolContent),
 						Source:   "mcp",
@@ -508,52 +487,6 @@ func extractText(result *mcp.CallToolResult) string {
 		}
 	}
 	return out
-}
-
-func buildRunPlan(conversationType string) []PlanStep {
-	switch conversationType {
-	case "investigation":
-		return []PlanStep{
-			{ID: "scope", Title: "Scope incident context", Description: "Identify alert, service, org, and likely time window.", Status: "pending"},
-			{ID: "evidence", Title: "Gather observability evidence", Description: "Query metrics, logs, traces, deploy signals, runbooks, and topology.", Status: "pending"},
-			{ID: "report", Title: "Synthesize RCA report", Description: "Produce a confidence-scored incident report with evidence and gaps.", Status: "pending"},
-		}
-	case "performance":
-		return []PlanStep{
-			{ID: "scope", Title: "Scope performance target", Status: "pending"},
-			{ID: "evidence", Title: "Compare telemetry signals", Status: "pending"},
-			{ID: "report", Title: "Summarize bottlenecks", Status: "pending"},
-		}
-	default:
-		return []PlanStep{
-			{ID: "understand", Title: "Understand request", Status: "pending"},
-			{ID: "evidence", Title: "Gather evidence", Status: "pending"},
-			{ID: "answer", Title: "Answer with citations", Status: "pending"},
-		}
-	}
-}
-
-func planObjective(conversationType string) string {
-	switch conversationType {
-	case "investigation":
-		return "Investigate the incident using live Grafana and MCP evidence."
-	case "performance":
-		return "Analyze performance using live observability evidence."
-	default:
-		return "Answer the request using available Grafana and MCP evidence."
-	}
-}
-
-func currentEvidenceStepID(plan []PlanStep) string {
-	for _, step := range plan {
-		if step.ID == "evidence" {
-			return step.ID
-		}
-	}
-	if len(plan) == 0 {
-		return ""
-	}
-	return plan[0].ID
 }
 
 func evidenceTitle(toolName string) string {

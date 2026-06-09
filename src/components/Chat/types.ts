@@ -23,21 +23,8 @@ export interface RenderedToolCall {
   response?: ToolCallResponse;
 }
 
-export interface AgentPlanStep {
-  id: string;
-  title: string;
-  description?: string;
-  status: string;
-}
-
-export interface AgentRunPlan {
-  objective: string;
-  steps: AgentPlanStep[];
-}
-
 export interface AgentEvidenceItem {
   id: string;
-  stepId?: string;
   title: string;
   summary: string;
   source?: string;
@@ -84,7 +71,6 @@ export interface ChatMessage {
   role: 'user' | 'assistant';
   content: string;
   toolCalls?: RenderedToolCall[];
-  runPlan?: AgentRunPlan;
   evidence?: AgentEvidenceItem[];
   approvals?: AgentApprovalItem[];
   finalReport?: AgentFinalReport;

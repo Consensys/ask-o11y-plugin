@@ -26,7 +26,6 @@ function createMockCallbacks(): jest.Mocked<AgentCallbacks> {
     onDone: jest.fn(),
     onError: jest.fn(),
     onMCPUnavailable: jest.fn(),
-    onRunPlan: jest.fn(),
     onEvidence: jest.fn(),
     onApprovalRequest: jest.fn(),
     onApprovalResolved: jest.fn(),
@@ -228,8 +227,6 @@ describe('reconnectToAgentRun', () => {
   it('should dispatch progressive agent events to callbacks', async () => {
     const callbacks = createMockCallbacks();
     const sseLines = [
-      'data: {"type":"run_plan","data":{"objective":"Investigate","steps":[{"id":"evidence","title":"Gather evidence","status":"pending"}]}}',
-      '',
       'data: {"type":"evidence","data":{"id":"tc_1","title":"Prometheus","summary":"up is 1"}}',
       '',
       'data: {"type":"approval_request","data":{"approvalId":"tc_2","toolCallId":"tc_2","toolName":"delete_dashboard","risk":"destructive","reason":"write","arguments":"{}"}}',
@@ -249,10 +246,6 @@ describe('reconnectToAgentRun', () => {
 
     await reconnectToAgentRun('run-1', callbacks);
 
-    expect(callbacks.onRunPlan).toHaveBeenCalledWith({
-      objective: 'Investigate',
-      steps: [{ id: 'evidence', title: 'Gather evidence', status: 'pending' }],
-    });
     expect(callbacks.onEvidence).toHaveBeenCalledWith({ id: 'tc_1', title: 'Prometheus', summary: 'up is 1' });
     expect(callbacks.onApprovalRequest).toHaveBeenCalledWith({
       approvalId: 'tc_2',

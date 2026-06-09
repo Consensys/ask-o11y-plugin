@@ -58,14 +58,6 @@ func TestRunStore_AppendEventBuildsTrace(t *testing.T) {
 	store := NewRunStore(log.DefaultLogger)
 	store.CreateRun("run-1", 100, 1)
 
-	store.AppendEvent("run-1", agent.SSEEvent{Type: "run_plan", Data: agent.RunPlanEvent{
-		Objective: "Investigate",
-		Steps: []agent.PlanStep{{
-			ID:     "evidence",
-			Title:  "Gather evidence",
-			Status: "pending",
-		}},
-	}})
 	store.AppendEvent("run-1", agent.SSEEvent{Type: "approval_request", Data: agent.ApprovalRequestEvent{
 		ApprovalID: "tc_1",
 		ToolCallID: "tc_1",
@@ -90,9 +82,6 @@ func TestRunStore_AppendEventBuildsTrace(t *testing.T) {
 	}
 	if run.Trace == nil {
 		t.Fatal("expected trace")
-	}
-	if len(run.Trace.Plan) != 1 || run.Trace.Plan[0].ID != "evidence" {
-		t.Fatalf("unexpected plan: %+v", run.Trace.Plan)
 	}
 	if len(run.Trace.Approvals) != 1 || run.Trace.Approvals[0].Decision != "approved" {
 		t.Fatalf("unexpected approvals: %+v", run.Trace.Approvals)

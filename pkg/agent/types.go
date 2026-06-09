@@ -87,27 +87,8 @@ type ToolCallResultEvent struct {
 	ErrorKind string `json:"errorKind,omitempty"`
 }
 
-type PlanStep struct {
-	ID          string `json:"id"`
-	Title       string `json:"title"`
-	Description string `json:"description,omitempty"`
-	Status      string `json:"status"`
-}
-
-type RunPlanEvent struct {
-	Objective string     `json:"objective"`
-	Steps     []PlanStep `json:"steps"`
-}
-
-type StepEvent struct {
-	ID     string `json:"id"`
-	Title  string `json:"title,omitempty"`
-	Status string `json:"status"`
-}
-
 type EvidenceEvent struct {
 	ID            string `json:"id"`
-	StepID        string `json:"stepId,omitempty"`
 	Title         string `json:"title"`
 	Summary       string `json:"summary"`
 	Source        string `json:"source,omitempty"`
