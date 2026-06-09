@@ -45,6 +45,31 @@ func TestBuildSystemPrompt_AntiHallucinationContractAlwaysPresent(t *testing.T) 
 	}
 }
 
+func TestBuildSystemPrompt_FeedbackGuardrailsPresent(t *testing.T) {
+	r, err := NewPromptRegistry(PluginSettings{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err := r.BuildSystemPrompt(BuildToolContext("Org1", "Editor"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cases := []struct {
+		name    string
+		snippet string
+	}{
+		{"no unprompted writes", "Write Actions Require Explicit Intent"},
+		{"capability honesty", "Capability honesty"},
+		{"honor user time range", "Honor the user's time range exactly"},
+	}
+	for _, tc := range cases {
+		if !strings.Contains(out, tc.snippet) {
+			t.Errorf("expected %q guardrail (%q) in system prompt", tc.name, tc.snippet)
+		}
+	}
+}
+
 func TestBuildSystemPrompt_DatasourceSnapshotSlot(t *testing.T) {
 	r, err := NewPromptRegistry(PluginSettings{})
 	if err != nil {
