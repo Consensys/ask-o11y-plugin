@@ -1530,7 +1530,10 @@ func (p *Plugin) handleAgentTopology(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if graphitiSearchFactsSupportsCenterNode(tools, toolName) && len(topologyNodes) > 0 {
-		centerNodes := topologyCenterNodes(topologyNodes, maxNodes)
+		// Bound centered fact lookups to a small cap independent of the display
+		// node limit — each center node is a sequential MCP call, so using
+		// maxNodes (up to 500) here can cause a call storm and gateway timeouts.
+		centerNodes := topologyCenterNodes(topologyNodes, min(maxNodes, maxTopologyCenterFactLookups))
 		centerFactLimit := topologyCenteredFactLimit(maxEdges, len(centerNodes))
 		for _, node := range centerNodes {
 			nodeResult, nodeErr := p.mcpProxy.CallToolWithContext(

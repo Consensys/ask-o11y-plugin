@@ -36,6 +36,11 @@ const (
 	defaultTopologyMaxEdges = 200
 	hardTopologyMaxNodes    = 500
 	hardTopologyMaxEdges    = 1000
+	// maxTopologyCenterFactLookups caps how many per-node centered fact
+	// queries a single topology refresh may issue. This is independent of the
+	// display node limit (maxNodes) to avoid a sequential MCP call storm that
+	// would exceed gateway timeouts.
+	maxTopologyCenterFactLookups = 12
 )
 
 type topologyBuilder struct {
