@@ -27,6 +27,7 @@ import { mcpServerStatusService, type MCPServerStatus, type MCPTool } from '../.
 import type { AppPluginSettings, MCPServerConfig } from '../../types/plugin';
 import { AgentTopologyResponse, getAgentTopology } from '../../services/agentTopologyClient';
 import { ServiceGraphScene } from '../ServiceGraph/ServiceGraphScene';
+import { getPluginStorageKey } from '../../utils/storageKeys';
 
 type ServerStatusKind = MCPServerStatus['status'];
 type SettingsTab = 'general' | 'agent-runtime' | 'mcp' | 'service-graph' | 'prompts';
@@ -123,7 +124,7 @@ const DEFAULT_SERVICE_GRAPH_MAX_EDGES = 200;
 const SERVICE_GRAPH_MAX_NODES_LIMIT = 500;
 const SERVICE_GRAPH_MAX_EDGES_LIMIT = 1000;
 const DEFAULT_TOPOLOGY_QUERY = 'service topology dependencies incidents upstream downstream';
-const SETTINGS_TAB_STORAGE_KEY = 'ask-o11y.settings.activeTab';
+const SETTINGS_TAB_STORAGE_KEY = getPluginStorageKey('settings.activeTab');
 
 const SETTINGS_TABS: Array<{ id: SettingsTab; label: string; icon: React.ComponentProps<typeof Tab>['icon'] }> = [
   { id: 'general', label: 'General', icon: 'sliders-v-alt' },
