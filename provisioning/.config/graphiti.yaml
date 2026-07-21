@@ -1,0 +1,72 @@
+server:
+  transport: "http"
+  host: "0.0.0.0"
+  port: 8000
+  allowed_hosts:
+    - "graphiti:8000"
+    - "localhost:8000"
+    - "localhost"
+    - "127.0.0.1"
+
+llm:
+  provider: "anthropic"
+  model: ${LLM_MODEL:-claude-haiku-4-5-20251001}
+  temperature: 1.0
+  max_tokens: 8192
+  providers:
+    anthropic:
+      api_key: ${ANTHROPIC_API_KEY:-}
+
+embedder:
+  provider: "openai"
+  model: ${EMBEDDING_MODEL:-nomic-embed-text}
+  providers:
+    openai:
+      api_key: "ollama"
+      api_url: ${OLLAMA_URL:-http://ollama:11434/v1}
+
+database:
+  provider: "neo4j"
+  providers:
+    neo4j:
+      uri: ${NEO4J_URI:-bolt://neo4j:7687}
+      username: ${NEO4J_USER:-neo4j}
+      password: ${NEO4J_PASSWORD:-demodemo}
+      database: ${NEO4J_DATABASE:-neo4j}
+      use_parallel_runtime: false
+
+graphiti:
+  group_id: ${GRAPHITI_GROUP_ID:-main}
+  entity_types:
+    - name: "Service"
+      description: "A microservice, application, or workload identified by a service/job/app metric label or trace resource.service.name"
+    - name: "ServiceInstance"
+      description: "A single running replica of a Service — from metric label instance/pod or trace resource.service.instance.id"
+    - name: "KubeCluster"
+      description: "A Kubernetes cluster — from the cluster metric label or kube_node_info"
+    - name: "Namespace"
+      description: "A Kubernetes namespace — from the namespace metric/trace label"
+    - name: "Node"
+      description: "A Kubernetes node — from the node metric label or kube_node_* metrics"
+    - name: "Pod"
+      description: "A Kubernetes Pod — from the pod metric label or kube_pod_* metrics"
+    - name: "Deployment"
+      description: "A Kubernetes Deployment — from kube_deployment_* metrics, label: deployment"
+    - name: "StatefulSet"
+      description: "A Kubernetes StatefulSet — from kube_statefulset_* metrics, label: statefulset"
+    - name: "DaemonSet"
+      description: "A Kubernetes DaemonSet — from kube_daemonset_* metrics, label: daemonset"
+    - name: "Job"
+      description: "A Kubernetes Job — from kube_job_* metrics, label: job_name"
+    - name: "CronJob"
+      description: "A Kubernetes CronJob — from kube_cronjob_* metrics, label: cronjob"
+    - name: "Ingress"
+      description: "A Kubernetes Ingress — from kube_ingress_* metrics, label: ingress"
+    - name: "KubeEvent"
+      description: "A notable Kubernetes event (CrashLoopBackOff, OOMKilled, FailedScheduling) — from Loki k8s event logs or kube_events_total metric"
+    - name: "Database"
+      description: "A data store (PostgreSQL, MySQL, Redis, MongoDB, Elasticsearch, ClickHouse) — from db.system trace attribute or pg_*/redis_*/mysql_* metric prefixes"
+    - name: "Queue"
+      description: "A message broker (Kafka, RabbitMQ, SQS, NATS, Pub/Sub) — from messaging.system trace attribute or kafka_*/rabbitmq_* metric prefixes"
+    - name: "Team"
+      description: "An engineering team or on-call group — from metric label team/owner or Kubernetes annotations"

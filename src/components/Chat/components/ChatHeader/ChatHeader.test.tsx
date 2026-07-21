@@ -84,4 +84,14 @@ describe('ChatHeader', () => {
       expect(screen.getByText('Test')).toBeInTheDocument();
     });
   });
+
+  describe('model label', () => {
+    it('should render the locked model label when provided', () => {
+      render(<ChatHeader isGenerating={false} currentModelLabel="Large · claude-sonnet-4-6" />);
+
+      const label = screen.getByText('Large · claude-sonnet-4-6');
+      expect(label).toBeInTheDocument();
+      expect(label).toHaveAttribute('title', 'Large · claude-sonnet-4-6');
+    });
+  });
 });

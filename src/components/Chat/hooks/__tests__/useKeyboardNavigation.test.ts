@@ -1,29 +1,18 @@
-/**
- * Unit tests for useKeyboardNavigation hook
- * Tests keyboard shortcuts and navigation functionality
- */
-
 import { renderHook, act } from '@testing-library/react';
-import { useKeyboardNavigation, useAnnounce } from '../useKeyboardNavigation';
+import { useKeyboardNavigation } from '../useKeyboardNavigation';
 
 describe('useKeyboardNavigation', () => {
-  let mockOnNewChat: jest.Mock;
-  let mockOnClearChat: jest.Mock;
-  let mockOnOpenHistory: jest.Mock;
-  let mockOnFocusInput: jest.Mock;
-  let mockOnToggleTheme: jest.Mock;
-  let mockOnSearch: jest.Mock;
+  let container: HTMLDivElement;
+  let containerRef: React.RefObject<HTMLDivElement>;
 
   beforeEach(() => {
-    mockOnNewChat = jest.fn();
-    mockOnClearChat = jest.fn();
-    mockOnOpenHistory = jest.fn();
-    mockOnFocusInput = jest.fn();
-    mockOnToggleTheme = jest.fn();
-    mockOnSearch = jest.fn();
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    containerRef = { current: container };
   });
 
   afterEach(() => {
+    document.body.removeChild(container);
     jest.clearAllMocks();
   });
 
@@ -35,302 +24,65 @@ describe('useKeyboardNavigation', () => {
     });
   };
 
-  describe('shortcuts return value', () => {
-    it('should return shortcuts array', () => {
-      const { result } = renderHook(() =>
-        useKeyboardNavigation({
-          onNewChat: mockOnNewChat,
-        })
-      );
+  it('should add keydown event listener on container mount', () => {
+    const addEventListenerSpy = jest.spyOn(container, 'addEventListener');
 
-      expect(result.current.shortcuts).toBeDefined();
-      expect(result.current.shortcuts.length).toBeGreaterThan(0);
-    });
+    renderHook(() => useKeyboardNavigation(containerRef));
 
-    it('should include focus chat input shortcut', () => {
-      const { result } = renderHook(() =>
-        useKeyboardNavigation({})
-      );
+    expect(addEventListenerSpy).toHaveBeenCalledWith('keydown', expect.any(Function));
 
-      const focusShortcut = result.current.shortcuts.find((s) => s.description === 'Focus chat input');
-      expect(focusShortcut).toBeDefined();
-      expect(focusShortcut?.keys).toContain('K');
-    });
-
-    it('should include new chat shortcut', () => {
-      const { result } = renderHook(() =>
-        useKeyboardNavigation({})
-      );
-
-      const newChatShortcut = result.current.shortcuts.find((s) => s.description === 'New chat');
-      expect(newChatShortcut).toBeDefined();
-      expect(newChatShortcut?.keys).toContain('N');
-    });
-
-    it('should include search shortcut', () => {
-      const { result } = renderHook(() =>
-        useKeyboardNavigation({})
-      );
-
-      const searchShortcut = result.current.shortcuts.find((s) => s.description === 'Search in chat');
-      expect(searchShortcut).toBeDefined();
-    });
-
-    it('should include all expected shortcuts', () => {
-      const { result } = renderHook(() =>
-        useKeyboardNavigation({})
-      );
-
-      const shortcutDescriptions = result.current.shortcuts.map((s) => s.description);
-
-      expect(shortcutDescriptions).toContain('Focus chat input');
-      expect(shortcutDescriptions).toContain('New chat');
-      expect(shortcutDescriptions).toContain('Open history');
-      expect(shortcutDescriptions).toContain('Search in chat');
-      expect(shortcutDescriptions).toContain('Clear chat');
-      expect(shortcutDescriptions).toContain('Close dialog');
-      expect(shortcutDescriptions).toContain('Navigate elements');
-      expect(shortcutDescriptions).toContain('Navigate messages');
-    });
+    addEventListenerSpy.mockRestore();
   });
 
-  describe('keyboard event handling', () => {
-    it('should add keydown event listener on mount', () => {
-      const addEventListenerSpy = jest.spyOn(window, 'addEventListener');
+  it('should remove keydown event listener on unmount', () => {
+    const removeEventListenerSpy = jest.spyOn(container, 'removeEventListener');
 
-      renderHook(() =>
-        useKeyboardNavigation({
-          onNewChat: mockOnNewChat,
-        })
-      );
+    const { unmount } = renderHook(() => useKeyboardNavigation(containerRef));
 
-      expect(addEventListenerSpy).toHaveBeenCalledWith('keydown', expect.any(Function));
+    unmount();
 
-      addEventListenerSpy.mockRestore();
+    expect(removeEventListenerSpy).toHaveBeenCalledWith('keydown', expect.any(Function));
+
+    removeEventListenerSpy.mockRestore();
+  });
+
+  it('should handle Escape to close dialog within container', () => {
+    const dialog = document.createElement('div');
+    dialog.setAttribute('role', 'dialog');
+    const closeButton = document.createElement('button');
+    closeButton.setAttribute('aria-label', 'Close');
+    const clickSpy = jest.fn();
+    closeButton.addEventListener('click', clickSpy);
+    dialog.appendChild(closeButton);
+    container.appendChild(dialog);
+
+    renderHook(() => useKeyboardNavigation(containerRef));
+
+    act(() => {
+      container.dispatchEvent(createKeyboardEvent('Escape'));
     });
 
-    it('should remove keydown event listener on unmount', () => {
-      const removeEventListenerSpy = jest.spyOn(window, 'removeEventListener');
+    expect(clickSpy).toHaveBeenCalled();
+  });
 
-      const { unmount } = renderHook(() =>
-        useKeyboardNavigation({
-          onNewChat: mockOnNewChat,
-        })
-      );
+  it('should not handle events from outside the container', () => {
+    const outsideElement = document.createElement('div');
+    document.body.appendChild(outsideElement);
 
-      unmount();
+    renderHook(() => useKeyboardNavigation(containerRef));
 
-      expect(removeEventListenerSpy).toHaveBeenCalledWith('keydown', expect.any(Function));
-
-      removeEventListenerSpy.mockRestore();
+    act(() => {
+      outsideElement.dispatchEvent(createKeyboardEvent('Escape'));
     });
 
-    it('should call onFocusInput on Cmd+K', () => {
-      renderHook(() =>
-        useKeyboardNavigation({
-          onFocusInput: mockOnFocusInput,
-        })
-      );
+    document.body.removeChild(outsideElement);
+  });
 
-      act(() => {
-        window.dispatchEvent(createKeyboardEvent('k', { metaKey: true }));
-      });
+  it('should not react to random key presses', () => {
+    renderHook(() => useKeyboardNavigation(containerRef));
 
-      expect(mockOnFocusInput).toHaveBeenCalled();
-    });
-
-    it('should call onFocusInput on Ctrl+K', () => {
-      renderHook(() =>
-        useKeyboardNavigation({
-          onFocusInput: mockOnFocusInput,
-        })
-      );
-
-      act(() => {
-        window.dispatchEvent(createKeyboardEvent('k', { ctrlKey: true }));
-      });
-
-      expect(mockOnFocusInput).toHaveBeenCalled();
-    });
-
-    it('should call onNewChat on Cmd+N', () => {
-      renderHook(() =>
-        useKeyboardNavigation({
-          onNewChat: mockOnNewChat,
-        })
-      );
-
-      act(() => {
-        window.dispatchEvent(createKeyboardEvent('n', { metaKey: true }));
-      });
-
-      expect(mockOnNewChat).toHaveBeenCalled();
-    });
-
-    it('should call onOpenHistory on Cmd+H', () => {
-      renderHook(() =>
-        useKeyboardNavigation({
-          onOpenHistory: mockOnOpenHistory,
-        })
-      );
-
-      act(() => {
-        window.dispatchEvent(createKeyboardEvent('h', { metaKey: true }));
-      });
-
-      expect(mockOnOpenHistory).toHaveBeenCalled();
-    });
-
-
-    it('should call onSearch on Cmd+F', () => {
-      renderHook(() =>
-        useKeyboardNavigation({
-          onSearch: mockOnSearch,
-        })
-      );
-
-      act(() => {
-        window.dispatchEvent(createKeyboardEvent('f', { metaKey: true }));
-      });
-
-      expect(mockOnSearch).toHaveBeenCalled();
-    });
-
-    it('should call onClearChat on Cmd+Shift+Delete', () => {
-      renderHook(() =>
-        useKeyboardNavigation({
-          onClearChat: mockOnClearChat,
-        })
-      );
-
-      act(() => {
-        window.dispatchEvent(createKeyboardEvent('Delete', { metaKey: true, shiftKey: true }));
-      });
-
-      expect(mockOnClearChat).toHaveBeenCalled();
-    });
-
-    it('should call onToggleTheme on Cmd+Shift+T', () => {
-      renderHook(() =>
-        useKeyboardNavigation({
-          onToggleTheme: mockOnToggleTheme,
-        })
-      );
-
-      act(() => {
-        window.dispatchEvent(createKeyboardEvent('T', { metaKey: true, shiftKey: true }));
-      });
-
-      expect(mockOnToggleTheme).toHaveBeenCalled();
-    });
-
-    it('should not call callbacks when only modifier key is pressed', () => {
-      renderHook(() =>
-        useKeyboardNavigation({
-          onNewChat: mockOnNewChat,
-          onFocusInput: mockOnFocusInput,
-        })
-      );
-
-      act(() => {
-        window.dispatchEvent(createKeyboardEvent('Meta', { metaKey: true }));
-      });
-
-      expect(mockOnNewChat).not.toHaveBeenCalled();
-      expect(mockOnFocusInput).not.toHaveBeenCalled();
-    });
-
-    it('should not call callbacks when random key without modifier is pressed', () => {
-      renderHook(() =>
-        useKeyboardNavigation({
-          onNewChat: mockOnNewChat,
-        })
-      );
-
-      act(() => {
-        window.dispatchEvent(createKeyboardEvent('a', {}));
-      });
-
-      expect(mockOnNewChat).not.toHaveBeenCalled();
+    act(() => {
+      container.dispatchEvent(createKeyboardEvent('a', {}));
     });
   });
 });
-
-describe('useAnnounce', () => {
-  beforeEach(() => {
-    document.body.innerHTML = '';
-  });
-
-  it('should return announce function', () => {
-    const { result } = renderHook(() => useAnnounce());
-    expect(typeof result.current).toBe('function');
-  });
-
-  it('should create announcement element with polite aria-live by default', () => {
-    const { result } = renderHook(() => useAnnounce());
-
-    act(() => {
-      result.current('Test announcement');
-    });
-
-    const announcement = document.querySelector('[role="status"]');
-    expect(announcement).not.toBeNull();
-    expect(announcement?.getAttribute('aria-live')).toBe('polite');
-    expect(announcement?.textContent).toBe('Test announcement');
-  });
-
-  it('should create announcement element with assertive aria-live when specified', () => {
-    const { result } = renderHook(() => useAnnounce());
-
-    act(() => {
-      result.current('Urgent announcement', 'assertive');
-    });
-
-    const announcement = document.querySelector('[role="status"]');
-    expect(announcement?.getAttribute('aria-live')).toBe('assertive');
-  });
-
-  it('should set aria-atomic to true', () => {
-    const { result } = renderHook(() => useAnnounce());
-
-    act(() => {
-      result.current('Test');
-    });
-
-    const announcement = document.querySelector('[role="status"]');
-    expect(announcement?.getAttribute('aria-atomic')).toBe('true');
-  });
-
-  it('should remove announcement after timeout', async () => {
-    jest.useFakeTimers();
-
-    const { result } = renderHook(() => useAnnounce());
-
-    act(() => {
-      result.current('Temporary announcement');
-    });
-
-    expect(document.querySelector('[role="status"]')).not.toBeNull();
-
-    act(() => {
-      jest.advanceTimersByTime(1000);
-    });
-
-    expect(document.querySelector('[role="status"]')).toBeNull();
-
-    jest.useRealTimers();
-  });
-
-  it('should position announcement off-screen for screen readers', () => {
-    const { result } = renderHook(() => useAnnounce());
-
-    act(() => {
-      result.current('Hidden announcement');
-    });
-
-    const announcement = document.querySelector('[role="status"]') as HTMLElement;
-    expect(announcement.style.position).toBe('absolute');
-    expect(announcement.style.left).toBe('-10000px');
-  });
-});
-

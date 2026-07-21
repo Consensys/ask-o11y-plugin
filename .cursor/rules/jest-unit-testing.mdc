@@ -1,0 +1,34 @@
+---
+description: Jest unit testing conventions
+globs: src/**/*.test.{ts,tsx}
+alwaysApply: false
+---
+
+# Jest Unit Testing
+
+Reference: [CLAUDE.md](./CLAUDE.md) is the authoritative source.
+
+## Test Locations
+
+- Unit tests in `src/**/*.test.{ts,tsx}` alongside the code they test
+- Use `data-testid` from `src/components/testIds.ts` for component references
+
+## Focus
+
+Test critical functionality: business logic, utility functions, service classes.
+Limit to **3–5 focused tests per file**.
+
+## Best Practices
+
+1. **Mock dependencies before imports** with `jest.mock()`
+2. **Test three scenarios**: valid inputs, invalid inputs, edge cases (null, undefined, unexpected types)
+3. **Descriptive names** — test name should describe expected behavior
+4. **Group** related tests in `describe` blocks
+5. **Clear mocks** in `beforeEach` with `jest.clearAllMocks()`
+
+## Run Tests
+
+```bash
+nvm use 22 && npm run test:ci              # CI mode
+nvm use 22 && npm test -- path/to/test.ts  # Single file
+```

@@ -22,10 +22,18 @@ export interface MCPServerStatus {
   toolCount: number;
 }
 
+export interface MCPToolAnnotations {
+  readOnlyHint?: boolean;
+  destructiveHint?: boolean;
+  idempotentHint?: boolean;
+  openWorldHint?: boolean;
+}
+
 export interface MCPTool {
   name: string;
   description: string;
   inputSchema: Record<string, any>;
+  annotations?: MCPToolAnnotations;
 }
 
 export interface SystemHealth {
@@ -67,7 +75,6 @@ export class MCPServerStatusService {
 
       return response.data;
     } catch (error) {
-      console.error('[MCPServerStatusService] Failed to fetch server statuses:', error);
       return {
         servers: [],
         systemHealth: {

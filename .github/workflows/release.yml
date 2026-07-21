@@ -16,18 +16,29 @@ jobs:
       id-token: write # Required for provenance attestation
       attestations: write # Required for provenance attestation
     runs-on: ubuntu-latest
-    env:
-      GRAFANA_ACCESS_POLICY_TOKEN: ""
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
           persist-credentials: false
 
-      - uses: grafana/plugin-actions/build-plugin@main # zizmor: ignore[unpinned-uses] provided by grafana
+      # Vendored locally (.github/actions/build-plugin) to satisfy the org's
+      # "require full-length commit SHA" policy, which rejects the upstream
+      # action's transitive package-plugin@main ref.
+      - uses: ./.github/actions/build-plugin
         with:
           node-version: '22'
-          go-version: '1.25'
+          go-version: '1.25.7'
           attestation: true # Enable build provenance attestation
           # Plugin signing enabled with Grafana Access Policy token
           # (For more info see https://grafana.com/developers/plugin-tools/publish-a-plugin/sign-a-plugin#generate-an-access-policy-token)
-          # policy_token: ${{ secrets.GRAFANA_ACCESS_POLICY_TOKEN }}
+          policy_token: ${{ secrets.GRAFANA_ACCESS_POLICY_TOKEN }}
+
+      - name: Verify provenance attestation
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          PLUGIN_ID=$(node -p "require('./src/plugin.json').id")
+          VERSION="${GITHUB_REF_NAME#v}"
+          gh attestation verify "${PLUGIN_ID}-${VERSION}.zip" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --cert-identity "https://github.com/${GITHUB_REPOSITORY}/.github/workflows/release.yml@refs/tags/${GITHUB_REF_NAME}"

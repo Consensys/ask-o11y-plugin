@@ -1,9 +1,7 @@
 import React, { useState, useEffect } from 'react';
-// Note: Select is deprecated but used for compatibility. Consider migrating to Combobox in future.
-
-import { Modal, Button, Select, Input, ClipboardButton } from '@grafana/ui';
+import { Modal, Button, Select, Input, ClipboardButton, Alert } from '@grafana/ui';
 import { sessionShareService, CreateShareResponse } from '../../../../services/sessionShare';
-import { ChatSession } from '../../../../core/models/ChatSession';
+import { ChatMessage } from '../../types';
 import {
   EXPIRY_OPTIONS,
   expiryConfigToApiParams,
@@ -12,9 +10,19 @@ import {
   findExpiryOptionByKey,
 } from '../../../../utils/shareUtils';
 
+interface SessionData {
+  id: string;
+  title: string;
+  messages: ChatMessage[];
+  createdAt: string;
+  updatedAt: string;
+  messageCount: number;
+  summary?: string;
+}
+
 interface ShareDialogProps {
   sessionId: string;
-  session: ChatSession;
+  session: SessionData;
   onClose: () => void;
   existingShares?: CreateShareResponse[];
   onSharesChanged?: (shares: CreateShareResponse[]) => void;
@@ -27,6 +35,7 @@ export function ShareDialog({ sessionId, session, onClose, existingShares = [], 
   const [createdShare, setCreatedShare] = useState<CreateShareResponse | null>(null);
   const [shares, setShares] = useState<CreateShareResponse[]>(existingShares);
   const [revokingShareId, setRevokingShareId] = useState<string | null>(null);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   useEffect(() => {
     // Load existing shares if not provided
@@ -41,17 +50,18 @@ export function ShareDialog({ sessionId, session, onClose, existingShares = [], 
       const loadedShares = await sessionShareService.getSessionShares(sessionId);
       setShares(loadedShares);
       onSharesChanged?.(loadedShares);
-    } catch (error) {
-      console.error('[ShareDialog] Failed to load shares:', error);
+    } catch {
+      // Best-effort share loading
     }
   };
 
   const handleCreateShare = async () => {
     setIsCreating(true);
+    setErrorMessage(null);
     try {
       const expiryOption = findExpiryOptionByKey(selectedExpiryKey);
       if (!expiryOption) {
-        console.error('[ShareDialog] Invalid expiry option selected');
+        setErrorMessage('Invalid expiry option selected.');
         return;
       }
 
@@ -69,9 +79,8 @@ export function ShareDialog({ sessionId, session, onClose, existingShares = [], 
       const updatedShares = [...shares, share];
       setShares(updatedShares);
       onSharesChanged?.(updatedShares);
-    } catch (error) {
-      console.error('[ShareDialog] Failed to create share:', error);
-      alert('Failed to create share. Please try again.');
+    } catch {
+      setErrorMessage('Failed to create share. Please try again.');
     } finally {
       setIsCreating(false);
     }
@@ -79,6 +88,7 @@ export function ShareDialog({ sessionId, session, onClose, existingShares = [], 
 
   const handleRevokeShare = async (shareId: string) => {
     setRevokingShareId(shareId);
+    setErrorMessage(null);
     try {
       await sessionShareService.revokeShare(shareId);
       const updatedShares = shares.filter((s) => s.shareId !== shareId);
@@ -87,9 +97,8 @@ export function ShareDialog({ sessionId, session, onClose, existingShares = [], 
       if (createdShare?.shareId === shareId) {
         setCreatedShare(null);
       }
-    } catch (error) {
-      console.error('[ShareDialog] Failed to revoke share:', error);
-      alert('Failed to revoke share. Please try again.');
+    } catch {
+      setErrorMessage('Failed to revoke share. Please try again.');
     } finally {
       setRevokingShareId(null);
     }
@@ -99,6 +108,11 @@ export function ShareDialog({ sessionId, session, onClose, existingShares = [], 
   return (
     <Modal title="Share Session" isOpen={true} onDismiss={onClose}>
       <div className="min-w-[400px]">
+        {errorMessage && (
+          <Alert severity="error" title="Error" className="mb-3">
+            {errorMessage}
+          </Alert>
+        )}
         {createdShare ? (
           <div className="space-y-3">
             <p className="text-sm text-primary">Share link created successfully!</p>

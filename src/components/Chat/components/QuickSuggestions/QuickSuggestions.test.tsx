@@ -7,25 +7,32 @@ import { render, screen, fireEvent } from '@testing-library/react';
 import { QuickSuggestions } from './QuickSuggestions';
 
 // Mock Grafana UI
-jest.mock('@grafana/ui', () => ({
-  useTheme2: () => ({
-    isDark: false,
-    colors: {
-      text: {
-        primary: '#000',
-        secondary: '#666',
-      },
-      background: {
-        secondary: '#f5f5f5',
-      },
-      border: {
-        weak: '#ddd',
-      },
-      primary: {
-        main: '#7c3aed',
-      },
+const mockTheme = {
+  isDark: false,
+  colors: {
+    text: {
+      primary: '#000',
+      secondary: '#666',
     },
-  }),
+    background: {
+      secondary: '#f5f5f5',
+    },
+    border: {
+      weak: '#ddd',
+    },
+    primary: {
+      main: '#7c3aed',
+      transparent: 'rgba(124, 58, 237, 0.2)',
+    },
+    action: {
+      hover: 'rgba(204, 204, 220, 0.12)',
+    },
+  },
+};
+
+jest.mock('@grafana/ui', () => ({
+  useTheme2: () => mockTheme,
+  useStyles2: (getStyles: (theme: any) => any) => getStyles(mockTheme),
 }));
 
 describe('QuickSuggestions', () => {

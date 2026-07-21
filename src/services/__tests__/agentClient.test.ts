@@ -1,0 +1,357 @@
+import { runAgentDetached, reconnectToAgentRun, readSSEStream, AgentCallbacks, AgentRunRequest } from '../agentClient';
+
+function createMockBody(lines: string[]) {
+  const encoder = new TextEncoder();
+  const data = encoder.encode(lines.join('\n') + '\n');
+  let read = false;
+  return {
+    getReader: () => ({
+      read: async () => {
+        if (!read) {
+          read = true;
+          return { done: false, value: data };
+        }
+        return { done: true, value: undefined };
+      },
+      releaseLock: () => {},
+    }),
+  };
+}
+
+function createMockCallbacks(): jest.Mocked<AgentCallbacks> {
+  return {
+    onContent: jest.fn(),
+    onToolCallStart: jest.fn(),
+    onToolCallResult: jest.fn(),
+    onDone: jest.fn(),
+    onError: jest.fn(),
+    onMCPUnavailable: jest.fn(),
+    onEvidence: jest.fn(),
+    onApprovalRequest: jest.fn(),
+    onApprovalResolved: jest.fn(),
+    onFinalReport: jest.fn(),
+  };
+}
+
+const defaultRequest: AgentRunRequest = {
+  message: 'Hello',
+  type: 'chat',
+};
+
+describe('runAgentDetached', () => {
+  const originalFetch = global.fetch;
+
+  afterEach(() => {
+    global.fetch = originalFetch;
+    jest.restoreAllMocks();
+  });
+
+  it('should return runId and sessionId on success', async () => {
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      json: jest.fn().mockResolvedValue({ runId: 'run-1', sessionId: 'sess-1', status: 'running' }),
+    });
+
+    const result = await runAgentDetached(defaultRequest);
+
+    expect(result.runId).toBe('run-1');
+    expect(result.sessionId).toBe('sess-1');
+    expect(result.status).toBe('running');
+  });
+
+  it('should throw on non-OK response', async () => {
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: false,
+      status: 500,
+      text: jest.fn().mockResolvedValue('Internal Server Error'),
+    });
+
+    await expect(runAgentDetached(defaultRequest)).rejects.toThrow('Agent detached request failed (500)');
+  });
+
+  it('should send correct request body without orgId', async () => {
+    const mockFetch = jest.fn().mockResolvedValue({
+      ok: true,
+      json: jest.fn().mockResolvedValue({ runId: 'run-1', sessionId: 'sess-1', status: 'running' }),
+    });
+    global.fetch = mockFetch;
+
+    const request: AgentRunRequest = {
+      message: 'test',
+      type: 'chat',
+      orgId: '42',
+    };
+
+    await runAgentDetached(request);
+
+    const [, fetchOptions] = mockFetch.mock.calls[0];
+    expect(fetchOptions.headers).toEqual(
+      expect.objectContaining({
+        'Content-Type': 'application/json',
+        'X-Grafana-Org-Id': '42',
+      })
+    );
+    const body = JSON.parse(fetchOptions.body);
+    expect(body.orgId).toBeUndefined();
+  });
+
+  it('should append model as a query param and keep it out of the request body', async () => {
+    const mockFetch = jest.fn().mockResolvedValue({
+      ok: true,
+      json: jest.fn().mockResolvedValue({ runId: 'run-1', sessionId: 'sess-1', status: 'running' }),
+    });
+    global.fetch = mockFetch;
+
+    await runAgentDetached({
+      message: 'test',
+      type: 'chat',
+      model: 'large',
+    });
+
+    const [url, fetchOptions] = mockFetch.mock.calls[0];
+    expect(url).toBe('/api/plugins/consensys-asko11y-app/resources/api/agent/run?model=large');
+    const body = JSON.parse(fetchOptions.body);
+    expect(body.model).toBeUndefined();
+  });
+});
+
+describe('reconnectToAgentRun', () => {
+  const originalFetch = global.fetch;
+
+  afterEach(() => {
+    global.fetch = originalFetch;
+    jest.restoreAllMocks();
+  });
+
+  it('should parse content events from SSE stream', async () => {
+    const callbacks = createMockCallbacks();
+    const sseLines = [
+      'data: {"type":"content","data":{"content":"Hello world"}}',
+      '',
+      'data: {"type":"done","data":{"totalIterations":1}}',
+      '',
+    ];
+
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      body: createMockBody(sseLines),
+    });
+
+    await reconnectToAgentRun('run-1', callbacks);
+
+    expect(callbacks.onContent).toHaveBeenCalledWith({ content: 'Hello world' });
+    expect(callbacks.onDone).toHaveBeenCalledWith({ totalIterations: 1 });
+  });
+
+  it('should parse tool call events from SSE stream', async () => {
+    const callbacks = createMockCallbacks();
+    const sseLines = [
+      'data: {"type":"tool_call_start","data":{"id":"call_1","name":"query_prometheus","arguments":"{}"}}',
+      '',
+      'data: {"type":"tool_call_result","data":{"id":"call_1","name":"query_prometheus","content":"result","isError":false}}',
+      '',
+      'data: {"type":"content","data":{"content":"Based on the results..."}}',
+      '',
+      'data: {"type":"done","data":{"totalIterations":2}}',
+      '',
+    ];
+
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      body: createMockBody(sseLines),
+    });
+
+    await reconnectToAgentRun('run-1', callbacks);
+
+    expect(callbacks.onToolCallStart).toHaveBeenCalledWith({
+      id: 'call_1',
+      name: 'query_prometheus',
+      arguments: '{}',
+    });
+    expect(callbacks.onToolCallResult).toHaveBeenCalledWith({
+      id: 'call_1',
+      name: 'query_prometheus',
+      content: 'result',
+      isError: false,
+    });
+    expect(callbacks.onContent).toHaveBeenCalledWith({ content: 'Based on the results...' });
+    expect(callbacks.onDone).toHaveBeenCalledWith({ totalIterations: 2 });
+  });
+
+  it('should propagate errorKind on tool_call_result', async () => {
+    const callbacks = createMockCallbacks();
+    const sseLines = [
+      'data: {"type":"tool_call_result","data":{"id":"call_1","name":"query_prometheus","content":"connection refused","isError":true,"errorKind":"transport"}}',
+      '',
+      'data: {"type":"done","data":{"totalIterations":1}}',
+      '',
+    ];
+
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      body: createMockBody(sseLines),
+    });
+
+    await reconnectToAgentRun('run-1', callbacks);
+
+    expect(callbacks.onToolCallResult).toHaveBeenCalledWith({
+      id: 'call_1',
+      name: 'query_prometheus',
+      content: 'connection refused',
+      isError: true,
+      errorKind: 'transport',
+    });
+  });
+
+  it('should dispatch mcp_unavailable event to callback', async () => {
+    const callbacks = createMockCallbacks();
+    const sseLines = [
+      'data: {"type":"mcp_unavailable","data":{"message":"MCP server unreachable — results may be incomplete. Please retry."}}',
+      '',
+      'data: {"type":"done","data":{"totalIterations":1}}',
+      '',
+    ];
+
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      body: createMockBody(sseLines),
+    });
+
+    await reconnectToAgentRun('run-1', callbacks);
+
+    expect(callbacks.onMCPUnavailable).toHaveBeenCalledWith({
+      message: 'MCP server unreachable — results may be incomplete. Please retry.',
+    });
+  });
+
+  it('should dispatch progressive agent events to callbacks', async () => {
+    const callbacks = createMockCallbacks();
+    const sseLines = [
+      'data: {"type":"evidence","data":{"id":"tc_1","title":"Prometheus","summary":"up is 1"}}',
+      '',
+      'data: {"type":"approval_request","data":{"approvalId":"tc_2","toolCallId":"tc_2","toolName":"delete_dashboard","risk":"destructive","reason":"write","arguments":"{}"}}',
+      '',
+      'data: {"type":"approval_resolved","data":{"approvalId":"tc_2","decision":"approved"}}',
+      '',
+      'data: {"type":"final_report","data":{"summary":"RCA complete"}}',
+      '',
+      'data: {"type":"done","data":{"totalIterations":1}}',
+      '',
+    ];
+
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      body: createMockBody(sseLines),
+    });
+
+    await reconnectToAgentRun('run-1', callbacks);
+
+    expect(callbacks.onEvidence).toHaveBeenCalledWith({ id: 'tc_1', title: 'Prometheus', summary: 'up is 1' });
+    expect(callbacks.onApprovalRequest).toHaveBeenCalledWith({
+      approvalId: 'tc_2',
+      toolCallId: 'tc_2',
+      toolName: 'delete_dashboard',
+      risk: 'destructive',
+      reason: 'write',
+      arguments: '{}',
+    });
+    expect(callbacks.onApprovalResolved).toHaveBeenCalledWith({ approvalId: 'tc_2', decision: 'approved' });
+    expect(callbacks.onFinalReport).toHaveBeenCalledWith({ summary: 'RCA complete' });
+  });
+
+  it('should handle SSE error events', async () => {
+    const callbacks = createMockCallbacks();
+    const sseLines = [
+      'data: {"type":"error","data":{"message":"LLM request failed"}}',
+      '',
+    ];
+
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      body: createMockBody(sseLines),
+    });
+
+    await reconnectToAgentRun('run-1', callbacks);
+
+    expect(callbacks.onError).toHaveBeenCalledWith('LLM request failed');
+  });
+
+  it('should skip malformed SSE lines without crashing', async () => {
+    const callbacks = createMockCallbacks();
+    const sseLines = [
+      'data: not-valid-json',
+      '',
+      'data: {"type":"content","data":{"content":"valid"}}',
+      '',
+      'data: {"type":"done","data":{"totalIterations":1}}',
+      '',
+    ];
+
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      body: createMockBody(sseLines),
+    });
+
+    await reconnectToAgentRun('run-1', callbacks);
+
+    expect(callbacks.onContent).toHaveBeenCalledWith({ content: 'valid' });
+  });
+
+  it('should set X-Grafana-Org-Id header when orgId is provided', async () => {
+    const callbacks = createMockCallbacks();
+    const mockFetch = jest.fn().mockResolvedValue({
+      ok: true,
+      body: createMockBody(['data: {"type":"done","data":{"totalIterations":0}}', '']),
+    });
+    global.fetch = mockFetch;
+
+    await reconnectToAgentRun('run-1', callbacks, '42');
+
+    const [, fetchOptions] = mockFetch.mock.calls[0];
+    expect(fetchOptions.headers).toEqual({ 'X-Grafana-Org-Id': '42' });
+  });
+
+  it('should return false on SSE idle timeout', async () => {
+    const callbacks = createMockCallbacks();
+    const hangingBody = {
+      getReader: () => ({
+        read: () => new Promise<never>(() => {}),
+        cancel: jest.fn().mockResolvedValue(undefined),
+        releaseLock: jest.fn(),
+      }),
+    } as unknown as ReadableStream<Uint8Array>;
+
+    const result = await readSSEStream(hangingBody, callbacks, { idleTimeoutMs: 100 });
+
+    expect(result).toBe(false);
+  });
+
+  it('should not timeout when data arrives before idle deadline', async () => {
+    const callbacks = createMockCallbacks();
+    const encoder = new TextEncoder();
+
+    let readCount = 0;
+    const chunkedBody = {
+      getReader: () => ({
+        read: async () => {
+          readCount++;
+          if (readCount === 1) {
+            return { done: false, value: encoder.encode('data: {"type":"content","data":{"content":"chunk1"},"sequence":1}\n\n') };
+          }
+          if (readCount === 2) {
+            await new Promise((resolve) => setTimeout(resolve, 50));
+            return { done: false, value: encoder.encode('data: {"type":"done","data":{"totalIterations":1},"sequence":2}\n\n') };
+          }
+          return { done: true, value: undefined };
+        },
+        releaseLock: jest.fn(),
+      }),
+    } as unknown as ReadableStream<Uint8Array>;
+
+    const result = await readSSEStream(chunkedBody, callbacks, { idleTimeoutMs: 200 });
+
+    expect(result).toBe(true);
+    expect(callbacks.onContent).toHaveBeenCalledWith({ content: 'chunk1' });
+    expect(callbacks.onDone).toHaveBeenCalled();
+  });
+});

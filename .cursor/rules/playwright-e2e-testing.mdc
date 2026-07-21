@@ -1,0 +1,38 @@
+---
+description: Playwright E2E testing conventions
+globs: tests/**/*.spec.ts
+alwaysApply: false
+---
+
+# Playwright E2E Testing
+
+Reference: [CLAUDE.md](./CLAUDE.md) is the authoritative source.
+
+## Test Locations
+
+- E2E specs in `tests/*.spec.ts`
+
+## Focus
+
+Test critical user flows: chat, session management, AppConfig, RBAC roles.
+Limit to **3–5 focused tests per file**.
+
+## Best Practices
+
+1. **Use `data-testid`** selectors from `src/components/testIds.ts` — not CSS or XPath
+2. **Mock external APIs** with `page.route()` for deterministic tests
+3. **Auto-waiting** — use Playwright's built-in waiting, avoid explicit `waitForTimeout`
+4. **Setup in `beforeEach`** — page navigation and route mocking
+5. **Test both success and error scenarios**
+
+## RBAC Testing
+
+Test RBAC with Admin, Editor, Viewer roles. Viewers must not access write tools.
+
+## Run Tests
+
+```bash
+# Requires running server: nvm use 22 && npm run server
+nvm use 22 && npm run e2e
+nvm use 22 && npm run e2e -- --grep "test name pattern"
+```

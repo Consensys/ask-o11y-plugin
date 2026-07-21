@@ -1,6 +1,7 @@
 package plugin
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"time"
@@ -14,14 +15,16 @@ type RedisShareStore struct {
 	client      *redis.Client
 	logger      log.Logger
 	rateLimiter RateLimiter
+	ctx         context.Context
 }
 
 // NewRedisShareStore creates a new Redis-backed share store
-func NewRedisShareStore(client *redis.Client, logger log.Logger, rateLimiter RateLimiter) *RedisShareStore {
+func NewRedisShareStore(ctx context.Context, client *redis.Client, logger log.Logger, rateLimiter RateLimiter) *RedisShareStore {
 	return &RedisShareStore{
 		client:      client,
 		logger:      logger,
 		rateLimiter: rateLimiter,
+		ctx:         ctx,
 	}
 }
 
@@ -59,7 +62,7 @@ func (s *RedisShareStore) CreateShare(sessionID string, sessionData []byte, orgI
 
 	// Store share in Redis with TTL
 	shareKey := fmt.Sprintf("share:%s", shareID)
-	ctx, cancel := getContextWithTimeout(RedisOpTimeout)
+	ctx, cancel := redisContext(s.ctx, RedisOpTimeout)
 	defer cancel()
 	if err := s.client.Set(ctx, shareKey, shareJSON, ttl).Err(); err != nil {
 		return nil, fmt.Errorf("failed to store share in Redis: %w", err)
@@ -67,7 +70,7 @@ func (s *RedisShareStore) CreateShare(sessionID string, sessionData []byte, orgI
 
 	// Add share ID to session index set and set/update TTL
 	sessionIndexKey := fmt.Sprintf("session:%s:shares", sessionID)
-	ctx2, cancel2 := getContextWithTimeout(RedisOpTimeout)
+	ctx2, cancel2 := redisContext(s.ctx, RedisOpTimeout)
 	defer cancel2()
 	if err := s.client.SAdd(ctx2, sessionIndexKey, shareID).Err(); err != nil {
 		// Log error but don't fail - the share is already stored
@@ -75,18 +78,18 @@ func (s *RedisShareStore) CreateShare(sessionID string, sessionData []byte, orgI
 	} else {
 		// Set TTL on the session index set to prevent memory leak
 		// Check current TTL and only extend if new share has longer TTL
-		ctx3, cancel3 := getContextWithTimeout(RedisOpTimeout)
+		ctx3, cancel3 := redisContext(s.ctx, RedisOpTimeout)
 		defer cancel3()
 		currentTTL, err := s.client.TTL(ctx3, sessionIndexKey).Result()
 		if err != nil {
 			s.logger.Warn("Failed to get TTL for session index", "error", err, "sessionId", sessionID)
 			// Set TTL anyway to be safe
-			ctx4, cancel4 := getContextWithTimeout(RedisOpTimeout)
+			ctx4, cancel4 := redisContext(s.ctx, RedisOpTimeout)
 			defer cancel4()
 			s.client.Expire(ctx4, sessionIndexKey, ttl)
 		} else if currentTTL == -1 || currentTTL < ttl {
 			// No TTL set (-1) or current TTL is shorter than new share's TTL
-			ctx4, cancel4 := getContextWithTimeout(RedisOpTimeout)
+			ctx4, cancel4 := redisContext(s.ctx, RedisOpTimeout)
 			defer cancel4()
 			if err := s.client.Expire(ctx4, sessionIndexKey, ttl).Err(); err != nil {
 				s.logger.Warn("Failed to set TTL on session index", "error", err, "sessionId", sessionID)
@@ -103,7 +106,7 @@ func (s *RedisShareStore) CreateShare(sessionID string, sessionData []byte, orgI
 func (s *RedisShareStore) GetShare(shareID string) (*ShareMetadata, error) {
 	shareKey := fmt.Sprintf("share:%s", shareID)
 
-	ctx, cancel := getContextWithTimeout(RedisOpTimeout)
+	ctx, cancel := redisContext(s.ctx, RedisOpTimeout)
 	defer cancel()
 	shareJSON, err := s.client.Get(ctx, shareKey).Result()
 	if err == redis.Nil {
@@ -121,7 +124,7 @@ func (s *RedisShareStore) GetShare(shareID string) (*ShareMetadata, error) {
 	// Check if expired (double-check even though Redis TTL should handle this)
 	if share.ExpiresAt != nil && share.ExpiresAt.Before(time.Now()) {
 		// Delete expired share
-		ctx2, cancel2 := getContextWithTimeout(RedisOpTimeout)
+		ctx2, cancel2 := redisContext(s.ctx, RedisOpTimeout)
 		defer cancel2()
 		s.client.Del(ctx2, shareKey)
 		return nil, fmt.Errorf("share expired")
@@ -141,7 +144,7 @@ func (s *RedisShareStore) DeleteShare(shareID string) error {
 	shareKey := fmt.Sprintf("share:%s", shareID)
 
 	// Delete share from Redis
-	ctx, cancel := getContextWithTimeout(RedisOpTimeout)
+	ctx, cancel := redisContext(s.ctx, RedisOpTimeout)
 	defer cancel()
 	if err := s.client.Del(ctx, shareKey).Err(); err != nil {
 		return fmt.Errorf("failed to delete share from Redis: %w", err)
@@ -149,7 +152,7 @@ func (s *RedisShareStore) DeleteShare(shareID string) error {
 
 	// Remove from session index
 	sessionIndexKey := fmt.Sprintf("session:%s:shares", share.SessionID)
-	ctx2, cancel2 := getContextWithTimeout(RedisOpTimeout)
+	ctx2, cancel2 := redisContext(s.ctx, RedisOpTimeout)
 	defer cancel2()
 	if err := s.client.SRem(ctx2, sessionIndexKey, shareID).Err(); err != nil {
 		// Log error but don't fail - the share is already deleted
@@ -165,7 +168,7 @@ func (s *RedisShareStore) GetSharesBySession(sessionID string) []*ShareMetadata 
 	sessionIndexKey := fmt.Sprintf("session:%s:shares", sessionID)
 
 	// Get all share IDs for this session (bulk operation - use longer timeout)
-	ctx, cancel := getContextWithTimeout(RedisBulkOpTimeout)
+	ctx, cancel := redisContext(s.ctx, RedisBulkOpTimeout)
 	defer cancel()
 	shareIDs, err := s.client.SMembers(ctx, sessionIndexKey).Result()
 	if err != nil {
@@ -184,7 +187,7 @@ func (s *RedisShareStore) GetSharesBySession(sessionID string) []*ShareMetadata 
 	}
 
 	// Get all shares in one operation (bulk operation - use longer timeout)
-	ctx2, cancel2 := getContextWithTimeout(RedisBulkOpTimeout)
+	ctx2, cancel2 := redisContext(s.ctx, RedisBulkOpTimeout)
 	defer cancel2()
 	values, err := s.client.MGet(ctx2, keys...).Result()
 	if err != nil {
@@ -198,7 +201,7 @@ func (s *RedisShareStore) GetSharesBySession(sessionID string) []*ShareMetadata 
 	for i, value := range values {
 		if value == nil {
 			// Share was deleted or expired, remove from index
-			ctx3, cancel3 := getContextWithTimeout(RedisOpTimeout)
+			ctx3, cancel3 := redisContext(s.ctx, RedisOpTimeout)
 			s.client.SRem(ctx3, sessionIndexKey, shareIDs[i])
 			cancel3()
 			continue
@@ -221,10 +224,10 @@ func (s *RedisShareStore) GetSharesBySession(sessionID string) []*ShareMetadata 
 			shares = append(shares, &share)
 		} else {
 			// Share expired, clean it up
-			ctx3, cancel3 := getContextWithTimeout(RedisOpTimeout)
+			ctx3, cancel3 := redisContext(s.ctx, RedisOpTimeout)
 			s.client.Del(ctx3, keys[i])
 			cancel3()
-			ctx4, cancel4 := getContextWithTimeout(RedisOpTimeout)
+			ctx4, cancel4 := redisContext(s.ctx, RedisOpTimeout)
 			s.client.SRem(ctx4, sessionIndexKey, shareIDs[i])
 			cancel4()
 		}
@@ -232,7 +235,7 @@ func (s *RedisShareStore) GetSharesBySession(sessionID string) []*ShareMetadata 
 
 	// If no shares remain, delete the empty index set to free memory immediately
 	if len(shares) == 0 && len(shareIDs) > 0 {
-		ctx3, cancel3 := getContextWithTimeout(RedisOpTimeout)
+		ctx3, cancel3 := redisContext(s.ctx, RedisOpTimeout)
 		defer cancel3()
 		s.client.Del(ctx3, sessionIndexKey)
 	}

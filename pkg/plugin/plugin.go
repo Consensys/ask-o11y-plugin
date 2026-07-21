@@ -1,175 +1,321 @@
 package plugin
 
 import (
+	"consensys-asko11y-app/pkg/agent"
 	"consensys-asko11y-app/pkg/mcp"
+	"consensys-asko11y-app/pkg/plugin/openapi"
+	"consensys-asko11y-app/pkg/rbac"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"hash/fnv"
 	"io"
 	"net/http"
-	"os"
+	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
+	"go.opentelemetry.io/otel/attribute"
+
 	"github.com/grafana/grafana-plugin-sdk-go/backend"
+	"github.com/grafana/grafana-plugin-sdk-go/backend/httpclient"
 	"github.com/grafana/grafana-plugin-sdk-go/backend/instancemgmt"
 	"github.com/grafana/grafana-plugin-sdk-go/backend/log"
 	"github.com/grafana/grafana-plugin-sdk-go/backend/resource/httpadapter"
+	"github.com/grafana/grafana-plugin-sdk-go/backend/tracing"
 	"github.com/redis/go-redis/v9"
 )
 
-// PluginID is the plugin identifier
 const PluginID = "consensys-asko11y-app"
 
-// Make sure Plugin implements required interfaces
+const defaultApprovalTimeout = 30 * time.Minute
+
+var approvalTimeout = defaultApprovalTimeout
+
 var (
 	_ backend.CallResourceHandler   = (*Plugin)(nil)
 	_ instancemgmt.InstanceDisposer = (*Plugin)(nil)
 	_ backend.CheckHealthHandler    = (*Plugin)(nil)
 )
 
-// RedisConfig holds Redis connection configuration
-type RedisConfig struct {
-	Addr     string
-	Password string
-	DB       int
+func builtInMCPBaseURL(settings PluginSettings) string {
+	if settings.BuiltInMCPBaseURL != "" {
+		return strings.TrimRight(settings.BuiltInMCPBaseURL, "/")
+	}
+	return "http://localhost:3000"
 }
 
-// getRedisAddr returns the Redis address from environment variables
-func getRedisAddr() string {
-	if addr := os.Getenv("REDIS_ADDR"); addr != "" {
-		return addr
+func resolveGrafanaURL(settings PluginSettings, cfg *backend.GrafanaCfg) (url, source string) {
+	if cfg != nil {
+		if appURL, err := cfg.AppURL(); err == nil && appURL != "" {
+			return strings.TrimRight(appURL, "/"), "GrafanaConfig.AppURL"
+		}
 	}
-	return "localhost:6379"
+	return builtInMCPBaseURL(settings), "config-fallback"
 }
 
-// createRedisClient creates a Redis client from environment variables
-func createRedisClient(logger log.Logger) (*redis.Client, error) {
-	// Try GF_PLUGIN_ASKO11Y_REDIS first (full connection string)
-	redisURL := os.Getenv("GF_PLUGIN_ASKO11Y_REDIS")
-	if redisURL != "" {
-		opt, err := redis.ParseURL(redisURL)
-		if err != nil {
-			return nil, fmt.Errorf("failed to parse GF_PLUGIN_ASKO11Y_REDIS: %w", err)
-		}
-		logger.Info("Using Redis connection from GF_PLUGIN_ASKO11Y_REDIS")
-		return redis.NewClient(opt), nil
+const defaultRedisURL = "redis://localhost:6379/0"
+
+func createRedisClient(logger log.Logger, redisURL string) (*redis.Client, error) {
+	if redisURL == "" {
+		logger.Info("No redisURL configured, attempting default", "defaultURL", defaultRedisURL)
+		redisURL = defaultRedisURL
 	}
-
-	// Fall back to individual environment variables
-	addr := getRedisAddr()
-	password := os.Getenv("REDIS_PASSWORD")
-
-	db := 0
-	if dbStr := os.Getenv("REDIS_DB"); dbStr != "" {
-		var err error
-		db, err = strconv.Atoi(dbStr)
-		if err != nil {
-			logger.Warn("Invalid REDIS_DB value, using default 0", "value", dbStr, "error", err)
-			db = 0
-		}
+	opt, err := redis.ParseURL(redisURL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse redisURL: %w", err)
 	}
-
-	opt := &redis.Options{
-		Addr:     addr,
-		Password: password,
-		DB:       db,
-	}
-
-	logger.Info("Using Redis connection from individual environment variables",
-		"addr", addr,
-		"db", db,
-		"hasPassword", password != "")
-
+	logger.Info("Using Redis connection", "addr", opt.Addr, "db", opt.DB)
 	return redis.NewClient(opt), nil
 }
 
-// PluginSettings represents the plugin configuration
+// builtInMCPServerID is the proxy server ID used to register the embedded
+// Grafana MCP server when useBuiltInMCP is enabled.
+const builtInMCPServerID = "mcp-grafana"
+
 type PluginSettings struct {
-	MCPServers []mcp.ServerConfig `json:"mcpServers"`
+	MCPServers               []mcp.ServerConfig              `json:"mcpServers"`
+	UseBuiltInMCP            bool                            `json:"useBuiltInMCP"`
+	BuiltInMCPToolSelections map[string]bool                 `json:"builtInMCPToolSelections,omitempty"`
+	TrustedMCPServers        map[string]bool                 `json:"trustedMCPServers,omitempty"`
+	RiskOverrides            map[string]mcp.ToolRiskOverride `json:"riskOverrides,omitempty"`
+
+	DefaultSystemPrompt string `json:"defaultSystemPrompt,omitempty"`
+	InvestigationPrompt string `json:"investigationPrompt,omitempty"`
+	PerformancePrompt   string `json:"performancePrompt,omitempty"`
+
+	MaxTotalTokens     int `json:"maxTotalTokens,omitempty"`
+	RecentMessageCount int `json:"recentMessageCount,omitempty"`
+
+	BuiltInMCPBaseURL string `json:"builtInMCPBaseURL,omitempty"`
+
+	GraphitiScanInterval string `json:"graphitiScanInterval,omitempty"`
+	ServiceGraphMaxNodes int    `json:"serviceGraphMaxNodes,omitempty"`
+	ServiceGraphMaxEdges int    `json:"serviceGraphMaxEdges,omitempty"`
+
+	ApprovalPolicy          string `json:"approvalPolicy,omitempty"`
+	MaxParallelToolCalls    int    `json:"maxParallelToolCalls,omitempty"`
+	AgentEvalCaptureEnabled bool   `json:"agentEvalCaptureEnabled,omitempty"`
 }
 
-// Plugin is the backend plugin implementation
+const mcpServerHeaderPrefix = "mcpServerHeader."
+
+// applySecureHeaders parses "mcpServerHeader.{serverID}.{headerName}" keys from
+// secureJsonData and populates the corresponding ServerConfig.Headers.
+// Server IDs must not contain dots (the UI auto-generates IDs like "mcp-1234567890").
+func applySecureHeaders(servers []mcp.ServerConfig, secure map[string]string) {
+	for key, value := range secure {
+		if !strings.HasPrefix(key, mcpServerHeaderPrefix) {
+			continue
+		}
+		rest := key[len(mcpServerHeaderPrefix):]
+		dotIdx := strings.Index(rest, ".")
+		if dotIdx < 0 {
+			continue
+		}
+		serverID, headerName := rest[:dotIdx], rest[dotIdx+1:]
+		if serverID == "" || headerName == "" {
+			continue
+		}
+		for i := range servers {
+			if servers[i].ID == serverID {
+				if servers[i].Headers == nil {
+					servers[i].Headers = make(map[string]string)
+				}
+				servers[i].Headers[headerName] = value
+				break
+			}
+		}
+	}
+}
+
+func applyAgentRuntimeSettings(settings *PluginSettings) {
+	if settings.ApprovalPolicy == "" {
+		settings.ApprovalPolicy = "approval-gated-writes"
+	}
+	if settings.MaxParallelToolCalls <= 0 {
+		settings.MaxParallelToolCalls = 4
+	}
+	for i := range settings.MCPServers {
+		if trusted, ok := settings.TrustedMCPServers[settings.MCPServers[i].ID]; ok {
+			settings.MCPServers[i].Trusted = trusted
+		}
+		if len(settings.RiskOverrides) > 0 && len(settings.MCPServers[i].RiskOverrides) == 0 {
+			settings.MCPServers[i].RiskOverrides = settings.RiskOverrides
+		}
+	}
+}
+
 type Plugin struct {
 	backend.CallResourceHandler
-	logger      log.Logger
-	mcpProxy    *mcp.Proxy
-	shareStore  ShareStoreInterface
-	redisClient *redis.Client      // Store Redis client for health checks and cleanup
-	usingRedis  bool               // Track if we're using Redis or in-memory
-	ctx         context.Context    // Plugin lifecycle context
-	cancel      context.CancelFunc // Cancel function for plugin lifecycle context
+	logger         log.Logger
+	mcpProxy       *mcp.Proxy
+	agentLoop      *agent.AgentLoop
+	scout          *Scout
+	shareStore     ShareStoreInterface
+	runStore       RunStoreInterface
+	sessionStore   SessionStoreInterface
+	redisClient    *redis.Client
+	usingRedis     bool
+	approvalBroker ApprovalBroker
+	approvalGrants ApprovalGrantStore
+	useBuiltInMCP  bool
+	promptRegistry *PromptRegistry
+	settings       PluginSettings
+	settingsMu     sync.RWMutex
+	ctx            context.Context
+	cancel         context.CancelFunc
+	runCancelsMu   sync.Mutex
+	runCancels     map[string]context.CancelFunc
+	// dsCache memoises the per-org datasource UID snapshot injected into the
+	// system prompt. See datasource_snapshot.go.
+	dsCache   map[string]dsCacheEntry
+	dsCacheMu sync.Mutex
 }
 
-// NewPlugin creates a new backend plugin instance
 func NewPlugin(ctx context.Context, settings backend.AppInstanceSettings) (instancemgmt.Instance, error) {
 	logger := log.DefaultLogger
 
-	// Parse plugin settings
 	var pluginSettings PluginSettings
 	if err := json.Unmarshal(settings.JSONData, &pluginSettings); err != nil {
-		logger.Warn("Failed to parse plugin settings, using empty config", "error", err)
+		logger.Error("Failed to parse plugin settings, using empty config", "error", err)
 		pluginSettings = PluginSettings{
 			MCPServers: []mcp.ServerConfig{},
 		}
 	}
 
-	// Create MCP proxy
-	mcpProxy := mcp.NewProxy(logger)
-	mcpProxy.UpdateConfig(pluginSettings.MCPServers)
+	applySecureHeaders(pluginSettings.MCPServers, settings.DecryptedSecureJSONData)
+	applyAgentRuntimeSettings(&pluginSettings)
 
-	// Start health monitoring
+	if pluginSettings.MaxTotalTokens <= 0 {
+		pluginSettings.MaxTotalTokens = agent.DefaultMaxTotalTokens
+	}
+	if pluginSettings.RecentMessageCount <= 0 {
+		pluginSettings.RecentMessageCount = 10
+	}
+	if pluginSettings.BuiltInMCPBaseURL != "" {
+		if _, err := url.ParseRequestURI(pluginSettings.BuiltInMCPBaseURL); err != nil {
+			logger.Error("builtInMCPBaseURL is not a valid URL, falling back to default",
+				"configured", pluginSettings.BuiltInMCPBaseURL,
+				"error", err,
+				"fallback", "http://localhost:3000",
+			)
+			pluginSettings.BuiltInMCPBaseURL = ""
+		}
+	}
+
+	promptRegistry, err := NewPromptRegistry(pluginSettings)
+	if err != nil {
+		logger.Error("Failed to initialize prompt registry, using defaults", "error", err)
+		promptRegistry, _ = NewPromptRegistry(PluginSettings{})
+	}
+
+	// Use a standalone context instead of the SDK-provided ctx.
+	// The SDK ctx is scoped to the factory call and gets cancelled
+	// after NewPlugin returns, which would cancel all child contexts.
+	pluginCtx, cancel := context.WithCancel(context.Background())
+
+	mcpProxy := mcp.NewProxy(pluginCtx, logger)
+	if err := mcpProxy.UpdateConfig(pluginSettings.MCPServers); err != nil {
+		cancel()
+		return nil, fmt.Errorf("failed to configure MCP servers: %w", err)
+	}
+
 	mcpProxy.StartHealthMonitoring(MCPHealthMonitoringInterval)
 
-	// Try to create Redis-backed share store, fallback to in-memory
 	var shareStore ShareStoreInterface
 	var redisClient *redis.Client
 	usingRedis := false
 
-	redisClient, err := createRedisClient(logger)
-	if err == nil {
-		// Test connection
-		ctx, cancel := context.WithTimeout(context.Background(), RedisConnectionTimeout)
-		defer cancel()
-		if err := redisClient.Ping(ctx).Err(); err == nil {
-			// Create Redis-backed rate limiter
-			rateLimiter := NewRedisRateLimiter(redisClient, logger)
-			shareStore = NewRedisShareStore(redisClient, logger, rateLimiter)
+	redisClient, redisErr := createRedisClient(logger, settings.DecryptedSecureJSONData["redisURL"])
+	if redisErr == nil {
+		pingCtx, pingCancel := context.WithTimeout(pluginCtx, RedisConnectionTimeout)
+		pingErr := redisClient.Ping(pingCtx).Err()
+		pingCancel()
+		if pingErr == nil {
+			rateLimiter := NewRedisRateLimiter(pluginCtx, redisClient, logger)
+			shareStore = NewRedisShareStore(pluginCtx, redisClient, logger, rateLimiter)
 			usingRedis = true
-			logger.Info("Using Redis for session sharing", "redisAddr", getRedisAddr())
+			logger.Info("Using Redis for session sharing")
 		} else {
-			logger.Warn("Redis connection test failed, falling back to in-memory storage", "error", err)
+			logger.Warn("Redis connection test failed, falling back to in-memory storage", "error", pingErr.Error())
 			redisClient.Close()
 			redisClient = nil
 		}
 	} else {
-		logger.Warn("Failed to create Redis client, falling back to in-memory storage", "error", err)
+		logger.Warn("Failed to create Redis client, falling back to in-memory storage", "error", redisErr.Error())
 	}
 
-	// Fallback to in-memory store if Redis is not available
+	var runStore RunStoreInterface
+	var sessionStore SessionStoreInterface
 	if !usingRedis {
-		// Create in-memory rate limiter
 		rateLimiter := NewInMemoryRateLimiter(logger)
 		shareStore = NewShareStore(logger, rateLimiter)
-		logger.Info("Using in-memory storage for session sharing (not suitable for multi-replica deployments)")
+		runStore = NewRunStore(logger)
+		sessionStore = NewSessionStore(logger)
+		logger.Info("Using in-memory storage (not suitable for multi-replica deployments)")
+	} else {
+		runStore = NewRedisRunStore(pluginCtx, redisClient, logger)
+		sessionStore = NewRedisSessionStore(pluginCtx, redisClient, logger)
 	}
 
-	// Create a context that lives for the plugin's lifetime (not the initialization context)
-	pluginCtx, cancel := context.WithCancel(context.Background())
+	var approvalBroker ApprovalBroker
+	var approvalGrants ApprovalGrantStore
+	if usingRedis && redisClient != nil {
+		approvalBroker = NewRedisApprovalBroker(pluginCtx, redisClient, logger)
+		approvalGrants = NewRedisApprovalGrantStore(pluginCtx, redisClient, logger)
+		logger.Info("Using Redis for distributed approval coordination")
+	} else {
+		approvalBroker = NewInMemoryApprovalBroker()
+		approvalGrants = NewInMemoryApprovalGrantStore()
+		logger.Warn("Using in-memory approval coordination; approval routing is unsafe with multiple Grafana replicas. Configure Redis for production.")
+	}
+
+	llmHTTPClient, err := httpclient.New(httpclient.Options{
+		Timeouts: &httpclient.TimeoutOptions{
+			Timeout:     600 * time.Second,
+			DialTimeout: 10 * time.Second,
+		},
+	})
+	if err != nil {
+		cancel()
+		return nil, fmt.Errorf("failed to create SDK HTTP client for LLM: %w", err)
+	}
+	llmClient := agent.NewLLMClient(logger, llmHTTPClient)
+	agentLoop := agent.NewAgentLoop(llmClient, mcpProxy, logger)
+
+	var scout *Scout
+	if interval, ok := parseScanInterval(pluginSettings.GraphitiScanInterval); ok {
+		scout = NewScout(pluginCtx, agentLoop, mcpProxy, logger, interval, pluginSettings)
+		go scout.Start()
+		logger.Info("Scout started", "interval", pluginSettings.GraphitiScanInterval)
+	} else {
+		logger.Info("Scout auto-scan disabled (interval=off)")
+	}
 
 	p := &Plugin{
-		logger:      logger,
-		mcpProxy:    mcpProxy,
-		shareStore:  shareStore,
-		redisClient: redisClient,
-		usingRedis:  usingRedis,
-		ctx:         pluginCtx,
-		cancel:      cancel,
+		logger:         logger,
+		mcpProxy:       mcpProxy,
+		agentLoop:      agentLoop,
+		scout:          scout,
+		shareStore:     shareStore,
+		runStore:       runStore,
+		sessionStore:   sessionStore,
+		redisClient:    redisClient,
+		usingRedis:     usingRedis,
+		approvalBroker: approvalBroker,
+		approvalGrants: approvalGrants,
+		useBuiltInMCP:  pluginSettings.UseBuiltInMCP,
+		promptRegistry: promptRegistry,
+		settings:       pluginSettings,
+		ctx:            pluginCtx,
+		cancel:         cancel,
+		runCancels:     make(map[string]context.CancelFunc),
 	}
 
-	// Start cleanup goroutine for expired shares (only needed for in-memory store)
 	if !usingRedis {
 		go func() {
 			ticker := time.NewTicker(ShareCleanupInterval)
@@ -185,7 +331,19 @@ func NewPlugin(ctx context.Context, settings backend.AppInstanceSettings) (insta
 		}()
 	}
 
-	// Setup resource handler using httpadapter
+	go func() {
+		ticker := time.NewTicker(RunCleanupInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				runStore.CleanupOld()
+			case <-pluginCtx.Done():
+				return
+			}
+		}
+	}()
+
 	mux := http.NewServeMux()
 	p.registerRoutes(mux)
 	p.CallResourceHandler = httpadapter.New(mux)
@@ -197,22 +355,41 @@ func NewPlugin(ctx context.Context, settings backend.AppInstanceSettings) (insta
 	return p, nil
 }
 
-// Dispose cleans up plugin resources
 func (p *Plugin) Dispose() {
-	// Cancel the plugin lifecycle context to stop the cleanup goroutine
-	if p.cancel != nil {
-		p.cancel()
+	p.runCancelsMu.Lock()
+	for _, cancel := range p.runCancels {
+		cancel()
 	}
+	p.runCancels = nil
+	p.runCancelsMu.Unlock()
+	if p.approvalBroker != nil {
+		p.approvalBroker.Close()
+	}
+	if p.approvalGrants != nil {
+		p.approvalGrants.Close()
+	}
+
+	// Stop the scout before closing the proxy so its in-flight scavenge can finish.
+	if p.scout != nil {
+		p.scout.Stop()
+	}
+
+	// Close proxy and Redis before cancelling context so that
+	// graceful shutdown I/O can still use the plugin context.
 	p.mcpProxy.StopHealthMonitoring()
+	p.mcpProxy.Close()
 	if p.redisClient != nil {
 		if err := p.redisClient.Close(); err != nil {
 			p.logger.Warn("Failed to close Redis client", "error", err)
 		}
 	}
+
+	if p.cancel != nil {
+		p.cancel()
+	}
 	p.logger.Info("Plugin disposed")
 }
 
-// CheckHealth handles health checks for the backend plugin
 func (p *Plugin) CheckHealth(ctx context.Context, req *backend.CheckHealthRequest) (*backend.CheckHealthResult, error) {
 	p.logger.Info("CheckHealth called")
 
@@ -220,19 +397,16 @@ func (p *Plugin) CheckHealth(ctx context.Context, req *backend.CheckHealthReques
 	status := backend.HealthStatusOk
 	message := fmt.Sprintf("Plugin is healthy (MCP servers: %d)", serverCount)
 
-	// Check Redis connection if using Redis
 	if p.usingRedis && p.redisClient != nil {
 		healthCtx, cancel := context.WithTimeout(ctx, HealthCheckTimeout)
 		defer cancel()
 		if err := p.redisClient.Ping(healthCtx).Err(); err != nil {
-			// Plugin is still functional, but Redis is down - use warning message
 			message = fmt.Sprintf("Plugin is healthy but Redis connection failed (MCP servers: %d). Session sharing may not work across replicas.", serverCount)
 			p.logger.Warn("Redis health check failed", "error", err)
 		} else {
 			message = fmt.Sprintf("Plugin is healthy (MCP servers: %d, Redis: connected)", serverCount)
 		}
 	} else if !p.usingRedis {
-		// Plugin is functional but using in-memory storage - include warning in message
 		message = fmt.Sprintf("Plugin is healthy but using in-memory storage (MCP servers: %d). Session sharing will not work across multiple Grafana replicas. Configure Redis for production.", serverCount)
 	}
 
@@ -242,35 +416,109 @@ func (p *Plugin) CheckHealth(ctx context.Context, req *backend.CheckHealthReques
 	}, nil
 }
 
-// registerRoutes registers HTTP routes for the plugin
 func (p *Plugin) registerRoutes(mux *http.ServeMux) {
-	// Health check endpoint
 	mux.HandleFunc("/health", p.handleHealth)
-
-	// MCP JSON-RPC endpoint
+	mux.HandleFunc("/openapi.json", p.handleOpenAPISpec)
 	mux.HandleFunc("/mcp", p.handleMCP)
-
-	// API endpoints for MCP operations (alternative REST-style interface)
 	mux.HandleFunc("/api/mcp/tools", p.handleMCPTools)
 	mux.HandleFunc("/api/mcp/call-tool", p.handleMCPCallTool)
 	mux.HandleFunc("/api/mcp/servers", p.handleMCPServers)
+	mux.HandleFunc("/api/agent/run", p.handleAgentRun)
+	mux.HandleFunc("/api/agent/runs/", p.handleAgentRuns)
+	mux.HandleFunc("/api/agent/evals", p.handleAgentEvals)
+	mux.HandleFunc("/api/agent/evals/run", p.handleAgentEvalRun)
+	mux.HandleFunc("/api/agent/topology", p.handleAgentTopology)
+	mux.HandleFunc("/api/prompt-defaults", p.handlePromptDefaults)
+	mux.HandleFunc("/api/graphiti/discover", p.handleGraphitiDiscover)
+	mux.HandleFunc("/api/graphiti/status", p.handleGraphitiStatus)
+	mux.HandleFunc("/api/graphiti/ingest-session", p.handleGraphitiIngestSession)
 
-	// Session sharing endpoints
-	// IMPORTANT: Register more specific routes BEFORE general ones
-	// Go's ServeMux matches longest pattern, but we need specific routes first to avoid conflicts
-	mux.HandleFunc("/api/sessions/share", p.handleCreateShare)        // Exact match: POST /api/sessions/share
-	mux.HandleFunc("/api/sessions/shared/", p.handleGetSharedSession) // Prefix: GET /api/sessions/shared/{shareId}
-	mux.HandleFunc("/api/sessions/share/", p.handleDeleteShare)       // Prefix: DELETE /api/sessions/share/{shareId}
-	mux.HandleFunc("/api/sessions/", p.handleGetSessionShares)        // Prefix: GET /api/sessions/{sessionId}/shares (must be last)
+	// Session CRUD (new) — registered before share routes for specificity
+	mux.HandleFunc("/api/sessions/current", p.handleSessionCurrent)
+	mux.HandleFunc("/api/sessions/share", p.handleCreateShare)
+	mux.HandleFunc("/api/sessions/shared/", p.handleGetSharedSession)
+	mux.HandleFunc("/api/sessions/share/", p.handleDeleteShare)
+	mux.HandleFunc("/api/sessions/", p.handleSessionRouter)
+	mux.HandleFunc("/api/sessions", p.handleSessionsRoot)
 
-	// Fallback handler
 	mux.HandleFunc("/", p.handleDefault)
 }
 
-// getUserRole extracts the user's role from the Grafana plugin context
+// ensureBuiltInMCPRegistered registers the built-in Grafana MCP client with the
+// proxy when useBuiltInMCP is enabled. It removes the client when no SA token
+// is available so the proxy doesn't keep a dead client around.
+func (p *Plugin) ensureBuiltInMCPRegistered(saToken, grafanaURL string) error {
+	if !p.useBuiltInMCP {
+		return nil
+	}
+	if saToken == "" {
+		p.logger.Warn("Built-in MCP requires a service account token; skipping built-in MCP server registration")
+		p.mcpProxy.RemoveServer(builtInMCPServerID)
+		return nil
+	}
+	return p.mcpProxy.EnsureServer(mcp.ServerConfig{
+		ID:      builtInMCPServerID,
+		Name:    "Grafana Built-in MCP",
+		URL:     grafanaURL + "/api/plugins/grafana-llm-app/resources/mcp/grafana",
+		Type:    "streamable-http",
+		Enabled: true,
+		Trusted: true,
+		Headers: map[string]string{"Authorization": "Bearer " + saToken},
+	})
+}
+
+// builtInSelectionServer returns a synthetic ServerConfig representing the
+// built-in MCP, used to apply the user's per-tool selections at filter time.
+// Returns nil when useBuiltInMCP is disabled.
+func (p *Plugin) builtInSelectionServer() *mcp.ServerConfig {
+	if !p.useBuiltInMCP {
+		return nil
+	}
+	return &mcp.ServerConfig{
+		ID:             builtInMCPServerID,
+		Enabled:        true,
+		Trusted:        true,
+		ToolSelections: p.settings.BuiltInMCPToolSelections,
+		RiskOverrides:  p.settings.RiskOverrides,
+	}
+}
+
+// settingsForFilter snapshots the server configs (user-defined + built-in
+// selection overlay) used by mcp.FilterToolsBySelection / mcp.IsToolEnabled.
+func (p *Plugin) settingsForFilter() []mcp.ServerConfig {
+	p.settingsMu.RLock()
+	servers := append([]mcp.ServerConfig(nil), p.settings.MCPServers...)
+	p.settingsMu.RUnlock()
+	if b := p.builtInSelectionServer(); b != nil {
+		servers = append(servers, *b)
+	}
+	return servers
+}
+
+// ensureBuiltInForListing registers the built-in MCP on demand (if needed) and
+// runs an immediate health check so /api/mcp/servers returns fresh tools
+// without waiting for the next periodic tick.
+func (p *Plugin) ensureBuiltInForListing(r *http.Request) {
+	if !p.useBuiltInMCP {
+		return
+	}
+	cfg := backend.GrafanaConfigFromContext(r.Context())
+	if cfg == nil {
+		return
+	}
+	saToken, err := cfg.PluginAppClientSecret()
+	if err != nil {
+		return
+	}
+	grafanaURL, _ := resolveGrafanaURL(p.settings, cfg)
+	if err := p.ensureBuiltInMCPRegistered(saToken, grafanaURL); err != nil {
+		p.logger.Warn("Failed to register built-in MCP for listing", "error", err)
+		return
+	}
+	p.mcpProxy.GetHealthMonitor().CheckServerNow(builtInMCPServerID)
+}
+
 func getUserRole(r *http.Request) string {
-	// Extract PluginContext from the request context
-	// This is provided by the httpadapter and contains user information
 	pluginContext := httpadapter.PluginConfigFromContext(r.Context())
 	if pluginContext.User != nil {
 		role := string(pluginContext.User.Role)
@@ -279,7 +527,6 @@ func getUserRole(r *http.Request) string {
 		}
 	}
 
-	// Fallback: try to get role from headers (for testing or direct API calls)
 	roleHeaders := []string{
 		"X-Grafana-User-Role",
 		"X-Grafana-Org-Role",
@@ -292,107 +539,9 @@ func getUserRole(r *http.Request) string {
 		}
 	}
 
-	// Default to most restrictive role if no role information found
 	return "Viewer"
 }
 
-// isReadOnlyTool checks if a tool is read-only (safe for Viewers)
-func isReadOnlyTool(toolName string) bool {
-	// List of read-only Grafana tools (get, list, query, search, find, generate operations)
-	readOnlyTools := map[string]bool{
-		"mcp-grafana_fetch_pyroscope_profile":         true,
-		"mcp-grafana_find_error_pattern_logs":         true,
-		"mcp-grafana_find_slow_requests":              true,
-		"mcp-grafana_generate_deeplink":               true,
-		"mcp-grafana_get_alert_group":                 true,
-		"mcp-grafana_get_alert_rule_by_uid":           true,
-		"mcp-grafana_get_annotation_tags":             true,
-		"mcp-grafana_get_annotations":                 true,
-		"mcp-grafana_get_assertions":                  true,
-		"mcp-grafana_get_current_oncall_users":        true,
-		"mcp-grafana_get_dashboard_by_uid":            true,
-		"mcp-grafana_get_dashboard_panel_queries":     true,
-		"mcp-grafana_get_dashboard_property":          true,
-		"mcp-grafana_get_dashboard_summary":           true,
-		"mcp-grafana_get_datasource_by_name":          true,
-		"mcp-grafana_get_datasource_by_uid":           true,
-		"mcp-grafana_get_incident":                    true,
-		"mcp-grafana_get_oncall_shift":                true,
-		"mcp-grafana_get_sift_analysis":               true,
-		"mcp-grafana_get_sift_investigation":          true,
-		"mcp-grafana_list_alert_groups":               true,
-		"mcp-grafana_list_alert_rules":                true,
-		"mcp-grafana_list_contact_points":             true,
-		"mcp-grafana_list_datasources":                true,
-		"mcp-grafana_list_incidents":                  true,
-		"mcp-grafana_list_loki_label_names":           true,
-		"mcp-grafana_list_loki_label_values":          true,
-		"mcp-grafana_list_oncall_schedules":           true,
-		"mcp-grafana_list_oncall_teams":               true,
-		"mcp-grafana_list_oncall_users":               true,
-		"mcp-grafana_list_prometheus_label_names":     true,
-		"mcp-grafana_list_prometheus_label_values":    true,
-		"mcp-grafana_list_prometheus_metric_metadata": true,
-		"mcp-grafana_list_prometheus_metric_names":    true,
-		"mcp-grafana_list_pyroscope_label_names":      true,
-		"mcp-grafana_list_pyroscope_label_values":     true,
-		"mcp-grafana_list_pyroscope_profile_types":    true,
-		"mcp-grafana_list_sift_investigations":        true,
-		"mcp-grafana_list_teams":                      true,
-		"mcp-grafana_list_users_by_org":               true,
-		"mcp-grafana_query_loki_logs":                 true,
-		"mcp-grafana_query_loki_stats":                true,
-		"mcp-grafana_query_prometheus":                true,
-		"mcp-grafana_search_dashboards":               true,
-		"mcp-grafana_search_folders":                  true,
-	}
-
-	return readOnlyTools[toolName]
-}
-
-// canAccessTool checks if a user with the given role can access a tool
-func canAccessTool(role string, toolName string) bool {
-	// Admin and Editor can access all tools
-	if role == "Admin" || role == "Editor" {
-		return true
-	}
-
-	// Viewer can only access read-only tools
-	if role == "Viewer" {
-		// Non-Grafana tools are accessible to all roles
-		if len(toolName) < 12 || toolName[:12] != "mcp-grafana_" {
-			return true
-		}
-		// Grafana tools: check if read-only
-		return isReadOnlyTool(toolName)
-	}
-
-	// Unknown roles default to Viewer permissions
-	if len(toolName) < 12 || toolName[:12] != "mcp-grafana_" {
-		return true
-	}
-	return isReadOnlyTool(toolName)
-}
-
-// filterToolsByRole filters the tool list based on user role
-func filterToolsByRole(tools []mcp.Tool, role string) []mcp.Tool {
-	// Admin and Editor get all tools
-	if role == "Admin" || role == "Editor" {
-		return tools
-	}
-
-	// Viewer gets filtered tools
-	filtered := make([]mcp.Tool, 0, len(tools))
-	for _, tool := range tools {
-		if canAccessTool(role, tool.Name) {
-			filtered = append(filtered, tool)
-		}
-	}
-
-	return filtered
-}
-
-// handleHealth handles health check requests
 func (p *Plugin) handleHealth(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
@@ -406,7 +555,19 @@ func (p *Plugin) handleHealth(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(response)
 }
 
-// handleMCP handles MCP JSON-RPC requests
+func (p *Plugin) handleOpenAPISpec(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "public, max-age=3600")
+
+	specBytes := openapi.GetSpecBytes()
+	w.Write(specBytes)
+}
+
 func (p *Plugin) handleMCP(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -424,7 +585,7 @@ func (p *Plugin) handleMCP(w http.ResponseWriter, r *http.Request) {
 	response, err := p.mcpProxy.HandleMCPRequest(body)
 	if err != nil {
 		p.logger.Error("Failed to handle MCP request", "error", err)
-		http.Error(w, fmt.Sprintf("Internal error: %v", err), http.StatusInternalServerError)
+		http.Error(w, "Internal error", http.StatusInternalServerError)
 		return
 	}
 
@@ -432,22 +593,23 @@ func (p *Plugin) handleMCP(w http.ResponseWriter, r *http.Request) {
 	w.Write(response)
 }
 
-// handleMCPTools handles MCP tool listing requests (REST-style)
 func (p *Plugin) handleMCPTools(w http.ResponseWriter, r *http.Request) {
-	// Get user role from headers
 	userRole := getUserRole(r)
-	p.logger.Info("MCP tools request", "method", r.Method, "role", userRole)
+	p.logger.Debug("MCP tools request", "method", r.Method, "role", userRole)
+
+	p.ensureBuiltInForListing(r)
 
 	tools, err := p.mcpProxy.ListTools()
 	if err != nil {
 		p.logger.Error("Failed to list tools", "error", err)
-		http.Error(w, fmt.Sprintf("Failed to list tools: %v", err), http.StatusInternalServerError)
+		http.Error(w, "Failed to list tools", http.StatusInternalServerError)
 		return
 	}
 
-	// Filter tools based on user role
-	filteredTools := filterToolsByRole(tools, userRole)
-	p.logger.Debug("Tools filtered by role", "role", userRole, "totalTools", len(tools), "filteredTools", len(filteredTools))
+	filteredTools := rbac.FilterToolsByRole(tools, userRole)
+	filteredTools = mcp.FilterToolsBySelection(filteredTools, p.settingsForFilter())
+
+	p.logger.Debug("Tools filtered", "role", userRole, "totalTools", len(tools), "filteredTools", len(filteredTools))
 
 	w.Header().Set("Content-Type", "application/json")
 
@@ -458,52 +620,64 @@ func (p *Plugin) handleMCPTools(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(response)
 }
 
-// handleMCPCallTool handles MCP tool call requests (REST-style)
 func (p *Plugin) handleMCPCallTool(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
-	// Get user role from headers
 	userRole := getUserRole(r)
 
 	var req struct {
 		Name       string                 `json:"name"`
 		Arguments  map[string]interface{} `json:"arguments"`
-		OrgName    string                 `json:"orgName"`    // Org name passed in body (headers not forwarded by Grafana proxy)
-		ScopeOrgId string                 `json:"scopeOrgId"` // Direct X-Scope-OrgId value if provided
+		OrgName    string                 `json:"orgName"`
+		ScopeOrgId string                 `json:"scopeOrgId"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, fmt.Sprintf("Invalid request: %v", err), http.StatusBadRequest)
+		p.logger.Warn("Invalid MCP call-tool request body", "error", err)
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
 		return
 	}
 
-	p.logger.Info("MCP call tool request", "tool", req.Name, "role", userRole)
+	p.logger.Debug("MCP call tool request", "tool", req.Name, "role", userRole)
 
-	// Check if user has access to this tool
-	if !canAccessTool(userRole, req.Name) {
+	tool, found := p.mcpProxy.FindToolByName(req.Name)
+	if !found {
+		// Tool cache may be empty if ListTools hasn't been called yet; populate it.
+		if _, err := p.mcpProxy.ListTools(); err == nil {
+			tool, found = p.mcpProxy.FindToolByName(req.Name)
+		}
+		if !found {
+			http.Error(w, fmt.Sprintf("Unknown tool: %s", req.Name), http.StatusNotFound)
+			return
+		}
+	}
+	if !rbac.CanAccessTool(userRole, tool) {
 		p.logger.Warn("Access denied to tool", "tool", req.Name, "role", userRole)
 		http.Error(w, fmt.Sprintf("Access denied: %s role cannot access tool %s", userRole, req.Name), http.StatusForbidden)
 		return
 	}
 
-	// Extract Org ID from request header (automatically forwarded by Grafana)
-	// Org Name and Scope Org ID come from the request body (custom headers are NOT forwarded by Grafana's proxy)
+	if !mcp.IsToolEnabled(req.Name, p.settingsForFilter()) {
+		p.logger.Warn("Tool disabled by user selection", "tool", req.Name)
+		http.Error(w, "Tool is not enabled", http.StatusForbidden)
+		return
+	}
+
 	orgID := r.Header.Get("X-Grafana-Org-Id")
 	if orgID == "" {
-		orgID = "1" // Default to org 1 if not specified
+		orgID = "1"
 	}
-	orgName := req.OrgName
-	scopeOrgId := req.ScopeOrgId
+	mcp.EnsureScopedGraphitiArgs(tool, req.Arguments, orgID)
 
-	p.logger.Debug("Tool call context", "orgID", orgID, "orgName", orgName, "scopeOrgId", scopeOrgId, "tool", req.Name)
+	p.logger.Debug("Tool call context", "orgID", orgID, "orgName", req.OrgName, "scopeOrgId", req.ScopeOrgId, "tool", req.Name)
 
-	result, err := p.mcpProxy.CallToolWithContext(req.Name, req.Arguments, orgID, orgName, scopeOrgId)
+	result, err := p.mcpProxy.CallToolWithContext(req.Name, req.Arguments, orgID, req.OrgName, req.ScopeOrgId)
 	if err != nil {
 		p.logger.Error("Failed to call tool", "error", err)
-		http.Error(w, fmt.Sprintf("Failed to call tool: %v", err), http.StatusInternalServerError)
+		http.Error(w, "Failed to call tool", http.StatusInternalServerError)
 		return
 	}
 
@@ -511,9 +685,10 @@ func (p *Plugin) handleMCPCallTool(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(result)
 }
 
-// handleMCPServers handles MCP server status requests
 func (p *Plugin) handleMCPServers(w http.ResponseWriter, r *http.Request) {
-	p.logger.Info("MCP servers status request", "method", r.Method)
+	p.logger.Debug("MCP servers status request", "method", r.Method)
+
+	p.ensureBuiltInForListing(r)
 
 	healthMonitor := p.mcpProxy.GetHealthMonitor()
 	serversHealth := healthMonitor.GetAllHealth()
@@ -529,7 +704,887 @@ func (p *Plugin) handleMCPServers(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(response)
 }
 
-// handleDefault handles all other requests
+func (p *Plugin) handleAgentRun(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	ctx, span := tracing.DefaultTracer().Start(r.Context(), "agent_run")
+	defer span.End()
+	r = r.WithContext(ctx)
+
+	userRole := getUserRole(r)
+	userID := getUserID(r)
+	orgID := r.Header.Get("X-Grafana-Org-Id")
+	if orgID == "" {
+		orgID = "1"
+	}
+
+	var req agent.RunRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		p.logger.Warn("Invalid agent run request body", "error", err)
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if req.OrgName == "" {
+		req.OrgName = "Org" + orgID
+	}
+
+	if req.Message == "" {
+		http.Error(w, "'message' is required", http.StatusBadRequest)
+		return
+	}
+
+	requestedModel, ok := parseAgentModelParam(r)
+	if !ok {
+		http.Error(w, "Invalid model; supported values are 'base' and 'large'", http.StatusBadRequest)
+		return
+	}
+
+	cfg := backend.GrafanaConfigFromContext(r.Context())
+	if cfg == nil {
+		p.logger.Error("Grafana configuration not available in request context")
+		http.Error(w, "Grafana configuration not available", http.StatusInternalServerError)
+		return
+	}
+	saToken, err := cfg.PluginAppClientSecret()
+	if err != nil {
+		p.logger.Warn("Service account token not available; built-in MCP and SA-authenticated LLM calls will not work", "error", err)
+		saToken = ""
+	}
+
+	grafanaURL, urlSource := resolveGrafanaURL(p.settings, cfg)
+	p.logger.Debug("Resolved Grafana URL for LLM/MCP calls", "url", grafanaURL, "source", urlSource)
+
+	if err := p.ensureBuiltInMCPRegistered(saToken, grafanaURL); err != nil {
+		p.logger.Error("Failed to register built-in MCP server", "error", err)
+		http.Error(w, "Failed to initialize MCP server", http.StatusInternalServerError)
+		return
+	}
+
+	runID, err := generateShareID()
+	if err != nil {
+		p.logger.Error("Failed to generate run ID", "error", err)
+		http.Error(w, "Failed to generate run ID", http.StatusInternalServerError)
+		return
+	}
+
+	numericOrgID := getOrgID(r)
+	if p.scout != nil {
+		p.scout.SetOrgID(numericOrgID)
+		p.scout.SetGrafanaConfig(grafanaURL, saToken)
+	}
+
+	toolCtx := BuildToolContext(req.OrgName, userRole)
+	toolCtx.ConversationType = req.Type
+	toolCtx.DatasourceSnapshot = p.datasourceSnapshot(orgID, req.OrgName, req.ScopeOrgID)
+
+	systemPrompt, err := p.promptRegistry.BuildSystemPrompt(toolCtx)
+	if err != nil {
+		p.logger.Error("Failed to build system prompt", "error", err)
+		http.Error(w, "Failed to build system prompt", http.StatusInternalServerError)
+		return
+	}
+
+	if p.isGraphitiAvailable() {
+		systemPrompt += graphitiKnowledgePrompt(orgGroupID(numericOrgID))
+	}
+
+	userPrompt, err := p.promptRegistry.BuildUserPrompt(req.Type, req.Message, toolCtx)
+	if err != nil {
+		p.logger.Error("Failed to build user prompt", "error", err, "type", req.Type)
+		http.Error(w, "Failed to build user prompt", http.StatusBadRequest)
+		return
+	}
+
+	var messages []agent.Message
+	var sessionID string
+	runModel := requestedModel
+	modelSource := "auto"
+	if requestedModel != "" {
+		modelSource = "request"
+	}
+
+	if req.SessionID != "" {
+		session, err := p.sessionStore.GetSession(req.SessionID, userID, numericOrgID)
+		if err != nil {
+			http.Error(w, "Session not found", http.StatusNotFound)
+			return
+		}
+		sessionID = req.SessionID
+		if session.Model != "" {
+			if requestedModel != "" && requestedModel != session.Model {
+				http.Error(w, "Session model cannot be changed", http.StatusBadRequest)
+				return
+			}
+			runModel = session.Model
+			modelSource = "session"
+		} else if requestedModel != "" {
+			if err := persistSessionModel(p.sessionStore, sessionID, userID, numericOrgID, requestedModel); err != nil {
+				p.logger.Error("Failed to persist session model", "error", err, "sessionId", sessionID)
+				http.Error(w, "Failed to persist session model", http.StatusInternalServerError)
+				return
+			}
+		}
+
+		for _, msg := range session.Messages {
+			messages = append(messages, agent.Message{
+				Role:    msg.Role,
+				Content: msg.Content,
+			})
+		}
+
+		messages = append(messages, agent.Message{
+			Role:    "user",
+			Content: userPrompt,
+		})
+
+		if err := p.sessionStore.AppendMessages(sessionID, userID, numericOrgID, []SessionMessage{{
+			Role:    "user",
+			Content: userPrompt,
+		}}); err != nil {
+			p.logger.Warn("Failed to append user message", "error", err)
+		}
+	} else {
+		messages = []agent.Message{{
+			Role:    "user",
+			Content: userPrompt,
+		}}
+
+		sessionTitle := generateSessionTitleFromType(req.Type, req.Message)
+
+		session, err := p.sessionStore.CreateSession(userID, numericOrgID, sessionTitle, []SessionMessage{{
+			Role:    "user",
+			Content: userPrompt,
+		}})
+		if err != nil {
+			p.logger.Error("Failed to create session", "error", err)
+			http.Error(w, "Failed to create session", http.StatusInternalServerError)
+			return
+		}
+		sessionID = session.ID
+		if runModel != "" {
+			if err := persistSessionModel(p.sessionStore, sessionID, userID, numericOrgID, runModel); err != nil {
+				p.logger.Error("Failed to persist session model", "error", err, "sessionId", sessionID)
+				http.Error(w, "Failed to persist session model", http.StatusInternalServerError)
+				return
+			}
+		}
+
+		if err := p.sessionStore.SetCurrentSessionID(userID, numericOrgID, sessionID); err != nil {
+			p.logger.Warn("Failed to set current session ID", "error", err)
+		}
+	}
+
+	effectiveRunModel := runModel
+	if effectiveRunModel == "" {
+		effectiveRunModel = selectAgentModelForTask(req.Type, req.Message)
+		modelSource = "auto"
+	}
+
+	if err := p.sessionStore.SetActiveRunID(sessionID, userID, numericOrgID, runID); err != nil {
+		p.logger.Warn("Failed to set active run ID", "error", err)
+	}
+	p.runStore.CreateRun(runID, userID, numericOrgID, sessionID)
+
+	p.logger.Info("Agent run request",
+		"role", userRole,
+		"orgID", orgID,
+		"runId", runID,
+		"sessionId", sessionID,
+		"messageCount", len(messages),
+		"type", req.Type,
+		"model", effectiveRunModel,
+		"modelSource", modelSource,
+	)
+
+	span.SetAttributes(
+		attribute.String("org_id", orgID),
+		attribute.String("user_role", string(userRole)),
+		attribute.String("session_id", sessionID),
+	)
+
+	eventCh := make(chan agent.SSEEvent, 16)
+
+	loopReq := agent.LoopRequest{
+		Messages:             messages,
+		SystemPrompt:         systemPrompt,
+		MaxTotalTokens:       p.settings.MaxTotalTokens,
+		RecentMessageCount:   p.settings.RecentMessageCount,
+		MaxIterations:        resolveMaxIterations(req.Type, req.Message),
+		Model:                effectiveRunModel,
+		AllowModelFallback:   modelSource == "auto" && effectiveRunModel == "large",
+		ConversationType:     req.Type,
+		GrafanaURL:           grafanaURL,
+		AuthToken:            saToken,
+		UserRole:             userRole,
+		OrgID:                orgID,
+		OrgName:              req.OrgName,
+		ScopeOrgID:           req.ScopeOrgID,
+		ExcludeToolNames:     graphitiWriteToolNames,
+		MCPServers:           p.settingsForFilter(),
+		ApprovalPolicy:       p.settings.ApprovalPolicy,
+		MaxParallelToolCalls: p.settings.MaxParallelToolCalls,
+		RegisterApproval:     p.approvalRegistrar(runID),
+		CheckApprovalGrant:   p.approvalGrantChecker(sessionID),
+	}
+
+	detachedCtx := context.WithoutCancel(ctx)
+	runCtx, runCancel := context.WithCancel(detachedCtx)
+
+	p.runCancelsMu.Lock()
+	p.runCancels[runID] = runCancel
+	p.runCancelsMu.Unlock()
+
+	go p.agentLoop.Run(runCtx, loopReq, eventCh)
+	go func() {
+		p.consumeAgentEvents(runID, sessionID, userID, numericOrgID, eventCh)
+		runCancel()
+		p.runCancelsMu.Lock()
+		delete(p.runCancels, runID)
+		p.runCancelsMu.Unlock()
+	}()
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"runId":       runID,
+		"sessionId":   sessionID,
+		"status":      RunStatusRunning,
+		"model":       effectiveRunModel,
+		"modelSource": modelSource,
+	})
+}
+
+func (p *Plugin) consumeAgentEvents(runID, sessionID string, userID, orgID int64, eventCh <-chan agent.SSEEvent) {
+	var lastEvent agent.SSEEvent
+	var allEvents []agent.SSEEvent
+	for event := range eventCh {
+		p.runStore.AppendEvent(runID, event)
+		allEvents = append(allEvents, event)
+		lastEvent = event
+	}
+
+	switch lastEvent.Type {
+	case "done":
+		p.runStore.FinishRun(runID, RunStatusCompleted, "")
+	case "error":
+		var errMsg string
+		if ee, ok := lastEvent.Data.(agent.ErrorEvent); ok {
+			errMsg = ee.Message
+		}
+		p.runStore.FinishRun(runID, RunStatusFailed, errMsg)
+	case "":
+		p.runCancelsMu.Lock()
+		_, stillCancellable := p.runCancels[runID]
+		p.runCancelsMu.Unlock()
+
+		if !stillCancellable {
+			p.runStore.FinishRun(runID, RunStatusCancelled, "run cancelled by user")
+		} else {
+			p.runStore.FinishRun(runID, RunStatusFailed, "agent terminated without producing events")
+		}
+	default:
+		p.runStore.FinishRun(runID, RunStatusCancelled, "")
+	}
+
+	if sessionID != "" {
+		assistantMsg := reconstructAssistantMessage(allEvents)
+		if err := p.sessionStore.AppendMessages(sessionID, userID, orgID, []SessionMessage{assistantMsg}); err != nil {
+			p.logger.Warn("Failed to append assistant message to session", "error", err, "sessionId", sessionID)
+		}
+		p.sessionStore.ClearActiveRunID(sessionID, userID, orgID)
+	}
+}
+
+func initSSEWriter(w http.ResponseWriter) (http.Flusher, bool) {
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "Streaming not supported", http.StatusInternalServerError)
+		return nil, false
+	}
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("X-Accel-Buffering", "no")
+
+	return flusher, true
+}
+
+func (p *Plugin) getAuthorizedRun(w http.ResponseWriter, r *http.Request, runID string) (*AgentRun, bool) {
+	run, err := p.runStore.GetRun(runID)
+	if err != nil {
+		http.Error(w, "Run not found", http.StatusNotFound)
+		return nil, false
+	}
+
+	if run.OrgID != getOrgID(r) || run.UserID != getUserID(r) {
+		http.Error(w, "Access denied", http.StatusForbidden)
+		return nil, false
+	}
+
+	return run, true
+}
+
+func (p *Plugin) approvalRegistrar(runID string) agent.ApprovalRegistrar {
+	return func(ctx context.Context, request agent.ApprovalRequestEvent) (agent.ApprovalWaitFunc, error) {
+		broker := p.approvalBroker
+		if broker == nil {
+			broker = NewInMemoryApprovalBroker()
+			p.approvalBroker = broker
+		}
+		return broker.Register(ctx, runID, request)
+	}
+}
+
+func (p *Plugin) approvalGrantChecker(sessionID string) agent.ApprovalGrantChecker {
+	return func(ctx context.Context, request agent.ApprovalRequestEvent) (bool, error) {
+		store := p.approvalGrants
+		if store == nil {
+			store = NewInMemoryApprovalGrantStore()
+			p.approvalGrants = store
+		}
+		return store.Has(ctx, sessionID, request.ToolName)
+	}
+}
+
+func (p *Plugin) handleAgentRuns(w http.ResponseWriter, r *http.Request) {
+	path := r.URL.Path
+	prefix := "/api/agent/runs/"
+	if !strings.HasPrefix(path, prefix) {
+		http.Error(w, "Invalid path format", http.StatusBadRequest)
+		return
+	}
+
+	remainder := strings.TrimPrefix(path, prefix)
+	if remainder == "" {
+		http.Error(w, "Run ID required", http.StatusBadRequest)
+		return
+	}
+
+	if strings.Contains(remainder, "/approvals/") {
+		parts := strings.Split(remainder, "/")
+		if len(parts) != 3 || parts[1] != "approvals" {
+			http.Error(w, "Invalid approval path format", http.StatusBadRequest)
+			return
+		}
+		runID, approvalID := parts[0], parts[2]
+		if r.Method != http.MethodPost {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if !isValidSecureID(runID) || !isValidApprovalID(approvalID) {
+			http.Error(w, "Invalid approval path identifiers", http.StatusBadRequest)
+			return
+		}
+		p.handleAgentApproval(w, r, runID, approvalID)
+		return
+	}
+
+	if runID, isCancel := strings.CutSuffix(remainder, "/cancel"); isCancel {
+		if r.Method != http.MethodPost {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if !isValidSecureID(runID) {
+			http.Error(w, "Invalid run ID format", http.StatusBadRequest)
+			return
+		}
+		p.handleCancelRun(w, r, runID)
+		return
+	}
+
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	runID, isEvents := strings.CutSuffix(remainder, "/events")
+	if !isValidSecureID(runID) {
+		http.Error(w, "Invalid run ID format", http.StatusBadRequest)
+		return
+	}
+
+	if isEvents {
+		p.handleAgentRunEvents(w, r, runID)
+		return
+	}
+
+	run, ok := p.getAuthorizedRun(w, r, runID)
+	if !ok {
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(run)
+}
+
+type approvalDecisionRequest struct {
+	Decision      string `json:"decision"`
+	Comment       string `json:"comment,omitempty"`
+	ApprovalScope string `json:"approvalScope,omitempty"`
+}
+
+func (p *Plugin) handleAgentApproval(w http.ResponseWriter, r *http.Request, runID, approvalID string) {
+	run, ok := p.getAuthorizedRun(w, r, runID)
+	if !ok {
+		return
+	}
+	role := getUserRole(r)
+	if role != "Admin" && role != "Editor" {
+		http.Error(w, "Access denied", http.StatusForbidden)
+		return
+	}
+
+	var req approvalDecisionRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+	decision := normalizeApprovalDecision(req.Decision)
+	if decision == "" {
+		http.Error(w, "Invalid approval decision", http.StatusBadRequest)
+		return
+	}
+
+	resolved := agent.ApprovalResolvedEvent{
+		ApprovalID: approvalID,
+		Decision:   decision,
+		Comment:    strings.TrimSpace(req.Comment),
+		ResolvedAt: time.Now().UTC().Format(time.RFC3339),
+	}
+	approveAlways := decision == "approved" && normalizeApprovalScope(req.ApprovalScope) == "always"
+	if approveAlways && resolved.Comment == "" {
+		resolved.Comment = "approved always for this session"
+	}
+
+	broker := p.approvalBroker
+	if broker == nil {
+		broker = NewInMemoryApprovalBroker()
+		p.approvalBroker = broker
+	}
+
+	delivered, err := broker.Resolve(r.Context(), runID, resolved)
+	if err != nil {
+		var conflict *approvalConflictError
+		switch {
+		case errors.As(err, &conflict):
+			http.Error(w, approvalAlreadyResolvedMessage(conflict.decision), http.StatusConflict)
+			return
+		case errors.Is(err, errApprovalNotPending):
+			if existing, exists := resolvedApprovalFromRun(run, approvalID); exists {
+				if existing.Decision == decision {
+					w.Header().Set("Content-Type", "application/json")
+					json.NewEncoder(w).Encode(existing)
+					return
+				}
+				http.Error(w, approvalAlreadyResolvedMessage(existing.Decision), http.StatusConflict)
+				return
+			}
+			http.Error(w, "Approval is not pending or has expired", http.StatusConflict)
+			return
+		default:
+			p.logger.Warn("Failed to resolve approval", "error", err, "runId", runID, "approvalId", approvalID)
+			http.Error(w, "Approval delivery failed", http.StatusGatewayTimeout)
+			return
+		}
+	}
+	if delivered.Decision != decision {
+		http.Error(w, approvalAlreadyResolvedMessage(delivered.Decision), http.StatusConflict)
+		return
+	}
+	if approveAlways {
+		if err := p.grantToolApproval(r.Context(), run, approvalID); err != nil {
+			p.logger.Warn("Failed to persist approval grant", "error", err, "runId", runID, "approvalId", approvalID)
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(delivered)
+}
+
+func (p *Plugin) grantToolApproval(ctx context.Context, run *AgentRun, approvalID string) error {
+	if run == nil || run.Trace == nil {
+		return fmt.Errorf("run trace is unavailable")
+	}
+	var matched *RunApproval
+	for i := range run.Trace.Approvals {
+		if run.Trace.Approvals[i].ApprovalID == approvalID {
+			matched = &run.Trace.Approvals[i]
+			break
+		}
+	}
+	if matched == nil || strings.TrimSpace(matched.ToolName) == "" {
+		return fmt.Errorf("approval request metadata is unavailable")
+	}
+
+	store := p.approvalGrants
+	if store == nil {
+		store = NewInMemoryApprovalGrantStore()
+		p.approvalGrants = store
+	}
+	return store.Grant(ctx, ApprovalGrant{
+		ToolName:  matched.ToolName,
+		Risk:      matched.Risk,
+		Reason:    matched.Reason,
+		SessionID: run.SessionID,
+		CreatedAt: time.Now().UTC(),
+	})
+}
+
+func resolvedApprovalFromRun(run *AgentRun, approvalID string) (agent.ApprovalResolvedEvent, bool) {
+	if run == nil || run.Trace == nil {
+		return agent.ApprovalResolvedEvent{}, false
+	}
+	for _, approval := range run.Trace.Approvals {
+		if approval.ApprovalID != approvalID || approval.Decision == "" {
+			continue
+		}
+		resolvedAt := ""
+		if approval.ResolvedAt != nil {
+			resolvedAt = approval.ResolvedAt.UTC().Format(time.RFC3339)
+		}
+		return agent.ApprovalResolvedEvent{
+			ApprovalID: approval.ApprovalID,
+			Decision:   approval.Decision,
+			Comment:    approval.Comment,
+			ResolvedAt: resolvedAt,
+		}, true
+	}
+	return agent.ApprovalResolvedEvent{}, false
+}
+
+func approvalAlreadyResolvedMessage(decision string) string {
+	if decision == "" {
+		return "Approval already resolved"
+	}
+	return fmt.Sprintf("Approval already resolved as %s", decision)
+}
+
+func (p *Plugin) handleCancelRun(w http.ResponseWriter, r *http.Request, runID string) {
+	run, ok := p.getAuthorizedRun(w, r, runID)
+	if !ok {
+		return
+	}
+
+	if run.Status != RunStatusRunning {
+		http.Error(w, "Run is not running", http.StatusConflict)
+		return
+	}
+
+	p.runCancelsMu.Lock()
+	cancelFn, exists := p.runCancels[runID]
+	p.runCancelsMu.Unlock()
+
+	if exists {
+		cancelFn()
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"status": "cancelled"})
+}
+
+func (p *Plugin) handleAgentRunEvents(w http.ResponseWriter, r *http.Request, runID string) {
+	if _, ok := p.getAuthorizedRun(w, r, runID); !ok {
+		return
+	}
+
+	run, subscriberCh, unsub, err := p.runStore.SubscribeAndSnapshot(runID)
+	if err != nil {
+		http.Error(w, "Run not found", http.StatusNotFound)
+		return
+	}
+	if unsub != nil {
+		defer unsub()
+	}
+
+	flusher, ok := initSSEWriter(w)
+	if !ok {
+		return
+	}
+
+	for _, event := range run.Events {
+		data, err := agent.MarshalSSE(event)
+		if err != nil {
+			p.logger.Error("Failed to marshal SSE event during replay", "error", err, "runId", runID, "eventType", event.Type)
+			continue
+		}
+		if _, err := w.Write(data); err != nil {
+			return
+		}
+	}
+	flusher.Flush()
+
+	if subscriberCh == nil {
+		return
+	}
+
+	// SSE keepalive: send comment lines to prevent proxy idle timeouts.
+	// Also select on r.Context().Done() since httpadapter's Write never
+	// returns an error, so we can't detect client disconnection via writes.
+	keepalive := time.NewTicker(15 * time.Second)
+	defer keepalive.Stop()
+
+	for {
+		select {
+		case event, ok := <-subscriberCh:
+			if !ok {
+				return
+			}
+			data, err := agent.MarshalSSE(event)
+			if err != nil {
+				p.logger.Error("Failed to marshal SSE event", "error", err, "runId", runID, "eventType", event.Type)
+				continue
+			}
+			w.Write(data)
+			flusher.Flush()
+		case <-keepalive.C:
+			w.Write([]byte(": keepalive\n\n"))
+			flusher.Flush()
+		case <-r.Context().Done():
+			p.logger.Debug("Client disconnected during SSE reconnect stream", "runId", runID)
+			return
+		}
+	}
+}
+
+func (p *Plugin) handlePromptDefaults(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{
+		"defaultSystemPrompt": DefaultSystemPrompt,
+		"investigationPrompt": DefaultInvestigationPrompt,
+		"performancePrompt":   DefaultPerformancePrompt,
+	})
+}
+
+func (p *Plugin) handleAgentEvals(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !p.settings.AgentEvalCaptureEnabled {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"enabled": false,
+			"evals":   []AgentEvalResult{},
+		})
+		return
+	}
+
+	runs, err := p.runStore.ListRuns(getUserID(r), getOrgID(r), parseLimitQuery(r, 20))
+	if err != nil {
+		p.logger.Warn("Failed to list runs for evals", "error", err)
+		http.Error(w, "Failed to list agent evals", http.StatusInternalServerError)
+		return
+	}
+	results := make([]AgentEvalResult, 0, len(runs))
+	for _, run := range runs {
+		results = append(results, scoreAgentRun(run))
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"enabled": true,
+		"evals":   results,
+	})
+}
+
+func (p *Plugin) handleAgentEvalRun(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !p.settings.AgentEvalCaptureEnabled {
+		http.Error(w, "Agent eval capture is disabled", http.StatusNotFound)
+		return
+	}
+	role := getUserRole(r)
+	if role != "Admin" && role != "Editor" {
+		http.Error(w, "Access denied", http.StatusForbidden)
+		return
+	}
+
+	var req agentEvalRunRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil && err != io.EOF {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	var results []AgentEvalResult
+	if req.RunID != "" {
+		run, ok := p.getAuthorizedRun(w, r, req.RunID)
+		if !ok {
+			return
+		}
+		results = []AgentEvalResult{scoreAgentRun(run)}
+	} else {
+		runs, err := p.runStore.ListRuns(getUserID(r), getOrgID(r), defaultEvalLimit(req.Limit))
+		if err != nil {
+			p.logger.Warn("Failed to list runs for eval execution", "error", err)
+			http.Error(w, "Failed to run agent evals", http.StatusInternalServerError)
+			return
+		}
+		results = make([]AgentEvalResult, 0, len(runs))
+		for _, run := range runs {
+			results = append(results, scoreAgentRun(run))
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"status":  "completed",
+		"results": results,
+	})
+}
+
+func (p *Plugin) handleAgentTopology(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	maxNodes := topologyLimitFromQuery(r, "maxNodes", defaultTopologyMaxNodes, hardTopologyMaxNodes)
+	maxEdges := topologyLimitFromQuery(r, "maxEdges", defaultTopologyMaxEdges, hardTopologyMaxEdges)
+
+	tools, err := p.mcpProxy.ListTools()
+	if err != nil {
+		p.logger.Warn("Failed to list tools for topology", "error", err)
+		http.Error(w, "Failed to load topology tools", http.StatusInternalServerError)
+		return
+	}
+	if !hasGraphitiMemoryTool(tools) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(AgentTopologyResponse{
+			Enabled: false,
+			Source:  "graphiti",
+			Nodes:   []TopologyNode{},
+			Edges:   []TopologyEdge{},
+		})
+		return
+	}
+	toolName := findGraphitiSearchFactsTool(tools)
+	if toolName == "" {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(AgentTopologyResponse{
+			Enabled:  true,
+			Source:   "graphiti",
+			Nodes:    []TopologyNode{},
+			Edges:    []TopologyEdge{},
+			Warnings: []string{"graphiti_search_memory_facts tool is not available"},
+		})
+		return
+	}
+
+	orgID := getOrgID(r)
+	query := strings.TrimSpace(r.URL.Query().Get("query"))
+	if query == "" {
+		query = graphitiTopologyFactQuery()
+	}
+	result, err := p.mcpProxy.CallToolWithContext(
+		toolName,
+		graphitiSearchFactsArgs(tools, toolName, orgID, query, maxEdges),
+		strconv.FormatInt(orgID, 10),
+		"Org"+strconv.FormatInt(orgID, 10),
+		"",
+	)
+	if err != nil {
+		p.logger.Warn("Failed to query Graphiti topology", "error", err)
+		http.Error(w, "Failed to load topology", http.StatusInternalServerError)
+		return
+	}
+
+	factBodies := []string{graphitiToolBody(result)}
+	nodeBodies := []string{}
+	topologyNodes := []graphitiTopologyNode{}
+	nodeToolName := findGraphitiSearchNodesTool(tools)
+	nodeWarnings := []string{}
+	if nodeToolName == "" {
+		nodeWarnings = append(nodeWarnings, "graphiti_search_nodes tool is not available; falling back to text-only topology parsing")
+	} else {
+		for _, nodeQuery := range graphitiTopologyNodeQueries() {
+			nodeResult, nodeErr := p.mcpProxy.CallToolWithContext(
+				nodeToolName,
+				graphitiSearchNodesArgs(tools, nodeToolName, orgID, nodeQuery.query, hardTopologyMaxNodes, nodeQuery.entityTypes),
+				strconv.FormatInt(orgID, 10),
+				"Org"+strconv.FormatInt(orgID, 10),
+				"",
+			)
+			if nodeErr != nil {
+				p.logger.Warn("Failed to query Graphiti topology nodes", "error", nodeErr, "query", nodeQuery.query)
+				nodeWarnings = append(nodeWarnings, "Graphiti topology node lookup failed; some relationships may be inferred from text")
+				continue
+			}
+			if nodeResult != nil && nodeResult.IsError {
+				nodeWarnings = append(nodeWarnings, "Graphiti topology node lookup returned an error; some relationships may be inferred from text")
+			}
+			if body := graphitiToolBody(nodeResult); body != "" {
+				nodeBodies = append(nodeBodies, body)
+				topologyNodes = append(topologyNodes, extractGraphitiTopologyNodes(body)...)
+			}
+		}
+	}
+
+	if graphitiSearchFactsSupportsCenterNode(tools, toolName) && len(topologyNodes) > 0 {
+		// Bound centered fact lookups to a small cap independent of the display
+		// node limit — each center node is a sequential MCP call, so using
+		// maxNodes (up to 500) here can cause a call storm and gateway timeouts.
+		centerNodes := topologyCenterNodes(topologyNodes, min(maxNodes, maxTopologyCenterFactLookups))
+		centerFactLimit := topologyCenteredFactLimit(maxEdges, len(centerNodes))
+		for _, node := range centerNodes {
+			nodeResult, nodeErr := p.mcpProxy.CallToolWithContext(
+				toolName,
+				graphitiSearchFactsForNodeArgs(tools, toolName, orgID, graphitiTopologyFactQuery(), centerFactLimit, node.UUID),
+				strconv.FormatInt(orgID, 10),
+				"Org"+strconv.FormatInt(orgID, 10),
+				"",
+			)
+			if nodeErr != nil {
+				p.logger.Warn("Failed to query Graphiti centered topology facts", "error", nodeErr, "node", node.Name)
+				nodeWarnings = append(nodeWarnings, "Graphiti centered topology lookup failed; some relationships may be missing")
+				continue
+			}
+			if nodeResult != nil && nodeResult.IsError {
+				nodeWarnings = append(nodeWarnings, "Graphiti centered topology lookup returned an error; some relationships may be missing")
+			}
+			if body := graphitiToolBody(nodeResult); body != "" {
+				factBodies = append(factBodies, body)
+			}
+		}
+	}
+
+	response := parseGraphitiTopologyBodies(factBodies, nodeBodies)
+	response.Enabled = true
+	response.Source = "graphiti"
+	if result != nil && result.IsError {
+		response.Warnings = append(response.Warnings, "Graphiti topology query returned an error")
+	}
+	response.Warnings = append(response.Warnings, uniqueStrings(nodeWarnings)...)
+	response = limitTopologyResponse(response, maxNodes, maxEdges)
+	if len(response.Nodes) == 0 {
+		response.Warnings = append(response.Warnings, "No service topology facts matched the current organization")
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(response)
+}
+
+func topologyLimitFromQuery(r *http.Request, key string, fallback, hardMax int) int {
+	raw := strings.TrimSpace(r.URL.Query().Get(key))
+	if raw == "" {
+		return fallback
+	}
+	value, err := strconv.Atoi(raw)
+	if err != nil {
+		return fallback
+	}
+	return sanitizeTopologyLimit(value, fallback, hardMax)
+}
+
 func (p *Plugin) handleDefault(w http.ResponseWriter, r *http.Request) {
 	p.logger.Info("Default handler", "path", r.URL.Path, "method", r.Method)
 
@@ -544,65 +1599,309 @@ func (p *Plugin) handleDefault(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(response)
 }
 
-// getUserID extracts the user ID from the Grafana plugin context
-// Note: Grafana SDK User struct may not have ID field directly
-// We use Login as a unique identifier, or fallback to header
 func getUserID(r *http.Request) int64 {
 	pluginContext := httpadapter.PluginConfigFromContext(r.Context())
-	if pluginContext.User != nil {
-		// Try to get user ID from Login (hash it to int64 for storage)
-		login := pluginContext.User.Login
-		if login != "" {
-			// Use FNV-1a hash for deterministic, collision-resistant hashing
-			// FNV-1a is fast, has good distribution, and avoids overflow issues
-			h := fnv.New64a()
-			h.Write([]byte(login))
-			hash := h.Sum64()
-
-			// Convert uint64 to int64 safely (take lower 63 bits to ensure positive)
-			// This avoids sign issues while maintaining good distribution
-			return int64(hash & 0x7FFFFFFFFFFFFFFF)
-		}
+	if pluginContext.User != nil && pluginContext.User.Login != "" {
+		h := fnv.New64a()
+		h.Write([]byte(pluginContext.User.Login))
+		return int64(h.Sum64() & 0x7FFFFFFFFFFFFFFF)
 	}
 
-	// Fallback: try to get from header
-	userIDHeader := r.Header.Get("X-Grafana-User-Id")
-	if userIDHeader != "" {
-		var userID int64
-		if _, err := fmt.Sscanf(userIDHeader, "%d", &userID); err == nil {
-			return userID
-		}
+	if id, err := strconv.ParseInt(r.Header.Get("X-Grafana-User-Id"), 10, 64); err == nil {
+		return id
 	}
 
 	return 0
 }
 
-// stringPtr returns a pointer to a copy of the string, allocated on the heap
-// This ensures the pointer remains valid after the function returns
-// Go's escape analysis will move the string to the heap automatically
+// isGraphitiAvailable returns true when the graphiti MCP server is registered
+// and has initialized its tools (i.e. graphiti_add_memory is in the tool list).
+func (p *Plugin) isGraphitiAvailable() bool {
+	tools, _ := p.mcpProxy.ListTools()
+	return hasGraphitiMemoryTool(tools)
+}
+
+// handleGraphitiStatus returns the knowledge graph connection status by calling
+// the graphiti_get_status MCP tool.
+func (p *Plugin) handleGraphitiStatus(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	enabled := p.isGraphitiAvailable()
+	connected := false
+	if enabled {
+		result, err := p.mcpProxy.CallTool("graphiti_get_status", map[string]interface{}{})
+		connected = err == nil && result != nil && !result.IsError
+		if err != nil {
+			p.logger.Warn("Knowledge graph status check failed", "error", err)
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"enabled":   enabled,
+		"connected": connected,
+	})
+}
+
+// handleGraphitiDiscover triggers a hidden discovery agent session that explores
+// the full observability environment and ingests the findings into the knowledge graph.
+func (p *Plugin) handleGraphitiDiscover(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !p.isGraphitiAvailable() {
+		http.Error(w, "Knowledge graph not available", http.StatusServiceUnavailable)
+		return
+	}
+
+	cfg := backend.GrafanaConfigFromContext(r.Context())
+	if cfg == nil {
+		p.logger.Error("Grafana configuration not available for discovery run")
+		http.Error(w, "Grafana configuration not available", http.StatusInternalServerError)
+		return
+	}
+	saToken, err := cfg.PluginAppClientSecret()
+	if err != nil {
+		p.logger.Warn("Service account token not available for discovery run", "error", err)
+		saToken = ""
+	}
+
+	grafanaURL, urlSource := resolveGrafanaURL(p.settings, cfg)
+	p.logger.Debug("Resolved Grafana URL for discovery run", "url", grafanaURL, "source", urlSource)
+
+	if err := p.ensureBuiltInMCPRegistered(saToken, grafanaURL); err != nil {
+		p.logger.Error("Failed to register built-in MCP server", "error", err)
+		http.Error(w, "Failed to initialize MCP server", http.StatusInternalServerError)
+		return
+	}
+
+	orgID := getOrgID(r)
+	userID := getUserID(r)
+	userRole := getUserRole(r)
+
+	runID, err := generateShareID()
+	if err != nil {
+		p.logger.Error("Failed to generate discovery run ID", "error", err)
+		http.Error(w, "Failed to generate run ID", http.StatusInternalServerError)
+		return
+	}
+
+	p.runStore.CreateRun(runID, userID, orgID)
+
+	loopReq := agent.LoopRequest{
+		Messages:           []agent.Message{{Role: "user", Content: GraphitiDiscoveryMessage}},
+		SystemPrompt:       GraphitiDiscoverySystemPrompt,
+		MaxTotalTokens:     p.settings.MaxTotalTokens,
+		RecentMessageCount: p.settings.RecentMessageCount,
+		MaxIterations:      GraphitiDiscoveryMaxIter,
+		Model:              agentModelLarge,
+		GrafanaURL:         grafanaURL,
+		AuthToken:          saToken,
+		UserRole:           userRole,
+		OrgID:              strconv.FormatInt(orgID, 10),
+		OrgName:            "Org" + strconv.FormatInt(orgID, 10),
+		ExcludeToolNames:   graphitiWriteToolNames,
+		MCPServers:         p.settingsForFilter(),
+		ConversationType:   "discovery",
+		ApprovalPolicy:     "off",
+	}
+
+	eventCh := make(chan agent.SSEEvent, GraphitiDiscoveryMaxIter*6)
+	detachedCtx := context.WithoutCancel(r.Context())
+	runCtx, runCancel := context.WithCancel(detachedCtx)
+
+	p.runCancelsMu.Lock()
+	p.runCancels[runID] = runCancel
+	p.runCancelsMu.Unlock()
+
+	go p.agentLoop.Run(runCtx, loopReq, eventCh)
+	go func() {
+		p.consumeDiscoveryEvents(runID, orgID, eventCh)
+		runCancel()
+		p.runCancelsMu.Lock()
+		delete(p.runCancels, runID)
+		p.runCancelsMu.Unlock()
+	}()
+
+	p.logger.Info("Knowledge graph discovery run started", "runId", runID, "orgID", orgID)
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"runId":  runID,
+		"status": RunStatusRunning,
+	})
+}
+
+// consumeDiscoveryEvents drains the agent event channel, updates run status,
+// and — on success — calls graphiti_add_memory with the agent's synthesis.
+// We call it from Go rather than letting the agent call it, to avoid Anthropic
+// streaming-parser failures when tool argument JSON contains nested JSON content.
+func (p *Plugin) consumeDiscoveryEvents(runID string, orgID int64, eventCh <-chan agent.SSEEvent) {
+	lastEvent, synthesis := collectDiscoverySynthesis(eventCh, func(event agent.SSEEvent) {
+		p.runStore.AppendEvent(runID, event)
+	})
+
+	switch lastEvent.Type {
+	case "done":
+		if synthesis != "" && p.isGraphitiAvailable() {
+			if err := ingestGraphitiMemory(
+				p.mcpProxy,
+				orgID,
+				"discovery_synthesis",
+				synthesis,
+				"text",
+				"Service topology discovery - agent synthesis",
+			); err != nil {
+				p.logger.Warn("Failed to ingest discovery synthesis into knowledge graph", "runId", runID, "error", err)
+			} else {
+				p.logger.Info("Discovery synthesis ingested into knowledge graph", "runId", runID)
+			}
+		}
+		p.runStore.FinishRun(runID, RunStatusCompleted, "")
+		p.logger.Info("Discovery run completed", "runId", runID, "orgID", orgID)
+	case "error":
+		var errMsg string
+		if ee, ok := lastEvent.Data.(agent.ErrorEvent); ok {
+			errMsg = ee.Message
+		}
+		p.runStore.FinishRun(runID, RunStatusFailed, errMsg)
+		p.logger.Warn("Discovery run failed", "runId", runID, "error", errMsg)
+	default:
+		p.runStore.FinishRun(runID, RunStatusCancelled, "")
+		p.logger.Warn("Discovery run cancelled", "runId", runID)
+	}
+}
+
+// ingestSessionRequest is the JSON body for POST /api/graphiti/ingest-session.
+type ingestSessionRequest struct {
+	Messages []ingestSessionMessage `json:"messages"`
+}
+
+type ingestSessionMessage struct {
+	Role    string `json:"role"` // "user" | "assistant"
+	Content string `json:"content"`
+}
+
+// handleGraphitiIngestSession ingests conversation messages from a completed
+// investigation session into the knowledge graph. This is the "Feed to Knowledge
+// Graph" action — the user opts in to share their investigation findings so
+// future sessions can leverage discovered causal relationships.
+func (p *Plugin) handleGraphitiIngestSession(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !p.isGraphitiAvailable() {
+		http.Error(w, "Knowledge graph not available", http.StatusServiceUnavailable)
+		return
+	}
+
+	var req ingestSessionRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+	if len(req.Messages) == 0 {
+		http.Error(w, "No messages provided", http.StatusBadRequest)
+		return
+	}
+
+	orgID := getOrgID(r)
+	body, count := buildSessionMemoryBody(req.Messages)
+
+	if count == 0 {
+		http.Error(w, "No non-empty messages provided", http.StatusBadRequest)
+		return
+	}
+
+	if err := ingestGraphitiMemory(
+		p.mcpProxy,
+		orgID,
+		"investigation_session",
+		body,
+		"message",
+		"Ask O11y investigation session",
+	); err != nil {
+		p.logger.Error("Failed to ingest session into knowledge graph",
+			"error", err, "orgID", orgID)
+		http.Error(w, "Failed to ingest session", http.StatusInternalServerError)
+		return
+	}
+
+	p.logger.Info("Session ingested into knowledge graph", "orgID", orgID, "messages", count)
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"ingested": count,
+	})
+}
+
 func stringPtr(s string) *string {
-	// Create a new string allocation to ensure pointer remains valid
-	// The compiler will escape this to the heap
-	sCopy := s
-	return &sCopy
+	return &s
 }
 
-// getOrgID extracts the organization ID from the request header
+func parseLimitQuery(r *http.Request, fallback int) int {
+	value, err := strconv.Atoi(r.URL.Query().Get("limit"))
+	if err != nil {
+		return defaultEvalLimit(fallback)
+	}
+	return defaultEvalLimit(value)
+}
+
+func defaultEvalLimit(limit int) int {
+	if limit <= 0 {
+		return 20
+	}
+	if limit > 100 {
+		return 100
+	}
+	return limit
+}
+
 func getOrgID(r *http.Request) int64 {
-	orgIDStr := r.Header.Get("X-Grafana-Org-Id")
-	if orgIDStr == "" {
-		return 1 // Default to org 1 if not specified
+	if id, err := strconv.ParseInt(r.Header.Get("X-Grafana-Org-Id"), 10, 64); err == nil && id > 0 {
+		return id
 	}
-
-	var orgID int64
-	fmt.Sscanf(orgIDStr, "%d", &orgID)
-	if orgID == 0 {
-		return 1 // Default to org 1 if parsing fails
-	}
-	return orgID
+	return 1
 }
 
-// handleCreateShare handles POST /api/sessions/share
+func isValidApprovalID(id string) bool {
+	if id == "" || len(id) > 128 {
+		return false
+	}
+	for _, r := range id {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_' || r == '-' {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+func normalizeApprovalDecision(decision string) string {
+	switch strings.ToLower(strings.TrimSpace(decision)) {
+	case "approved", "approve", "accepted", "accept":
+		return "approved"
+	case "rejected", "reject", "denied", "deny":
+		return "rejected"
+	default:
+		return ""
+	}
+}
+
+func normalizeApprovalScope(scope string) string {
+	switch strings.ToLower(strings.TrimSpace(scope)) {
+	case "always", "tool", "approve_always", "approve-always":
+		return "always"
+	default:
+		return "once"
+	}
+}
+
 func (p *Plugin) handleCreateShare(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -615,23 +1914,22 @@ func (p *Plugin) handleCreateShare(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		SessionID      string          `json:"sessionId"`
 		SessionData    json.RawMessage `json:"sessionData"`
-		ExpiresInDays  *int            `json:"expiresInDays,omitempty"`  // Deprecated: use ExpiresInHours (converted to hours internally)
-		ExpiresInHours *int            `json:"expiresInHours,omitempty"` // Accepts hours directly
+		ExpiresInDays  *int            `json:"expiresInDays,omitempty"`
+		ExpiresInHours *int            `json:"expiresInHours,omitempty"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, fmt.Sprintf("Invalid request: %v", err), http.StatusBadRequest)
+		p.logger.Warn("Invalid create-share request body", "error", err)
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
 		return
 	}
 
-	// Validate session data
 	if err := ValidateSessionData(req.SessionData); err != nil {
 		p.logger.Warn("Invalid session data", "error", err)
-		http.Error(w, fmt.Sprintf("Invalid session data: %v", err), http.StatusBadRequest)
+		http.Error(w, "Invalid session data", http.StatusBadRequest)
 		return
 	}
 
-	// Validate sessionId matches session data
 	var sessionData map[string]interface{}
 	if err := json.Unmarshal(req.SessionData, &sessionData); err != nil {
 		http.Error(w, "Invalid session data format", http.StatusBadRequest)
@@ -643,7 +1941,6 @@ func (p *Plugin) handleCreateShare(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Handle expiration: prefer ExpiresInHours, fall back to ExpiresInDays (for backward compatibility)
 	var expiresInHours *int
 	if req.ExpiresInHours != nil {
 		if *req.ExpiresInHours <= 0 {
@@ -656,7 +1953,6 @@ func (p *Plugin) handleCreateShare(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "expiresInDays must be positive", http.StatusBadRequest)
 			return
 		}
-		// Convert days to hours for backward compatibility
 		hours := *req.ExpiresInDays * 24
 		expiresInHours = &hours
 	}
@@ -668,16 +1964,14 @@ func (p *Plugin) handleCreateShare(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		p.logger.Error("Failed to create share", "error", err)
-		http.Error(w, fmt.Sprintf("Failed to create share: %v", err), http.StatusInternalServerError)
+		http.Error(w, "Failed to create share", http.StatusInternalServerError)
 		return
 	}
 
-	// Build share URL
 	shareURL := fmt.Sprintf("/a/%s/shared/%s?orgId=%d", PluginID, share.ShareID, orgID)
 
 	var expiresAtStr *string
 	if share.ExpiresAt != nil {
-		// Allocate string on heap to avoid pointer to local variable going out of scope
 		expStr := share.ExpiresAt.Format(time.RFC3339)
 		expiresAtStr = stringPtr(expStr)
 	}
@@ -692,15 +1986,12 @@ func (p *Plugin) handleCreateShare(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(response)
 }
 
-// handleGetSharedSession handles GET /api/sessions/shared/:shareId
 func (p *Plugin) handleGetSharedSession(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
-	// Extract shareId from URL path
-	// Path format: /api/sessions/shared/{shareId}
 	path := r.URL.Path
 	if !strings.HasPrefix(path, "/api/sessions/shared/") {
 		http.Error(w, "Invalid path format", http.StatusBadRequest)
@@ -715,7 +2006,6 @@ func (p *Plugin) handleGetSharedSession(w http.ResponseWriter, r *http.Request) 
 
 	orgID := getOrgID(r)
 
-	// Get share
 	share, err := p.shareStore.GetShare(shareID)
 	if err != nil {
 		if err.Error() == "share not found" {
@@ -731,13 +2021,11 @@ func (p *Plugin) handleGetSharedSession(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// Validate org match
 	if share.OrgID != orgID {
 		http.Error(w, "You don't have access to this shared session", http.StatusForbidden)
 		return
 	}
 
-	// Parse session data
 	var sessionData map[string]interface{}
 	if err := json.Unmarshal(share.SessionData, &sessionData); err != nil {
 		p.logger.Error("Failed to parse session data", "error", err)
@@ -745,7 +2033,6 @@ func (p *Plugin) handleGetSharedSession(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// Add shared metadata
 	sessionData["isShared"] = true
 	sessionData["sharedBy"] = fmt.Sprintf("%d", share.UserID)
 
@@ -753,15 +2040,12 @@ func (p *Plugin) handleGetSharedSession(w http.ResponseWriter, r *http.Request) 
 	json.NewEncoder(w).Encode(sessionData)
 }
 
-// handleDeleteShare handles DELETE /api/sessions/share/:shareId
 func (p *Plugin) handleDeleteShare(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodDelete {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
-	// Extract shareId from URL path
-	// Path format: /api/sessions/share/{shareId}
 	path := r.URL.Path
 	if !strings.HasPrefix(path, "/api/sessions/share/") {
 		http.Error(w, "Invalid path format", http.StatusBadRequest)
@@ -776,7 +2060,6 @@ func (p *Plugin) handleDeleteShare(w http.ResponseWriter, r *http.Request) {
 
 	userID := getUserID(r)
 
-	// Get share to verify ownership
 	share, err := p.shareStore.GetShare(shareID)
 	if err != nil {
 		if err.Error() == "share not found" || err.Error() == "share expired" {
@@ -788,13 +2071,11 @@ func (p *Plugin) handleDeleteShare(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Validate ownership
 	if share.UserID != userID {
 		http.Error(w, "You don't have permission to revoke this share", http.StatusForbidden)
 		return
 	}
 
-	// Delete share
 	if err := p.shareStore.DeleteShare(shareID); err != nil {
 		p.logger.Error("Failed to delete share", "error", err)
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
@@ -809,42 +2090,194 @@ func (p *Plugin) handleDeleteShare(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(response)
 }
 
-// handleGetSessionShares handles GET /api/sessions/:sessionId/shares
-func (p *Plugin) handleGetSessionShares(w http.ResponseWriter, r *http.Request) {
+// handleSessionsRoot handles /api/sessions (no trailing slash).
+func (p *Plugin) handleSessionsRoot(w http.ResponseWriter, r *http.Request) {
+	userID := getUserID(r)
+	orgID := getOrgID(r)
+
+	switch r.Method {
+	case http.MethodGet:
+		sessions, err := p.sessionStore.ListSessions(userID, orgID)
+		if err != nil {
+			p.logger.Error("Failed to list sessions", "error", err)
+			http.Error(w, "Failed to list sessions", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(sessions)
+
+	case http.MethodPost:
+		var req struct {
+			Title    string           `json:"title"`
+			Messages []SessionMessage `json:"messages"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			p.logger.Warn("Invalid create-session request body", "error", err)
+			http.Error(w, "Invalid request body", http.StatusBadRequest)
+			return
+		}
+		session, err := p.sessionStore.CreateSession(userID, orgID, req.Title, req.Messages)
+		if err != nil {
+			p.logger.Error("Failed to create session", "error", err)
+			http.Error(w, "Failed to create session", http.StatusInternalServerError)
+			return
+		}
+		if err := p.sessionStore.SetCurrentSessionID(userID, orgID, session.ID); err != nil {
+			p.logger.Warn("Failed to set current session ID", "error", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		json.NewEncoder(w).Encode(session)
+
+	case http.MethodDelete:
+		if err := p.sessionStore.DeleteAllSessions(userID, orgID); err != nil {
+			p.logger.Error("Failed to delete all sessions", "error", err)
+			http.Error(w, "Failed to delete sessions", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]bool{"success": true})
+
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+// handleSessionCurrent handles /api/sessions/current.
+func (p *Plugin) handleSessionCurrent(w http.ResponseWriter, r *http.Request) {
+	userID := getUserID(r)
+	orgID := getOrgID(r)
+
+	switch r.Method {
+	case http.MethodGet:
+		id, err := p.sessionStore.GetCurrentSessionID(userID, orgID)
+		if err != nil {
+			http.Error(w, "Failed to get current session", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"sessionId": id})
+
+	case http.MethodPut:
+		var req struct {
+			SessionID string `json:"sessionId"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			p.logger.Warn("Invalid set-current-session request body", "error", err)
+			http.Error(w, "Invalid request body", http.StatusBadRequest)
+			return
+		}
+		if req.SessionID == "" {
+			if err := p.sessionStore.ClearCurrentSessionID(userID, orgID); err != nil {
+				http.Error(w, "Failed to clear current session", http.StatusInternalServerError)
+				return
+			}
+		} else {
+			if err := p.sessionStore.SetCurrentSessionID(userID, orgID, req.SessionID); err != nil {
+				http.Error(w, "Session not found", http.StatusNotFound)
+				return
+			}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]bool{"success": true})
+
+	case http.MethodDelete:
+		if err := p.sessionStore.ClearCurrentSessionID(userID, orgID); err != nil {
+			http.Error(w, "Failed to clear current session", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]bool{"success": true})
+
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+// handleSessionRouter dispatches /api/sessions/{id} and /api/sessions/{id}/shares.
+func (p *Plugin) handleSessionRouter(w http.ResponseWriter, r *http.Request) {
+	path := r.URL.Path
+	prefix := "/api/sessions/"
+
+	// Delegate to share-related handlers based on path prefix.
+	if strings.HasPrefix(path, "/api/sessions/shared/") || strings.HasPrefix(path, "/api/sessions/share/") {
+		http.Error(w, "Invalid path format", http.StatusBadRequest)
+		return
+	}
+
+	remainder := strings.TrimPrefix(path, prefix)
+	if remainder == "" {
+		http.Error(w, "Session ID required", http.StatusBadRequest)
+		return
+	}
+
+	// /api/sessions/{id}/shares → list shares for session
+	if sessionID, isShares := strings.CutSuffix(remainder, "/shares"); isShares {
+		if !isValidSecureID(sessionID) {
+			http.Error(w, "Invalid session ID format", http.StatusBadRequest)
+			return
+		}
+		p.handleGetSessionShares(w, r, sessionID)
+		return
+	}
+
+	// /api/sessions/{id} → CRUD on a single session
+	sessionID := remainder
+	if !isValidSecureID(sessionID) {
+		http.Error(w, "Invalid session ID format", http.StatusBadRequest)
+		return
+	}
+
+	userID := getUserID(r)
+	orgID := getOrgID(r)
+
+	switch r.Method {
+	case http.MethodGet:
+		session, err := p.sessionStore.GetSession(sessionID, userID, orgID)
+		if err != nil {
+			http.Error(w, "Session not found", http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(session)
+
+	case http.MethodPut:
+		var update SessionUpdate
+		if err := json.NewDecoder(r.Body).Decode(&update); err != nil {
+			p.logger.Warn("Invalid update-session request body", "error", err)
+			http.Error(w, "Invalid request body", http.StatusBadRequest)
+			return
+		}
+		if update.Model != nil {
+			http.Error(w, "Session model can only be set by agent run creation", http.StatusBadRequest)
+			return
+		}
+		if err := p.sessionStore.UpdateSession(sessionID, userID, orgID, update); err != nil {
+			http.Error(w, "Session not found", http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]bool{"success": true})
+
+	case http.MethodDelete:
+		if err := p.sessionStore.DeleteSession(sessionID, userID, orgID); err != nil {
+			http.Error(w, "Session not found", http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]bool{"success": true})
+
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+func (p *Plugin) handleGetSessionShares(w http.ResponseWriter, r *http.Request, sessionID string) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
-	// Extract sessionId from URL path
-	// Path format: /api/sessions/{sessionId}/shares
-	// IMPORTANT: This handler must reject paths that match more specific routes
-	path := r.URL.Path
-
-	// Reject paths that should be handled by more specific routes
-	if strings.HasPrefix(path, "/api/sessions/shared/") {
-		http.Error(w, "Invalid path format", http.StatusBadRequest)
-		return
-	}
-	if strings.HasPrefix(path, "/api/sessions/share/") {
-		http.Error(w, "Invalid path format", http.StatusBadRequest)
-		return
-	}
-	if path == "/api/sessions/share" {
-		http.Error(w, "Invalid path format", http.StatusBadRequest)
-		return
-	}
-
-	prefix := "/api/sessions/"
-	suffix := "/shares"
-
-	if !strings.HasPrefix(path, prefix) || !strings.HasSuffix(path, suffix) {
-		http.Error(w, "Invalid path format", http.StatusBadRequest)
-		return
-	}
-
-	// Extract sessionId: remove prefix and suffix
-	sessionID := strings.TrimPrefix(strings.TrimSuffix(path, suffix), prefix)
 	if sessionID == "" {
 		http.Error(w, "Session ID required", http.StatusBadRequest)
 		return
@@ -852,17 +2285,14 @@ func (p *Plugin) handleGetSessionShares(w http.ResponseWriter, r *http.Request) 
 
 	userID := getUserID(r)
 
-	// Get shares for session
 	shares := p.shareStore.GetSharesBySession(sessionID)
 
-	// Filter to only shares created by this user
 	var userShares []map[string]interface{}
 	for _, share := range shares {
 		if share.UserID == userID {
 			shareURL := fmt.Sprintf("/a/%s/shared/%s?orgId=%d", PluginID, share.ShareID, share.OrgID)
 			var expiresAtStr *string
 			if share.ExpiresAt != nil {
-				// Allocate string on heap to avoid pointer to local variable going out of scope
 				expStr := share.ExpiresAt.Format(time.RFC3339)
 				expiresAtStr = stringPtr(expStr)
 			}
@@ -876,4 +2306,133 @@ func (p *Plugin) handleGetSessionShares(w http.ResponseWriter, r *http.Request) 
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(userShares)
+}
+
+func generateSessionTitleFromType(convType, message string) string {
+	const maxTitleLen = 50
+	switch convType {
+	case "investigation":
+		alertName := extractAlertNameForTitle(message)
+		return truncateTitle(fmt.Sprintf("Alert Investigation: %s", alertName), maxTitleLen)
+	case "performance":
+		target := extractTargetForTitle(message)
+		return truncateTitle(fmt.Sprintf("Performance Analysis: %s", target), maxTitleLen)
+	default:
+		return truncateTitle(message, maxTitleLen)
+	}
+}
+
+func trimCaseInsensitivePrefix(s string, prefixes ...string) string {
+	lower := strings.ToLower(s)
+	for _, p := range prefixes {
+		if strings.HasPrefix(lower, p) {
+			return strings.TrimSpace(s[len(p):])
+		}
+	}
+	return s
+}
+
+func extractAlertNameForTitle(message string) string {
+	return trimCaseInsensitivePrefix(strings.TrimSpace(message), "alertname:", "alert:")
+}
+
+func extractTargetForTitle(message string) string {
+	return trimCaseInsensitivePrefix(strings.TrimSpace(message), "target:")
+}
+
+func truncateTitle(s string, maxLen int) string {
+	runes := []rune(s)
+	if len(runes) <= maxLen {
+		return s
+	}
+	return string(runes[:maxLen-3]) + "..."
+}
+
+func reconstructAssistantMessage(events []agent.SSEEvent) SessionMessage {
+	var content string
+	// Merge tool_call_start and tool_call_result by ID so each tool call
+	// produces exactly one entry (no duplicates when reopening a session).
+	toolCallsByID := make(map[string]map[string]interface{})
+	var toolCallOrder []string
+
+	for _, e := range events {
+		switch e.Type {
+		case "content":
+			if ce, ok := e.Data.(agent.ContentEvent); ok {
+				content += ce.Content
+			} else if m, ok := e.Data.(map[string]interface{}); ok {
+				if c, ok := m["content"].(string); ok {
+					content += c
+				}
+			}
+		case "tool_call_start":
+			var id, name, arguments string
+			if tcs, ok := e.Data.(agent.ToolCallStartEvent); ok {
+				id, name, arguments = tcs.ID, tcs.Name, tcs.Arguments
+			} else if m, ok := e.Data.(map[string]interface{}); ok {
+				id, _ = m["id"].(string)
+				name, _ = m["name"].(string)
+				arguments, _ = m["arguments"].(string)
+			}
+			if id == "" {
+				continue
+			}
+			if _, exists := toolCallsByID[id]; !exists {
+				toolCallOrder = append(toolCallOrder, id)
+			}
+			toolCallsByID[id] = map[string]interface{}{
+				"name":      name,
+				"arguments": arguments,
+				"running":   true,
+			}
+		case "tool_call_result":
+			var id, name, resultContent string
+			var isError bool
+			if tcr, ok := e.Data.(agent.ToolCallResultEvent); ok {
+				id, name, resultContent, isError = tcr.ID, tcr.Name, tcr.Content, tcr.IsError
+			} else if m, ok := e.Data.(map[string]interface{}); ok {
+				id, _ = m["id"].(string)
+				name, _ = m["name"].(string)
+				resultContent, _ = m["content"].(string)
+				isError, _ = m["isError"].(bool)
+			}
+			if id == "" {
+				continue
+			}
+			tc, exists := toolCallsByID[id]
+			if !exists {
+				tc = map[string]interface{}{"name": name}
+				toolCallOrder = append(toolCallOrder, id)
+			}
+			tc["running"] = false
+			if tc["arguments"] == nil || tc["arguments"] == "" {
+				tc["arguments"] = ""
+			}
+			if isError {
+				tc["error"] = resultContent
+			} else {
+				tc["response"] = map[string]interface{}{
+					"content": []map[string]interface{}{{"type": "text", "text": resultContent}},
+				}
+			}
+			toolCallsByID[id] = tc
+		}
+	}
+
+	msg := SessionMessage{
+		Role:    "assistant",
+		Content: content,
+	}
+
+	if len(toolCallOrder) > 0 {
+		toolCallsRaw := make([]map[string]interface{}, 0, len(toolCallOrder))
+		for _, id := range toolCallOrder {
+			toolCallsRaw = append(toolCallsRaw, toolCallsByID[id])
+		}
+		if data, err := json.Marshal(toolCallsRaw); err == nil {
+			msg.ToolCalls = data
+		}
+	}
+
+	return msg
 }

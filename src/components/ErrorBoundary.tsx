@@ -1,10 +1,6 @@
-/**
- * React Error Boundary Component
- * Catches JavaScript errors anywhere in the component tree and displays a fallback UI
- */
-
 import React, { Component, ErrorInfo, ReactNode } from 'react';
 import { Alert, Button, Icon } from '@grafana/ui';
+import { getPluginSessionStorageKeys } from '../utils/storageKeys';
 
 interface Props {
   children: ReactNode;
@@ -20,10 +16,6 @@ interface State {
   errorCount: number;
 }
 
-/**
- * Error Boundary component that catches errors in child components
- * and displays a user-friendly error message
- */
 export class ErrorBoundary extends Component<Props, State> {
   constructor(props: Props) {
     super(props);
@@ -36,7 +28,6 @@ export class ErrorBoundary extends Component<Props, State> {
   }
 
   static getDerivedStateFromError(error: Error): Partial<State> {
-    // Update state to trigger fallback UI
     return {
       hasError: true,
       error,
@@ -44,54 +35,27 @@ export class ErrorBoundary extends Component<Props, State> {
   }
 
   componentDidCatch(error: Error, errorInfo: ErrorInfo) {
-    // Log the error details
-    console.error('[ErrorBoundary] Caught error:', error, errorInfo);
-
-    // Update state with error details
     this.setState((prevState) => ({
       errorInfo,
       errorCount: prevState.errorCount + 1,
     }));
 
-    // Call custom error logger if provided
-    if (this.props.logError) {
-      this.props.logError(error, errorInfo);
-    }
-
-    // Send error to monitoring service (if configured)
-    this.reportErrorToService(error, errorInfo);
+    this.props.logError?.(error, errorInfo);
   }
 
   componentDidUpdate(prevProps: Props) {
-    // Reset error boundary if children change
     if (prevProps.children !== this.props.children && this.state.hasError) {
       this.resetErrorBoundary();
     }
   }
 
-  reportErrorToService = (error: Error, errorInfo: ErrorInfo) => {
-    // In production, this would send to an error monitoring service
-    // For now, just log to console with structured data
-    const errorReport = {
-      message: error.message,
-      stack: error.stack,
-      componentStack: errorInfo.componentStack,
-      timestamp: new Date().toISOString(),
-      errorCount: this.state.errorCount,
-    };
-
-    console.error('[ErrorBoundary] Error report:', errorReport);
-  };
-
   resetErrorBoundary = () => {
-    // Reset the error boundary state
     this.setState({
       hasError: false,
       error: null,
       errorInfo: null,
     });
 
-    // Call custom reset handler if provided
     if (this.props.onReset) {
       this.props.onReset();
     }
@@ -102,7 +66,6 @@ export class ErrorBoundary extends Component<Props, State> {
       const { error, errorInfo, errorCount } = this.state;
       const { fallbackTitle = 'Something went wrong' } = this.props;
 
-      // Show fallback UI
       return (
         <div className="error-boundary-fallback p-4">
           <Alert severity="error" title={fallbackTitle} className="mb-4">
@@ -135,7 +98,6 @@ export class ErrorBoundary extends Component<Props, State> {
                 </Button>
               </div>
 
-              {/* Expandable error details for developers */}
               {process.env.NODE_ENV === 'development' && errorInfo && (
                 <details className="mt-4 p-3 bg-weak rounded">
                   <summary className="cursor-pointer font-medium text-sm">
@@ -163,14 +125,10 @@ export class ErrorBoundary extends Component<Props, State> {
       );
     }
 
-    // No error, render children normally
     return this.props.children;
   }
 }
 
-/**
- * Specialized error boundary for the Chat component
- */
 export class ChatErrorBoundary extends Component<{ children: ReactNode }, State> {
   constructor(props: { children: ReactNode }) {
     super(props);
@@ -189,9 +147,7 @@ export class ChatErrorBoundary extends Component<{ children: ReactNode }, State>
     };
   }
 
-  componentDidCatch(error: Error, errorInfo: ErrorInfo) {
-    console.error('[ChatErrorBoundary] Chat component error:', error, errorInfo);
-
+  componentDidCatch(_error: Error, errorInfo: ErrorInfo) {
     this.setState((prevState) => ({
       errorInfo,
       errorCount: prevState.errorCount + 1,
@@ -199,9 +155,6 @@ export class ChatErrorBoundary extends Component<{ children: ReactNode }, State>
   }
 
   resetChat = () => {
-    // Clear chat-specific state if needed
-    localStorage.removeItem('chat_recovery_state');
-
     this.setState({
       hasError: false,
       error: null,
@@ -226,14 +179,14 @@ export class ChatErrorBoundary extends Component<{ children: ReactNode }, State>
                 </Button>
                 <Button
                   onClick={() => {
-                    // Clear session and reload
-                    sessionStorage.clear();
+                    const keysToRemove = getPluginSessionStorageKeys(sessionStorage);
+                    keysToRemove.forEach((key) => sessionStorage.removeItem(key));
                     window.location.reload();
                   }}
                   variant="secondary"
                   icon="trash-alt"
                 >
-                  Clear Session & Reload
+                  Clear & Reload
                 </Button>
               </div>
             </div>
@@ -246,9 +199,6 @@ export class ChatErrorBoundary extends Component<{ children: ReactNode }, State>
   }
 }
 
-/**
- * Hook for using error boundaries with functional components
- */
 export function useErrorHandler() {
   const [error, setError] = React.useState<Error | null>(null);
 
@@ -259,12 +209,11 @@ export function useErrorHandler() {
   }, [error]);
 
   const resetError = () => setError(null);
-  const captureError = (error: Error) => setError(error);
+  const captureError = (err: Error) => setError(err);
 
   return { captureError, resetError };
 }
 
-// Export a HOC for wrapping components with error boundary
 export function withErrorBoundary<P extends object>(Component: React.ComponentType<P>, fallbackTitle?: string) {
   const WithErrorBoundaryComponent = (props: P) => (
     <ErrorBoundary fallbackTitle={fallbackTitle}>

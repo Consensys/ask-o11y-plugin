@@ -82,4 +82,14 @@ describe('Components/App', () => {
     // Application is lazy loaded, so we need to wait for the component and routes to be rendered
     await waitFor(() => expect(queryByText(/Ask O11y Assistant/i)).toBeInTheDocument(), { timeout: 2000 });
   });
+
+  test('does not expose a standalone service graph route', async () => {
+    const { queryByText } = render(
+      <MemoryRouter initialEntries={['/topology']}>
+        <App {...props} />
+      </MemoryRouter>
+    );
+
+    await waitFor(() => expect(queryByText(/Ask O11y Assistant/i)).toBeInTheDocument(), { timeout: 2000 });
+  });
 });

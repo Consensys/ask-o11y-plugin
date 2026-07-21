@@ -1,56 +1,92 @@
-import React, { forwardRef, useImperativeHandle, useRef, useEffect, useState } from 'react';
-import { Icon, Alert, useTheme2 } from '@grafana/ui';
+import React, { forwardRef, useImperativeHandle, useRef, useEffect, useState, useCallback } from 'react';
+import { Icon, Alert, useStyles2, useTheme2 } from '@grafana/ui';
+import { css, cx, keyframes } from '@emotion/css';
+import { GrafanaTheme2 } from '@grafana/data';
 import { ValidationService } from '../../../../services/validation';
+import { getHoverButtonStyle } from '../../../../theme';
+
+const TEXTAREA_MAX_ROWS = 25;
 
 interface ChatInputProps {
   currentInput: string;
   isGenerating: boolean;
-  toolsLoading: boolean;
   setCurrentInput: (value: string) => void;
   sendMessage: () => void;
   handleKeyPress: (e: React.KeyboardEvent) => void;
   rightSlot?: React.ReactNode;
   leftSlot?: React.ReactNode;
+  queuedMessageCount: number;
+  onStopGeneration?: () => void;
 }
 
 export interface ChatInputRef {
-  focus: (moveCursorToEnd?: boolean) => void;
+  focus: () => void;
+  clear: () => void;
 }
 
 export const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(
   (
-    { currentInput, isGenerating, toolsLoading, setCurrentInput, sendMessage, handleKeyPress, rightSlot, leftSlot },
+    {
+      currentInput,
+      isGenerating,
+      setCurrentInput,
+      sendMessage,
+      handleKeyPress,
+      rightSlot,
+      leftSlot,
+      queuedMessageCount,
+      onStopGeneration,
+    },
     ref
   ) => {
     const textareaRef = useRef<HTMLTextAreaElement>(null);
     const [validationError, setValidationError] = useState<string | null>(null);
     const theme = useTheme2();
+    const styles = useStyles2(getStyles);
+    const isComposingRef = useRef(false);
+    const maxTextareaHeight = theme.spacing(TEXTAREA_MAX_ROWS);
 
     useImperativeHandle(ref, () => ({
-      focus: (moveCursorToEnd = false) => {
+      focus: () => {
         if (textareaRef.current) {
           textareaRef.current.focus();
-          if (moveCursorToEnd) {
-            textareaRef.current.setSelectionRange(textareaRef.current.value.length, textareaRef.current.value.length);
-          }
+        }
+      },
+      clear: () => {
+        if (textareaRef.current) {
+          textareaRef.current.value = '';
+          autoResize();
         }
       },
     }));
 
     // Auto-resize textarea
-    const autoResize = () => {
+    const autoResize = useCallback(() => {
       if (textareaRef.current) {
         textareaRef.current.style.height = 'auto';
-        textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 200)}px`;
+        textareaRef.current.style.height = `${Math.min(
+          textareaRef.current.scrollHeight,
+          parseFloat(maxTextareaHeight)
+        )}px`;
       }
-    };
+    }, [maxTextareaHeight]);
 
+    // Sync external changes to textarea (e.g., from suggestion clicks, clearing chat)
     useEffect(() => {
-      autoResize();
-    }, [currentInput]);
+      if (textareaRef.current) {
+        // Always sync, even if value appears the same (handles edge cases like clearing after send)
+        textareaRef.current.value = currentInput;
+        autoResize();
+      }
+    }, [autoResize, currentInput]);
 
     const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
       const rawValue = e.target.value;
+
+      // Don't update state during composition (IME input)
+      if (isComposingRef.current) {
+        return;
+      }
 
       // Allow setting the value even if it's invalid (for better UX)
       setCurrentInput(rawValue);
@@ -98,44 +134,32 @@ export const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(
         )}
 
         {/* Gradient border wrapper */}
-        <div className={`gradient-border-wrapper ${validationError ? 'opacity-50' : ''}`}>
-          <div
-            className="gradient-border-inner px-5 py-4"
-            style={{
-              backgroundColor: theme.isDark ? '#1a1a1a' : theme.colors.background.primary,
-            }}
-          >
-            {/* Top row: @ symbol and settings icon */}
-            {/* <div className="flex items-center justify-between mb-3">
-              <span className="text-base font-medium" style={{ color: theme.colors.text.secondary }}>
-                @
-              </span>
-              <button
-                type="button"
-                className="p-1.5 rounded hover:bg-white/5 transition-colors"
-                aria-label="Settings"
-                style={{ color: theme.colors.text.secondary }}
-              >
-                <Icon name="cog" size="md" />
-              </button>
-            </div> */}
-
-            {/* Text input area */}
+        <div className={cx(styles.gradientWrapper, styles.gradientGlow, validationError && 'opacity-50')}>
+          <div className={cx(styles.gradientInner, 'px-5 py-4')}>
             <textarea
               ref={textareaRef}
-              value={currentInput}
+              defaultValue={currentInput}
               onChange={handleInputChange}
               onKeyDown={handleKeyDown}
+              onCompositionStart={() => {
+                isComposingRef.current = true;
+              }}
+              onCompositionEnd={(e) => {
+                isComposingRef.current = false;
+                handleInputChange(e as any);
+              }}
               placeholder="Ask me anything about your metrics, logs, or observability..."
-              disabled={isGenerating || toolsLoading}
               rows={1}
-              className="w-full resize-none bg-transparent border-0 text-base placeholder-secondary focus:outline-none focus:ring-0 min-h-[28px] max-h-[200px]"
+              className={cx(
+                'w-full resize-none bg-transparent border-0 text-base placeholder-secondary focus:outline-none focus:ring-0',
+                styles.textarea
+              )}
               style={{
                 lineHeight: '1.6',
                 height: 'auto',
                 color: theme.colors.text.primary,
               }}
-              aria-label="Chat input"
+              aria-label={isGenerating ? 'Chat input (message will be queued)' : 'Chat input'}
               aria-invalid={!!validationError}
               aria-describedby={validationError ? 'input-error' : undefined}
             />
@@ -147,29 +171,36 @@ export const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(
                 {leftSlot}
 
                 {/* Loading indicator */}
-                {(isGenerating || toolsLoading) && (
+                {isGenerating && (
                   <div className="flex items-center text-sm" style={{ color: theme.colors.text.secondary }}>
-                    {isGenerating ? (
-                      <>
-                        <div className="flex gap-1 mr-2">
-                          <div
-                            className="w-1.5 h-1.5 bg-current rounded-full animate-pulse"
-                            style={{ animationDelay: '0ms' }}
-                          />
-                          <div
-                            className="w-1.5 h-1.5 bg-current rounded-full animate-pulse"
-                            style={{ animationDelay: '150ms' }}
-                          />
-                          <div
-                            className="w-1.5 h-1.5 bg-current rounded-full animate-pulse"
-                            style={{ animationDelay: '300ms' }}
-                          />
-                        </div>
-                        <span>Generating...</span>
-                      </>
-                    ) : (
-                      <span>Loading tools...</span>
-                    )}
+                    <div className="flex gap-1 mr-2">
+                      <div
+                        className="w-1.5 h-1.5 bg-current rounded-full animate-pulse"
+                        style={{ animationDelay: '0ms' }}
+                      />
+                      <div
+                        className="w-1.5 h-1.5 bg-current rounded-full animate-pulse"
+                        style={{ animationDelay: '150ms' }}
+                      />
+                      <div
+                        className="w-1.5 h-1.5 bg-current rounded-full animate-pulse"
+                        style={{ animationDelay: '300ms' }}
+                      />
+                    </div>
+                    <span>Generating...</span>
+                  </div>
+                )}
+
+                {queuedMessageCount > 0 && (
+                  <div
+                    className="flex items-center text-xs px-2 py-1 rounded-full border border-weak bg-surface"
+                    aria-label={`${queuedMessageCount} message${
+                      queuedMessageCount > 1 ? 's' : ''
+                    } queued — will be sent after current response completes`}
+                    data-testid="chat-queue-indicator"
+                  >
+                    <Icon name="clock-nine" size="xs" className="mr-1" />
+                    <span>{queuedMessageCount} queued — will send after response</span>
                   </div>
                 )}
               </div>
@@ -178,11 +209,27 @@ export const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(
                 {/* Right slot for optional actions */}
                 {rightSlot}
 
+                {isGenerating && onStopGeneration && (
+                  <button
+                    onClick={onStopGeneration}
+                    className={cx('p-2 rounded-md transition-colors', styles.hoverButton)}
+                    aria-label="Stop generating"
+                    title="Stop generating"
+                    data-testid="chat-stop-button"
+                    style={{ color: theme.colors.text.secondary }}
+                  >
+                    <Icon name="square-shape" size="lg" />
+                  </button>
+                )}
+
                 {/* Enter/Send button */}
                 <button
                   onClick={handleSendClick}
-                  disabled={!currentInput.trim() || isGenerating || toolsLoading || !!validationError}
-                  className="p-2 rounded-md hover:bg-white/10 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                  disabled={!currentInput.trim() || !!validationError}
+                  className={cx(
+                    'p-2 rounded-md transition-colors disabled:opacity-30 disabled:cursor-not-allowed',
+                    styles.hoverButton
+                  )}
                   aria-label="Send message (Enter)"
                   style={{ color: theme.colors.text.secondary }}
                 >
@@ -198,3 +245,53 @@ export const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(
 );
 
 ChatInput.displayName = 'ChatInput';
+
+const getStyles = (theme: GrafanaTheme2) => {
+  const gradientShift = keyframes({
+    '0%': { backgroundPosition: '0% 50%' },
+    '50%': { backgroundPosition: '100% 50%' },
+    '100%': { backgroundPosition: '0% 50%' },
+  });
+
+  const gradient = `linear-gradient(90deg, ${theme.colors.primary.main}, ${theme.colors.error.main}, ${theme.colors.warning.main}, ${theme.colors.error.main}, ${theme.colors.primary.main})`;
+  const gradientInset = theme.spacing(0.25);
+  const glowBlur = theme.spacing(1);
+  const outerRadius = theme.shape.radius.default;
+  const innerRadius = theme.shape.radius.sm;
+
+  return {
+    gradientWrapper: css({
+      position: 'relative',
+      borderRadius: outerRadius,
+      padding: gradientInset,
+      background: gradient,
+      backgroundSize: '200% 100%',
+      animation: `${gradientShift} 4s ease infinite`,
+    }),
+    gradientGlow: css({
+      '&::before': {
+        content: '""',
+        position: 'absolute',
+        inset: `calc(-1 * ${gradientInset})`,
+        borderRadius: `calc(${outerRadius} + ${gradientInset})`,
+        background: gradient,
+        backgroundSize: '200% 100%',
+        animation: `${gradientShift} 4s ease infinite`,
+        filter: `blur(${glowBlur})`,
+        opacity: 0.5,
+        zIndex: -1,
+      },
+    }),
+    gradientInner: css({
+      backgroundColor: theme.colors.background.canvas,
+      borderRadius: innerRadius,
+      position: 'relative',
+      zIndex: 1,
+    }),
+    textarea: css({
+      minHeight: theme.spacing(3.5),
+      maxHeight: theme.spacing(TEXTAREA_MAX_ROWS),
+    }),
+    hoverButton: getHoverButtonStyle(theme),
+  };
+};

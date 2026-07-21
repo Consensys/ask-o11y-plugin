@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   SceneFlexLayout,
   SceneFlexItem,
@@ -7,10 +7,11 @@ import {
   SceneTimeRange,
   EmbeddedScene,
 } from '@grafana/scenes';
-import { useTheme2 } from '@grafana/ui';
-import { getDataSourceSrv } from '@grafana/runtime';
+import { useTheme2, Alert, IconButton, Tooltip } from '@grafana/ui';
+import { resolveVisualizationDatasource } from '../../utils/resolveVisualizationDatasource';
 import { LogsDedupStrategy, LogsSortOrder } from '@grafana/data';
 import { Query } from '../../utils/promqlParser';
+import { analyzeQuery } from '../../utils/queryAnalyzer';
 
 interface LogsRendererProps {
   query: Query;
@@ -23,33 +24,43 @@ export const LogsRenderer: React.FC<LogsRendererProps> = ({
   height = 400,
   defaultTimeRange = { from: 'now-1h', to: 'now' },
 }) => {
-  // Get Grafana theme for styling
   const theme = useTheme2();
   const [scene, setScene] = useState<EmbeddedScene | null>(null);
+  const [datasourceError, setDatasourceError] = useState<string | null>(null);
+  const [isCopied, setIsCopied] = useState(false);
+
+  const analysis = analyzeQuery(query.query, 'logql');
+
+  const handleCopyQuery = useCallback(() => {
+    navigator.clipboard.writeText(query.query).catch(() => {});
+    setIsCopied(true);
+  }, [query.query]);
 
   useEffect(() => {
-    console.log('[LogsRenderer] Creating scene for query:', query.query);
+    if (!isCopied) {
+      return;
+    }
+    const timer = setTimeout(() => setIsCopied(false), 2000);
+    return () => clearTimeout(timer);
+  }, [isCopied]);
 
-    // Create a time range
+  useEffect(() => {
+    setDatasourceError(null);
+
+    const resolved = resolveVisualizationDatasource('loki', query.datasourceUid);
+    if (!resolved.ok) {
+      setDatasourceError(resolved.error);
+      setScene(null);
+      return;
+    }
+
     const timeRange = new SceneTimeRange({
       from: defaultTimeRange.from,
       to: defaultTimeRange.to,
     });
 
-    // Try to get the default Loki data source
-    let dataSource: { uid?: string; type: string } = { type: 'loki' };
-    try {
-      const ds = getDataSourceSrv().getInstanceSettings('loki');
-      if (ds) {
-        dataSource = { uid: ds.uid, type: 'loki' };
-        console.log('[LogsRenderer] Using Loki data source:', ds.uid);
-      }
-    } catch (error) {
-      console.warn('[LogsRenderer] Could not get default Loki data source, using fallback');
-    }
+    const dataSource = { uid: resolved.settings.uid, type: resolved.settings.type };
 
-    // Create a query runner with Loki data source
-    // Note: Don't pass $timeRange here - it will inherit from the EmbeddedScene
     const queryRunner = new SceneQueryRunner({
       datasource: dataSource,
       queries: [
@@ -61,7 +72,6 @@ export const LogsRenderer: React.FC<LogsRendererProps> = ({
       ],
     });
 
-    // Create a logs panel
     const panel = PanelBuilders.logs()
       .setTitle(query.title || 'Logs')
       .setData(queryRunner)
@@ -75,7 +85,6 @@ export const LogsRenderer: React.FC<LogsRendererProps> = ({
       .setOption('sortOrder', LogsSortOrder.Descending)
       .build();
 
-    // Create a layout with the panel
     const layout = new SceneFlexLayout({
       direction: 'column',
       children: [
@@ -86,36 +95,37 @@ export const LogsRenderer: React.FC<LogsRendererProps> = ({
       ],
     });
 
-    // Create the embedded scene
     const embeddedScene = new EmbeddedScene({
       $timeRange: timeRange,
       body: layout,
       controls: [],
     });
 
-    console.log('[LogsRenderer] Scene created successfully');
-
-    // Track if this effect instance is still valid (survives React Strict Mode)
     let isCancelled = false;
 
-    // Delay activation to survive React Strict Mode's unmount/remount cycle
     const activationTimeout = setTimeout(() => {
       if (!isCancelled) {
-        console.log('[LogsRenderer] Activating scene...');
         embeddedScene.activate();
         setScene(embeddedScene);
       }
     }, 0);
 
-    // Cleanup function
     return () => {
-      console.log('[LogsRenderer] Cleanup running');
       isCancelled = true;
       clearTimeout(activationTimeout);
     };
-  }, [query.query, query.title, height, defaultTimeRange.from, defaultTimeRange.to]);
+  }, [query.query, query.title, query.datasourceUid, height, defaultTimeRange.from, defaultTimeRange.to]);
 
-  // Show loading state while scene is being created
+  if (datasourceError) {
+    return (
+      <div className="my-4">
+        <Alert title="Cannot load logs panel" severity="error">
+          {datasourceError}
+        </Alert>
+      </div>
+    );
+  }
+
   if (!scene) {
     return (
       <div
@@ -133,42 +143,70 @@ export const LogsRenderer: React.FC<LogsRendererProps> = ({
   return (
     <div
       className="my-4 rounded-lg overflow-hidden"
-      style={{
-        border: `1px solid ${theme.colors.border.weak}`,
-      }}
+      style={{ border: `1px solid ${theme.colors.border.weak}` }}
     >
-      {query.title && (
-        <div
-          className="px-4 py-2"
-          style={{
-            backgroundColor: theme.colors.background.secondary,
-            borderBottom: `1px solid ${theme.colors.border.weak}`,
-          }}
-        >
-          <h4 className="text-sm font-medium" style={{ color: theme.colors.text.primary }}>
-            {query.title}
-          </h4>
+      <div
+        className="px-4 py-2 flex items-center justify-between"
+        style={{
+          backgroundColor: theme.colors.background.secondary,
+          borderBottom: `1px solid ${theme.colors.border.weak}`,
+        }}
+      >
+        <div className="flex items-center gap-2">
+          {query.title && (
+            <h4 className="text-sm font-medium" style={{ color: theme.colors.text.primary }}>
+              {query.title}
+            </h4>
+          )}
+          {analysis.hasAggregation && (
+            <span
+              className="text-xs px-2 py-1 rounded"
+              style={{
+                backgroundColor: theme.colors.primary.main,
+                color: theme.colors.primary.contrastText,
+              }}
+            >
+              {analysis.aggregationType.toUpperCase()} aggregation
+            </span>
+          )}
         </div>
-      )}
+
+        <Tooltip content={isCopied ? 'Copied!' : 'Copy query'}>
+          <IconButton
+            name={isCopied ? 'check' : 'copy'}
+            size="sm"
+            onClick={handleCopyQuery}
+            aria-label="Copy query to clipboard"
+          />
+        </Tooltip>
+      </div>
+
       <div
         className="p-4"
         data-scene-container="logs"
-        style={{
-          backgroundColor: theme.colors.background.primary,
-        }}
+        style={{ backgroundColor: theme.colors.background.primary }}
       >
         <scene.Component model={scene} />
       </div>
+
       <div
-        className="px-4 py-2"
+        className="px-4 py-2 border-t"
         style={{
           backgroundColor: theme.colors.background.secondary,
           borderTop: `1px solid ${theme.colors.border.weak}`,
         }}
       >
-        <code className="text-xs" style={{ color: theme.colors.text.secondary }}>
-          {query.query}
-        </code>
+        <div className="flex items-center justify-between">
+          <code
+            className="text-xs flex-1 min-w-0 whitespace-pre-wrap break-all max-h-24 overflow-y-auto"
+            style={{ color: theme.colors.text.secondary }}
+          >
+            {query.query}
+          </code>
+          <span className="text-xs ml-4" style={{ color: theme.colors.text.secondary }}>
+            {analysis.hasAggregation ? `${analysis.aggregationType} aggregation` : 'Raw logs'}
+          </span>
+        </div>
       </div>
     </div>
   );

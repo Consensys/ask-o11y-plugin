@@ -9,8 +9,8 @@ import {
   SceneRefreshPicker,
   SceneTimePicker,
 } from '@grafana/scenes';
-import { useTheme2, IconButton, Tooltip, RadioButtonGroup } from '@grafana/ui';
-import { getDataSourceSrv } from '@grafana/runtime';
+import { useTheme2, IconButton, Tooltip, RadioButtonGroup, Alert } from '@grafana/ui';
+import { resolveVisualizationDatasource } from '../../utils/resolveVisualizationDatasource';
 import { VizOrientation, VisibilityMode, AxisPlacement } from '@grafana/schema';
 import {
   PieChartType,
@@ -44,6 +44,8 @@ const GraphRendererComponent: React.FC<GraphRendererProps> = ({
   const [isLoading, setIsLoading] = useState(true);
   const [currentVizType, setCurrentVizType] = useState(visualizationType);
   const [isExpanded, setIsExpanded] = useState(false);
+  const [datasourceError, setDatasourceError] = useState<string | null>(null);
+  const [isCopied, setIsCopied] = useState(false);
 
   const vizTypeOptions = [
     { label: 'Time Series', value: 'timeseries' },
@@ -60,31 +62,37 @@ const GraphRendererComponent: React.FC<GraphRendererProps> = ({
     setCurrentVizType(value as typeof visualizationType);
   }, []);
 
-  useEffect(() => {
-    console.log('[GraphRenderer] Creating scene for query:', query.query, 'viz type:', currentVizType);
-    setIsLoading(true);
+  const handleCopyQuery = useCallback(() => {
+    navigator.clipboard.writeText(query.query).catch(() => {});
+    setIsCopied(true);
+  }, [query.query]);
 
-    // Create a time range
+  useEffect(() => {
+    if (!isCopied) {
+      return;
+    }
+    const timer = setTimeout(() => setIsCopied(false), 2000);
+    return () => clearTimeout(timer);
+  }, [isCopied]);
+
+  useEffect(() => {
+    setIsLoading(true);
+    setDatasourceError(null);
+
+    const resolved = resolveVisualizationDatasource('prometheus', query.datasourceUid);
+    if (!resolved.ok) {
+      setDatasourceError(resolved.error);
+      setScene(null);
+      setIsLoading(false);
+      return;
+    }
+
+    const dataSource = { uid: resolved.settings.uid, type: resolved.settings.type };
+
     const timeRange = new SceneTimeRange({
       from: defaultTimeRange.from,
       to: defaultTimeRange.to,
     });
-
-    // Get Prometheus data source
-    let dataSource: any;
-    try {
-      // Try to get the default Prometheus data source
-      const dsService = getDataSourceSrv();
-      dataSource = dsService.getInstanceSettings('Prometheus');
-
-      if (!dataSource) {
-        console.warn('[GraphRenderer] No Prometheus data source found, using default');
-        dataSource = { uid: 'prometheus', type: 'prometheus' };
-      }
-    } catch (error) {
-      console.warn('[GraphRenderer] Error getting data source:', error);
-      dataSource = { uid: 'prometheus', type: 'prometheus' };
-    }
 
     // Create query runner with the PromQL query
     // Note: Don't pass $timeRange here - it will inherit from the EmbeddedScene
@@ -206,7 +214,6 @@ const GraphRendererComponent: React.FC<GraphRendererProps> = ({
       controls,
     });
 
-    console.log('[GraphRenderer] Scene created successfully');
 
     // Track if this effect instance is still valid (survives React Strict Mode)
     let isCancelled = false;
@@ -214,7 +221,6 @@ const GraphRendererComponent: React.FC<GraphRendererProps> = ({
     // Delay activation to survive React Strict Mode's unmount/remount cycle
     const activationTimeout = setTimeout(() => {
       if (!isCancelled) {
-        console.log('[GraphRenderer] Activating scene...');
         embeddedScene.activate();
         setScene(embeddedScene);
         setIsLoading(false);
@@ -223,7 +229,6 @@ const GraphRendererComponent: React.FC<GraphRendererProps> = ({
 
     // Cleanup function
     return () => {
-      console.log('[GraphRenderer] Cleanup running');
       isCancelled = true;
       clearTimeout(activationTimeout);
     };
@@ -237,7 +242,18 @@ const GraphRendererComponent: React.FC<GraphRendererProps> = ({
     isExpanded,
     defaultTimeRange.from,
     defaultTimeRange.to,
+    query.datasourceUid,
   ]);
+
+  if (datasourceError) {
+    return (
+      <div className="my-4">
+        <Alert title="Cannot load graph" severity="error">
+          {datasourceError}
+        </Alert>
+      </div>
+    );
+  }
 
   // Show loading state while scene is being created
   if (!scene) {
@@ -310,16 +326,17 @@ const GraphRendererComponent: React.FC<GraphRendererProps> = ({
           borderTop: `1px solid ${theme.colors.border.weak}`,
         }}
       >
-        <code className="text-xs flex-1" style={{ color: theme.colors.text.secondary }}>
+        <code
+          className="text-xs flex-1 min-w-0 whitespace-pre-wrap break-all max-h-24 overflow-y-auto"
+          style={{ color: theme.colors.text.secondary }}
+        >
           {query.query}
         </code>
-        <Tooltip content="Copy query">
+        <Tooltip content={isCopied ? 'Copied!' : 'Copy query'}>
           <IconButton
-            name="copy"
+            name={isCopied ? 'check' : 'copy'}
             size="sm"
-            onClick={() => {
-              navigator.clipboard.writeText(query.query);
-            }}
+            onClick={handleCopyQuery}
             aria-label="Copy query to clipboard"
           />
         </Tooltip>

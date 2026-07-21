@@ -1,0 +1,173 @@
+# Vendored from grafana/plugin-actions/build-plugin
+# Source commit: 2ecc2ba7168309f04010b5b637530b877d67e4ff
+# Reason: the org policy "Require actions pinned to a full-length commit SHA"
+# rejects the upstream transitive `package-plugin@main` ref. We vendor this
+# composite action and pin that nested ref to a SHA. Re-sync from upstream when
+# bumping; keep all nested `uses:` pinned to SHAs.
+name: "Grafana Build Plugin"
+description: "Builds a Grafana plugin"
+
+outputs:
+  archive:
+    description: "The path to the plugin archive (zip)."
+    value: ${{ steps.package-plugin.outputs.archive }}
+  archive-sha1sum:
+    description: "The path to the plugin archive sha1sum."
+    value: ${{ steps.package-plugin.outputs.archive-sha1sum }}
+
+inputs:
+  token:
+    description: "Token for the repository. Can be passed in using `{{ secrets.GITHUB_TOKEN }}`."
+    required: false
+    default: "${{ github.token }}"
+  policy_token:
+    description: "Grafana access policy token. https://grafana.com/developers/plugin-tools/publish-a-plugin/sign-a-plugin#generate-an-access-policy-token"
+    required: false
+    default: ""
+  sign_root_urls:
+    description: "Root URLs for plugin signing"
+    required: false
+    default: ""
+  grafana_token:
+    description: "[deprecated] Grafana API Key to sign a plugin. Prefer `policy_token`."
+    required: false
+    default: ""
+  go-version:
+    description: "Version of go"
+    required: false
+    default: "1.25"
+  node-version:
+    description: "Version of node"
+    required: false
+    default: "20"
+  backend-target:
+    # Upstream declares this as `type: choice` with an `options` list, but those
+    # keys are only valid for workflow_dispatch inputs, not composite-action
+    # inputs (actionlint rejects them). The value is passed through as a string.
+    # Valid targets: build:backend, build:darwin, build:darwinARM64, build:debug,
+    # build:debug{Darwin,Linux,Windows}{AMD64,ARM64}, build:linux, build:linuxARM,
+    # build:linuxARM64, build:windows, buildAll.
+    description: "Backend target for the plugin backend build"
+    required: false
+    default: "buildAll"
+  attestation:
+    description: "Create a verifiable attestation for the plugin using Github OIDC. Requires id-token: write and attestations: writes permissions"
+    required: false
+    default: "false"
+  use_changelog_generator:
+    description: "Whether to generate a changelog for the plugin"
+    required: false
+    default: "false"
+
+runs:
+  using: "composite"
+  steps:
+    - name: Package plugin
+      id: "package-plugin"
+      uses: grafana/plugin-actions/package-plugin@2ecc2ba7168309f04010b5b637530b877d67e4ff
+      with:
+        policy_token: ${{ inputs.policy_token }}
+        sign_root_urls: ${{ inputs.sign_root_urls }}
+        node-version: "${{ inputs.node-version }}"
+        go-version: "${{ inputs.go-version }}"
+        backend-target: "${{ inputs.backend-target }}"
+
+    - name: Get plugin metadata
+      id: metadata
+      run: |
+        echo "github-tag=${GITHUB_REF#refs/*/}" >> $GITHUB_OUTPUT
+      shell: bash
+
+    - name: Print outputs from package-plugin
+      shell: bash
+      run: |
+        printf "archive=%s\n" "${PLUGIN_ARCHIVE}"
+        printf "archive-sha1sum=%s\n" "${PLUGIN_ARCHIVE_SHA1SUM}"
+        printf "plugin-id=%s\n" "${PLUGIN_ID}"
+        printf "plugin-version=%s\n" "${PLUGIN_VERSION}"
+      env:
+        PLUGIN_ARCHIVE: ${{ steps.package-plugin.outputs.archive }}
+        PLUGIN_ARCHIVE_SHA1SUM: ${{ steps.package-plugin.outputs.archive-sha1sum }}
+        PLUGIN_ID: ${{ steps.package-plugin.outputs.plugin-id }}
+        PLUGIN_VERSION: ${{ steps.package-plugin.outputs.plugin-version }}
+
+    - name: Generate Changelog
+      id: github-changelog-generator
+      if: ${{ inputs.use_changelog_generator == 'true' }}
+      uses: janheinrichmerker/action-github-changelog-generator@e60b5a2bd9fcd88dadf6345ff8327863fb8b490f # v2.4
+      with:
+        token: ${{ inputs.token }}
+        output: CHANGELOG.md
+        user: ${{ github.repository_owner }}
+        project: ${{ github.event.repository.name }}
+        unreleased: true
+        issues: true
+        pullRequests: true
+        includeLabels: "bug,enhancement,feature"
+        simpleList: true
+
+    - name: Read changelog
+      id: changelog
+      run: |
+        awk '/^## / {s++} s == 1 {print}' CHANGELOG.md > release_notes.md
+        echo "path=release_notes.md" >> $GITHUB_OUTPUT
+      shell: bash
+
+    - name: Check package version
+      run: if [ "v${PLUGIN_VERSION}" != "${GITHUB_TAG}" ]; then printf "\033[0;31mPlugin version doesn't match tag name. The tag should be v${PLUGIN_VERSION} \033[0m\n"; exit 1; fi
+      shell: bash
+      env:
+        PLUGIN_VERSION: ${{ steps.package-plugin.outputs.plugin-version }}
+        GITHUB_TAG: ${{ steps.metadata.outputs.github-tag }}
+
+    - name: Generate artifact attestation
+      if: ${{ inputs.attestation == 'true' }}
+      id: attestation
+      uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a # v3.0.0
+      with:
+        subject-path: ${{ steps.package-plugin.outputs.archive }}
+
+    - name: Commit updated changelog
+      if: ${{ inputs.use_changelog_generator == 'true' }}
+      run: |
+        git add CHANGELOG.md
+
+        git config --local user.name grafana-plugins-platform-bot[bot]
+        git config --local user.email 144369747+grafana-plugins-platform-bot[bot]@users.noreply.github.com
+
+        git commit -m "docs: update changelog for ${PLUGIN_VERSION} [skip ci]"
+
+        git push origin HEAD:${DEFAULT_BRANCH}
+      shell: bash
+      env:
+        DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        PLUGIN_VERSION: ${{ steps.package-plugin.outputs.plugin-version }}
+
+    - name: Create Github release
+      uses: softprops/action-gh-release@62c96d0c4e8a889135c1f3a25910db8dbe0e85f7 # v2.3.4
+      with:
+        draft: true
+        generate_release_notes: true
+        token: ${{ inputs.token }}
+        files: |
+          ./${{ steps.package-plugin.outputs.archive }}
+          ./${{ steps.package-plugin.outputs.archive-sha1sum }}
+        body: |
+          **This Github draft release has been created for your plugin.**
+
+          _Note: if this is the first release for your plugin please consult the [distributing-your-plugin section](https://github.com/${{github.repository}}/blob/main/README.md#distributing-your-plugin) of the README_
+
+          If you would like to submit this release to Grafana please consider the following steps:
+
+          - Check the Validate plugin step in the [release workflow](https://github.com/${{github.repository}}/commit/${{github.sha}}/checks/${{github.run_id}}) for any warnings that need attention
+          - **Edit this draft release**, adjust these notes accordingly and click **Publish Release**
+          - Navigate to https://grafana.com/auth/sign-in/ to sign into your account
+          - Once logged in click **My Plugins** in the admin navigation
+          - Click the **Submit Plugin** button
+          - Fill in the Plugin Submission form:
+            - Paste this [.zip asset link](https://github.com/${{ github.repository }}/releases/download/v${{ steps.package-plugin.outputs.plugin-version }}/${{ steps.package-plugin.outputs.archive }}) in the Plugin URL field
+            - Paste this [.zip.sha1 link](https://github.com/${{ github.repository }}/releases/download/v${{ steps.package-plugin.outputs.plugin-version }}/${{ steps.package-plugin.outputs.archive-sha1sum }}) in the SHA1 field
+
+          If the links above are not working, you must first edit this draft release and publish it.
+
+           ${{ inputs.attestation == 'true' && format('This build has been attested. You can view the attestation details [here]({0})', steps.attestation.outputs.attestation-url) }}

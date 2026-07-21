@@ -4,13 +4,17 @@ services:
     extends:
       file: .config/docker-compose-base.yaml
       service: grafana
+    build:
+      args:
+        grafana_version: ${GRAFANA_VERSION:-13.0.1}
     environment:
       GF_INSTALL_PLUGINS: 'grafana-llm-app'
       GF_AUTH_BASIC_ENABLED: true
       GF_AUTH_ANONYMOUS_ENABLED: false
       GF_SECURITY_ALLOW_EMBEDDING: true
+      GF_FEATURE_TOGGLES_ENABLE: 'externalServiceAccounts'
+      GF_AUTH_MANAGED_SERVICE_ACCOUNTS_ENABLED: 'true'
       LLM_API_KEY: ${LLM_API_KEY:-}
-      GF_PLUGIN_ASKO11Y_REDIS: ${GF_PLUGIN_ASKO11Y_REDIS:-redis://redis:6379/0}
     depends_on:
       redis:
         condition: service_healthy
@@ -28,6 +32,56 @@ services:
       -t streamable-http --log-level debug --disable-incident	--disable-oncall	--disable-sift	--disable-admin	--disable-asserts	--disable-annotations
     depends_on:
       - grafana
+
+  graphiti:
+    build: ./docker/graphiti
+    ports:
+      - '127.0.0.1:8002:8000'
+    environment:
+      ANTHROPIC_API_KEY: ${LLM_API_KEY:-}
+      LLM_MODEL: ${GRAPHITI_LLM_MODEL:-claude-haiku-4-5-20251001}
+      OPENAI_API_KEY: ollama
+      OPENAI_BASE_URL: http://ollama:11434/v1
+      OLLAMA_URL: http://ollama:11434/v1
+      EMBEDDING_MODEL: ${GRAPHITI_EMBEDDING_MODEL:-nomic-embed-text}
+      EMBEDDING_DIM: ${GRAPHITI_EMBEDDING_DIM:-768}
+      GRAPHITI_GROUP_ID: ${GRAPHITI_GROUP_ID:-main}
+      NEO4J_URI: bolt://neo4j:${NEO4J_PORT:-7687}
+      NEO4J_USER: ${NEO4J_USER}
+      NEO4J_PASSWORD: ${NEO4J_PASSWORD}
+      CONFIG_PATH: /app/mcp/config/config.yaml
+    volumes:
+      - ./provisioning/.config/graphiti.yaml:/app/mcp/config/config.yaml:ro
+      - ./provisioning/.config/graphiti-sitecustomize.py:/usr/local/lib/python3.11/sitecustomize.py:ro
+    depends_on:
+      neo4j:
+        condition: service_healthy
+      ollama:
+        condition: service_started
+
+  ollama:
+    image: ollama/ollama
+    ports:
+      - '127.0.0.1:11434:11434'
+    volumes:
+      - ollama_data:/root/.ollama
+
+  neo4j:
+    image: neo4j:5.26.0
+    ports:
+      - "7474:7474"  # HTTP
+      - "${NEO4J_PORT:-7687}:${NEO4J_PORT:-7687}"  # Bolt
+    volumes:
+      - neo4j_data:/data
+      - neo4j_logs:/logs
+    environment:
+      NEO4J_AUTH: ${NEO4J_USER}/${NEO4J_PASSWORD}
+    healthcheck:
+      test: ["CMD", "wget", "-O", "/dev/null", "http://localhost:7474"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
 
   redis:
     image: redis:7-alpine
@@ -47,12 +101,14 @@ services:
     ports:
       - 127.0.0.1:8000:8000/tcp
     volumes:
-      - ./mcpo:/mcpo
+      - ./provisioning/.config:/config:ro
     command: >
-      --config /mcpo/config.json
+      --config /config/mcpo.json
     depends_on:
       - mcp-grafana
 
 volumes:
   redis-data:
-
+  neo4j_data:
+  neo4j_logs:
+  ollama_data:

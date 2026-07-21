@@ -10,6 +10,9 @@ import { SelectableValue } from '@grafana/data';
 import { PluginPage, config } from '@grafana/runtime';
 import { css } from '@emotion/css';
 import { backendMCPClient } from '../services/backendMCPClient';
+import { getPluginStorageKey } from '../utils/storageKeys';
+
+export const TOOL_SETTINGS_KEY = getPluginStorageKey('mcp-tool-settings');
 
 interface Tool {
   name: string;
@@ -47,7 +50,7 @@ export function MCPToolsPage() {
       setTools(fetchedTools);
 
       // Load tool settings from localStorage
-      const savedSettings = localStorage.getItem('mcp-tool-settings');
+      const savedSettings = localStorage.getItem(TOOL_SETTINGS_KEY);
       if (savedSettings) {
         setToolSettings(JSON.parse(savedSettings));
       } else {
@@ -59,7 +62,7 @@ export function MCPToolsPage() {
         setToolSettings(defaultSettings);
       }
     } catch (error) {
-      console.error('[MCPToolsPage] Failed to load tools:', error);
+      // Silently handle errors - component will show empty state
     } finally {
       setLoading(false);
     }
@@ -68,7 +71,7 @@ export function MCPToolsPage() {
   // Save settings to localStorage
   const saveSettings = (newSettings: ToolSettings) => {
     setToolSettings(newSettings);
-    localStorage.setItem('mcp-tool-settings', JSON.stringify(newSettings));
+    localStorage.setItem(TOOL_SETTINGS_KEY, JSON.stringify(newSettings));
   };
 
   // Toggle tool enabled state

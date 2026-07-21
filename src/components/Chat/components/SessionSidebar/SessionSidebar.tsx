@@ -1,11 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { UseSessionManagerReturn } from '../../hooks/useSessionManager';
-import { SessionMetadata } from '../../../../core';
+import { UseSessionManagerReturn, SessionMetadata } from '../../hooks/useSessionManager';
 import { LoadingButton, InlineLoading } from '../../../LoadingOverlay';
 import { ShareDialog } from '../ShareDialog/ShareDialog';
 import { sessionShareService, CreateShareResponse } from '../../../../services/sessionShare';
-import { ServiceFactory } from '../../../../core/services/ServiceFactory';
-import { usePluginUserStorage, config } from '@grafana/runtime';
+import { getSession } from '../../../../services/backendSessionClient';
 import { Icon, useTheme2 } from '@grafana/ui';
 
 interface SessionSidebarProps {
@@ -13,9 +11,11 @@ interface SessionSidebarProps {
   currentSessionId: string | null;
   isOpen: boolean;
   onClose: () => void;
+  /** When true, render as a persistent panel docked beside the chat instead of a modal overlay. */
+  docked?: boolean;
 }
 
-export function SessionSidebar({ sessionManager, currentSessionId, isOpen, onClose }: SessionSidebarProps) {
+export function SessionSidebar({ sessionManager, currentSessionId, isOpen, onClose, docked = false }: SessionSidebarProps) {
   const theme = useTheme2();
   const [showDeleteConfirm, setShowDeleteConfirm] = useState<string | null>(null);
   const [loadingAction, setLoadingAction] = useState<string | null>(null);
@@ -52,8 +52,8 @@ export function SessionSidebar({ sessionManager, currentSessionId, isOpen, onClo
           try {
             const shares = await sessionShareService.getSessionShares(session.id);
             sharesMap.set(session.id, shares);
-          } catch (error) {
-            console.error(`[SessionSidebar] Failed to load shares for session ${session.id}:`, error);
+          } catch {
+            // Best-effort share loading per session
           }
         }
         setSessionShares(sharesMap);
@@ -65,9 +65,10 @@ export function SessionSidebar({ sessionManager, currentSessionId, isOpen, onClo
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen, sessionIdsString]); // sessionIdsString is a stable string value, won't cause infinite loops
 
-  const formatDate = (date: Date) => {
+  const formatDate = (date: Date | string) => {
+    const d = typeof date === 'string' ? new Date(date) : date;
     const now = new Date();
-    const diff = now.getTime() - date.getTime();
+    const diff = now.getTime() - d.getTime();
     const days = Math.floor(diff / (1000 * 60 * 60 * 24));
 
     if (days === 0) {
@@ -77,7 +78,7 @@ export function SessionSidebar({ sessionManager, currentSessionId, isOpen, onClo
     } else if (days < 7) {
       return `${days} days ago`;
     } else {
-      return date.toLocaleDateString();
+      return d.toLocaleDateString();
     }
   };
 
@@ -86,7 +87,9 @@ export function SessionSidebar({ sessionManager, currentSessionId, isOpen, onClo
     try {
       await new Promise((resolve) => setTimeout(resolve, 300)); // Small delay for UX
       await sessionManager.loadSession(sessionId);
-      onClose();
+      if (!docked) {
+        onClose();
+      }
     } finally {
       setLoadingAction(null);
     }
@@ -108,26 +111,23 @@ export function SessionSidebar({ sessionManager, currentSessionId, isOpen, onClo
     }
   };
 
-
-  const storagePercent = sessionManager.storageStats.total > 0 
-    ? Math.round((sessionManager.storageStats.used / sessionManager.storageStats.total) * 100)
-    : 0;
-
   if (!isOpen) {
     return null;
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex">
-      {/* Backdrop - theme-aware overlay */}
-      <div 
-        className="absolute inset-0" 
-        onClick={onClose}
-        style={{ 
-          backgroundColor: theme.colors.background.canvas,
-          opacity: theme.isDark ? 0.9 : 0.8
-        }}
-      />
+    <div className={docked ? 'flex h-full' : 'fixed inset-0 z-50 flex'}>
+      {/* Backdrop - theme-aware overlay (modal mode only) */}
+      {!docked && (
+        <div
+          className="absolute inset-0"
+          onClick={onClose}
+          style={{
+            backgroundColor: theme.colors.background.canvas,
+            opacity: theme.isDark ? 0.9 : 0.8,
+          }}
+        />
+      )}
 
       {/* Sidebar */}
       <div 
@@ -156,9 +156,11 @@ export function SessionSidebar({ sessionManager, currentSessionId, isOpen, onClo
                 setCreatingSession(true);
                 try {
                   await sessionManager.createNewSession();
-                  onClose();
-                } catch (error) {
-                  console.error('[SessionSidebar] Failed to create new session:', error);
+                  if (!docked) {
+                    onClose();
+                  }
+                } catch {
+                  // Session creation is best-effort; UI resets on next interaction
                 } finally {
                   setCreatingSession(false);
                 }
@@ -173,18 +175,8 @@ export function SessionSidebar({ sessionManager, currentSessionId, isOpen, onClo
             </LoadingButton>
           </div>
 
-          {/* Storage indicator */}
           <div className="mt-2 text-xs text-secondary">
-            <div className="flex justify-between mb-1">
-              <span>{sessionManager.sessions.length} sessions</span>
-              <span>{storagePercent}% storage used</span>
-            </div>
-            <div className="w-full bg-surface rounded-full h-1">
-              <div
-                className={`h-1 rounded-full ${storagePercent > 80 ? 'bg-error' : 'bg-primary'}`}
-                style={{ width: `${storagePercent}%` }}
-              />
-            </div>
+            <span>{sessionManager.sessions.length} sessions</span>
           </div>
         </div>
 
@@ -226,8 +218,8 @@ export function SessionSidebar({ sessionManager, currentSessionId, isOpen, onClo
                 if (confirm('Are you sure you want to delete all conversations? This cannot be undone.')) {
                   try {
                     await sessionManager.deleteAllSessions();
-                  } catch (error) {
-                    console.error('[SessionSidebar] Failed to delete all sessions:', error);
+                  } catch {
+                    // Best-effort delete all
                   }
                 }
               }}
@@ -271,28 +263,22 @@ function ShareDialogWrapper({
   existingShares: CreateShareResponse[];
   onSharesChanged: (shares: CreateShareResponse[]) => void;
 }) {
-  const storage = usePluginUserStorage();
-  const orgId = String(config.bootData.user.orgId || '1');
   const [session, setSession] = React.useState<any>(null);
   const [loading, setLoading] = React.useState(true);
 
   useEffect(() => {
     const loadSession = async () => {
       try {
-        const sessionService = ServiceFactory.getSessionService(storage);
-        const loadedSession = await sessionService.getSession(orgId, sessionId);
-        if (loadedSession) {
-          setSession(loadedSession);
-        }
-      } catch (error) {
-        console.error('[ShareDialogWrapper] Failed to load session:', error);
+        const loadedSession = await getSession(sessionId);
+        setSession(loadedSession);
+      } catch {
+        // Failed to load session for share dialog; loading state handles UI
       } finally {
         setLoading(false);
       }
     };
     loadSession();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sessionId, orgId]); // storage is stable, don't include it to avoid unnecessary re-runs
+  }, [sessionId]);
 
   if (loading || !session) {
     return null;
@@ -321,7 +307,7 @@ interface SessionItemProps {
   onConfirmDelete: () => void;
   onCancelDelete: () => void;
   onShare: () => void;
-  formatDate: (date: Date) => string;
+  formatDate: (date: Date | string) => string;
 }
 
 function SessionItem({
@@ -371,7 +357,7 @@ function SessionItem({
       onClick={isLoading ? undefined : onLoad}
       className={`p-1.5 rounded group transition-colors relative ${
         isActive
-          ? 'bg-surface border border-primary'
+          ? 'bg-primary/10 border-l-2 border border-primary'
           : 'hover:bg-secondary border border-weak'
       } ${isLoading ? 'cursor-wait' : 'cursor-pointer'}`}
     >
@@ -383,7 +369,10 @@ function SessionItem({
 
       <div className="flex items-start justify-between gap-1.5">
         <div className="flex-1 min-w-0">
-          <h3 className="font-medium text-xs truncate text-primary">{session.title}</h3>
+          <div className="flex items-center gap-1">
+            {isActive && <Icon name="arrow-right" size="xs" className="text-primary flex-shrink-0" />}
+            <h3 className={`font-medium text-xs truncate ${isActive ? 'text-primary font-semibold' : 'text-primary'}`}>{session.title}</h3>
+          </div>
           <div className="flex items-center gap-1.5 mt-0.5 text-xs text-secondary">
             <span>{formatDate(session.updatedAt)}</span>
             <span>•</span>

@@ -6,13 +6,12 @@ export const testIds = {
   appConfig: {
     apiKey: 'data-testid ac-api-key',
     apiUrl: 'data-testid ac-api-url',
+    settingsTab: (id: string) => `data-testid ac-settings-tab-${id}`,
+    settingsTabPanel: (id: string) => `data-testid ac-settings-tab-panel-${id}`,
+    unsavedChangesNotice: 'data-testid ac-unsaved-changes-notice',
     maxTotalTokens: 'data-testid ac-max-total-tokens',
     submit: 'data-testid ac-submit-form',
-    // Built-in MCP test IDs
-    useBuiltInMCPField: 'data-testid ac-use-builtin-mcp-field',
     useBuiltInMCPToggle: 'data-testid ac-use-builtin-mcp-toggle',
-    saveMCPModeButton: 'data-testid ac-save-mcp-mode',
-    // MCP Server test IDs
     addMcpServerButton: 'data-testid ac-add-mcp-server',
     saveMcpServersButton: 'data-testid ac-save-mcp-servers',
     mcpServerCard: (id: string) => `data-testid ac-mcp-server-${id}`,
@@ -25,25 +24,34 @@ export const testIds = {
     mcpServerHeaderValueInput: (id: string, index: number) => `data-testid ac-mcp-server-header-value-${id}-${index}`,
     mcpServerHeaderRemoveButton: (id: string, index: number) =>
       `data-testid ac-mcp-server-header-remove-${id}-${index}`,
-    // System Prompt test IDs
-    systemPromptModeSelector: 'data-testid ac-system-prompt-mode',
-    customSystemPromptTextarea: 'data-testid ac-custom-system-prompt',
-    customSystemPromptCharCount: 'data-testid ac-custom-prompt-char-count',
-    viewDefaultPromptButton: 'data-testid ac-view-default-prompt',
-    saveSystemPromptButton: 'data-testid ac-save-system-prompt',
-    defaultPromptModal: 'data-testid ac-default-prompt-modal',
-    defaultPromptContent: 'data-testid ac-default-prompt-content',
-    copyDefaultPromptButton: 'data-testid ac-copy-default-prompt',
-    closeDefaultPromptButton: 'data-testid ac-close-default-prompt',
-    // Display Settings test IDs
+    manageToolsButton: (id: string) => `data-testid ac-manage-tools-${id}`,
+    manageToolsModal: 'data-testid ac-manage-tools-modal',
+    manageToolsToolItem: (toolName: string) => `data-testid ac-manage-tool-item-${toolName}`,
+    promptEditor: {
+      system: 'ac-prompt-system',
+      investigation: 'ac-prompt-investigation',
+      performance: 'ac-prompt-performance',
+    },
     displaySettings: 'data-testid ac-display-settings',
     kioskModeField: 'data-testid ac-kiosk-mode-field',
     kioskModeToggle: 'data-testid ac-kiosk-mode-toggle',
     chatPanelPositionField: 'data-testid ac-chat-panel-position-field',
     chatPanelPositionSelector: 'data-testid ac-chat-panel-position-selector',
     saveDisplaySettingsButton: 'data-testid ac-save-display-settings',
+    serviceGraphMaxNodes: 'data-testid ac-service-graph-max-nodes',
+    serviceGraphMaxEdges: 'data-testid ac-service-graph-max-edges',
+    refreshServiceGraphButton: 'data-testid ac-refresh-service-graph',
+    serviceGraphSummary: 'data-testid ac-service-graph-summary',
+    saveServiceGraphSettingsButton: 'data-testid ac-save-service-graph-settings',
   },
   home: {
     container: 'data-testid home-container',
+  },
+  chat: {
+    newChatButton: 'data-testid chat-new-chat-button',
+    retryButton: 'data-testid chat-retry-button',
+  },
+  investigation: {
+    error: 'data-testid investigation-error',
   },
 };

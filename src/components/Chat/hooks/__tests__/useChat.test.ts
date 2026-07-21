@@ -1,88 +1,170 @@
-/**
- * Unit tests for useChat hook utilities
- * Tests pure functions that can be tested without React context
- */
+import { act } from 'react';
+import { renderHook } from '@testing-library/react';
+import { useChat } from '../useChat';
+import { resolveAgentApproval, getAgentRunStatus } from '../../../../services/agentClient';
+import type { AgentApprovalItem, ChatMessage } from '../../types';
 
-import { SYSTEM_PROMPT } from '../../constants';
-import type { AppPluginSettings } from '../../../../types/plugin';
+jest.mock('@grafana/runtime', () => ({
+  config: {
+    bootData: {
+      user: {
+        orgId: 2,
+      },
+    },
+  },
+}));
 
-// Import the buildEffectiveSystemPrompt function via module internals
-// Since it's not exported, we'll test it indirectly through the hook behavior
-// For now, let's test the logic by recreating the function
+jest.mock('../../../../services/backendSessionClient', () => ({
+  listSessions: jest.fn(() => new Promise(() => {})),
+  getSession: jest.fn(),
+  deleteSession: jest.fn(),
+  deleteAllSessions: jest.fn(),
+  getCurrentSessionId: jest.fn(),
+  setCurrentSessionId: jest.fn(),
+}));
 
-const buildEffectiveSystemPrompt = (
-  mode: AppPluginSettings['systemPromptMode'] = 'default',
-  customPrompt = ''
-): string => {
-  switch (mode) {
-    case 'replace':
-      return customPrompt || SYSTEM_PROMPT;
-    case 'append':
-      if (customPrompt.trim()) {
-        return `${SYSTEM_PROMPT}\n\n## Additional Instructions\n\n${customPrompt}`;
-      }
-      return SYSTEM_PROMPT;
-    case 'default':
-    default:
-      return SYSTEM_PROMPT;
-  }
-};
+jest.mock('../../../../services/agentClient', () => ({
+  runAgentDetached: jest.fn(),
+  reconnectToAgentRun: jest.fn(),
+  cancelAgentRun: jest.fn(),
+  resolveAgentApproval: jest.fn(),
+  getAgentRunStatus: jest.fn(),
+}));
 
-describe('buildEffectiveSystemPrompt', () => {
-  describe('default mode', () => {
-    it('should return SYSTEM_PROMPT for default mode', () => {
-      const result = buildEffectiveSystemPrompt('default');
-      expect(result).toBe(SYSTEM_PROMPT);
-    });
+const resolveAgentApprovalMock = resolveAgentApproval as jest.MockedFunction<typeof resolveAgentApproval>;
+const getAgentRunStatusMock = getAgentRunStatus as jest.MockedFunction<typeof getAgentRunStatus>;
 
-    it('should return SYSTEM_PROMPT when mode is undefined', () => {
-      const result = buildEffectiveSystemPrompt(undefined);
-      expect(result).toBe(SYSTEM_PROMPT);
-    });
-
-    it('should ignore custom prompt in default mode', () => {
-      const result = buildEffectiveSystemPrompt('default', 'Custom prompt');
-      expect(result).toBe(SYSTEM_PROMPT);
-    });
+describe('useChat approval handling', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
   });
 
-  describe('replace mode', () => {
-    it('should use custom prompt when provided', () => {
-      const customPrompt = 'You are a specialized assistant.';
-      const result = buildEffectiveSystemPrompt('replace', customPrompt);
-      expect(result).toBe(customPrompt);
+  it('guards duplicate approval submissions before React state rerenders', async () => {
+    let resolveDecision!: (value: { approvalId: string; decision: 'approved'; resolvedAt: string }) => void;
+    const pendingDecision = new Promise<{ approvalId: string; decision: 'approved'; resolvedAt: string }>((resolve) => {
+      resolveDecision = resolve;
+    });
+    resolveAgentApprovalMock.mockReturnValueOnce(pendingDecision);
+
+    const approval: AgentApprovalItem = {
+      approvalId: 'tc_1',
+      runId: 'run-1',
+      toolCallId: 'tc_1',
+      toolName: 'grafana_alerting_manage_rules',
+      risk: 'destructive',
+      reason: 'Tool is destructive',
+      arguments: '{}',
+    };
+    const initialMessage: ChatMessage = {
+      role: 'assistant',
+      content: '',
+      approvals: [approval],
+    };
+
+    const { result } = renderHook(() => useChat({}, null, jest.fn(), { messages: [initialMessage] }));
+
+    let firstSubmit!: Promise<void>;
+    let secondSubmit!: Promise<void>;
+    act(() => {
+      firstSubmit = result.current.resolveApproval(approval, 'approved');
+      secondSubmit = result.current.resolveApproval(approval, 'approved');
     });
 
-    it('should fall back to SYSTEM_PROMPT when custom prompt is empty', () => {
-      const result = buildEffectiveSystemPrompt('replace', '');
-      expect(result).toBe(SYSTEM_PROMPT);
+    expect(resolveAgentApprovalMock).toHaveBeenCalledTimes(1);
+    expect(resolveAgentApprovalMock).toHaveBeenCalledWith('run-1', 'tc_1', 'approved', undefined, '2', 'once');
+
+    await act(async () => {
+      resolveDecision({
+        approvalId: 'tc_1',
+        decision: 'approved',
+        resolvedAt: '2026-05-29T12:00:00Z',
+      });
+      await firstSubmit;
+      await secondSubmit;
     });
 
-    it('should fall back to SYSTEM_PROMPT when custom prompt is undefined', () => {
-      const result = buildEffectiveSystemPrompt('replace');
-      expect(result).toBe(SYSTEM_PROMPT);
-    });
+    expect(result.current.chatHistory[0].approvals?.[0].decision).toBe('approved');
   });
 
-  describe('append mode', () => {
-    it('should append custom prompt to SYSTEM_PROMPT', () => {
-      const customPrompt = 'Focus on metrics analysis.';
-      const result = buildEffectiveSystemPrompt('append', customPrompt);
-      
-      expect(result).toContain(SYSTEM_PROMPT);
-      expect(result).toContain('## Additional Instructions');
-      expect(result).toContain(customPrompt);
+  it('passes approve-always scope to the approval API', async () => {
+    resolveAgentApprovalMock.mockResolvedValueOnce({
+      approvalId: 'tc_1',
+      decision: 'approved',
+      resolvedAt: '2026-05-29T12:00:00Z',
+    });
+    const approval: AgentApprovalItem = {
+      approvalId: 'tc_1',
+      runId: 'run-1',
+      toolCallId: 'tc_1',
+      toolName: 'grafana_alerting_manage_rules',
+      risk: 'destructive',
+      reason: 'Tool is destructive',
+      arguments: '{}',
+    };
+    const { result } = renderHook(() =>
+      useChat({}, null, jest.fn(), {
+        messages: [{ role: 'assistant', content: '', approvals: [approval] }],
+      })
+    );
+
+    await act(async () => {
+      await result.current.resolveApproval(approval, 'approved', 'always');
     });
 
-    it('should return SYSTEM_PROMPT when custom prompt is empty', () => {
-      const result = buildEffectiveSystemPrompt('append', '');
-      expect(result).toBe(SYSTEM_PROMPT);
+    expect(resolveAgentApprovalMock).toHaveBeenCalledWith('run-1', 'tc_1', 'approved', undefined, '2', 'always');
+  });
+
+  it('refreshes the run and clears stale approval cards after a resolved 409', async () => {
+    resolveAgentApprovalMock.mockRejectedValueOnce(
+      new Error('Failed to resolve approval (409): Approval is not pending')
+    );
+    getAgentRunStatusMock.mockResolvedValueOnce({
+      runId: 'run-1',
+      status: 'running',
+      userId: 7,
+      orgId: 2,
+      createdAt: '2026-05-29T12:00:00Z',
+      updatedAt: '2026-05-29T12:00:00Z',
+      events: [],
+      trace: {
+        approvals: [
+          {
+            approvalId: 'tc_1',
+            toolCallId: 'tc_1',
+            toolName: 'grafana_alerting_manage_rules',
+            risk: 'destructive',
+            reason: 'Tool is destructive',
+            arguments: '{}',
+            decision: 'approved',
+            resolvedAt: '2026-05-29T12:01:00Z',
+          },
+        ],
+      },
     });
 
-    it('should return SYSTEM_PROMPT when custom prompt is whitespace only', () => {
-      const result = buildEffectiveSystemPrompt('append', '   ');
-      expect(result).toBe(SYSTEM_PROMPT);
+    const approval: AgentApprovalItem = {
+      approvalId: 'tc_1',
+      runId: 'run-1',
+      toolCallId: 'tc_1',
+      toolName: 'grafana_alerting_manage_rules',
+      risk: 'destructive',
+      reason: 'Tool is destructive',
+      arguments: '{}',
+    };
+    const { result } = renderHook(() =>
+      useChat({}, null, jest.fn(), {
+        messages: [{ role: 'assistant', content: '', approvals: [approval] }],
+      })
+    );
+
+    await act(async () => {
+      await result.current.resolveApproval(approval, 'approved');
     });
+
+    const updatedApproval = result.current.chatHistory[0].approvals?.[0];
+    expect(getAgentRunStatusMock).toHaveBeenCalledWith('run-1', '2');
+    expect(updatedApproval?.decision).toBe('approved');
+    expect(updatedApproval?.error).toBeUndefined();
+    expect(updatedApproval?.resolving).toBe(false);
   });
 });
-

@@ -1,342 +1,766 @@
-import { useState, useRef, useEffect, useMemo } from 'react';
-import { llm } from '@grafana/llm';
+import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { config } from '@grafana/runtime';
-import { ChatMessage, GrafanaPageRef } from '../types';
-import { useMCPManager } from './useMCPManager';
-import { useStreamManager } from './useStreamManager';
+import { AgentApprovalItem, ChatMessage, GrafanaPageRef, RenderedToolCall } from '../types';
 import { useSessionManager } from './useSessionManager';
-import { SYSTEM_PROMPT } from '../constants';
-import { ConversationMemoryService } from '../../../services/memory';
-import { ReliabilityService } from '../../../services/reliability';
 import { ValidationService } from '../../../services/validation';
-import { ChatSession } from '../../../core/models/ChatSession';
+import { parseGrafanaLinks } from '../utils/grafanaLinkParser';
+import {
+  runAgentDetached,
+  reconnectToAgentRun,
+  cancelAgentRun,
+  resolveAgentApproval,
+  getAgentRunStatus,
+  type AgentCallbacks,
+  type ApprovalRequestEvent,
+  type ApprovalResolvedEvent,
+  type ContentEvent,
+  type EvidenceEvent,
+  type FinalReportEvent,
+  type MCPUnavailableEvent,
+  type ToolCallStartEvent,
+  type ToolCallResultEvent,
+} from '../../../services/agentClient';
+import { getSession } from '../../../services/backendSessionClient';
 import type { AppPluginSettings } from '../../../types/plugin';
+import type { LLMModelSelection } from '../../../services/llmModels';
 
-/**
- * Builds the effective system prompt based on the configured mode and custom prompt.
- * - 'default': Uses the built-in SYSTEM_PROMPT
- * - 'replace': Uses only the custom prompt
- * - 'append': Concatenates SYSTEM_PROMPT with the custom prompt
- */
-const buildEffectiveSystemPrompt = (
-  mode: AppPluginSettings['systemPromptMode'] = 'default',
-  customPrompt = ''
-): string => {
-  switch (mode) {
-    case 'replace':
-      return customPrompt || SYSTEM_PROMPT; // Fallback to default if custom is empty
-    case 'append':
-      if (customPrompt.trim()) {
-        return `${SYSTEM_PROMPT}\n\n## Additional Instructions\n\n${customPrompt}`;
-      }
-      return SYSTEM_PROMPT;
-    case 'default':
-    default:
-      return SYSTEM_PROMPT;
-  }
-};
+interface InitialSessionData {
+  id?: string;
+  messages?: ChatMessage[];
+}
 
-export const useChat = (pluginSettings: AppPluginSettings, initialSession?: ChatSession, readOnly?: boolean) => {
-  console.log('[useChat] Hook initialized', { 
-    readOnly, 
-    hasInitialSession: !!initialSession,
-    initialMessageCount: initialSession?.messages?.length || 0
-  });
+function updateLastAssistantMessage(history: ChatMessage[], updater: (msg: ChatMessage) => ChatMessage): ChatMessage[] {
+  return history.map((msg, idx) => (idx === history.length - 1 && msg.role === 'assistant' ? updater(msg) : msg));
+}
 
-  // Get organization ID from Grafana config
+export function useChat(
+  pluginSettings: AppPluginSettings,
+  sessionIdFromUrl: string | null,
+  onSessionIdChange: (sessionId: string | null) => void,
+  initialSession?: InitialSessionData,
+  readOnly?: boolean,
+  initialMessage?: string,
+  initialMessageType?: 'chat' | 'investigation' | 'performance',
+  selectedModel: LLMModelSelection = 'auto'
+) {
   const orgId = String(config.bootData.user.orgId || '1');
 
-  // Destructure specific settings to avoid unnecessary re-computations
-  const { systemPromptMode, customSystemPrompt } = pluginSettings;
-
-  // Compute effective system prompt based on plugin settings
-  const effectiveSystemPrompt = useMemo(
-    () => buildEffectiveSystemPrompt(systemPromptMode, customSystemPrompt),
-    [systemPromptMode, customSystemPrompt]
-  );
-
-  // Initialize chat history with initial session messages if provided
-  // Ensure messages array exists and is not empty
   const initialMessages = initialSession?.messages || [];
   const [chatHistory, setChatHistory] = useState<ChatMessage[]>(initialMessages);
-  
-  // Update chatHistory when initialSession changes (e.g., when SharedSession loads)
-  // Use a ref to track if we've already initialized to avoid unnecessary updates
+
   const hasInitializedRef = useRef(false);
   const initialSessionIdRef = useRef<string | undefined>(initialSession?.id);
-  const initialMessageCountRef = useRef<number>(initialSession?.messages?.length || 0);
-  
+  const initialMessageCountRef = useRef<number>(initialSession?.messages?.length ?? 0);
+
   useEffect(() => {
-    // Only update if we have an initialSession with messages and haven't initialized yet
-    // or if the session ID or message count changed (session was updated)
-    if (initialSession?.messages && initialSession.messages.length > 0) {
-      const sessionIdChanged = initialSessionIdRef.current !== initialSession.id;
-      const messageCountChanged = initialMessageCountRef.current !== initialSession.messages.length;
-      const shouldUpdate = !hasInitializedRef.current || sessionIdChanged || messageCountChanged;
-      
-      if (shouldUpdate) {
-        console.log('[useChat] Updating chatHistory from initialSession', { 
-          messageCount: initialSession.messages.length,
-          firstMessage: initialSession.messages[0]?.content?.substring(0, 50),
-          currentHistoryLength: chatHistory.length
-        });
-        setChatHistory(initialSession.messages);
-        hasInitializedRef.current = true;
-        initialSessionIdRef.current = initialSession.id;
-        initialMessageCountRef.current = initialSession.messages.length;
-      }
+    if (!initialSession?.messages || initialSession.messages.length === 0) {
+      return;
+    }
+
+    const sessionIdChanged = initialSessionIdRef.current !== initialSession.id;
+    const messageCountChanged = initialMessageCountRef.current !== initialSession.messages.length;
+    const shouldUpdate = !hasInitializedRef.current || sessionIdChanged || messageCountChanged;
+
+    if (shouldUpdate) {
+      setChatHistory(initialSession.messages);
+      hasInitializedRef.current = true;
+      initialSessionIdRef.current = initialSession.id;
+      initialMessageCountRef.current = initialSession.messages.length;
+      isAutoScrollRef.current = true;
+      setIsAutoScroll(true);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [initialSession?.id, initialSession?.messages?.length]); // Only depend on id and length, not the whole object or chatHistory
+  }, [initialSession?.id, initialSession?.messages?.length]);
+
   const [currentInput, setCurrentInput] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
-  const chatContainerRef = useRef<HTMLDivElement>(null);
-  const bottomSpacerRef = useRef<HTMLDivElement>(null);
-  const [isAutoScroll, setIsAutoScroll] = useState(true);
-  const [retryCount, setRetryCount] = useState(0);
-
-  const {
-    toolCalls,
-    toolsLoading,
-    toolsError,
-    toolsData,
-    clearToolCalls,
-    handleToolCalls,
-    getRunningToolCallsCount,
-    formatToolsForOpenAI,
-  } = useMCPManager();
-
-  console.log('[useChat] MCP Manager state:', {
-    toolsLoading,
-    toolsError: !!toolsError,
-    toolCount: toolsData?.tools?.length,
-  });
-
-  const { handleStreamingChatWithHistory } = useStreamManager(
-    setChatHistory,
-    handleToolCalls,
-    formatToolsForOpenAI,
-    pluginSettings
+  const [conversationType, setConversationType] = useState<'chat' | 'investigation' | 'performance'>(
+    initialMessageType || 'chat'
   );
+  const [isReconnecting, setIsReconnecting] = useState(false);
+  const chatContainerRef = useRef<HTMLDivElement>(null);
+  const cleanupRef = useRef<(() => void) | null>(null);
 
-  // Session management with persistence
-  const sessionManager = useSessionManager(orgId, chatHistory, setChatHistory, readOnly);
+  const chatContainerCallbackRef = useCallback((node: HTMLDivElement | null) => {
+    cleanupRef.current?.();
+    cleanupRef.current = null;
+    (chatContainerRef as React.MutableRefObject<HTMLDivElement | null>).current = node;
 
-  // Auto-scroll when chat history changes (only if auto-scroll is enabled)
-  useEffect(() => {
-    if (isAutoScroll && bottomSpacerRef.current) {
-      bottomSpacerRef.current.scrollIntoView({ block: 'end', behavior: 'auto' });
+    if (!node) {
+      return;
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [chatHistory]);
 
-  // Handle scroll: pause auto-scroll when user scrolls up; resume when at bottom
-  useEffect(() => {
-    const handleScroll = () => {
-      const threshold = 50; // px tolerance from the bottom
-      const atBottom = window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - threshold;
-      setIsAutoScroll(atBottom);
+    const el = node;
+    const SCROLL_THRESHOLD = 50;
+    let lastScrollTop = el.scrollTop;
+
+    function scrollToBottom(): void {
+      if (isAutoScrollRef.current) {
+        el.scrollTop = el.scrollHeight;
+      }
+    }
+
+    function handleScroll(): void {
+      const cur = el.scrollTop;
+      const atBottom = el.scrollHeight - cur - el.clientHeight < SCROLL_THRESHOLD;
+      const scrolledUp = cur < lastScrollTop;
+      lastScrollTop = cur;
+
+      if (atBottom) {
+        isAutoScrollRef.current = true;
+        setIsAutoScroll(true);
+      } else if (scrolledUp) {
+        isAutoScrollRef.current = false;
+        setIsAutoScroll(false);
+      }
+    }
+
+    const ro = new ResizeObserver(scrollToBottom);
+    ro.observe(el, { box: 'border-box' });
+    Array.from(el.children).forEach((child) => ro.observe(child));
+
+    const mo = new MutationObserver((mutations) => {
+      for (const m of mutations) {
+        for (const n of m.addedNodes) {
+          if (n instanceof Element) {
+            ro.observe(n);
+          }
+        }
+      }
+      scrollToBottom();
+    });
+    mo.observe(el, { childList: true, subtree: false });
+
+    el.addEventListener('scroll', handleScroll, { passive: true });
+    scrollToBottom();
+
+    cleanupRef.current = () => {
+      ro.disconnect();
+      mo.disconnect();
+      el.removeEventListener('scroll', handleScroll);
     };
-
-    window.addEventListener('scroll', handleScroll, { passive: true });
-    return () => window.removeEventListener('scroll', handleScroll);
   }, []);
 
-  // Legacy handleScroll kept for compatibility but not used
-  const handleScroll = () => {};
+  useEffect(
+    () => () => {
+      cleanupRef.current?.();
+    },
+    []
+  );
 
-  const sendMessage = async () => {
-    console.log('[useChat] sendMessage called', {
-      hasInput: !!currentInput.trim(),
-      isGenerating,
-    });
+  const bottomSpacerRef = useRef<HTMLDivElement>(null);
+  const [isAutoScroll, setIsAutoScroll] = useState(true);
+  const isAutoScrollRef = useRef(true);
+  const [retryCount, setRetryCount] = useState(0);
+  const [toolCalls, setToolCalls] = useState<Map<string, RenderedToolCall>>(new Map());
+  const [messageQueue, setMessageQueue] = useState<string[]>([]);
+  // mcpUnavailable is set once per run when the backend confirms MCP is down
+  // (multiple distinct tools hit transport errors). Surfaced as a banner.
+  const [mcpUnavailable, setMcpUnavailable] = useState<string | null>(null);
+  const queuedForSessionRef = useRef<string | null>(null);
 
-    if (!currentInput.trim() || isGenerating) {
-      console.log('[useChat] sendMessage aborted - conditions not met');
+  const abortControllerRef = useRef<AbortController | null>(null);
+  const activeRunIdRef = useRef<string | null>(null);
+  const activeSessionIdRef = useRef<string | null>(null);
+  const pendingRunSessionIdRef = useRef<string | null>(null);
+  const approvalInFlightRef = useRef<Set<string>>(new Set());
+
+  const sessionManager = useSessionManager(
+    orgId,
+    chatHistory,
+    setChatHistory,
+    sessionIdFromUrl,
+    onSessionIdChange,
+    readOnly
+  );
+
+  const hasLoadedFromUrlRef = useRef(false);
+  useEffect(() => {
+    if (sessionIdFromUrl && !readOnly && !hasLoadedFromUrlRef.current && chatHistory.length === 0 && !initialMessage) {
+      hasLoadedFromUrlRef.current = true;
+      sessionManager.loadSession(sessionIdFromUrl).catch(() => {});
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessionIdFromUrl, readOnly, initialMessage]);
+
+  useEffect(() => {
+    return () => {
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+    };
+  }, []);
+
+  const appendErrorMessage = (content: string): void => {
+    setChatHistory((prev) => [...prev, { role: 'assistant', content }]);
+  };
+
+  const getRunningToolCallsCount = useCallback((): number => {
+    return Array.from(toolCalls.values()).filter((tc) => tc.running).length;
+  }, [toolCalls]);
+
+  const makeCallbacks = useCallback(
+    (abortController: AbortController, hadErrorRef: { current: boolean }): AgentCallbacks => ({
+      onContent: (event: ContentEvent) => {
+        if (abortController.signal.aborted) {
+          return;
+        }
+        setChatHistory((prev) =>
+          updateLastAssistantMessage(prev, (msg) => {
+            const accumulated = msg.content + event.content;
+            return {
+              ...msg,
+              content: accumulated,
+              pageRefs: parseGrafanaLinks(accumulated),
+            };
+          })
+        );
+      },
+      onToolCallStart: (event: ToolCallStartEvent) => {
+        if (abortController.signal.aborted) {
+          return;
+        }
+        setToolCalls((prev) => {
+          const next = new Map(prev);
+          next.set(event.id, { name: event.name, arguments: event.arguments, running: true });
+          return next;
+        });
+      },
+      onToolCallResult: (event: ToolCallResultEvent) => {
+        if (abortController.signal.aborted) {
+          return;
+        }
+        setToolCalls((prev) => {
+          const next = new Map(prev);
+          const existing = next.get(event.id);
+          next.set(event.id, {
+            name: event.name,
+            arguments: existing?.arguments || '',
+            running: false,
+            error: event.isError ? event.content : undefined,
+            response: event.isError ? undefined : { content: [{ type: 'text', text: event.content }] },
+          });
+          return next;
+        });
+      },
+      onDone: () => {
+        // Terminal event; stream completion is handled by the reconnect loop.
+      },
+      onReconnect: () => {
+        setChatHistory((prev) =>
+          updateLastAssistantMessage(prev, (msg) => ({
+            ...msg,
+            content: '',
+            pageRefs: undefined,
+          }))
+        );
+        setToolCalls(new Map());
+      },
+      onError: (message: string) => {
+        hadErrorRef.current = true;
+        setChatHistory((prev) =>
+          updateLastAssistantMessage(prev, (msg) => ({
+            ...msg,
+            error: message,
+          }))
+        );
+      },
+      onMCPUnavailable: (event: MCPUnavailableEvent) => {
+        setMcpUnavailable(event.message);
+      },
+      onEvidence: (event: EvidenceEvent) => {
+        if (abortController.signal.aborted) {
+          return;
+        }
+        setChatHistory((prev) =>
+          updateLastAssistantMessage(prev, (msg) => {
+            const evidence = msg.evidence || [];
+            const existingIndex = evidence.findIndex((item) => item.id === event.id);
+            const nextEvidence =
+              existingIndex >= 0
+                ? evidence.map((item, index) => (index === existingIndex ? event : item))
+                : [...evidence, event];
+            return { ...msg, evidence: nextEvidence };
+          })
+        );
+      },
+      onApprovalRequest: (event: ApprovalRequestEvent) => {
+        if (abortController.signal.aborted) {
+          return;
+        }
+        const runId = activeRunIdRef.current || undefined;
+        setChatHistory((prev) =>
+          updateLastAssistantMessage(prev, (msg) => {
+            const approvals = msg.approvals || [];
+            if (approvals.some((approval) => approval.approvalId === event.approvalId)) {
+              return msg;
+            }
+            return { ...msg, approvals: [...approvals, { ...event, runId }] };
+          })
+        );
+      },
+      onApprovalResolved: (event: ApprovalResolvedEvent) => {
+        if (abortController.signal.aborted) {
+          return;
+        }
+        setChatHistory((prev) =>
+          updateLastAssistantMessage(prev, (msg) => ({
+            ...msg,
+            approvals: (msg.approvals || []).map((approval) =>
+              approval.approvalId === event.approvalId
+                ? {
+                    ...approval,
+                    decision: event.decision,
+                    comment: event.comment,
+                    resolvedAt: event.resolvedAt,
+                    resolving: false,
+                    error: undefined,
+                  }
+                : approval
+            ),
+          }))
+        );
+      },
+      onFinalReport: (event: FinalReportEvent) => {
+        if (abortController.signal.aborted) {
+          return;
+        }
+        setChatHistory((prev) =>
+          updateLastAssistantMessage(prev, (msg) => ({
+            ...msg,
+            finalReport: event,
+          }))
+        );
+      },
+    }),
+    []
+  );
+
+  const resolveApproval = useCallback(
+    async (
+      approval: AgentApprovalItem,
+      decision: 'approved' | 'rejected',
+      approvalScope: 'once' | 'always' = 'once'
+    ): Promise<void> => {
+      const runId = approval.runId || activeRunIdRef.current;
+      if (!runId || approval.decision) {
+        return;
+      }
+      const inFlightKey = `${runId}:${approval.approvalId}`;
+      if (approvalInFlightRef.current.has(inFlightKey)) {
+        return;
+      }
+      approvalInFlightRef.current.add(inFlightKey);
+
+      setChatHistory((prev) =>
+        updateLastAssistantMessage(prev, (msg) => ({
+          ...msg,
+          approvals: (msg.approvals || []).map((item) =>
+            item.approvalId === approval.approvalId ? { ...item, resolving: true, error: undefined } : item
+          ),
+        }))
+      );
+
+      try {
+        const resolved = await resolveAgentApproval(
+          runId,
+          approval.approvalId,
+          decision,
+          undefined,
+          orgId,
+          approvalScope
+        );
+        setChatHistory((prev) =>
+          updateLastAssistantMessage(prev, (msg) => ({
+            ...msg,
+            approvals: (msg.approvals || []).map((item) =>
+              item.approvalId === approval.approvalId
+                ? {
+                    ...item,
+                    decision: resolved.decision,
+                    comment: resolved.comment,
+                    resolvedAt: resolved.resolvedAt,
+                    resolving: false,
+                    error: undefined,
+                  }
+                : item
+            ),
+          }))
+        );
+      } catch (error) {
+        try {
+          const run = await getAgentRunStatus(runId, orgId);
+          const resolved = run.trace?.approvals?.find(
+            (item) => item.approvalId === approval.approvalId && item.decision
+          );
+          if (resolved) {
+            setChatHistory((prev) =>
+              updateLastAssistantMessage(prev, (msg) => ({
+                ...msg,
+                approvals: (msg.approvals || []).map((item) =>
+                  item.approvalId === approval.approvalId
+                    ? {
+                        ...item,
+                        decision: resolved.decision,
+                        comment: resolved.comment,
+                        resolvedAt: resolved.resolvedAt,
+                        resolving: false,
+                        error: undefined,
+                      }
+                    : item
+                ),
+              }))
+            );
+            return;
+          }
+        } catch {
+          // Keep the original approval error below; the refresh is best effort.
+        }
+        setChatHistory((prev) =>
+          updateLastAssistantMessage(prev, (msg) => ({
+            ...msg,
+            approvals: (msg.approvals || []).map((item) =>
+              item.approvalId === approval.approvalId
+                ? {
+                    ...item,
+                    resolving: false,
+                    error: error instanceof Error ? error.message : 'Failed to resolve approval',
+                  }
+                : item
+            ),
+          }))
+        );
+      } finally {
+        approvalInFlightRef.current.delete(inFlightKey);
+      }
+    },
+    [orgId]
+  );
+
+  const sendMessage = async (explicitInput?: string): Promise<void> => {
+    const inputToSend = explicitInput ?? currentInput;
+    if (!inputToSend.trim()) {
       return;
     }
 
-    // Force auto-scroll to bottom when sending a message
+    isAutoScrollRef.current = true;
     setIsAutoScroll(true);
 
-    // Validate input before processing
     let validatedInput: string;
     try {
-      validatedInput = ValidationService.validateChatInput(currentInput);
-      console.log('[useChat] Input validation passed');
+      validatedInput = ValidationService.validateChatInput(inputToSend);
     } catch (error) {
-      console.error('[useChat] Input validation failed:', error);
-      setChatHistory((prev) => [
-        ...prev,
-        {
-          role: 'assistant',
-          content: `⚠️ Input validation error: ${error instanceof Error ? error.message : 'Invalid input'}`,
-        },
-      ]);
+      appendErrorMessage(`Input validation error: ${error instanceof Error ? error.message : 'Invalid input'}`);
       return;
     }
 
-    // Check circuit breaker before attempting
-    if (!ReliabilityService.checkCircuitBreaker('llm-stream')) {
-      console.log('[useChat] Circuit breaker is open, showing error message');
-      setChatHistory((prev) => [
-        ...prev,
-        {
-          role: 'assistant',
-          content: '⚠️ The service is temporarily unavailable due to repeated errors. Please try again in a moment.',
-        },
-      ]);
+    if (isGenerating) {
+      // Only queue messages for the current session to prevent chat leaking
+      if (!queuedForSessionRef.current || queuedForSessionRef.current === sessionManager.currentSessionId) {
+        setMessageQueue((prev) => [...prev, validatedInput]);
+        queuedForSessionRef.current = sessionManager.currentSessionId;
+      }
+      setCurrentInput('');
       return;
     }
 
-    const userMessage: ChatMessage = {
-      role: 'user',
-      content: validatedInput,
-    };
-
+    const userMessage: ChatMessage = { role: 'user', content: validatedInput };
     const newChatHistory = [...chatHistory, userMessage];
-    console.log('[useChat] Adding user message to history');
     setChatHistory(newChatHistory);
-    // Save immediately after user input
-    if (!readOnly) {
-      sessionManager.saveImmediately(newChatHistory);
-    }
     setCurrentInput('');
     setIsGenerating(true);
-    clearToolCalls();
+    setToolCalls(new Map());
+    setMcpUnavailable(null);
 
-    const assistantMessage: ChatMessage = {
-      role: 'assistant',
-      content: '',
-      toolCalls: [],
-    };
+    setChatHistory((prev) => [...prev, { role: 'assistant', content: '', toolCalls: [] }]);
 
-    console.log('[useChat] Adding empty assistant message to history');
-    setChatHistory((prev) => [...prev, assistantMessage]);
+    const abortController = new AbortController();
+    abortControllerRef.current = abortController;
+    const hadErrorRef = { current: false };
 
-    // Build context with memory and summarization
-    console.log('[useChat] Building context window');
-    const messages: llm.Message[] = ConversationMemoryService.buildContextWindow(
-      effectiveSystemPrompt,
-      newChatHistory,
-      sessionManager.currentSummary,
-      15 // Keep last 15 messages in full
-    );
-    console.log('[useChat] Context window built, message count:', messages.length);
-
-    // Save recovery state
-    console.log('[useChat] Saving recovery state');
-    ReliabilityService.saveRecoveryState({
-      sessionId: sessionManager.currentSessionId,
-      lastMessageIndex: newChatHistory.length,
-      wasGenerating: true,
-    });
+    const messageType = conversationType;
+    if (conversationType !== 'chat') {
+      setConversationType('chat');
+    }
+    const sessionModel = sessionManager.sessions.find((s) => s.id === sessionManager.currentSessionId)?.model;
+    const runModel = sessionModel || (selectedModel === 'auto' ? undefined : selectedModel);
 
     try {
-      // Call streaming directly - retry logic is complex with RxJS streams
-      // The stream manager handles its own error recovery
-      const tools = toolsData?.tools || [];
-      console.log('[useChat] Calling handleStreamingChatWithHistory with', tools.length, 'tools');
-      await handleStreamingChatWithHistory(messages, tools);
-
-      // Success - record for circuit breaker
-      console.log('[useChat] Streaming completed successfully');
-      ReliabilityService.recordCircuitBreakerSuccess('llm-stream');
-      setRetryCount(0);
-
-      // Clear recovery state on success
-      ReliabilityService.clearRecoveryState();
-    } catch (error) {
-      console.error('[useChat] Error in chat completion:', error);
-
-      // Record failure for circuit breaker
-      ReliabilityService.recordCircuitBreakerFailure('llm-stream');
-
-      // Get user-friendly error message
-      const errorMessage = ReliabilityService.getUserFriendlyErrorMessage(error);
-
-      // Update chat history with error message and save immediately
-      setChatHistory((prev) => {
-        const updated = prev.map((msg, idx) =>
-          idx === prev.length - 1 && msg.role === 'assistant' ? { ...msg, content: errorMessage } : msg
-        );
-        
-        // Save immediately after error (use setTimeout to ensure state has updated)
-        if (!readOnly) {
-          setTimeout(() => {
-            sessionManager.saveImmediately(updated);
-          }, 0);
-        }
-        
-        return updated;
+      const result = await runAgentDetached({
+        message: validatedInput,
+        type: messageType,
+        sessionId: sessionManager.currentSessionId || undefined,
+        model: runModel,
+        orgId,
+        orgName: config.bootData.user.orgName || '',
+        scopeOrgId: config.bootData.user.orgName || '',
       });
 
-      // Track retry count
+      if (abortController.signal.aborted) {
+        cancelAgentRun(result.runId, orgId).catch(() => {});
+        return;
+      }
+
+      activeRunIdRef.current = result.runId;
+
+      if (result.sessionId && !sessionManager.currentSessionId) {
+        pendingRunSessionIdRef.current = result.sessionId;
+        sessionManager.setCurrentSessionIdDirect(result.sessionId);
+        onSessionIdChange(result.sessionId);
+      }
+
+      const callbacks = makeCallbacks(abortController, hadErrorRef);
+      await reconnectToAgentRun(result.runId, callbacks, orgId, abortController.signal);
+
+      activeRunIdRef.current = null;
+
+      if (!readOnly) {
+        sessionManager.refreshSessions().catch(() => {});
+      }
+
+      if (hadErrorRef.current) {
+        setRetryCount((prev) => prev + 1);
+      } else {
+        setRetryCount(0);
+      }
+    } catch (error) {
+      activeRunIdRef.current = null;
+
+      if (error instanceof DOMException && error.name === 'AbortError') {
+        setChatHistory((prev) =>
+          updateLastAssistantMessage(prev, (msg) => ({
+            ...msg,
+            content: msg.content + '\n\n*[Generation stopped]*',
+          }))
+        );
+        return;
+      }
+      setChatHistory((prev) =>
+        updateLastAssistantMessage(prev, (msg) => ({
+          ...msg,
+          error: error instanceof Error ? error.message : 'An unexpected error occurred',
+        }))
+      );
       setRetryCount((prev) => prev + 1);
     } finally {
-      console.log('[useChat] Resetting isGenerating to false');
       setIsGenerating(false);
+      if (abortControllerRef.current === abortController) {
+        abortControllerRef.current = null;
+      }
     }
   };
 
-  const handleKeyPress = (e: React.KeyboardEvent) => {
+  // Re-send the most recent user prompt after a failed run. Appends a fresh
+  // turn rather than mutating the failed one, avoiding stale-closure issues
+  // with sendMessage's history handling.
+  const retryLastMessage = (): void => {
+    if (isGenerating) {
+      return;
+    }
+    const lastUserMessage = [...chatHistory].reverse().find((message) => message.role === 'user');
+    if (!lastUserMessage?.content) {
+      return;
+    }
+    void sendMessage(lastUserMessage.content);
+  };
+
+  useEffect(() => {
+    if (toolCalls.size > 0) {
+      const toolCallsArray = Array.from(toolCalls.values());
+      setChatHistory((prev) => updateLastAssistantMessage(prev, (msg) => ({ ...msg, toolCalls: toolCallsArray })));
+    }
+  }, [toolCalls]);
+
+  const stopGeneration = useCallback((): void => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+    const runId = activeRunIdRef.current;
+    if (runId) {
+      cancelAgentRun(runId, orgId).catch(() => {});
+      activeRunIdRef.current = null;
+    }
+    setMessageQueue([]);
+  }, [orgId]);
+
+  // Reconnect to an active run on mount / session change (using backend activeRunId)
+  const hasAttemptedReconnectRef = useRef<string | null>(null);
+  useEffect(() => {
+    const sessionId = sessionManager.currentSessionId;
+    if (!sessionId || readOnly || isGenerating) {
+      return;
+    }
+
+    if (hasAttemptedReconnectRef.current === sessionId) {
+      return;
+    }
+
+    hasAttemptedReconnectRef.current = sessionId;
+
+    let cancelled = false;
+    const abortController = new AbortController();
+
+    const reconnect = async () => {
+      try {
+        const session = await getSession(sessionId);
+        if (cancelled || !session.activeRunId) {
+          return;
+        }
+
+        const activeRunId = session.activeRunId;
+
+        setIsReconnecting(true);
+        setIsGenerating(true);
+        setToolCalls(new Map());
+
+        setChatHistory((prev) => {
+          const lastMsg = prev[prev.length - 1];
+          if (lastMsg?.role === 'assistant' && lastMsg.content === '') {
+            return prev;
+          }
+          return [...prev, { role: 'assistant', content: '', toolCalls: [] }];
+        });
+
+        abortControllerRef.current = abortController;
+        activeRunIdRef.current = activeRunId;
+
+        const hadErrorRef = { current: false };
+        const callbacks = makeCallbacks(abortController, hadErrorRef);
+        await reconnectToAgentRun(activeRunId, callbacks, orgId, abortController.signal);
+      } catch (err) {
+        if (!cancelled) {
+          setChatHistory((prev) =>
+            updateLastAssistantMessage(prev, (msg) => ({
+              ...msg,
+              error: err instanceof Error ? err.message : 'Failed to reconnect to the previous response.',
+            }))
+          );
+        }
+      } finally {
+        if (!cancelled) {
+          activeRunIdRef.current = null;
+          setIsReconnecting(false);
+          setIsGenerating(false);
+          if (abortControllerRef.current === abortController) {
+            abortControllerRef.current = null;
+          }
+        }
+      }
+    };
+
+    reconnect();
+
+    return () => {
+      cancelled = true;
+      // Only abort if we're not actively generating (to avoid aborting mid-stream when sessionId is set)
+      if (!isGenerating) {
+        abortController.abort();
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessionManager.currentSessionId, readOnly]);
+
+  // Drain queued messages after generation completes.
+  useEffect(() => {
+    if (!isGenerating && messageQueue.length > 0) {
+      // Only process queued messages if they belong to the current session
+      if (queuedForSessionRef.current === sessionManager.currentSessionId) {
+        const [nextMessage, ...remaining] = messageQueue;
+        setMessageQueue(remaining);
+        sendMessage(nextMessage);
+      } else {
+        // Clear queue if session changed to prevent chat leaking
+        setMessageQueue([]);
+        queuedForSessionRef.current = null;
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isGenerating, messageQueue.length, sessionManager.currentSessionId]);
+
+  // Abort active generation and clear queue when switching sessions to prevent chat leaking
+  useEffect(() => {
+    const prevSessionId = activeSessionIdRef.current;
+    const nextSessionId = sessionManager.currentSessionId;
+    activeSessionIdRef.current = nextSessionId;
+
+    if (pendingRunSessionIdRef.current === nextSessionId) {
+      pendingRunSessionIdRef.current = null;
+      return;
+    }
+
+    if (
+      prevSessionId !== nextSessionId &&
+      (abortControllerRef.current || activeRunIdRef.current || messageQueue.length > 0)
+    ) {
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+        abortControllerRef.current = null;
+      }
+      if (activeRunIdRef.current) {
+        cancelAgentRun(activeRunIdRef.current, orgId).catch(() => {});
+        activeRunIdRef.current = null;
+      }
+      setIsGenerating(false);
+      setToolCalls(new Map());
+      setMessageQueue([]);
+      queuedForSessionRef.current = null;
+    }
+  }, [sessionManager.currentSessionId, orgId, messageQueue.length]);
+
+  const handleKeyPress = (e: React.KeyboardEvent): void => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       sendMessage();
     }
   };
 
-  const clearChat = () => {
+  const clearChat = (): void => {
+    stopGeneration();
     setChatHistory([]);
-    clearToolCalls();
+    setCurrentInput('');
+    setToolCalls(new Map());
+    setMessageQueue([]);
     sessionManager.createNewSession();
   };
 
-  // Update chat history with tool calls
-  const updateToolCallsInChatHistory = (toolCallsMap: Map<string, any>) => {
-    const toolCallsArray = Array.from(toolCallsMap.values());
-    setChatHistory((prev) =>
-      prev.map((msg, idx) =>
-        idx === prev.length - 1 && msg.role === 'assistant' ? { ...msg, toolCalls: toolCallsArray } : msg
-      )
-    );
-  };
+  const autoSendStateRef = useRef<'idle' | 'creating-session' | 'ready-to-send' | 'sent'>('idle');
+  const [autoSendTrigger, setAutoSendTrigger] = useState(0);
 
-  // Watch for tool calls changes and update chat history
   useEffect(() => {
-    if (toolCalls.size > 0) {
-      updateToolCallsInChatHistory(toolCalls);
+    if (!initialMessage || readOnly) {
+      return;
     }
-  }, [toolCalls]);
 
-  // Save immediately when streaming completes (isGenerating changes from true to false)
-  const prevIsGeneratingRef = useRef(isGenerating);
-  useEffect(() => {
-    // Save when streaming completes (isGenerating goes from true to false)
-    if (prevIsGeneratingRef.current && !isGenerating && chatHistory.length > 0 && !readOnly) {
-      console.log('[useChat] Streaming completed, saving immediately');
-      sessionManager.saveImmediately(chatHistory);
-    }
-    prevIsGeneratingRef.current = isGenerating;
-  }, [isGenerating, chatHistory, sessionManager, readOnly]);
+    const state = autoSendStateRef.current;
 
-  // Recovery on mount
-  useEffect(() => {
-    const recovery = ReliabilityService.loadRecoveryState();
-    if (recovery && recovery.wasGenerating) {
-      console.log('[Chat] Recovery state detected, but streaming cannot be resumed. State cleared.');
-      ReliabilityService.clearRecoveryState();
+    if (state === 'idle') {
+      autoSendStateRef.current = 'creating-session';
+      if (!sessionIdFromUrl) {
+        sessionManager.createNewSession();
+      }
+      setAutoSendTrigger((prev) => prev + 1);
+      return;
     }
-  }, []);
+
+    if (state === 'creating-session' && chatHistory.length === 0 && !isGenerating) {
+      autoSendStateRef.current = 'ready-to-send';
+      setCurrentInput(initialMessage);
+      return;
+    }
+
+    if (state === 'ready-to-send' && currentInput === initialMessage && !isGenerating) {
+      autoSendStateRef.current = 'sent';
+      sendMessage();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialMessage, readOnly, chatHistory.length, isGenerating, currentInput, autoSendTrigger]);
 
   const detectedPageRefs = useMemo((): Array<GrafanaPageRef & { messageIndex: number }> => {
     for (let i = chatHistory.length - 1; i >= 0; i--) {
       const msg = chatHistory[i];
-      // Only return when we find an assistant message WITH pageRefs
       if (msg.role === 'assistant' && msg.pageRefs && msg.pageRefs.length > 0) {
         return msg.pageRefs.map((ref) => ({ ...ref, messageIndex: i }));
       }
-      // Continue searching if assistant message has no pageRefs
     }
     return [];
   }, [chatHistory]);
@@ -345,23 +769,26 @@ export const useChat = (pluginSettings: AppPluginSettings, initialSession?: Chat
     chatHistory,
     currentInput,
     isGenerating,
-    chatContainerRef,
+    isReconnecting,
+    chatContainerRef: chatContainerCallbackRef,
     toolCalls,
-    toolsLoading,
-    toolsError,
-    toolsData,
+    conversationType,
+    setConversationType,
     setCurrentInput,
     sendMessage,
+    retryLastMessage,
     handleKeyPress,
     clearChat,
     getRunningToolCallsCount,
+    mcpUnavailable,
+    dismissMcpUnavailable: () => setMcpUnavailable(null),
     isAutoScroll,
-    setIsAutoScroll,
-    handleScroll,
-    // Session management
     sessionManager,
     retryCount,
     bottomSpacerRef: bottomSpacerRef as React.RefObject<HTMLDivElement>,
     detectedPageRefs,
+    messageQueue,
+    stopGeneration,
+    resolveApproval,
   };
-};
+}

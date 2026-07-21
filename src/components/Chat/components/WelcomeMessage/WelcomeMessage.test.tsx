@@ -14,6 +14,9 @@ jest.mock('@grafana/ui', () => ({
         primary: '#000',
         secondary: '#666',
       },
+      warning: {
+        main: '#ff9830',
+      },
     },
   }),
 }));
@@ -27,16 +30,6 @@ describe('WelcomeMessage', () => {
   it('should render the assistant name', () => {
     render(<WelcomeMessage />);
     expect(screen.getByText('Ask O11y Assistant')).toBeInTheDocument();
-  });
-
-  it('should render the BETA badge', () => {
-    render(<WelcomeMessage />);
-    expect(screen.getByText('BETA')).toBeInTheDocument();
-  });
-
-  it('should render the version number', () => {
-    render(<WelcomeMessage />);
-    expect(screen.getByText('v0.2.0')).toBeInTheDocument();
   });
 
   it('should render the description', () => {

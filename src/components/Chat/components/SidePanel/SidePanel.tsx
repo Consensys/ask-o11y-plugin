@@ -1,8 +1,16 @@
 import React, { useState, useEffect } from 'react';
-import { useTheme2 } from '@grafana/ui';
+import { Icon, useStyles2, useTheme2 } from '@grafana/ui';
+import { cx } from '@emotion/css';
+import { GrafanaTheme2 } from '@grafana/data';
+import { getHoverButtonStyle } from '../../../../theme';
 import { GrafanaPageRef } from '../../types';
 import { TabCloseButton } from './TabCloseButton';
 import { useEmbeddingAllowed } from '../../hooks/useEmbeddingAllowed';
+import { getTabLabel, toRelativeUrl } from '../../utils/urlUtils';
+
+const SIDE_PANEL_MIN_WIDTH_UNITS = 50;
+const SIDE_PANEL_TARGET_WIDTH = '50vw';
+const SIDE_PANEL_MAX_WIDTH = '65%';
 
 export interface SidePanelProps {
   isOpen: boolean;
@@ -13,37 +21,16 @@ export interface SidePanelProps {
   kioskModeEnabled?: boolean;
 }
 
-function getTabLabel(ref: GrafanaPageRef, index: number): string {
-  if (ref.title) {
-    return ref.title.length > 20 ? ref.title.substring(0, 20) + '...' : ref.title;
-  }
-  if (ref.type === 'dashboard' && ref.uid) {
-    return `Dashboard ${ref.uid.substring(0, 8)}`;
-  }
-  return ref.type === 'explore' ? 'Explore' : `Page ${index + 1}`;
-}
-
-function toRelativeUrl(url: string, kioskModeEnabled = true): string {
-  let relativeUrl = url;
-  if (url.startsWith('http://') || url.startsWith('https://')) {
-    const match = url.match(/https?:\/\/[^/]+(\/.*)/);
-    relativeUrl = match ? match[1] : url;
-  }
-
-  if (relativeUrl.includes('kiosk') || relativeUrl.includes('viewPanel')) {
-    return relativeUrl;
-  }
-
-  if (!kioskModeEnabled) {
-    return relativeUrl;
-  }
-
-  const separator = relativeUrl.includes('?') ? '&' : '?';
-  return `${relativeUrl}${separator}kiosk`;
-}
-
-export const SidePanel: React.FC<SidePanelProps> = ({ isOpen, onClose, pageRefs, onRemoveTab, embedded = false, kioskModeEnabled = true }) => {
+export const SidePanel: React.FC<SidePanelProps> = ({
+  isOpen,
+  onClose,
+  pageRefs,
+  onRemoveTab,
+  embedded = false,
+  kioskModeEnabled = true,
+}) => {
   const theme = useTheme2();
+  const styles = useStyles2(getStyles);
   const [activeIndex, setActiveIndex] = useState(0);
   const allowEmbedding = useEmbeddingAllowed();
 
@@ -73,71 +60,40 @@ export const SidePanel: React.FC<SidePanelProps> = ({ isOpen, onClose, pageRefs,
 
   const containerStyle = embedded
     ? {
-        backgroundColor: theme.isDark ? '#1a1b1f' : theme.colors.background.primary,
+        backgroundColor: theme.colors.background.primary,
         borderColor: theme.colors.border.weak,
       }
     : {
-        width: '800px',
-        minWidth: '400px',
-        maxWidth: '65%',
-        backgroundColor: theme.isDark ? '#1a1b1f' : theme.colors.background.primary,
+        width: `clamp(${theme.spacing(
+          SIDE_PANEL_MIN_WIDTH_UNITS
+        )}, ${SIDE_PANEL_TARGET_WIDTH}, ${SIDE_PANEL_MAX_WIDTH})`,
+        backgroundColor: theme.colors.background.primary,
         borderColor: theme.colors.border.weak,
       };
 
   return (
-    <div
-      className={containerClassName}
-      style={containerStyle}
-      role="complementary"
-      aria-label="Grafana page preview"
-    >
+    <div className={containerClassName} style={containerStyle} role="complementary" aria-label="Grafana page preview">
       {/* Header */}
       <div
         className="flex items-center justify-between px-4 py-3 border-b flex-shrink-0"
         style={{
           borderColor: theme.colors.border.weak,
-          backgroundColor: theme.isDark ? '#111217' : theme.colors.background.secondary,
+          backgroundColor: theme.colors.background.secondary,
         }}
       >
-        <div className="flex items-center gap-2">
-          <svg
-            width="16"
-            height="16"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            style={{ color: theme.colors.text.secondary }}
-          >
-            <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
-            <line x1="9" y1="3" x2="9" y2="21" />
-          </svg>
-          <span className="text-sm font-medium" style={{ color: theme.colors.text.primary }}>
+        <div className="flex items-center gap-2 text-secondary">
+          <Icon name="columns" size="md" />
+          <span className="text-sm font-medium text-primary">
             {activeRef.title || (activeRef.type === 'explore' ? 'Explore' : 'Dashboard')}
           </span>
         </div>
         <button
           onClick={onClose}
-          className="p-1.5 rounded-md hover:bg-white/10 transition-colors"
+          className={cx('p-1.5 rounded-md transition-colors text-secondary', styles.hoverButton)}
           aria-label="Close panel"
           title="Close panel"
-          style={{ color: theme.colors.text.secondary }}
         >
-          <svg
-            width="16"
-            height="16"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          >
-            <line x1="18" y1="6" x2="6" y2="18" />
-            <line x1="6" y1="6" x2="18" y2="18" />
-          </svg>
+          <Icon name="times" size="md" />
         </button>
       </div>
 
@@ -147,7 +103,7 @@ export const SidePanel: React.FC<SidePanelProps> = ({ isOpen, onClose, pageRefs,
           className="flex gap-1 px-2 py-2 border-b flex-shrink-0"
           style={{
             borderColor: theme.colors.border.weak,
-            backgroundColor: theme.isDark ? '#111217' : theme.colors.background.secondary,
+            backgroundColor: theme.colors.background.secondary,
           }}
           role="tablist"
         >
@@ -156,12 +112,7 @@ export const SidePanel: React.FC<SidePanelProps> = ({ isOpen, onClose, pageRefs,
               key={`${ref.url}-${idx}`}
               className="flex items-center gap-1 flex-1 min-w-0 rounded-md transition-colors"
               style={{
-                backgroundColor:
-                  idx === safeActiveIndex
-                    ? theme.colors.primary.main
-                    : theme.isDark
-                    ? 'rgba(255,255,255,0.05)'
-                    : 'rgba(0,0,0,0.05)',
+                backgroundColor: idx === safeActiveIndex ? theme.colors.primary.main : theme.colors.action.hover,
               }}
               role="tab"
               aria-selected={idx === safeActiveIndex}
@@ -199,3 +150,7 @@ export const SidePanel: React.FC<SidePanelProps> = ({ isOpen, onClose, pageRefs,
     </div>
   );
 };
+
+const getStyles = (theme: GrafanaTheme2) => ({
+  hoverButton: getHoverButtonStyle(theme),
+});

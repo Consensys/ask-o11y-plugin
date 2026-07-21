@@ -1,19 +1,71 @@
-import React, { ChangeEvent, useState, useEffect } from 'react';
+import React, { ChangeEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { lastValueFrom } from 'rxjs';
 import { AppPluginMeta, PluginConfigPageProps, PluginMeta } from '@grafana/data';
-import { getBackendSrv } from '@grafana/runtime';
-import { Button, Field, FieldSet, Input, Icon, Switch, Alert, RadioButtonGroup, TextArea, Modal } from '@grafana/ui';
+import { config, getBackendSrv } from '@grafana/runtime';
+import {
+  Alert,
+  Badge,
+  Button,
+  Combobox,
+  type ComboboxOption,
+  Field,
+  FieldSet,
+  Icon,
+  Input,
+  RadioButtonGroup,
+  Spinner,
+  Switch,
+  Tab,
+  TabsBar,
+} from '@grafana/ui';
 import { mcp } from '@grafana/llm';
 import { testIds } from '../testIds';
 import { ValidationService } from '../../services/validation';
-import { SYSTEM_PROMPT } from '../Chat/constants';
-import type { AppPluginSettings, MCPServerConfig, SystemPromptMode } from '../../types/plugin';
+import { PromptEditor } from './PromptEditor';
+import { ManageToolsModal } from './ManageToolsModal';
+import { mcpServerStatusService, type MCPServerStatus, type MCPTool } from '../../services/mcpServerStatus';
+import type { AppPluginSettings, MCPServerConfig } from '../../types/plugin';
+import { AgentTopologyResponse, getAgentTopology } from '../../services/agentTopologyClient';
+import { ServiceGraphScene } from '../ServiceGraph/ServiceGraphScene';
+import { getPluginStorageKey } from '../../utils/storageKeys';
 
-const PROMPT_MODE_OPTIONS = [
-  { label: 'Use default prompt', value: 'default' as SystemPromptMode },
-  { label: 'Replace with custom prompt', value: 'replace' as SystemPromptMode },
-  { label: 'Append to default prompt', value: 'append' as SystemPromptMode },
-];
+type ServerStatusKind = MCPServerStatus['status'];
+type SettingsTab = 'general' | 'agent-runtime' | 'mcp' | 'service-graph' | 'prompts';
+type MCPServerType = NonNullable<MCPServerConfig['type']>;
+
+const STATUS_LABELS: Record<ServerStatusKind, string> = {
+  healthy: 'Healthy',
+  degraded: 'Degraded',
+  unhealthy: 'Unhealthy',
+  disconnected: 'Disconnected',
+  connecting: 'Connecting',
+};
+
+const STATUS_BADGE_CLASSES: Record<ServerStatusKind, string> = {
+  healthy: 'bg-success text-success-text',
+  degraded: 'bg-warning text-warning-text',
+  unhealthy: 'bg-error text-error-text',
+  disconnected: 'bg-error text-error-text',
+  connecting: 'bg-info text-info-text',
+};
+
+function StatusBadge({ status }: { status?: ServerStatusKind }) {
+  if (!status) {
+    return <span className="text-xs text-secondary">Status unknown</span>;
+  }
+
+  return (
+    <span className={`inline-block px-2 py-0.5 rounded text-xs font-medium ${STATUS_BADGE_CLASSES[status]}`}>
+      {STATUS_LABELS[status]}
+    </span>
+  );
+}
+
+interface PromptDefaults {
+  defaultSystemPrompt: string;
+  investigationPrompt: string;
+  performancePrompt: string;
+}
 
 function normalizeHeaderKey(key: string): string {
   const trimmed = key.trim();
@@ -31,68 +83,384 @@ function getCollisionId(key: string): string | null {
 }
 
 type State = {
-  // Maximum total tokens for LLM requests
   maxTotalTokens: number;
-  // MCP server configurations
   mcpServers: MCPServerConfig[];
-  // Built-in MCP configuration
   useBuiltInMCP: boolean;
-  builtInMCPAvailable: boolean | null; // null = checking, true/false = result
-  // System prompt configuration
-  systemPromptMode: SystemPromptMode;
-  customSystemPrompt: string;
-  // Track which servers have advanced options expanded
+  builtInMCPAvailable: boolean | null;
+  builtInMCPToolSelections: Record<string, boolean>;
   expandedAdvanced: Set<string>;
-  // Display settings
   kioskModeEnabled: boolean;
   chatPanelPosition: 'left' | 'right';
+  defaultSystemPrompt: string;
+  investigationPrompt: string;
+  performancePrompt: string;
+  graphitiScanInterval: string;
+  graphitiConnected: boolean | null;
+  graphitiDiscovering: boolean;
+  graphitiRunId: string | null;
+  graphitiToolCount: number;
+  graphitiError: string | null;
+  serviceGraphMaxNodes: number;
+  serviceGraphMaxEdges: number;
+  approvalPolicy: string;
+  maxParallelToolCalls: number;
+  agentEvalCaptureEnabled: boolean;
 };
 
 type ValidationErrors = {
   maxTotalTokens?: string;
   mcpServers: { [id: string]: { name?: string; url?: string } };
-  customSystemPrompt?: string;
 };
 
 export interface AppConfigProps extends PluginConfigPageProps<AppPluginMeta<AppPluginSettings>> {}
 
+const PROMPT_DEFAULTS_URL = '/api/plugins/consensys-asko11y-app/resources/api/prompt-defaults';
+const DEFAULT_MAX_TOTAL_TOKENS = 128000;
+const MIN_TOTAL_TOKENS = 1000;
+const MAX_TOTAL_TOKENS = 200000;
+const BUILTIN_MCP_SERVER_ID = 'mcp-grafana';
+const DEFAULT_SERVICE_GRAPH_MAX_NODES = 100;
+const DEFAULT_SERVICE_GRAPH_MAX_EDGES = 200;
+const SERVICE_GRAPH_MAX_NODES_LIMIT = 500;
+const SERVICE_GRAPH_MAX_EDGES_LIMIT = 1000;
+const DEFAULT_TOPOLOGY_QUERY = 'service topology dependencies incidents upstream downstream';
+const SETTINGS_TAB_STORAGE_KEY = getPluginStorageKey('settings.activeTab');
+
+const SETTINGS_TABS: Array<{ id: SettingsTab; label: string; icon: React.ComponentProps<typeof Tab>['icon'] }> = [
+  { id: 'general', label: 'General', icon: 'sliders-v-alt' },
+  { id: 'agent-runtime', label: 'Agent Runtime', icon: 'ai' },
+  { id: 'mcp', label: 'MCP', icon: 'plug' },
+  { id: 'service-graph', label: 'Service Graph', icon: 'sitemap' },
+  { id: 'prompts', label: 'Prompts', icon: 'comment-alt-message' },
+];
+
+const MCP_TYPE_OPTIONS: Array<ComboboxOption<MCPServerType>> = [
+  { label: 'OpenAPI', value: 'openapi' },
+  { label: 'Standard MCP', value: 'standard' },
+  { label: 'SSE', value: 'sse' },
+  { label: 'Streamable HTTP', value: 'streamable-http' },
+];
+
+const GRAPHITI_SCAN_INTERVAL_OPTIONS: Array<ComboboxOption<string>> = [
+  { label: 'Off', value: 'off' },
+  { label: 'Every 5 minutes', value: '5m' },
+  { label: 'Every 15 minutes', value: '15m' },
+  { label: 'Every 30 minutes', value: '30m' },
+  { label: 'Every hour', value: '1h' },
+  { label: 'Every 3 hours', value: '3h' },
+  { label: 'Every 12 hours', value: '12h' },
+  { label: 'Every 24 hours', value: '24h' },
+];
+
+type DirtyTabMap = Record<SettingsTab, boolean>;
+
+const cleanObject = <T extends Record<string, unknown> | undefined>(value: T): Record<string, unknown> => {
+  if (!value) {
+    return {};
+  }
+
+  return Object.keys(value)
+    .sort()
+    .reduce<Record<string, unknown>>((acc, key) => {
+      const nextValue = value[key];
+      if (nextValue !== undefined) {
+        acc[key] = nextValue;
+      }
+      return acc;
+    }, {});
+};
+
+const stableStringify = (value: unknown): string =>
+  JSON.stringify(value, (_key, currentValue) => {
+    if (currentValue && typeof currentValue === 'object' && !Array.isArray(currentValue)) {
+      return cleanObject(currentValue as Record<string, unknown>);
+    }
+    return currentValue;
+  });
+
+function normalizeMCPServersForDirty(settings: AppPluginSettings): unknown[] {
+  const trustedServers = settings.trustedMCPServers ?? {};
+
+  return (settings.mcpServers ?? []).map((server) => ({
+    id: server.id,
+    name: server.name,
+    url: server.url,
+    enabled: server.enabled,
+    type: server.type || 'openapi',
+    trusted: server.trusted ?? trustedServers[server.id] ?? false,
+    headers: cleanObject(server.headers),
+    toolSelections: cleanObject(server.toolSelections),
+    riskOverrides: cleanObject(server.riskOverrides),
+  }));
+}
+
+function getPromptValue(
+  settings: AppPluginSettings,
+  defaults: PromptDefaults | null,
+  field: keyof PromptDefaults
+): string {
+  return settings[field] || defaults?.[field] || '';
+}
+
+function isSettingsTab(value: string | null): value is SettingsTab {
+  return SETTINGS_TABS.some((tab) => tab.id === value);
+}
+
+function getInitialSettingsTab(): SettingsTab {
+  if (typeof window === 'undefined') {
+    return 'general';
+  }
+
+  const hashTab = window.location.hash.replace(/^#/, '');
+  if (isSettingsTab(hashTab)) {
+    return hashTab;
+  }
+
+  try {
+    const storedTab = window.sessionStorage.getItem(SETTINGS_TAB_STORAGE_KEY);
+    if (isSettingsTab(storedTab)) {
+      return storedTab;
+    }
+  } catch {
+    // Browser storage can be unavailable in private or embedded contexts.
+  }
+
+  return 'general';
+}
+
+function rememberSettingsTab(tab: SettingsTab) {
+  const nextUrl = `${window.location.pathname}${window.location.search}#${tab}`;
+  if (window.location.hash !== `#${tab}`) {
+    window.history.replaceState(window.history.state, '', nextUrl);
+  }
+
+  try {
+    window.sessionStorage.setItem(SETTINGS_TAB_STORAGE_KEY, tab);
+  } catch {
+    // Tab persistence is best-effort.
+  }
+}
+
 const AppConfig = ({ plugin }: AppConfigProps) => {
   const { enabled, pinned, jsonData } = plugin.meta;
+  const secureJsonFields: Record<string, boolean> =
+    (plugin.meta as unknown as { secureJsonFields?: Record<string, boolean> }).secureJsonFields || {};
+  const [promptDefaults, setPromptDefaults] = useState<PromptDefaults | null>(null);
+  const [activeTab, setActiveTab] = useState<SettingsTab>(getInitialSettingsTab);
+  const [savedJsonData, setSavedJsonData] = useState<AppPluginSettings>(jsonData ?? {});
+  const [topology, setTopology] = useState<AgentTopologyResponse | null>(null);
+  const [topologyLoading, setTopologyLoading] = useState(false);
+  const [topologyError, setTopologyError] = useState<string | null>(null);
   const [state, setState] = useState<State>({
-    maxTotalTokens: jsonData?.maxTotalTokens || 50000,
-    mcpServers: jsonData?.mcpServers || [],
+    maxTotalTokens: jsonData?.maxTotalTokens || DEFAULT_MAX_TOTAL_TOKENS,
+    mcpServers: (jsonData?.mcpServers || []).map((server) => ({
+      ...server,
+      trusted: server.trusted ?? jsonData?.trustedMCPServers?.[server.id] ?? false,
+    })),
     useBuiltInMCP: jsonData?.useBuiltInMCP ?? false,
     builtInMCPAvailable: null,
-    systemPromptMode: jsonData?.systemPromptMode || 'default',
-    customSystemPrompt: jsonData?.customSystemPrompt || '',
+    builtInMCPToolSelections: jsonData?.builtInMCPToolSelections ?? {},
     expandedAdvanced: new Set<string>(),
     kioskModeEnabled: jsonData?.kioskModeEnabled ?? true,
     chatPanelPosition: jsonData?.chatPanelPosition || 'right',
+    defaultSystemPrompt: jsonData?.defaultSystemPrompt || '',
+    investigationPrompt: jsonData?.investigationPrompt || '',
+    performancePrompt: jsonData?.performancePrompt || '',
+    graphitiScanInterval: jsonData?.graphitiScanInterval || 'off',
+    graphitiConnected: null,
+    graphitiDiscovering: false,
+    graphitiRunId: null,
+    graphitiToolCount: 0,
+    graphitiError: null,
+    serviceGraphMaxNodes: jsonData?.serviceGraphMaxNodes || DEFAULT_SERVICE_GRAPH_MAX_NODES,
+    serviceGraphMaxEdges: jsonData?.serviceGraphMaxEdges || DEFAULT_SERVICE_GRAPH_MAX_EDGES,
+    approvalPolicy: jsonData?.approvalPolicy || 'approval-gated-writes',
+    maxParallelToolCalls: jsonData?.maxParallelToolCalls || 4,
+    agentEvalCaptureEnabled: jsonData?.agentEvalCaptureEnabled ?? false,
   });
   const [validationErrors, setValidationErrors] = useState<ValidationErrors>({
     mcpServers: {},
   });
-  const [showDefaultPromptModal, setShowDefaultPromptModal] = useState(false);
-  const [copySuccess, setCopySuccess] = useState(false);
+  const [resetSecureKeys, setResetSecureKeys] = useState<Set<string>>(new Set());
+  const [deletedSecureKeys, setDeletedSecureKeys] = useState<Set<string>>(new Set());
+  const suppressBeforeUnloadRef = useRef(false);
 
-  // Check built-in MCP availability on mount
+  // Manage Tools modal state
+  const [modalServerId, setModalServerId] = useState<string | null>(null);
+  const [modalOpen, setModalOpen] = useState(false);
+  const [serverTools, setServerTools] = useState<MCPTool[]>([]);
+  const [serverToolsLoading, setServerToolsLoading] = useState(false);
+
+  // Per-server health status, keyed by serverId. Refreshed on mount and periodically.
+  const [serverStatuses, setServerStatuses] = useState<Record<string, ServerStatusKind>>({});
+
   useEffect(() => {
-    const checkAvailability = async () => {
+    let cancelled = false;
+    const fetchStatuses = async () => {
       try {
-        const available = await mcp.enabled();
-        setState((prev) => ({ ...prev, builtInMCPAvailable: available }));
-      } catch (error) {
-        console.error('Error checking built-in MCP availability:', error);
-        setState((prev) => ({ ...prev, builtInMCPAvailable: false }));
+        const response = await mcpServerStatusService.fetchServerStatuses();
+        if (cancelled) {
+          return;
+        }
+        const next: Record<string, ServerStatusKind> = {};
+        for (const s of response.servers) {
+          next[s.serverId] = s.status;
+        }
+        setServerStatuses(next);
+      } catch {
+        // status fetch is best-effort; UI shows "Status unknown"
+      }
+    };
+    fetchStatuses();
+    const id = window.setInterval(fetchStatuses, 15000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(id);
+    };
+  }, []);
+
+  useEffect(() => {
+    const init = async () => {
+      const [available, defaults] = await Promise.all([
+        mcp.enabled().catch(() => false),
+        lastValueFrom(getBackendSrv().fetch<PromptDefaults>({ url: PROMPT_DEFAULTS_URL }))
+          .then((res) => res.data)
+          .catch(() => null),
+      ]);
+
+      setState((prev) => ({
+        ...prev,
+        builtInMCPAvailable: available,
+        defaultSystemPrompt: prev.defaultSystemPrompt || defaults?.defaultSystemPrompt || '',
+        investigationPrompt: prev.investigationPrompt || defaults?.investigationPrompt || '',
+        performancePrompt: prev.performancePrompt || defaults?.performancePrompt || '',
+      }));
+      if (defaults) {
+        setPromptDefaults(defaults);
       }
     };
 
-    checkAvailability();
+    init();
   }, []);
 
-  const isLLMSettingsDisabled = Boolean(!state.maxTotalTokens || state.maxTotalTokens < 1000);
+  const isLLMSettingsDisabled = Boolean(
+    !state.maxTotalTokens || state.maxTotalTokens < MIN_TOTAL_TOKENS || state.maxTotalTokens > MAX_TOTAL_TOKENS
+  );
+  const isAgentRuntimeDisabled = state.maxParallelToolCalls < 1 || state.maxParallelToolCalls > 16;
+  const isServiceGraphSettingsDisabled =
+    state.serviceGraphMaxNodes < 1 ||
+    state.serviceGraphMaxNodes > SERVICE_GRAPH_MAX_NODES_LIMIT ||
+    state.serviceGraphMaxEdges < 1 ||
+    state.serviceGraphMaxEdges > SERVICE_GRAPH_MAX_EDGES_LIMIT;
+  const orgId = String(config.bootData?.user?.orgId || '1');
 
-  const onChange = (event: ChangeEvent<HTMLInputElement>) => {
+  const dirtyTabs = useMemo<DirtyTabMap>(() => {
+    const savedMCPSettings: AppPluginSettings = {
+      mcpServers: savedJsonData.mcpServers,
+      trustedMCPServers: savedJsonData.trustedMCPServers,
+    };
+    const currentMCPSettings: AppPluginSettings = {
+      mcpServers: state.mcpServers,
+      trustedMCPServers: state.mcpServers.reduce<Record<string, boolean>>((acc, server) => {
+        if (server.trusted) {
+          acc[server.id] = true;
+        }
+        return acc;
+      }, {}),
+    };
+
+    const mcpDirty =
+      state.useBuiltInMCP !== (savedJsonData.useBuiltInMCP ?? false) ||
+      stableStringify(cleanObject(state.builtInMCPToolSelections)) !==
+        stableStringify(cleanObject(savedJsonData.builtInMCPToolSelections)) ||
+      stableStringify(normalizeMCPServersForDirty(currentMCPSettings)) !==
+        stableStringify(normalizeMCPServersForDirty(savedMCPSettings)) ||
+      resetSecureKeys.size > 0 ||
+      deletedSecureKeys.size > 0;
+
+    return {
+      general:
+        state.maxTotalTokens !== (savedJsonData.maxTotalTokens || DEFAULT_MAX_TOTAL_TOKENS) ||
+        state.kioskModeEnabled !== (savedJsonData.kioskModeEnabled ?? true) ||
+        state.chatPanelPosition !== (savedJsonData.chatPanelPosition || 'right'),
+      'agent-runtime':
+        state.approvalPolicy !== (savedJsonData.approvalPolicy || 'approval-gated-writes') ||
+        state.maxParallelToolCalls !== (savedJsonData.maxParallelToolCalls || 4) ||
+        state.agentEvalCaptureEnabled !== (savedJsonData.agentEvalCaptureEnabled ?? false),
+      mcp: mcpDirty,
+      'service-graph':
+        state.graphitiScanInterval !== (savedJsonData.graphitiScanInterval || 'off') ||
+        state.serviceGraphMaxNodes !== (savedJsonData.serviceGraphMaxNodes || DEFAULT_SERVICE_GRAPH_MAX_NODES) ||
+        state.serviceGraphMaxEdges !== (savedJsonData.serviceGraphMaxEdges || DEFAULT_SERVICE_GRAPH_MAX_EDGES),
+      prompts:
+        state.defaultSystemPrompt !== getPromptValue(savedJsonData, promptDefaults, 'defaultSystemPrompt') ||
+        state.investigationPrompt !== getPromptValue(savedJsonData, promptDefaults, 'investigationPrompt') ||
+        state.performancePrompt !== getPromptValue(savedJsonData, promptDefaults, 'performancePrompt'),
+    };
+  }, [deletedSecureKeys, promptDefaults, resetSecureKeys, savedJsonData, state]);
+
+  const hasUnsavedChanges = Object.values(dirtyTabs).some(Boolean);
+
+  const loadTopology = useCallback(async () => {
+    setTopologyLoading(true);
+    setTopologyError(null);
+    try {
+      const nextTopology = await getAgentTopology(DEFAULT_TOPOLOGY_QUERY, orgId, {
+        maxNodes: state.serviceGraphMaxNodes,
+        maxEdges: state.serviceGraphMaxEdges,
+      });
+      setTopology(nextTopology);
+    } catch (err) {
+      setTopologyError(err instanceof Error ? err.message : 'Failed to load service graph');
+    } finally {
+      setTopologyLoading(false);
+    }
+  }, [orgId, state.serviceGraphMaxEdges, state.serviceGraphMaxNodes]);
+
+  useEffect(() => {
+    if (activeTab === 'service-graph' && !topology && !topologyLoading && !topologyError) {
+      loadTopology();
+    }
+  }, [activeTab, loadTopology, topology, topologyError, topologyLoading]);
+
+  useEffect(() => {
+    rememberSettingsTab(activeTab);
+  }, [activeTab]);
+
+  useEffect(() => {
+    if (!hasUnsavedChanges) {
+      return;
+    }
+
+    const onBeforeUnload = (event: BeforeUnloadEvent) => {
+      if (suppressBeforeUnloadRef.current) {
+        return;
+      }
+      event.preventDefault();
+    };
+
+    window.addEventListener('beforeunload', onBeforeUnload);
+    return () => window.removeEventListener('beforeunload', onBeforeUnload);
+  }, [hasUnsavedChanges]);
+
+  function activateSettingsTab(tab: SettingsTab) {
+    rememberSettingsTab(tab);
+    setActiveTab(tab);
+  }
+
+  const saveAndReload = useCallback(
+    (data: PluginUpdatePayload) => {
+      suppressBeforeUnloadRef.current = true;
+      void updatePluginAndReload(plugin.meta.id, data).then((didReload) => {
+        if (!didReload) {
+          suppressBeforeUnloadRef.current = false;
+        }
+      });
+    },
+    [plugin.meta.id]
+  );
+
+  function onChange(event: ChangeEvent<HTMLInputElement>) {
     const { name, value, type } = event.target;
     const parsedValue = type === 'number' ? parseInt(value, 10) || 0 : value.trim();
 
@@ -101,7 +469,6 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
       [name]: parsedValue,
     });
 
-    // Validate token limit
     if (name === 'maxTotalTokens') {
       try {
         ValidationService.validateConfigValue('tokenLimit', parsedValue);
@@ -113,9 +480,9 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
         }));
       }
     }
-  };
+  }
 
-  const addMCPServer = () => {
+  function addMCPServer() {
     const newServer: MCPServerConfig = {
       id: `mcp-${Date.now()}`,
       name: 'New MCP Server',
@@ -127,23 +494,20 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
       ...state,
       mcpServers: [...state.mcpServers, newServer],
     });
-  };
+  }
 
-  const updateMCPServer = (id: string, updates: Partial<MCPServerConfig>) => {
-    // Update state
+  function updateMCPServer(id: string, updates: Partial<MCPServerConfig>) {
     setState({
       ...state,
       mcpServers: state.mcpServers.map((server) => (server.id === id ? { ...server, ...updates } : server)),
     });
 
-    // Validate the updates
     const newErrors = { ...validationErrors.mcpServers };
 
     if (updates.url !== undefined) {
       if (updates.url.trim()) {
         try {
           ValidationService.validateMCPServerURL(updates.url);
-          // Clear URL error for this server
           if (newErrors[id]) {
             delete newErrors[id].url;
             if (Object.keys(newErrors[id]).length === 0) {
@@ -151,7 +515,6 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
             }
           }
         } catch (error) {
-          // Set URL error for this server
           if (!newErrors[id]) {
             newErrors[id] = {};
           }
@@ -162,13 +525,11 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
 
     if (updates.name !== undefined) {
       if (!updates.name.trim()) {
-        // Set name error for this server
         if (!newErrors[id]) {
           newErrors[id] = {};
         }
         newErrors[id].name = 'Server name is required';
       } else {
-        // Clear name error for this server
         if (newErrors[id]) {
           delete newErrors[id].name;
           if (Object.keys(newErrors[id]).length === 0) {
@@ -179,16 +540,27 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
     }
 
     setValidationErrors((prev) => ({ ...prev, mcpServers: newErrors }));
-  };
+  }
 
-  const removeMCPServer = (id: string) => {
+  function removeMCPServer(id: string) {
+    const server = state.mcpServers.find((s) => s.id === id);
+    if (server?.headers) {
+      const keysToDelete = new Set(deletedSecureKeys);
+      for (const headerKey of Object.keys(server.headers)) {
+        const cleanKey = normalizeHeaderKey(headerKey);
+        if (cleanKey && !cleanKey.startsWith('__new_header_')) {
+          keysToDelete.add(`mcpServerHeader.${id}.${cleanKey}`);
+        }
+      }
+      setDeletedSecureKeys(keysToDelete);
+    }
     setState({
       ...state,
-      mcpServers: state.mcpServers.filter((server) => server.id !== id),
+      mcpServers: state.mcpServers.filter((s) => s.id !== id),
     });
-  };
+  }
 
-  const toggleAdvancedOptions = (id: string) => {
+  function toggleAdvancedOptions(id: string) {
     setState((prev) => {
       const newExpanded = new Set(prev.expandedAdvanced);
       if (newExpanded.has(id)) {
@@ -198,12 +570,11 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
       }
       return { ...prev, expandedAdvanced: newExpanded };
     });
-  };
+  }
 
-  // Counter for generating unique header IDs (survives rapid clicks within same millisecond)
-  const headerIdCounterRef = React.useRef(0);
+  const headerIdCounterRef = useRef(0);
 
-  const addHeader = (serverId: string) => {
+  function addHeader(serverId: string) {
     const server = state.mcpServers.find((s) => s.id === serverId);
     if (!server) {
       return;
@@ -212,21 +583,19 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
     const currentHeaders = server.headers || {};
     const headerCount = Object.keys(currentHeaders).length;
 
-    // Max 10 headers
     if (headerCount >= 10) {
       return;
     }
 
-    // Use a combination of timestamp and counter to ensure uniqueness even with rapid clicks
     headerIdCounterRef.current += 1;
     const tempKey = `__new_header_${Date.now()}_${headerIdCounterRef.current}`;
 
     updateMCPServer(serverId, {
       headers: { ...currentHeaders, [tempKey]: '' },
     });
-  };
+  }
 
-  const updateHeader = (serverId: string, oldKey: string, newKey: string, value: string) => {
+  function updateHeader(serverId: string, oldKey: string, newKey: string, value: string) {
     const server = state.mcpServers.find((s) => s.id === serverId);
     if (!server) {
       return;
@@ -237,7 +606,16 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
 
     const finalKey = computeFinalHeaderKey(oldKey, newKey, keyOrder);
 
-    // Rebuild headers preserving order - replace oldKey with finalKey at the same position
+    if (oldKey !== finalKey) {
+      const oldCleanKey = normalizeHeaderKey(oldKey);
+      if (oldCleanKey && !oldCleanKey.startsWith('__new_header_')) {
+        const oldSecureKey = `mcpServerHeader.${serverId}.${oldCleanKey}`;
+        if (secureJsonFields[oldSecureKey]) {
+          setDeletedSecureKeys((prev) => new Set(prev).add(oldSecureKey));
+        }
+      }
+    }
+
     const newHeaders: Record<string, string> = {};
     for (const k of keyOrder) {
       if (k === oldKey) {
@@ -248,9 +626,9 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
     }
 
     updateMCPServer(serverId, { headers: newHeaders });
-  };
+  }
 
-  const computeFinalHeaderKey = (oldKey: string, newKey: string, existingKeys: string[]): string => {
+  function computeFinalHeaderKey(oldKey: string, newKey: string, existingKeys: string[]): string {
     if (oldKey === newKey) {
       return newKey;
     }
@@ -264,103 +642,203 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
     }
 
     const oldCollisionId = getCollisionId(oldKey);
-    const conflictingCollisionId = getCollisionId(conflictingKey);
-
-    let uniquePart: string;
     if (oldCollisionId) {
-      uniquePart = oldCollisionId;
-    } else if (conflictingCollisionId) {
-      uniquePart = `pair_${conflictingCollisionId}`;
-    } else if (oldKey.startsWith('__new_header_')) {
-      uniquePart = oldKey.replace('__new_header_', '');
-    } else {
-      uniquePart = `id_${oldKey.replace(/[^a-zA-Z0-9]/g, '_')}_${Date.now()}`;
+      return `${newKey}__collision_${oldCollisionId}`;
     }
 
-    return `${newKey}__collision_${uniquePart}`;
-  };
+    const conflictingCollisionId = getCollisionId(conflictingKey);
+    if (conflictingCollisionId) {
+      return `${newKey}__collision_pair_${conflictingCollisionId}`;
+    }
 
-  const removeHeader = (serverId: string, key: string) => {
+    if (oldKey.startsWith('__new_header_')) {
+      const uniquePart = oldKey.replace('__new_header_', '');
+      return `${newKey}__collision_${uniquePart}`;
+    }
+
+    const sanitizedKey = oldKey.replace(/[^a-zA-Z0-9]/g, '_');
+    return `${newKey}__collision_id_${sanitizedKey}_${Date.now()}`;
+  }
+
+  function removeHeader(serverId: string, key: string) {
     const server = state.mcpServers.find((s) => s.id === serverId);
     if (!server) {
       return;
+    }
+
+    const cleanKey = normalizeHeaderKey(key);
+    const secureKey = `mcpServerHeader.${serverId}.${cleanKey}`;
+    if (secureJsonFields[secureKey]) {
+      setDeletedSecureKeys((prev) => new Set(prev).add(secureKey));
     }
 
     const currentHeaders = { ...(server.headers || {}) };
     delete currentHeaders[key];
 
     updateMCPServer(serverId, { headers: currentHeaders });
-  };
+  }
 
-  const onSystemPromptModeChange = (mode: SystemPromptMode) => {
-    setState({
-      ...state,
-      systemPromptMode: mode,
-    });
-
-    // Clear validation error when switching back to default
-    if (mode === 'default') {
-      setValidationErrors((prev) => ({ ...prev, customSystemPrompt: undefined }));
-    } else {
-      // Validate existing custom prompt when switching to replace/append
-      validateCustomPrompt(state.customSystemPrompt, mode);
+  async function openManageTools(serverId: string) {
+    setServerTools([]);
+    setServerToolsLoading(true);
+    setModalServerId(serverId);
+    setModalOpen(true);
+    try {
+      const response = await mcpServerStatusService.fetchServerStatuses();
+      const statusInfo = response.servers.find((s) => s.serverId === serverId);
+      setServerTools(statusInfo?.tools ?? []);
+    } catch {
+      setServerTools([]);
+    } finally {
+      setServerToolsLoading(false);
     }
-  };
+  }
 
-  const onCustomSystemPromptChange = (value: string) => {
-    setState({
-      ...state,
-      customSystemPrompt: value,
-    });
-    validateCustomPrompt(value, state.systemPromptMode);
-  };
+  async function handleSaveToolSelections(serverId: string, selections: Record<string, boolean>) {
+    const nextBuiltInSelections = serverId === BUILTIN_MCP_SERVER_ID ? selections : state.builtInMCPToolSelections;
+    const nextServers =
+      serverId === BUILTIN_MCP_SERVER_ID
+        ? state.mcpServers
+        : state.mcpServers.map((s) => (s.id === serverId ? { ...s, toolSelections: selections } : s));
 
-  const validateCustomPrompt = (value: string, mode: SystemPromptMode) => {
-    if (mode === 'default') {
-      setValidationErrors((prev) => ({ ...prev, customSystemPrompt: undefined }));
-      return true;
-    }
+    setState((prev) => ({
+      ...prev,
+      builtInMCPToolSelections: nextBuiltInSelections,
+      mcpServers: nextServers,
+    }));
+    setModalOpen(false);
+    setModalServerId(null);
 
-    const isRequired = mode === 'replace' || mode === 'append';
+    // Persist all MCP-related fields from the latest local state so successive
+    // Apply calls don't overwrite each other's prior changes via stale jsonData.
+    const nextJsonData: AppPluginSettings = {
+      ...savedJsonData,
+      useBuiltInMCP: state.useBuiltInMCP,
+      builtInMCPToolSelections: nextBuiltInSelections,
+      mcpServers: nextServers,
+      trustedMCPServers: nextServers.reduce<Record<string, boolean>>((acc, server) => {
+        if (server.trusted) {
+          acc[server.id] = true;
+        }
+        return acc;
+      }, {}),
+    };
 
     try {
-      ValidationService.validateCustomSystemPrompt(value, isRequired);
-      setValidationErrors((prev) => ({ ...prev, customSystemPrompt: undefined }));
-      return true;
-    } catch (error) {
-      setValidationErrors((prev) => ({
-        ...prev,
-        customSystemPrompt: error instanceof Error ? error.message : 'Invalid system prompt',
-      }));
-      return false;
+      await updatePlugin(plugin.meta.id, { enabled, pinned, jsonData: nextJsonData });
+      setSavedJsonData(nextJsonData);
+    } catch {
+      // Persist error: local state already updated; user can retry via the main Save button.
     }
-  };
+  }
 
-  const onSubmitSystemPrompt = () => {
-    if (!validateCustomPrompt(state.customSystemPrompt, state.systemPromptMode)) {
+  useEffect(() => {
+    setState((prev) => ({ ...prev, graphitiConnected: null }));
+    lastValueFrom(
+      getBackendSrv().fetch<{ connected: boolean }>({
+        url: `/api/plugins/consensys-asko11y-app/resources/api/graphiti/status`,
+      })
+    )
+      .then((res) => setState((prev) => ({ ...prev, graphitiConnected: res.data.connected })))
+      .catch(() => setState((prev) => ({ ...prev, graphitiConnected: false })));
+  }, []);
+
+  useEffect(() => {
+    if (!state.graphitiRunId) {
+      return;
+    }
+    const runId = state.graphitiRunId;
+    const interval = setInterval(async () => {
+      try {
+        const res = await lastValueFrom(
+          getBackendSrv().fetch<{ status: string; events?: Array<{ type: string }> }>({
+            url: `/api/plugins/consensys-asko11y-app/resources/api/agent/runs/${runId}`,
+          })
+        );
+        const { status, events = [] } = res.data;
+        const toolCount = events.filter((e) => e.type === 'tool_call_result').length;
+        if (status === 'running') {
+          setState((prev) => ({ ...prev, graphitiToolCount: toolCount }));
+        } else {
+          clearInterval(interval);
+          setState((prev) => ({
+            ...prev,
+            graphitiDiscovering: false,
+            graphitiRunId: null,
+            graphitiToolCount: toolCount,
+            graphitiError: status === 'failed' ? 'Discovery run failed' : null,
+          }));
+        }
+      } catch {
+        clearInterval(interval);
+        setState((prev) => ({ ...prev, graphitiDiscovering: false, graphitiError: 'Failed to poll discovery status' }));
+      }
+    }, 2000);
+    return () => clearInterval(interval);
+  }, [state.graphitiRunId]);
+
+  function onSubmitGraphitiSettings() {
+    if (isServiceGraphSettingsDisabled) {
       return;
     }
 
-    updatePluginAndReload(plugin.meta.id, {
+    saveAndReload({
       enabled,
       pinned,
       jsonData: {
-        ...jsonData,
-        systemPromptMode: state.systemPromptMode,
-        customSystemPrompt: state.customSystemPrompt,
+        ...savedJsonData,
+        graphitiScanInterval: state.graphitiScanInterval,
+        serviceGraphMaxNodes: state.serviceGraphMaxNodes,
+        serviceGraphMaxEdges: state.serviceGraphMaxEdges,
       },
     });
-  };
+  }
 
-  const isSystemPromptSaveDisabled =
-    state.systemPromptMode !== 'default' && (!state.customSystemPrompt.trim() || !!validationErrors.customSystemPrompt);
+  async function onBuildKnowledgeGraph() {
+    setState((prev) => ({
+      ...prev,
+      graphitiDiscovering: true,
+      graphitiRunId: null,
+      graphitiToolCount: 0,
+      graphitiError: null,
+    }));
+    try {
+      const res = await lastValueFrom(
+        getBackendSrv().fetch<{ runId: string; status: string }>({
+          url: `/api/plugins/consensys-asko11y-app/resources/api/graphiti/discover`,
+          method: 'POST',
+          data: {},
+        })
+      );
+      setState((prev) => ({ ...prev, graphitiRunId: res.data.runId }));
+    } catch (err) {
+      setState((prev) => ({
+        ...prev,
+        graphitiDiscovering: false,
+        graphitiError: err instanceof Error ? err.message : 'Discovery run failed',
+      }));
+    }
+  }
 
-  const onSubmitLLMSettings = () => {
+  function savePrompt(field: 'defaultSystemPrompt' | 'investigationPrompt' | 'performancePrompt', value: string) {
+    if (value.length > 15000) {
+      return;
+    }
+    saveAndReload({
+      enabled,
+      pinned,
+      jsonData: {
+        ...savedJsonData,
+        [field]: value,
+      },
+    });
+  }
+
+  function onSubmitLLMSettings() {
     if (isLLMSettingsDisabled || validationErrors.maxTotalTokens) {
       return;
     }
 
-    // Validate before saving
     try {
       ValidationService.validateConfigValue('tokenLimit', state.maxTotalTokens);
     } catch (error) {
@@ -371,29 +849,34 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
       return;
     }
 
-    updatePluginAndReload(plugin.meta.id, {
+    saveAndReload({
       enabled,
       pinned,
       jsonData: {
-        ...jsonData,
+        ...savedJsonData,
         maxTotalTokens: state.maxTotalTokens,
       },
     });
-  };
+  }
 
-  const onSubmitMCPMode = () => {
-    updatePluginAndReload(plugin.meta.id, {
+  function onSubmitAgentRuntimeSettings() {
+    if (isAgentRuntimeDisabled) {
+      return;
+    }
+
+    saveAndReload({
       enabled,
       pinned,
       jsonData: {
-        ...jsonData,
-        useBuiltInMCP: state.useBuiltInMCP,
+        ...savedJsonData,
+        approvalPolicy: state.approvalPolicy,
+        maxParallelToolCalls: state.maxParallelToolCalls,
+        agentEvalCaptureEnabled: state.agentEvalCaptureEnabled,
       },
     });
-  };
+  }
 
-  const onSubmitMCPServers = () => {
-    // Validate all MCP servers before saving
+  function onSubmitMCPServers() {
     const errors: ValidationErrors['mcpServers'] = {};
     let hasErrors = false;
 
@@ -424,578 +907,775 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
       return;
     }
 
-    // Check for collision markers (duplicate header keys)
     const hasDuplicateHeaders = state.mcpServers.some(
       (server) => server.headers && Object.keys(server.headers).some((key) => key.includes('__collision_'))
     );
     if (hasDuplicateHeaders) {
-      // Don't save - the duplicate headers are already highlighted in red
       return;
     }
 
-    // Clean up headers before saving - remove entries with empty or temp keys
+    const secureJsonData: Record<string, string> = {};
+
     const cleanedServers = state.mcpServers.map((server) => {
       if (!server.headers) {
         return server;
       }
 
-      const cleanedHeaders: Record<string, string> = {};
+      const headerKeys: Record<string, string> = {};
       for (const [key, value] of Object.entries(server.headers)) {
         let cleanKey = key.trim();
-        // Skip empty keys and temp placeholder keys
         if (!cleanKey || cleanKey.startsWith('__new_header_')) {
           continue;
         }
-        // Strip collision markers (shouldn't happen if validation above works)
         if (cleanKey.includes('__collision_')) {
           cleanKey = cleanKey.split('__collision_')[0].trim();
         }
-        cleanedHeaders[cleanKey] = value;
+        headerKeys[cleanKey] = '';
+        const secureKey = `mcpServerHeader.${server.id}.${cleanKey}`;
+        if (value) {
+          secureJsonData[secureKey] = value;
+        } else if (resetSecureKeys.has(secureKey)) {
+          secureJsonData[secureKey] = '';
+        }
       }
 
       return {
         ...server,
-        headers: Object.keys(cleanedHeaders).length > 0 ? cleanedHeaders : undefined,
+        headers: Object.keys(headerKeys).length > 0 ? headerKeys : undefined,
       };
     });
 
-    updatePluginAndReload(plugin.meta.id, {
+    for (const key of deletedSecureKeys) {
+      if (!(key in secureJsonData)) {
+        secureJsonData[key] = '';
+      }
+    }
+
+    const trustedMCPServers = cleanedServers.reduce<Record<string, boolean>>((acc, server) => {
+      if (server.trusted) {
+        acc[server.id] = true;
+      }
+      return acc;
+    }, {});
+
+    const hasSecureChanges = Object.keys(secureJsonData).length > 0;
+    saveAndReload({
       enabled,
       pinned,
       jsonData: {
-        ...jsonData,
+        ...savedJsonData,
         mcpServers: cleanedServers,
+        useBuiltInMCP: state.useBuiltInMCP,
+        builtInMCPToolSelections: state.builtInMCPToolSelections,
+        trustedMCPServers,
       },
+      ...(hasSecureChanges ? { secureJsonData } : {}),
     });
-  };
+  }
+
+  const topologyServiceCount = topology?.nodes.filter((node) => node.type === 'service').length ?? 0;
+  const topologyHasTypedNodes = topology ? topologyServiceCount !== topology.nodes.length : false;
 
   return (
     <div>
-      <FieldSet label="LLM Settings">
-        <Field
-          label="Max Total Tokens"
-          description="Maximum number of tokens for LLM requests (minimum: 1000, recommended: 50000-200000)"
-          invalid={!!validationErrors.maxTotalTokens}
-          error={validationErrors.maxTotalTokens}
-        >
-          <Input
-            width={60}
-            name="maxTotalTokens"
-            id="config-max-tokens"
-            data-testid={testIds.appConfig.maxTotalTokens}
-            type="number"
-            value={state.maxTotalTokens}
-            placeholder="50000"
-            min={1000}
-            max={200000}
-            onChange={onChange}
-            invalid={!!validationErrors.maxTotalTokens}
-          />
-        </Field>
-
-        <div className="mt-3">
-          <Button
-            onClick={onSubmitLLMSettings}
-            data-testid={testIds.appConfig.submit}
-            disabled={isLLMSettingsDisabled || !!validationErrors.maxTotalTokens}
-          >
-            Save LLM settings
-          </Button>
-        </div>
-      </FieldSet>
-
-      <FieldSet label="MCP Mode" className="mt-4">
-        <p className="text-sm text-secondary mb-3">
-          Choose how to connect to MCP (Model Context Protocol) tools. Built-in mode uses Grafana&apos;s integrated MCP
-          server, while External mode connects to custom MCP servers you configure.
-        </p>
-
-        {state.builtInMCPAvailable === null && (
-          <Alert severity="info" title="Checking availability">
-            Checking if built-in MCP is available...
-          </Alert>
-        )}
-
-        {state.builtInMCPAvailable === false && (
-          <Alert severity="warning" title="Built-in MCP unavailable">
-            The grafana-llm-app plugin is not installed or MCP is not enabled. To use built-in MCP, install and
-            configure grafana-llm-app.
-          </Alert>
-        )}
-
-        <Field
-          label="Use Built-in Grafana MCP"
-          description={
-            state.useBuiltInMCP
-              ? "Enable Grafana's built-in MCP server. Can be used together with external servers below."
-              : 'Using external MCP servers configured below. Built-in MCP is disabled.'
-          }
-          data-testid={testIds.appConfig.useBuiltInMCPField}
-        >
-          <Switch
-            value={state.useBuiltInMCP}
-            onChange={(e) => setState({ ...state, useBuiltInMCP: e.currentTarget.checked })}
-            disabled={state.builtInMCPAvailable === false}
-            data-testid={testIds.appConfig.useBuiltInMCPToggle}
-          />
-        </Field>
-
-        {state.useBuiltInMCP && state.builtInMCPAvailable && !state.mcpServers.some((s) => s.enabled) && (
-          <Alert severity="info" title="Built-in MCP enabled" className="mt-2">
-            Using Grafana&apos;s built-in MCP server with observability tools. You can also configure external servers
-            below - all tools will be available together.
-          </Alert>
-        )}
-
-        {state.useBuiltInMCP && state.builtInMCPAvailable && state.mcpServers.some((s) => s.enabled) && (
-          <Alert severity="success" title="Combined mode active" className="mt-2">
-            Using both built-in Grafana MCP and {state.mcpServers.filter((s) => s.enabled).length} external server(s).
-            All tools available in chat.
-          </Alert>
-        )}
-
-        <div className="mt-3">
-          <Button
-            onClick={onSubmitMCPMode}
-            variant="primary"
-            disabled={
-              state.builtInMCPAvailable === null ||
-              (state.useBuiltInMCP && state.builtInMCPAvailable === false)
-            }
-            data-testid={testIds.appConfig.saveMCPModeButton}
-          >
-            Save MCP Mode
-          </Button>
-        </div>
-      </FieldSet>
-
-      <FieldSet label="MCP Server Connections" className="mt-4">
-        <p className="text-sm text-secondary mb-3">
-          Configure additional MCP (Model Context Protocol) servers to extend tool capabilities. Supports OpenAPI-based
-          servers like{' '}
-          <a href="https://github.com/open-webui/mcpo" target="_blank" rel="noopener noreferrer">
-            MCPO
-          </a>
-          .
-        </p>
-
-        {state.mcpServers.map((server) => (
-          <div
-            key={server.id}
-            data-testid={testIds.appConfig.mcpServerCard(server.id)}
-            className="p-4 mb-3 rounded border"
-            style={{
-              borderColor: 'var(--grafana-border-medium)',
-              backgroundColor: 'var(--grafana-background-secondary)',
+      <TabsBar>
+        {SETTINGS_TABS.map((tab) => (
+          <Tab
+            key={tab.id}
+            label={dirtyTabs[tab.id] ? `${tab.label} *` : tab.label}
+            icon={tab.icon}
+            active={activeTab === tab.id}
+            tooltip={dirtyTabs[tab.id] ? 'Unsaved changes' : undefined}
+            data-testid={testIds.appConfig.settingsTab(tab.id)}
+            onChangeTab={(event) => {
+              event.preventDefault();
+              activateSettingsTab(tab.id);
             }}
-          >
-            <div className="flex items-center justify-between mb-3">
-              <div className="flex items-center gap-2">
-                <Icon name="plug" />
-                <span className="font-medium">{server.name || 'Unnamed Server'}</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <Switch
-                  value={server.enabled}
-                  onChange={(e) => updateMCPServer(server.id, { enabled: e.currentTarget.checked })}
-                />
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  icon="trash-alt"
-                  onClick={() => removeMCPServer(server.id)}
-                  data-testid={testIds.appConfig.mcpServerRemoveButton(server.id)}
-                >
-                  Remove
-                </Button>
-              </div>
-            </div>
+          />
+        ))}
+      </TabsBar>
 
+      {dirtyTabs[activeTab] && (
+        <Alert
+          severity="warning"
+          title="Unsaved changes"
+          className="mt-4"
+          data-testid={testIds.appConfig.unsavedChangesNotice}
+        >
+          Save this tab&apos;s settings before leaving or reloading the page.
+        </Alert>
+      )}
+
+      <div className="mt-4" data-testid={testIds.appConfig.settingsTabPanel(activeTab)}>
+        {activeTab === 'general' && (
+          <FieldSet label="LLM Settings">
             <Field
-              label="Server Name"
-              invalid={!!validationErrors.mcpServers[server.id]?.name}
-              error={validationErrors.mcpServers[server.id]?.name}
+              label="Max Total Tokens"
+              description={`Maximum prompt-plus-completion budget per LLM call (minimum: ${MIN_TOTAL_TOKENS}, maximum: ${MAX_TOTAL_TOKENS}, default: ${DEFAULT_MAX_TOTAL_TOKENS})`}
+              invalid={!!validationErrors.maxTotalTokens}
+              error={validationErrors.maxTotalTokens}
             >
               <Input
                 width={60}
-                value={server.name}
-                placeholder="My MCP Server"
-                onChange={(e) => updateMCPServer(server.id, { name: e.currentTarget.value })}
-                invalid={!!validationErrors.mcpServers[server.id]?.name}
-                data-testid={testIds.appConfig.mcpServerNameInput(server.id)}
+                name="maxTotalTokens"
+                id="config-max-tokens"
+                data-testid={testIds.appConfig.maxTotalTokens}
+                type="number"
+                value={state.maxTotalTokens}
+                placeholder={String(DEFAULT_MAX_TOTAL_TOKENS)}
+                min={MIN_TOTAL_TOKENS}
+                max={MAX_TOTAL_TOKENS}
+                onChange={onChange}
+                invalid={!!validationErrors.maxTotalTokens}
               />
             </Field>
 
-            <Field
-              label="Server URL"
-              className="mt-2"
-              invalid={!!validationErrors.mcpServers[server.id]?.url}
-              error={validationErrors.mcpServers[server.id]?.url}
-            >
-              <Input
-                width={60}
-                value={server.url}
-                placeholder="https://mcp-server.example.com"
-                onChange={(e) => updateMCPServer(server.id, { url: e.currentTarget.value })}
-                invalid={!!validationErrors.mcpServers[server.id]?.url}
-                data-testid={testIds.appConfig.mcpServerUrlInput(server.id)}
-              />
-            </Field>
-
-            <Field label="Type" className="mt-2">
-              <select
-                className="gf-form-input"
-                value={server.type || 'openapi'}
-                onChange={(e) =>
-                  updateMCPServer(server.id, {
-                    type: e.target.value as 'openapi' | 'standard' | 'sse' | 'streamable-http',
-                  })
-                }
-                style={{ width: '240px', height: '32px' }}
-              >
-                <option value="openapi">OpenAPI</option>
-                <option value="standard">Standard MCP</option>
-                <option value="sse">SSE</option>
-                <option value="streamable-http">Streamable HTTP</option>
-              </select>
-            </Field>
-
-            {/* Advanced Options Toggle */}
             <div className="mt-3">
-              <button
-                type="button"
-                onClick={() => toggleAdvancedOptions(server.id)}
-                className="flex items-center gap-1 text-sm cursor-pointer bg-transparent border-none p-0"
-                style={{ color: 'var(--grafana-text-link)' }}
-                data-testid={testIds.appConfig.mcpServerAdvancedToggle(server.id)}
+              <Button
+                onClick={onSubmitLLMSettings}
+                data-testid={testIds.appConfig.submit}
+                disabled={isLLMSettingsDisabled || !!validationErrors.maxTotalTokens}
               >
-                <Icon name={state.expandedAdvanced.has(server.id) ? 'angle-down' : 'angle-right'} />
-                Advanced Options
-                {server.headers && Object.keys(server.headers).length > 0 && (
-                  <span className="ml-1 text-xs" style={{ color: 'var(--grafana-text-secondary)' }}>
-                    ({Object.keys(server.headers).length} header{Object.keys(server.headers).length !== 1 ? 's' : ''})
-                  </span>
-                )}
-              </button>
+                Save LLM settings
+              </Button>
+            </div>
+          </FieldSet>
+        )}
+
+        {activeTab === 'agent-runtime' && (
+          <FieldSet label="Agent Runtime">
+            <Field
+              label="Approval policy"
+              description="Controls whether risky tool calls pause until the user approves them."
+            >
+              <RadioButtonGroup
+                value={state.approvalPolicy}
+                onChange={(value) => setState({ ...state, approvalPolicy: value })}
+                options={[
+                  { label: 'Gate writes and external actions', value: 'approval-gated-writes' },
+                  { label: 'Disabled', value: 'off' },
+                ]}
+              />
+            </Field>
+
+            <Field
+              label="Max parallel tool calls"
+              description="Upper bound reserved for the agent scheduler. The current runtime keeps tool execution sequential when a provider serializes tool calls."
+              className="mt-2"
+              invalid={isAgentRuntimeDisabled}
+              error={isAgentRuntimeDisabled ? 'Enter a value from 1 to 16' : undefined}
+            >
+              <Input
+                width={20}
+                name="maxParallelToolCalls"
+                type="number"
+                min={1}
+                max={16}
+                value={state.maxParallelToolCalls}
+                onChange={onChange}
+                invalid={isAgentRuntimeDisabled}
+              />
+            </Field>
+
+            <Field
+              label="Capture eval traces"
+              description="Stores experimental eval inputs and scores when eval routes are enabled."
+              className="mt-2"
+            >
+              <Switch
+                value={state.agentEvalCaptureEnabled}
+                onChange={(e) => setState({ ...state, agentEvalCaptureEnabled: e.currentTarget.checked })}
+              />
+            </Field>
+
+            <div className="mt-3">
+              <Button onClick={onSubmitAgentRuntimeSettings} disabled={isAgentRuntimeDisabled}>
+                Save agent runtime
+              </Button>
+            </div>
+          </FieldSet>
+        )}
+
+        {activeTab === 'mcp' && (
+          <FieldSet label="MCP Servers">
+            <p className="text-sm text-secondary mb-3">
+              MCP (Model Context Protocol) servers provide tools the agent can call. The built-in Grafana MCP is bundled
+              with the grafana-llm-app plugin; external servers extend the toolset.
+            </p>
+
+            {state.builtInMCPAvailable === false && (
+              <Alert severity="warning" title="Built-in MCP unavailable" className="mb-3">
+                The grafana-llm-app plugin is not installed or MCP is not enabled. To use the built-in Grafana MCP,
+                install and configure grafana-llm-app.
+              </Alert>
+            )}
+
+            <div
+              data-testid={testIds.appConfig.mcpServerCard(BUILTIN_MCP_SERVER_ID)}
+              className="p-4 mb-3 rounded border border-medium bg-secondary"
+            >
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2 min-w-0">
+                  <Icon name="plug" />
+                  <span className="font-medium">Grafana Built-in MCP</span>
+                  <StatusBadge status={serverStatuses[BUILTIN_MCP_SERVER_ID]} />
+                </div>
+                <div className="flex items-center gap-2">
+                  <Switch
+                    value={state.useBuiltInMCP}
+                    onChange={(e) => {
+                      const checked = (e.currentTarget ?? e.target)?.checked ?? false;
+                      setState((prev) => ({ ...prev, useBuiltInMCP: checked }));
+                    }}
+                    disabled={state.builtInMCPAvailable === false}
+                    data-testid={testIds.appConfig.useBuiltInMCPToggle}
+                  />
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    icon="wrench"
+                    onClick={() => openManageTools(BUILTIN_MCP_SERVER_ID)}
+                    disabled={!state.useBuiltInMCP || state.builtInMCPAvailable === false}
+                    data-testid={testIds.appConfig.manageToolsButton(BUILTIN_MCP_SERVER_ID)}
+                  >
+                    Tools
+                  </Button>
+                </div>
+              </div>
             </div>
 
-            {/* Advanced Options Content */}
-            {state.expandedAdvanced.has(server.id) && (
+            {state.mcpServers.map((server) => (
               <div
-                className="mt-2 p-3 rounded"
-                style={{
-                  backgroundColor: 'var(--grafana-background-canvas)',
-                  border: '1px solid var(--grafana-border-weak)',
-                }}
+                key={server.id}
+                data-testid={testIds.appConfig.mcpServerCard(server.id)}
+                className="p-4 mb-3 rounded border border-medium bg-secondary"
               >
-                <div className="flex items-center justify-between mb-2">
-                  <span className="text-sm font-medium">Custom Headers</span>
-                  <span className="text-xs" style={{ color: 'var(--grafana-text-secondary)' }}>
-                    {Object.keys(server.headers || {}).length}/10
-                  </span>
-                </div>
-                <p className="text-xs mb-2" style={{ color: 'var(--grafana-text-secondary)' }}>
-                  Add custom HTTP headers to include with every request to this MCP server.
-                </p>
-
-                {/* Header List */}
-                {Object.entries(server.headers || {}).map(([key, value], index) => {
-                  // Display empty for temp keys, strip collision markers for display
-                  let displayKey = key;
-                  if (key.startsWith('__new_header_')) {
-                    displayKey = '';
-                  } else if (key.includes('__collision_')) {
-                    displayKey = key.split('__collision_')[0];
-                  }
-                  const hasCollision = key.includes('__collision_');
-                  // Use index as key since we preserve order when updating headers
-                  // This maintains focus when editing keys
-                  return (
-                    <div key={`${server.id}-header-${index}`} className="mb-2">
-                      <div className="flex items-center gap-2">
-                        <Input
-                          width={20}
-                          value={displayKey}
-                          placeholder="Header key"
-                          onChange={(e) => updateHeader(server.id, key, e.currentTarget.value, value)}
-                          data-testid={testIds.appConfig.mcpServerHeaderKeyInput(server.id, index)}
-                          invalid={hasCollision}
-                        />
-                        <Input
-                          width={30}
-                          value={value}
-                          placeholder="Header value"
-                          onChange={(e) => updateHeader(server.id, key, key, e.currentTarget.value)}
-                          data-testid={testIds.appConfig.mcpServerHeaderValueInput(server.id, index)}
-                        />
-                        <Button
-                          variant="secondary"
-                          size="sm"
-                          icon="times"
-                          onClick={() => removeHeader(server.id, key)}
-                          data-testid={testIds.appConfig.mcpServerHeaderRemoveButton(server.id, index)}
-                          aria-label="Remove header"
-                        />
-                      </div>
-                      {hasCollision && (
-                        <span className="text-xs mt-1 block" style={{ color: 'var(--grafana-text-error)' }}>
-                          Duplicate key name
-                        </span>
-                      )}
-                    </div>
-                  );
-                })}
-
-                {/* Add Header Button */}
-                {(() => {
-                  const headers = server.headers || {};
-                  const headerKeys = Object.keys(headers);
-                  const atMaxHeaders = headerKeys.length >= 10;
-                  // Check if any header has an empty, temp, or collision key
-                  const hasIncompleteHeader = headerKeys.some(
-                    (key) => key.startsWith('__new_header_') || !key.trim() || key.includes('__collision_')
-                  );
-
-                  if (atMaxHeaders) {
-                    return null;
-                  }
-
-                  return (
+                <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <Icon name="plug" />
+                    <span className="font-medium">{server.name || 'Unnamed Server'}</span>
+                    <StatusBadge status={serverStatuses[server.id]} />
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Switch
+                      value={server.enabled}
+                      onChange={(e) => updateMCPServer(server.id, { enabled: e.currentTarget.checked })}
+                    />
                     <Button
                       variant="secondary"
                       size="sm"
-                      icon="plus"
-                      onClick={() => addHeader(server.id)}
-                      disabled={hasIncompleteHeader}
-                      data-testid={testIds.appConfig.mcpServerAddHeaderButton(server.id)}
+                      icon="wrench"
+                      onClick={() => openManageTools(server.id)}
+                      data-testid={testIds.appConfig.manageToolsButton(server.id)}
                     >
-                      Add Header
+                      Tools
                     </Button>
-                  );
-                })()}
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      icon="trash-alt"
+                      onClick={() => removeMCPServer(server.id)}
+                      data-testid={testIds.appConfig.mcpServerRemoveButton(server.id)}
+                    >
+                      Remove
+                    </Button>
+                  </div>
+                </div>
+
+                <Field
+                  label="Server Name"
+                  invalid={!!validationErrors.mcpServers[server.id]?.name}
+                  error={validationErrors.mcpServers[server.id]?.name}
+                >
+                  <Input
+                    width={60}
+                    value={server.name}
+                    placeholder="My MCP Server"
+                    onChange={(e) => updateMCPServer(server.id, { name: e.currentTarget.value })}
+                    invalid={!!validationErrors.mcpServers[server.id]?.name}
+                    data-testid={testIds.appConfig.mcpServerNameInput(server.id)}
+                  />
+                </Field>
+
+                <Field
+                  label="Server URL"
+                  className="mt-2"
+                  invalid={!!validationErrors.mcpServers[server.id]?.url}
+                  error={validationErrors.mcpServers[server.id]?.url}
+                >
+                  <Input
+                    width={60}
+                    value={server.url}
+                    placeholder="https://mcp-server.example.com"
+                    onChange={(e) => updateMCPServer(server.id, { url: e.currentTarget.value })}
+                    invalid={!!validationErrors.mcpServers[server.id]?.url}
+                    data-testid={testIds.appConfig.mcpServerUrlInput(server.id)}
+                  />
+                </Field>
+
+                <Field label="Type" className="mt-2">
+                  <Combobox<MCPServerType>
+                    value={(server.type || 'openapi') as MCPServerType}
+                    onChange={(option) =>
+                      updateMCPServer(server.id, {
+                        type: option.value,
+                      })
+                    }
+                    options={MCP_TYPE_OPTIONS}
+                    width={30}
+                  />
+                </Field>
+
+                <Field
+                  label="Trusted MCP server"
+                  description="Trust this server's MCP annotations for read-only/destructive/open-world risk signals."
+                  className="mt-2"
+                >
+                  <Switch
+                    value={server.trusted ?? false}
+                    onChange={(e) => updateMCPServer(server.id, { trusted: e.currentTarget.checked })}
+                  />
+                </Field>
+
+                <div className="mt-3">
+                  <button
+                    type="button"
+                    onClick={() => toggleAdvancedOptions(server.id)}
+                    className="flex items-center gap-1 text-sm text-link cursor-pointer bg-transparent border-none p-0"
+                    data-testid={testIds.appConfig.mcpServerAdvancedToggle(server.id)}
+                  >
+                    <Icon name={state.expandedAdvanced.has(server.id) ? 'angle-down' : 'angle-right'} />
+                    Advanced Options
+                    {server.headers && Object.keys(server.headers).length > 0 && (
+                      <span className="ml-1 text-xs text-secondary">
+                        ({Object.keys(server.headers).length} header
+                        {Object.keys(server.headers).length !== 1 ? 's' : ''})
+                      </span>
+                    )}
+                  </button>
+                </div>
+
+                {state.expandedAdvanced.has(server.id) && (
+                  <div className="mt-2 p-3 rounded bg-canvas border border-weak">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-sm font-medium">Custom Headers</span>
+                      <span className="text-xs text-secondary">{Object.keys(server.headers || {}).length}/10</span>
+                    </div>
+                    <p className="text-xs text-secondary mb-2">
+                      Add custom HTTP headers to include with every request to this MCP server.
+                    </p>
+
+                    {Object.entries(server.headers || {}).map(([key, value], index) => {
+                      let displayKey = key;
+                      if (key.startsWith('__new_header_')) {
+                        displayKey = '';
+                      } else if (key.includes('__collision_')) {
+                        displayKey = key.split('__collision_')[0];
+                      }
+                      const hasCollision = key.includes('__collision_');
+                      const cleanKey = normalizeHeaderKey(key);
+                      const secureKey = `mcpServerHeader.${server.id}.${cleanKey}`;
+                      const isConfigured = secureJsonFields[secureKey] && !resetSecureKeys.has(secureKey) && !value;
+                      return (
+                        <div key={`${server.id}-header-${index}`} className="mb-2">
+                          <div className="flex items-center gap-2">
+                            <Input
+                              width={20}
+                              value={displayKey}
+                              placeholder="Header key"
+                              onChange={(e) => updateHeader(server.id, key, e.currentTarget.value, value)}
+                              data-testid={testIds.appConfig.mcpServerHeaderKeyInput(server.id, index)}
+                              invalid={hasCollision}
+                            />
+                            {isConfigured ? (
+                              <>
+                                <Input
+                                  width={30}
+                                  value=""
+                                  placeholder="Configured"
+                                  disabled
+                                  type="password"
+                                  data-testid={testIds.appConfig.mcpServerHeaderValueInput(server.id, index)}
+                                />
+                                <Button
+                                  variant="secondary"
+                                  size="sm"
+                                  icon="edit"
+                                  onClick={() => setResetSecureKeys((prev) => new Set(prev).add(secureKey))}
+                                  aria-label="Reset header value"
+                                />
+                              </>
+                            ) : (
+                              <Input
+                                width={30}
+                                value={value}
+                                placeholder="Header value"
+                                type="password"
+                                onChange={(e) => updateHeader(server.id, key, key, e.currentTarget.value)}
+                                data-testid={testIds.appConfig.mcpServerHeaderValueInput(server.id, index)}
+                              />
+                            )}
+                            <Button
+                              variant="secondary"
+                              size="sm"
+                              icon="times"
+                              onClick={() => removeHeader(server.id, key)}
+                              data-testid={testIds.appConfig.mcpServerHeaderRemoveButton(server.id, index)}
+                              aria-label="Remove header"
+                            />
+                          </div>
+                          {hasCollision && <span className="text-xs text-error mt-1 block">Duplicate key name</span>}
+                        </div>
+                      );
+                    })}
+
+                    {Object.keys(server.headers || {}).length < 10 && (
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        icon="plus"
+                        onClick={() => addHeader(server.id)}
+                        disabled={Object.keys(server.headers || {}).some(
+                          (key) => key.startsWith('__new_header_') || !key.trim() || key.includes('__collision_')
+                        )}
+                        data-testid={testIds.appConfig.mcpServerAddHeaderButton(server.id)}
+                      >
+                        Add Header
+                      </Button>
+                    )}
+                  </div>
+                )}
               </div>
-            )}
-          </div>
-        ))}
+            ))}
 
-        <Button
-          variant="secondary"
-          icon="plus"
-          onClick={addMCPServer}
-          data-testid={testIds.appConfig.addMcpServerButton}
-        >
-          Add MCP Server
-        </Button>
-
-        <div className="mt-3">
-          {Object.keys(validationErrors.mcpServers).length > 0 && (
-            <Alert severity="error" title="Validation errors" className="mb-3">
-              Please fix the validation errors above before saving.
-            </Alert>
-          )}
-          <Button
-            onClick={onSubmitMCPServers}
-            variant="primary"
-            disabled={Object.keys(validationErrors.mcpServers).length > 0}
-            data-testid={testIds.appConfig.saveMcpServersButton}
-          >
-            Save MCP Server Connections
-          </Button>
-        </div>
-      </FieldSet>
-
-      <FieldSet label="System Prompt" className="mt-4">
-        <p className="text-sm text-secondary mb-3">
-          Customize the system prompt that instructs the AI assistant. You can use the default observability-focused
-          prompt, replace it entirely with your own, or append additional instructions to it.
-        </p>
-
-        <Field label="Prompt Mode" description="Choose how to configure the system prompt">
-          <RadioButtonGroup
-            options={PROMPT_MODE_OPTIONS}
-            value={state.systemPromptMode}
-            onChange={onSystemPromptModeChange}
-            data-testid={testIds.appConfig.systemPromptModeSelector}
-          />
-        </Field>
-
-        {state.systemPromptMode !== 'default' && (
-          <Field
-            label="Custom System Prompt"
-            description={
-              state.systemPromptMode === 'replace'
-                ? 'Enter your complete custom system prompt'
-                : 'Enter additional instructions to append to the default prompt'
-            }
-            className="mt-3"
-            invalid={!!validationErrors.customSystemPrompt}
-            error={validationErrors.customSystemPrompt}
-          >
-            <TextArea
-              value={state.customSystemPrompt}
-              onChange={(e) => onCustomSystemPromptChange(e.currentTarget.value)}
-              rows={8}
-              placeholder={
-                state.systemPromptMode === 'replace'
-                  ? 'You are a helpful assistant that...'
-                  : 'Additional instructions:\n- Always provide code examples\n- Focus on performance optimization'
-              }
-              invalid={!!validationErrors.customSystemPrompt}
-              data-testid={testIds.appConfig.customSystemPromptTextarea}
-            />
-          </Field>
-        )}
-
-        {state.systemPromptMode !== 'default' && (
-          <p className="text-sm text-secondary mt-1" data-testid={testIds.appConfig.customSystemPromptCharCount}>
-            Characters: {state.customSystemPrompt.length} / {ValidationService.MAX_SYSTEM_PROMPT_LENGTH}
-            {state.customSystemPrompt.length > ValidationService.MAX_SYSTEM_PROMPT_LENGTH * 0.8 && (
-              <span className="text-warning ml-2">(Approaching limit - long prompts may impact performance)</span>
-            )}
-          </p>
-        )}
-
-        <div className="mt-3 flex gap-2">
-          <Button
-            variant="secondary"
-            onClick={() => setShowDefaultPromptModal(true)}
-            icon="eye"
-            data-testid={testIds.appConfig.viewDefaultPromptButton}
-          >
-            View Default Prompt
-          </Button>
-          <Button
-            onClick={onSubmitSystemPrompt}
-            variant="primary"
-            disabled={isSystemPromptSaveDisabled}
-            data-testid={testIds.appConfig.saveSystemPromptButton}
-          >
-            Save System Prompt
-          </Button>
-        </div>
-      </FieldSet>
-
-      {/* Display Settings */}
-      <FieldSet label="Display Settings" data-testid={testIds.appConfig.displaySettings}>
-        <Field
-          label="Kiosk Mode"
-          description="When enabled, embedded Grafana pages hide navigation bars for a cleaner view"
-          data-testid={testIds.appConfig.kioskModeField}
-        >
-          <Switch
-            value={state.kioskModeEnabled}
-            onChange={(e) => setState({ ...state, kioskModeEnabled: e.currentTarget.checked })}
-            data-testid={testIds.appConfig.kioskModeToggle}
-          />
-        </Field>
-
-        <Field
-          label="Chat Panel Position"
-          description="Choose where the chat panel appears when displaying Grafana pages"
-          data-testid={testIds.appConfig.chatPanelPositionField}
-        >
-          <RadioButtonGroup
-            value={state.chatPanelPosition}
-            options={[
-              { label: 'Left', value: 'left' },
-              { label: 'Right', value: 'right' },
-            ]}
-            onChange={(value) => setState({ ...state, chatPanelPosition: value as 'left' | 'right' })}
-          />
-        </Field>
-
-        <div className="mt-4">
-          <Button
-            onClick={() => {
-              const updateData = {
-                enabled,
-                pinned,
-                jsonData: {
-                  ...jsonData,
-                  kioskModeEnabled: state.kioskModeEnabled,
-                  chatPanelPosition: state.chatPanelPosition,
-                },
-              };
-              updatePluginAndReload(plugin.meta.id, updateData);
-            }}
-            variant="primary"
-            data-testid={testIds.appConfig.saveDisplaySettingsButton}
-          >
-            Save Display Settings
-          </Button>
-        </div>
-      </FieldSet>
-
-      <Modal
-        title="Default System Prompt"
-        isOpen={showDefaultPromptModal}
-        onDismiss={() => setShowDefaultPromptModal(false)}
-        data-testid={testIds.appConfig.defaultPromptModal}
-      >
-        <div className="p-2">
-          <p className="text-sm text-secondary mb-3">
-            This is the default system prompt used by the Observability Assistant. It instructs the AI to specialize in
-            the Grafana LGTM stack and use MCP tools.
-          </p>
-          <pre
-            className="p-3 rounded text-sm overflow-auto"
-            style={{
-              backgroundColor: 'var(--grafana-background-secondary)',
-              border: '1px solid var(--grafana-border-weak)',
-              maxHeight: '400px',
-              whiteSpace: 'pre-wrap',
-              wordBreak: 'break-word',
-            }}
-            data-testid={testIds.appConfig.defaultPromptContent}
-          >
-            {SYSTEM_PROMPT}
-          </pre>
-          <div className="mt-3 flex justify-end gap-2">
             <Button
               variant="secondary"
-              onClick={async () => {
-                try {
-                  await navigator.clipboard.writeText(SYSTEM_PROMPT);
-                  setCopySuccess(true);
-                  setTimeout(() => setCopySuccess(false), 2000);
-                } catch (err) {
-                  console.error('Failed to copy system prompt:', err);
-                }
-              }}
-              icon={copySuccess ? 'check' : 'copy'}
-              data-testid={testIds.appConfig.copyDefaultPromptButton}
+              icon="plus"
+              onClick={addMCPServer}
+              data-testid={testIds.appConfig.addMcpServerButton}
             >
-              {copySuccess ? 'Copied!' : 'Copy to Clipboard'}
+              Add MCP Server
             </Button>
-            <Button
-              variant="primary"
-              onClick={() => setShowDefaultPromptModal(false)}
-              data-testid={testIds.appConfig.closeDefaultPromptButton}
+
+            <div className="mt-3">
+              {Object.keys(validationErrors.mcpServers).length > 0 && (
+                <Alert severity="error" title="Validation errors" className="mb-3">
+                  Please fix the validation errors above before saving.
+                </Alert>
+              )}
+              <Button
+                onClick={onSubmitMCPServers}
+                variant="primary"
+                disabled={Object.keys(validationErrors.mcpServers).length > 0}
+                data-testid={testIds.appConfig.saveMcpServersButton}
+              >
+                Save MCP Servers
+              </Button>
+            </div>
+          </FieldSet>
+        )}
+
+        {activeTab === 'prompts' && promptDefaults && (
+          <FieldSet label="Prompt Templates">
+            <p className="text-sm text-secondary mb-3">
+              Customize the prompt templates used by the AI assistant. Templates use Go text/template syntax. Variables
+              like {'{{.AlertName}}'} and {'{{.Target}}'} are replaced at runtime.
+            </p>
+
+            <PromptEditor
+              label="System Prompt"
+              description="Base instructions for the AI assistant across all conversation types."
+              currentValue={state.defaultSystemPrompt}
+              defaultValue={promptDefaults.defaultSystemPrompt}
+              onSave={(value) => savePrompt('defaultSystemPrompt', value)}
+              testIdPrefix={testIds.appConfig.promptEditor.system}
+            />
+
+            <PromptEditor
+              label="Investigation Prompt"
+              description="Template for alert investigation workflows. Use {{.AlertName}} for the alert name."
+              currentValue={state.investigationPrompt}
+              defaultValue={promptDefaults.investigationPrompt}
+              onSave={(value) => savePrompt('investigationPrompt', value)}
+              testIdPrefix={testIds.appConfig.promptEditor.investigation}
+            />
+
+            <PromptEditor
+              label="Performance Prompt"
+              description="Template for performance analysis workflows. Use {{.Target}} for the target system."
+              currentValue={state.performancePrompt}
+              defaultValue={promptDefaults.performancePrompt}
+              onSave={(value) => savePrompt('performancePrompt', value)}
+              testIdPrefix={testIds.appConfig.promptEditor.performance}
+            />
+          </FieldSet>
+        )}
+
+        {activeTab === 'prompts' && !promptDefaults && (
+          <FieldSet label="Prompt Templates">
+            <div className="flex items-center gap-2 text-secondary text-sm">
+              <Spinner />
+              <span>Loading prompt templates...</span>
+            </div>
+          </FieldSet>
+        )}
+
+        {activeTab === 'general' && (
+          <FieldSet label="Display Settings" data-testid={testIds.appConfig.displaySettings}>
+            <Field
+              label="Kiosk Mode"
+              description="When enabled, embedded Grafana pages hide navigation bars for a cleaner view"
+              data-testid={testIds.appConfig.kioskModeField}
             >
-              Close
-            </Button>
-          </div>
-        </div>
-      </Modal>
+              <Switch
+                value={state.kioskModeEnabled}
+                onChange={(e) => setState({ ...state, kioskModeEnabled: e.currentTarget.checked })}
+                data-testid={testIds.appConfig.kioskModeToggle}
+              />
+            </Field>
+
+            <Field
+              label="Chat Panel Position"
+              description="Choose where the chat panel appears when displaying Grafana pages"
+              data-testid={testIds.appConfig.chatPanelPositionField}
+            >
+              <RadioButtonGroup
+                value={state.chatPanelPosition}
+                options={[
+                  { label: 'Left', value: 'left' as const },
+                  { label: 'Right', value: 'right' as const },
+                ]}
+                onChange={(value) => setState({ ...state, chatPanelPosition: value })}
+              />
+            </Field>
+
+            <div className="mt-4">
+              <Button
+                onClick={() => {
+                  saveAndReload({
+                    enabled,
+                    pinned,
+                    jsonData: {
+                      ...savedJsonData,
+                      kioskModeEnabled: state.kioskModeEnabled,
+                      chatPanelPosition: state.chatPanelPosition,
+                    },
+                  });
+                }}
+                variant="primary"
+                data-testid={testIds.appConfig.saveDisplaySettingsButton}
+              >
+                Save Display Settings
+              </Button>
+            </div>
+          </FieldSet>
+        )}
+
+        {activeTab === 'service-graph' && (
+          <FieldSet label="Service Graph">
+            <p className="text-sm text-secondary mb-3">
+              Graphiti-backed service topology is used as RCA context. The graph below is trimmed by backend-enforced
+              limits before rendering in Grafana.
+            </p>
+
+            <Field
+              label="Auto-scan interval"
+              description="How often the Scout agent discovers services via MCP tools and updates the knowledge graph. Each scan covers the corresponding time window."
+            >
+              <Combobox<string>
+                width={20}
+                value={state.graphitiScanInterval}
+                onChange={(option) => setState({ ...state, graphitiScanInterval: option.value })}
+                options={GRAPHITI_SCAN_INTERVAL_OPTIONS}
+              />
+            </Field>
+
+            <Field label="Graphiti connection status">
+              {state.graphitiConnected === null ? (
+                <span className="text-secondary text-sm">
+                  <Icon name="fa fa-spinner" /> Checking…
+                </span>
+              ) : state.graphitiConnected ? (
+                <span className="text-success text-sm">
+                  <Icon name="check-circle" /> Connected
+                </span>
+              ) : (
+                <span className="text-error text-sm">
+                  <Icon name="exclamation-triangle" /> Unreachable — ensure the graphiti MCP server is provisioned and
+                  running
+                </span>
+              )}
+            </Field>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <Field
+                label="Max graph nodes"
+                description={`Backend-enforced node limit. Default ${DEFAULT_SERVICE_GRAPH_MAX_NODES}, maximum ${SERVICE_GRAPH_MAX_NODES_LIMIT}.`}
+                invalid={state.serviceGraphMaxNodes < 1 || state.serviceGraphMaxNodes > SERVICE_GRAPH_MAX_NODES_LIMIT}
+                error={`Enter a value from 1 to ${SERVICE_GRAPH_MAX_NODES_LIMIT}`}
+              >
+                <Input
+                  width={20}
+                  name="serviceGraphMaxNodes"
+                  type="number"
+                  min={1}
+                  max={SERVICE_GRAPH_MAX_NODES_LIMIT}
+                  value={state.serviceGraphMaxNodes}
+                  onChange={onChange}
+                  invalid={state.serviceGraphMaxNodes < 1 || state.serviceGraphMaxNodes > SERVICE_GRAPH_MAX_NODES_LIMIT}
+                  data-testid={testIds.appConfig.serviceGraphMaxNodes}
+                />
+              </Field>
+
+              <Field
+                label="Max graph edges"
+                description={`Backend-enforced edge limit. Default ${DEFAULT_SERVICE_GRAPH_MAX_EDGES}, maximum ${SERVICE_GRAPH_MAX_EDGES_LIMIT}.`}
+                invalid={state.serviceGraphMaxEdges < 1 || state.serviceGraphMaxEdges > SERVICE_GRAPH_MAX_EDGES_LIMIT}
+                error={`Enter a value from 1 to ${SERVICE_GRAPH_MAX_EDGES_LIMIT}`}
+              >
+                <Input
+                  width={20}
+                  name="serviceGraphMaxEdges"
+                  type="number"
+                  min={1}
+                  max={SERVICE_GRAPH_MAX_EDGES_LIMIT}
+                  value={state.serviceGraphMaxEdges}
+                  onChange={onChange}
+                  invalid={state.serviceGraphMaxEdges < 1 || state.serviceGraphMaxEdges > SERVICE_GRAPH_MAX_EDGES_LIMIT}
+                  data-testid={testIds.appConfig.serviceGraphMaxEdges}
+                />
+              </Field>
+            </div>
+
+            <div className="mt-3 flex gap-2">
+              <Button
+                onClick={onSubmitGraphitiSettings}
+                variant="primary"
+                disabled={isServiceGraphSettingsDisabled}
+                data-testid={testIds.appConfig.saveServiceGraphSettingsButton}
+              >
+                Save Service Graph settings
+              </Button>
+
+              <Button
+                onClick={loadTopology}
+                variant="secondary"
+                disabled={topologyLoading || isServiceGraphSettingsDisabled}
+                icon="sync"
+                data-testid={testIds.appConfig.refreshServiceGraphButton}
+              >
+                Refresh graph
+              </Button>
+
+              <Button
+                onClick={onBuildKnowledgeGraph}
+                variant="secondary"
+                disabled={state.graphitiDiscovering || !state.graphitiConnected}
+                icon={state.graphitiDiscovering ? 'fa fa-spinner' : 'database'}
+              >
+                {state.graphitiDiscovering
+                  ? `Building… (${state.graphitiToolCount} tool calls)`
+                  : 'Build Knowledge Graph'}
+              </Button>
+            </div>
+            {state.graphitiError && <div className="mt-2 text-error text-sm">{state.graphitiError}</div>}
+            {!state.graphitiDiscovering && !state.graphitiError && state.graphitiToolCount > 0 && (
+              <div className="mt-2 text-success text-sm">
+                <Icon name="check" /> Build complete — {state.graphitiToolCount} tool calls processed
+              </div>
+            )}
+
+            <div className="mt-4">
+              {topology && (
+                <div
+                  className="mb-3 flex flex-wrap items-center gap-2"
+                  data-testid={testIds.appConfig.serviceGraphSummary}
+                >
+                  <Badge text={topology.source} color="blue" />
+                  <span className="text-sm text-secondary">{topologyServiceCount} services</span>
+                  {topologyHasTypedNodes && (
+                    <span className="text-sm text-secondary">{topology.nodes.length} nodes</span>
+                  )}
+                  <span className="text-sm text-secondary">{topology.edges.length} links</span>
+                </div>
+              )}
+
+              {topologyError && (
+                <Alert title="Could not load service graph" severity="error" className="mb-3">
+                  {topologyError}
+                </Alert>
+              )}
+
+              {topology?.warnings?.map((warning) => (
+                <Alert key={warning} title="Topology warning" severity="warning" className="mb-3">
+                  {warning}
+                </Alert>
+              ))}
+
+              {topologyLoading && (
+                <div className="flex items-center justify-center gap-2 p-6 border border-weak rounded">
+                  <Spinner />
+                  <span className="text-sm text-secondary">Loading topology from Graphiti memory...</span>
+                </div>
+              )}
+
+              {!topologyLoading && topology && <ServiceGraphScene topology={topology} height={460} />}
+            </div>
+          </FieldSet>
+        )}
+      </div>
+
+      {modalServerId && (
+        <ManageToolsModal
+          key={modalServerId}
+          serverId={modalServerId}
+          serverName={
+            modalServerId === BUILTIN_MCP_SERVER_ID
+              ? 'Grafana Built-in MCP'
+              : state.mcpServers.find((s) => s.id === modalServerId)?.name || modalServerId
+          }
+          tools={serverTools}
+          loading={serverToolsLoading}
+          serverEnabled={
+            modalServerId === BUILTIN_MCP_SERVER_ID
+              ? state.useBuiltInMCP
+              : state.mcpServers.find((s) => s.id === modalServerId)?.enabled ?? true
+          }
+          currentSelections={
+            modalServerId === BUILTIN_MCP_SERVER_ID
+              ? state.builtInMCPToolSelections
+              : state.mcpServers.find((s) => s.id === modalServerId)?.toolSelections
+          }
+          isOpen={modalOpen}
+          onDismiss={() => {
+            setModalOpen(false);
+            setModalServerId(null);
+          }}
+          onSave={handleSaveToolSelections}
+        />
+      )}
     </div>
   );
 };
 
 export default AppConfig;
 
-const updatePluginAndReload = async (pluginId: string, data: Partial<PluginMeta<AppPluginSettings>>) => {
+interface PluginUpdatePayload extends Partial<PluginMeta<AppPluginSettings>> {
+  secureJsonData?: Record<string, string>;
+}
+
+const updatePluginAndReload = async (pluginId: string, data: PluginUpdatePayload): Promise<boolean> => {
   try {
     await updatePlugin(pluginId, data);
-
-    // Reloading the page as the changes made here wouldn't be propagated to the actual plugin otherwise.
-    // This is not ideal, however unfortunately currently there is no supported way for updating the plugin state.
     window.location.reload();
-  } catch (e) {
-    console.error('Error while updating the plugin', e);
+    return true;
+  } catch {
+    // Plugin update failed; reload did not occur so the user remains on the config page
+    return false;
   }
 };
 
-const updatePlugin = async (pluginId: string, data: Partial<PluginMeta>) => {
+const updatePlugin = async (pluginId: string, data: PluginUpdatePayload) => {
   const response = await getBackendSrv().fetch({
     url: `/api/plugins/${pluginId}/settings`,
     method: 'POST',

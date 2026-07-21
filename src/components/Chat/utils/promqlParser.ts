@@ -23,6 +23,7 @@ export interface Query {
   from?: string;
   to?: string;
   visualization?: VisualizationType;
+  datasourceUid?: string;
 }
 
 // For backward compatibility
@@ -41,10 +42,22 @@ function getQueryType(language: QueryLanguage): QueryType {
 }
 
 /**
- * Parses attributes (title, from, to, viz) from a string like: title="My Title" from="now-7d" to="now" viz="gauge"
+ * Parses attributes (title, from, to, viz, ds) from a string like: title="My Title" from="now-7d" to="now" viz="gauge" ds="abc123"
  */
-function parseAttributes(attrString: string): { title?: string; from?: string; to?: string; viz?: VisualizationType } {
-  const attrs: { title?: string; from?: string; to?: string; viz?: VisualizationType } = {};
+function parseAttributes(attrString: string): {
+  title?: string;
+  from?: string;
+  to?: string;
+  viz?: VisualizationType;
+  datasourceUid?: string;
+} {
+  const attrs: {
+    title?: string;
+    from?: string;
+    to?: string;
+    viz?: VisualizationType;
+    datasourceUid?: string;
+  } = {};
 
   const titleMatch = attrString.match(/title="([^"]*)"/);
   if (titleMatch) {
@@ -68,6 +81,11 @@ function parseAttributes(attrString: string): { title?: string; from?: string; t
     if (['timeseries', 'stat', 'gauge', 'table', 'piechart', 'barchart', 'heatmap', 'histogram'].includes(vizValue)) {
       attrs.viz = vizValue;
     }
+  }
+
+  const dsMatch = attrString.match(/\bds="([^"]*)"/);
+  if (dsMatch && dsMatch[1].trim()) {
+    attrs.datasourceUid = dsMatch[1].trim();
   }
 
   return attrs;
@@ -97,6 +115,7 @@ export function extractPromQLQueries(content: string): Query[] {
       from: attrs.from,
       to: attrs.to,
       visualization: attrs.viz,
+      datasourceUid: attrs.datasourceUid,
     });
   }
 
@@ -122,8 +141,16 @@ export function removePromQLCodeBlocks(content: string): string {
  */
 export function splitContentByPromQL(
   content: string
-): Array<{ type: 'text' | 'promql' | 'logql' | 'traceql'; content: string; query?: Query }> {
-  const sections: Array<{ type: 'text' | 'promql' | 'logql' | 'traceql'; content: string; query?: Query }> = [];
+): Array<{
+  type: 'text' | 'promql' | 'logql' | 'traceql';
+  content: string;
+  query?: Query;
+}> {
+  const sections: Array<{
+    type: 'text' | 'promql' | 'logql' | 'traceql';
+    content: string;
+    query?: Query;
+  }> = [];
 
   // Captures all attributes as a single group to support title, from, to in any order
   const codeBlockRegex = /```(promql|prometheus|logql|loki|traceql|tempo)([^\n]*)\n([\s\S]*?)```/gi;
@@ -166,6 +193,7 @@ export function splitContentByPromQL(
         from: attrs.from,
         to: attrs.to,
         visualization: attrs.viz,
+        datasourceUid: attrs.datasourceUid,
       },
     });
 

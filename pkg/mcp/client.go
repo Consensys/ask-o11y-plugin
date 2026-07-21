@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	mathrand "math/rand"
 	"net/http"
 	"strings"
 	"sync"
@@ -35,6 +36,10 @@ type Client struct {
 	ctx               context.Context
 	cancel            context.CancelFunc
 	httpClient        *http.Client
+	// sessionCreatedAt tracks when the current MCP session was established so
+	// forceReconnect can dedupe reconnect storms when the on-call retry path
+	// has already refreshed the session within the last few seconds.
+	sessionCreatedAt time.Time
 }
 
 // customRoundTripper wraps http.RoundTripper to add custom headers
@@ -66,17 +71,21 @@ func (t *customRoundTripper) RoundTrip(req *http.Request) (*http.Response, error
 		req.Header.Set("X-Scope-OrgID", t.orgName)
 	}
 
-	// Add any configured headers (can override the above if needed)
+	// Add any configured headers (can override the above if needed).
+	// "Host" must be set via req.Host, not req.Header — Go ignores Header["Host"].
 	for key, value := range t.config.Headers {
-		req.Header.Set(key, value)
+		if strings.EqualFold(key, "Host") {
+			req.Host = value
+		} else {
+			req.Header.Set(key, value)
+		}
 	}
 
 	return t.base.RoundTrip(req)
 }
 
-// NewClient creates a new MCP client
-func NewClient(config ServerConfig, logger log.Logger) *Client {
-	ctx, cancel := context.WithCancel(context.Background())
+func NewClient(parent context.Context, config ServerConfig, logger log.Logger, httpClient *http.Client) *Client {
+	ctx, cancel := context.WithCancel(parent)
 
 	return &Client{
 		config:            config,
@@ -84,6 +93,7 @@ func NewClient(config ServerConfig, logger log.Logger) *Client {
 		operationMetadata: make(map[string]OperationMetadata),
 		ctx:               ctx,
 		cancel:            cancel,
+		httpClient:        httpClient,
 	}
 }
 
@@ -111,6 +121,8 @@ func (c *Client) connectMCP() error {
 		Version: "1.0.0",
 	}, nil)
 
+	httpClient := c.httpClientWithHeaders()
+
 	var transport mcpsdk.Transport
 	var err error
 
@@ -118,13 +130,14 @@ func (c *Client) connectMCP() error {
 	case "sse":
 		transport = &mcpsdk.SSEClientTransport{
 			Endpoint:   c.config.URL,
-			HTTPClient: http.DefaultClient,
+			HTTPClient: httpClient,
 		}
 	case "streamable-http", "http+streamable":
 		transport = &mcpsdk.StreamableClientTransport{
-			Endpoint:   c.config.URL,
-			HTTPClient: http.DefaultClient,
-			MaxRetries: 3,
+			Endpoint:             c.config.URL,
+			HTTPClient:           httpClient,
+			MaxRetries:           3,
+			DisableStandaloneSSE: true,
 		}
 	case "standard":
 		// For standard MCP, we'll use SSE as fallback or custom implementation
@@ -137,18 +150,85 @@ func (c *Client) connectMCP() error {
 		return fmt.Errorf("unsupported MCP transport type: %s", c.config.Type)
 	}
 
-	// Use a fresh background context for connection to prevent issues with
-	// reconnection when the parent context is canceled
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
+	connectCtx, connectCancel := context.WithTimeout(c.ctx, connectDialTimeout)
+	defer connectCancel()
 
-	c.session, err = c.mcpClient.Connect(ctx, transport, nil)
+	c.session, err = c.mcpClient.Connect(connectCtx, transport, nil)
 	if err != nil {
 		return fmt.Errorf("failed to connect to MCP server: %w", err)
 	}
+	c.sessionCreatedAt = time.Now()
 
 	c.logger.Debug("Connected to MCP server", "type", c.config.Type, "url", c.config.URL)
 	return nil
+}
+
+// forceReconnect tears down the current session and re-establishes it. Safe
+// to call from the health monitor between user requests so the next CallTool
+// hits a fresh session instead of a dead one. Dedupes against reconnects that
+// already happened via the on-call path in the last forceReconnectMinInterval.
+func (c *Client) forceReconnect() error {
+	c.mu.Lock()
+	fresh := !c.sessionCreatedAt.IsZero() && time.Since(c.sessionCreatedAt) < forceReconnectMinInterval
+	if fresh {
+		c.mu.Unlock()
+		c.logger.Debug("forceReconnect skipped: session recently refreshed", "server", c.config.ID)
+		return nil
+	}
+	if c.session != nil {
+		c.session.Close()
+		c.session = nil
+	}
+	c.mu.Unlock()
+
+	// connectMCP takes c.mu internally; do not hold it across this call.
+	return c.connectMCP()
+}
+
+const connectDialTimeout = 10 * time.Second
+
+// forceReconnectMinInterval is the dedupe window that prevents the health
+// monitor from thrashing a session that the on-call retry path just refreshed.
+const forceReconnectMinInterval = 5 * time.Second
+
+func (c *Client) baseTransport() http.RoundTripper {
+	if c.httpClient.Transport != nil {
+		return c.httpClient.Transport
+	}
+	return http.DefaultTransport
+}
+
+func (c *Client) sdkHTTPClientWithTransport(transport http.RoundTripper) *http.Client {
+	client := *c.httpClient
+	client.Transport = transport
+	return &client
+}
+
+func (c *Client) httpClientWithHeaders() *http.Client {
+	if len(c.config.Headers) == 0 {
+		return c.httpClient
+	}
+	return c.sdkHTTPClientWithTransport(&configHeaderRoundTripper{
+		base:    c.baseTransport(),
+		headers: c.config.Headers,
+	})
+}
+
+type configHeaderRoundTripper struct {
+	base    http.RoundTripper
+	headers map[string]string
+}
+
+func (t *configHeaderRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	req = req.Clone(req.Context())
+	for key, value := range t.headers {
+		if strings.EqualFold(key, "Host") {
+			req.Host = value
+		} else {
+			req.Header.Set(key, value)
+		}
+	}
+	return t.base.RoundTrip(req)
 }
 
 // connectMCPWithOrgContext establishes a connection to an MCP server with a custom HTTP client that includes org headers.
@@ -174,16 +254,13 @@ func (c *Client) connectMCPWithOrgContext(orgID string, orgName string, scopeOrg
 		Version: "1.0.0",
 	}, nil)
 
-	// Create custom HTTP client with customRoundTripper
-	customHTTPClient := &http.Client{
-		Transport: &customRoundTripper{
-			base:       http.DefaultTransport,
-			orgID:      orgID,
-			orgName:    orgName,
-			scopeOrgId: scopeOrgId,
-			config:     c.config,
-		},
-	}
+	customHTTPClient := c.sdkHTTPClientWithTransport(&customRoundTripper{
+		base:       c.baseTransport(),
+		orgID:      orgID,
+		orgName:    orgName,
+		scopeOrgId: scopeOrgId,
+		config:     c.config,
+	})
 
 	var transport mcpsdk.Transport
 	var err error
@@ -196,9 +273,10 @@ func (c *Client) connectMCPWithOrgContext(orgID string, orgName string, scopeOrg
 		}
 	case "streamable-http", "http+streamable":
 		transport = &mcpsdk.StreamableClientTransport{
-			Endpoint:   c.config.URL,
-			HTTPClient: customHTTPClient,
-			MaxRetries: 3,
+			Endpoint:             c.config.URL,
+			HTTPClient:           customHTTPClient,
+			MaxRetries:           3,
+			DisableStandaloneSSE: true,
 		}
 	case "standard":
 		return fmt.Errorf("standard MCP type requires custom implementation")
@@ -208,14 +286,14 @@ func (c *Client) connectMCPWithOrgContext(orgID string, orgName string, scopeOrg
 		return fmt.Errorf("unsupported MCP transport type: %s", c.config.Type)
 	}
 
-	// Use a fresh background context for connection
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
+	connectCtx, connectCancel := context.WithTimeout(c.ctx, connectDialTimeout)
+	defer connectCancel()
 
-	c.session, err = c.mcpClient.Connect(ctx, transport, nil)
+	c.session, err = c.mcpClient.Connect(connectCtx, transport, nil)
 	if err != nil {
 		return fmt.Errorf("failed to connect to MCP server with org context: %w", err)
 	}
+	c.sessionCreatedAt = time.Now()
 
 	c.logger.Debug("Connected to MCP server with org context", "type", c.config.Type, "url", c.config.URL, "orgID", orgID, "orgName", orgName, "scopeOrgId", scopeOrgId)
 	return nil
@@ -301,14 +379,28 @@ func normalizeJSONSchema(schema map[string]interface{}) map[string]interface{} {
 	return schema
 }
 
+func schemaToMap(schema interface{}) map[string]interface{} {
+	if schema == nil {
+		return nil
+	}
+	schemaBytes, err := json.Marshal(schema)
+	if err != nil {
+		return nil
+	}
+	var out map[string]interface{}
+	if err := json.Unmarshal(schemaBytes, &out); err != nil {
+		return nil
+	}
+	return normalizeJSONSchema(out)
+}
+
 // listMCPTools lists tools using the MCP SDK
 func (c *Client) listMCPTools() ([]Tool, error) {
 	if err := c.connectMCP(); err != nil {
 		return nil, err
 	}
 
-	// Use a fresh background context with timeout for listing tools
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(c.ctx, 10*time.Second)
 	defer cancel()
 
 	result, err := c.session.ListTools(ctx, &mcpsdk.ListToolsParams{})
@@ -319,28 +411,30 @@ func (c *Client) listMCPTools() ([]Tool, error) {
 	// Convert SDK tools to our Tool type
 	tools := make([]Tool, len(result.Tools))
 	for i, sdkTool := range result.Tools {
-		inputSchema := make(map[string]interface{})
-		if sdkTool.InputSchema != nil {
-			// Convert the input schema
-			schemaBytes, err := json.Marshal(sdkTool.InputSchema)
-			if err != nil {
-				c.logger.Warn("Failed to marshal input schema", "tool", sdkTool.Name, "error", err)
-				continue
-			}
-			if err := json.Unmarshal(schemaBytes, &inputSchema); err != nil {
-				c.logger.Warn("Failed to unmarshal input schema", "tool", sdkTool.Name, "error", err)
-				continue
+		inputSchema := schemaToMap(sdkTool.InputSchema)
+		if inputSchema == nil {
+			inputSchema = normalizeJSONSchema(nil)
+		}
+		outputSchema := schemaToMap(sdkTool.OutputSchema)
+
+		var annotations *ToolAnnotations
+		if sdkTool.Annotations != nil {
+			annotations = &ToolAnnotations{
+				ReadOnlyHint:    boolPtrTrueOnly(sdkTool.Annotations.ReadOnlyHint),
+				DestructiveHint: sdkTool.Annotations.DestructiveHint,
+				IdempotentHint:  boolPtrTrueOnly(sdkTool.Annotations.IdempotentHint),
+				OpenWorldHint:   sdkTool.Annotations.OpenWorldHint,
+				Title:           sdkTool.Annotations.Title,
 			}
 		}
 
-		// Normalize the schema to ensure it has the proper JSON Schema structure
-		// LiteLLM expects at least a "properties" field as an object, not null
-		inputSchema = normalizeJSONSchema(inputSchema)
-
 		tools[i] = Tool{
-			Name:        sdkTool.Name,
-			Description: sdkTool.Description,
-			InputSchema: inputSchema,
+			Name:         sdkTool.Name,
+			Title:        sdkTool.Title,
+			Description:  sdkTool.Description,
+			InputSchema:  inputSchema,
+			OutputSchema: outputSchema,
+			Annotations:  annotations,
 		}
 	}
 
@@ -367,9 +461,92 @@ func (c *Client) CallToolWithContext(toolName string, arguments map[string]inter
 	}
 }
 
-// callMCPToolWithContext calls a tool using the MCP SDK with additional context (e.g., Org ID, Org Name, Scope Org ID)
-// Org headers are forwarded to all MCP servers - each server can use whichever headers it needs.
+// retrySchedule is the fixed exponential backoff used to retry MCP tool calls
+// after transport errors. We make one initial attempt plus one retry per entry
+// in this schedule, upper-bounded at ~1.1s worst case so the user-visible delay
+// stays small while giving the MCP sidecar a chance to recover from transient
+// EOF / connection-refused blips.
+var retrySchedule = []time.Duration{
+	100 * time.Millisecond,
+	300 * time.Millisecond,
+	700 * time.Millisecond,
+}
+
+// retryRand seeds jitter; dedicated to retries so we don't perturb the
+// default rand source used elsewhere.
+var retryRand = mathrand.New(mathrand.NewSource(time.Now().UnixNano()))
+var retryRandMu sync.Mutex
+
+// jitteredDuration applies symmetric jitter of ±fraction around base.
+// e.g. jitteredDuration(100ms, 0.30) returns a value in [70ms, 130ms].
+func jitteredDuration(base time.Duration, fraction float64) time.Duration {
+	if fraction <= 0 {
+		return base
+	}
+	retryRandMu.Lock()
+	defer retryRandMu.Unlock()
+	delta := (retryRand.Float64()*2 - 1) * fraction
+	return time.Duration(float64(base) * (1 + delta))
+}
+
+// callToolOncer is the inner function signature used for retry. Declared as a
+// type so tests can inject a stub without spinning up a streamable-http server.
+type callToolOncer func(toolName string, arguments map[string]interface{}, orgID, orgName, scopeOrgId string) (*CallToolResult, error)
+
+// callMCPToolWithContext wraps callMCPToolOnce with classification-aware retry.
+// Only ErrKindTransport errors are retried; tool-logic, protocol, and canceled
+// errors are returned immediately. After the last retry the underlying error
+// is wrapped in *TransportError so callers can distinguish transport outages
+// from tool-layer failures and avoid fabricating around missing data.
 func (c *Client) callMCPToolWithContext(toolName string, arguments map[string]interface{}, orgID string, orgName string, scopeOrgId string) (*CallToolResult, error) {
+	return c.callMCPToolWithRetry(c.callMCPToolOnce, toolName, arguments, orgID, orgName, scopeOrgId)
+}
+
+func (c *Client) callMCPToolWithRetry(once callToolOncer, toolName string, arguments map[string]interface{}, orgID, orgName, scopeOrgId string) (*CallToolResult, error) {
+	var lastErr error
+	maxAttempts := len(retrySchedule) + 1 // initial try + one retry per backoff slot
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		result, err := once(toolName, arguments, orgID, orgName, scopeOrgId)
+		if err == nil {
+			return result, nil
+		}
+		lastErr = err
+		if c.ctx != nil && c.ctx.Err() != nil {
+			return nil, c.ctx.Err()
+		}
+		kind := ClassifyError(c.ctx, err)
+		if kind != ErrKindTransport {
+			return nil, err
+		}
+		if attempt == maxAttempts-1 {
+			break
+		}
+		wait := jitteredDuration(retrySchedule[attempt], 0.30)
+		c.logger.Warn("mcp retry",
+			"server", c.config.ID,
+			"tool", toolName,
+			"attempt", attempt+1,
+			"wait_ms", wait.Milliseconds(),
+			"error", sanitizeError(err))
+		if c.ctx != nil {
+			select {
+			case <-time.After(wait):
+			case <-c.ctx.Done():
+				return nil, c.ctx.Err()
+			}
+		} else {
+			time.Sleep(wait)
+		}
+	}
+	return nil, &TransportError{Err: lastErr}
+}
+
+// callMCPToolOnce executes a single tool call against the MCP session. The
+// existing inline "connection closed / client is closing" one-shot reconnect
+// is preserved here because it reuses the already-locked session path and has
+// been proven safe in production. The outer retry wrapper adds attempts on
+// top — these are two independent reliability layers.
+func (c *Client) callMCPToolOnce(toolName string, arguments map[string]interface{}, orgID string, orgName string, scopeOrgId string) (*CallToolResult, error) {
 	// Track whether we're using org context for potential reconnection
 	// Forward org headers to all MCP servers (not just specific ones)
 	useOrgContext := orgID != "" || orgName != "" || scopeOrgId != ""
@@ -380,7 +557,7 @@ func (c *Client) callMCPToolWithContext(toolName string, arguments map[string]in
 		c.logger.Debug("Calling tool with org context", "server", c.config.ID, "tool", toolName, "orgID", orgID, "orgName", orgName, "scopeOrgId", scopeOrgId)
 
 		if err := c.connectMCPWithOrgContext(orgID, orgName, scopeOrgId); err != nil {
-			c.logger.Error("Failed to connect to server with org context", "server", c.config.ID, "error", err, "orgID", orgID, "orgName", orgName, "scopeOrgId", scopeOrgId)
+			c.logger.Error("Failed to connect to server with org context", "server", c.config.ID, "error", sanitizeError(err))
 			return nil, err
 		}
 	} else {
@@ -400,9 +577,7 @@ func (c *Client) callMCPToolWithContext(toolName string, arguments map[string]in
 		return nil, fmt.Errorf("session not established for tool call")
 	}
 
-	// Use a fresh background context with timeout for tool calls
-	// This prevents issues with connection reuse and canceled parent contexts
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(c.ctx, 30*time.Second)
 	defer cancel()
 
 	result, err := session.CallTool(ctx, &mcpsdk.CallToolParams{
@@ -412,7 +587,7 @@ func (c *Client) callMCPToolWithContext(toolName string, arguments map[string]in
 	if err != nil {
 		// If the call failed due to connection issues, try to reconnect once
 		if strings.Contains(err.Error(), "connection closed") || strings.Contains(err.Error(), "client is closing") {
-			c.logger.Warn("Connection closed, attempting to reconnect", "error", err, "server", c.config.ID)
+			c.logger.Warn("Connection closed, attempting to reconnect", "error", sanitizeError(err), "server", c.config.ID)
 
 			// Try to reconnect - use the same connection method as the original call
 			// to preserve org context headers if they were used
@@ -432,7 +607,7 @@ func (c *Client) callMCPToolWithContext(toolName string, arguments map[string]in
 			}
 
 			if reconnectErr != nil {
-				c.logger.Error("Failed to reconnect after connection closed", "error", reconnectErr, "server", c.config.ID)
+				c.logger.Error("Failed to reconnect after connection closed", "error", sanitizeError(reconnectErr), "server", c.config.ID)
 				return nil, fmt.Errorf("failed to reconnect: %w", reconnectErr)
 			}
 
@@ -445,8 +620,7 @@ func (c *Client) callMCPToolWithContext(toolName string, arguments map[string]in
 				return nil, fmt.Errorf("session not established after reconnection")
 			}
 
-			// Retry the tool call with a fresh context
-			retryCtx, retryCancel := context.WithTimeout(context.Background(), 30*time.Second)
+			retryCtx, retryCancel := context.WithTimeout(c.ctx, 30*time.Second)
 			defer retryCancel()
 
 			result, err = session.CallTool(retryCtx, &mcpsdk.CallToolParams{
@@ -454,11 +628,11 @@ func (c *Client) callMCPToolWithContext(toolName string, arguments map[string]in
 				Arguments: arguments,
 			})
 			if err != nil {
-				c.logger.Error("Failed to call tool after reconnection", "error", err, "server", c.config.ID, "tool", toolName)
+				c.logger.Error("Failed to call tool after reconnection", "error", sanitizeError(err), "server", c.config.ID, "tool", toolName)
 				return nil, fmt.Errorf("failed to call tool after reconnection: %w", err)
 			}
 		} else {
-			c.logger.Error("Failed to call tool", "error", err, "server", c.config.ID, "tool", toolName)
+			c.logger.Error("Failed to call tool", "error", sanitizeError(err), "server", c.config.ID, "tool", toolName)
 			return nil, fmt.Errorf("failed to call tool: %w", err)
 		}
 	}
@@ -479,24 +653,37 @@ func (c *Client) callMCPToolWithContext(toolName string, arguments map[string]in
 				Text: c.Text,
 			}
 		case *mcpsdk.ImageContent:
-			// Convert image content to text representation
 			content[i] = ContentBlock{
-				Type: "text",
-				Text: fmt.Sprintf("[Image: %s]", c.MIMEType),
+				Type:     "image",
+				Data:     string(c.Data),
+				MimeType: c.MIMEType,
+			}
+		case *mcpsdk.AudioContent:
+			content[i] = ContentBlock{
+				Type:     "audio",
+				Data:     string(c.Data),
+				MimeType: c.MIMEType,
+			}
+		case *mcpsdk.ResourceLink:
+			content[i] = ContentBlock{
+				Type:        "resource_link",
+				URI:         c.URI,
+				Name:        c.Name,
+				Title:       c.Title,
+				Description: c.Description,
+				MimeType:    c.MIMEType,
 			}
 		case *mcpsdk.EmbeddedResource:
-			// Convert embedded resource content to text representation
-			if c.Resource != nil && c.Resource.URI != "" {
-				content[i] = ContentBlock{
-					Type: "text",
-					Text: fmt.Sprintf("[Resource: %s]", c.Resource.URI),
-				}
-			} else {
-				content[i] = ContentBlock{
-					Type: "text",
-					Text: "[Embedded Resource]",
+			block := ContentBlock{Type: "resource"}
+			if c.Resource != nil {
+				block.Resource = map[string]interface{}{
+					"uri":      c.Resource.URI,
+					"mimeType": c.Resource.MIMEType,
+					"text":     c.Resource.Text,
+					"blob":     string(c.Resource.Blob),
 				}
 			}
+			content[i] = block
 		default:
 			// Unknown content type
 			content[i] = ContentBlock{
@@ -507,8 +694,9 @@ func (c *Client) callMCPToolWithContext(toolName string, arguments map[string]in
 	}
 
 	return &CallToolResult{
-		Content: content,
-		IsError: result.IsError,
+		Content:           content,
+		StructuredContent: result.StructuredContent,
+		IsError:           result.IsError,
 	}, nil
 }
 
@@ -532,15 +720,15 @@ func (c *Client) listOpenAPITools() ([]Tool, error) {
 		req.Header.Set(key, value)
 	}
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := c.httpClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch OpenAPI spec: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("failed to fetch OpenAPI spec: status %d, body: %s", resp.StatusCode, string(body))
+		io.Copy(io.Discard, resp.Body)
+		return nil, fmt.Errorf("failed to fetch OpenAPI spec: status %d", resp.StatusCode)
 	}
 
 	var spec map[string]interface{}
@@ -594,6 +782,7 @@ func (c *Client) listOpenAPITools() ([]Tool, error) {
 				Name:        operationID,
 				Description: description,
 				InputSchema: schema,
+				Annotations: openAPIToolAnnotations(method),
 			})
 
 			// Store operation metadata
@@ -710,15 +899,15 @@ func (c *Client) listStandardTools() ([]Tool, error) {
 		req.Header.Set(key, value)
 	}
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := c.httpClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list tools: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("failed to list tools: status %d, body: %s", resp.StatusCode, string(body))
+		io.Copy(io.Discard, resp.Body)
+		return nil, fmt.Errorf("failed to list tools: status %d", resp.StatusCode)
 	}
 
 	var result struct {
@@ -732,7 +921,6 @@ func (c *Client) listStandardTools() ([]Tool, error) {
 	return result.Tools, nil
 }
 
-// validateOpenAPIArguments validates arguments against the OpenAPI schema
 func (c *Client) validateOpenAPIArguments(toolName string, arguments map[string]interface{}) error {
 	c.mu.RLock()
 	spec := c.openAPISpec
@@ -861,7 +1049,6 @@ func (c *Client) resolveRef(spec map[string]interface{}, ref string) map[string]
 	return current
 }
 
-// getJSONType returns the JSON type of a Go value
 func getJSONType(value interface{}) string {
 	switch value.(type) {
 	case string:
@@ -952,7 +1139,7 @@ func (c *Client) callOpenAPIToolWithContext(toolName string, arguments map[strin
 		req.Header.Set(key, value)
 	}
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := c.httpClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to call tool: %w", err)
 	}
@@ -968,7 +1155,7 @@ func (c *Client) callOpenAPIToolWithContext(toolName string, arguments map[strin
 			Content: []ContentBlock{
 				{
 					Type: "text",
-					Text: fmt.Sprintf("Error: %s", string(respBody)),
+					Text: fmt.Sprintf("Tool call failed with status: %d", resp.StatusCode),
 				},
 			},
 			IsError: true,
@@ -1030,19 +1217,19 @@ func (c *Client) callStandardTool(toolName string, arguments map[string]interfac
 		req.Header.Set(key, value)
 	}
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := c.httpClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to call tool: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
+		io.Copy(io.Discard, resp.Body)
 		return &CallToolResult{
 			Content: []ContentBlock{
 				{
 					Type: "text",
-					Text: fmt.Sprintf("Error: %s", string(body)),
+					Text: fmt.Sprintf("Tool call failed with status: %d", resp.StatusCode),
 				},
 			},
 			IsError: true,
@@ -1057,6 +1244,22 @@ func (c *Client) callStandardTool(toolName string, arguments map[string]interfac
 	return &result, nil
 }
 
+const maxErrorLen = 512
+
+// sanitizeError returns a truncated error string safe for logging.
+// Uses rune-safe slicing to avoid cutting multi-byte characters.
+func sanitizeError(err error) string {
+	if err == nil {
+		return ""
+	}
+	msg := err.Error()
+	runes := []rune(msg)
+	if len(runes) > maxErrorLen {
+		return string(runes[:maxErrorLen]) + "...(truncated)"
+	}
+	return msg
+}
+
 // isHTTPMethod checks if the given string is a valid HTTP method
 func isHTTPMethod(method string) bool {
 	methods := []string{"get", "post", "put", "delete", "patch", "options", "head"}
@@ -1066,4 +1269,16 @@ func isHTTPMethod(method string) bool {
 		}
 	}
 	return false
+}
+
+func openAPIToolAnnotations(method string) *ToolAnnotations {
+	upper := strings.ToUpper(method)
+	readOnly := upper == "GET" || upper == "HEAD" || upper == "OPTIONS"
+	destructive := upper == "DELETE"
+	idempotent := readOnly || upper == "PUT" || upper == "DELETE"
+	return &ToolAnnotations{
+		ReadOnlyHint:    boolPtr(readOnly),
+		DestructiveHint: boolPtr(destructive),
+		IdempotentHint:  boolPtr(idempotent),
+	}
 }

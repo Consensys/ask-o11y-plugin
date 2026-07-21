@@ -18,9 +18,17 @@ jobs:
   release:
     runs-on: ubuntu-latest
     steps:
-      - uses: grafana/plugin-actions/create-plugin-update@main # zizmor: ignore[unpinned-uses] provided by grafana
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+
+      # Vendored locally (.github/actions/create-plugin-update) to satisfy the
+      # org's "require full-length commit SHA" policy, which rejects the
+      # upstream action's @main ref and its transitive package-manager-detect tag.
+      - uses: ./.github/actions/create-plugin-update
         with:
           node-version: 22
+          token: ${{ github.token }}
           # Uncomment to use a fine-grained personal access token instead of default github token
           # (For more info on how to generate the token see https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens)
           # Make sure to save the token in your repository secrets

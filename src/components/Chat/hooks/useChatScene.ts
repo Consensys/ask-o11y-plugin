@@ -40,13 +40,11 @@ export function useChatScene(
         deactivateRef.current = embeddedScene.activate();
         sceneRef.current = embeddedScene;
         setScene(embeddedScene);
-      } catch (error) {
-        console.error('[useChatScene] Error creating scene:', error);
+      } catch {
         if (deactivateRef.current) {
           try {
             deactivateRef.current();
           } catch (cleanupError) {
-            console.warn('[useChatScene] Error during cleanup after failed creation:', cleanupError);
           }
         }
         deactivateRef.current = null;
@@ -60,7 +58,6 @@ export function useChatScene(
         try {
           deactivateRef.current();
         } catch (error) {
-          console.warn('[useChatScene] Error during unmount deactivation:', error);
         }
         deactivateRef.current = null;
       }
@@ -83,8 +80,8 @@ export function useChatScene(
             secondary.setState({ isVisible: showSidePanel });
           }
         }
-      } catch (error) {
-        console.error('[useChatScene] Error updating visibility:', error);
+      } catch {
+        // Scene visibility update failed; UI stays in current state
       }
     }
   }, [showSidePanel]);
@@ -111,8 +108,8 @@ export function useChatScene(
             secondary.setState({ ...sidePanelState, isVisible: currentIsVisible });
           }
         }
-      } catch (error) {
-        console.error('[useChatScene] Error updating scene state:', error);
+      } catch {
+        // Scene state update failed; UI stays in current state
       }
     }
   }, [chatState, sidePanelState]);

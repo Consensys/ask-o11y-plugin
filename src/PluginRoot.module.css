@@ -1,0 +1,249 @@
+@import 'tailwindcss' important;
+
+:local(.root) {
+  width: 100%;
+  height: 100%;
+}
+
+/* Default CSS custom properties for fallback values (before Grafana theme loads) */
+.ask-o11y-plugin-root {
+  /* Light theme fallback values */
+  --grafana-color-primary: #1f77b4;
+  --grafana-color-primary-light: #4d94d1;
+  --grafana-color-primary-dark: #1565c0;
+  --grafana-color-primary-transparent: rgba(31, 119, 180, 0.1);
+
+  --grafana-color-secondary: #6c757d;
+  --grafana-color-secondary-light: #8a95a0;
+  --grafana-color-secondary-dark: #545b62;
+
+  --grafana-color-background-primary: #ffffff;
+  --grafana-color-background-secondary: #f8f9fa;
+  --grafana-color-background-canvas: #f5f5f5;
+  --grafana-color-background-elevated: #ffffff;
+
+  --grafana-color-text-primary: #212529;
+  --grafana-color-text-secondary: #6c757d;
+  --grafana-color-text-disabled: #adb5bd;
+  --grafana-color-text-link: #1f77b4;
+  --grafana-color-text-link-hover: #1565c0;
+  --grafana-color-text-primary-inverse: #ffffff;
+
+  --grafana-color-border-weak: #e9ecef;
+  --grafana-color-border-medium: #dee2e6;
+  --grafana-color-border-strong: #ced4da;
+
+  --grafana-color-success: #28a745;
+  --grafana-color-success-light: #5cb85c;
+  --grafana-color-success-dark: #1e7e34;
+
+  --grafana-color-warning: #ffc107;
+  --grafana-color-warning-light: #ffd54f;
+  --grafana-color-warning-dark: #f57c00;
+
+  --grafana-color-error: #dc3545;
+  --grafana-color-error-light: #e57373;
+  --grafana-color-error-dark: #c62828;
+
+  --grafana-color-info: #17a2b8;
+  --grafana-color-info-light: #4dd0e1;
+  --grafana-color-info-dark: #0277bd;
+
+  --grafana-spacing-xs: 4px;
+  --grafana-spacing-sm: 8px;
+  --grafana-spacing-md: 16px;
+  --grafana-spacing-lg: 24px;
+  --grafana-spacing-xl: 32px;
+  --grafana-spacing-xxl: 48px;
+
+  --grafana-border-radius-sm: 2px;
+  --grafana-border-radius: 4px;
+  --grafana-border-radius-lg: 6px;
+  --grafana-border-radius-xl: 8px;
+
+  --grafana-font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell',
+    'Fira Sans', 'Droid Sans', 'Helvetica Neue', sans-serif;
+  --grafana-font-family-mono: 'Monaco', 'Menlo', 'Ubuntu Mono', 'Consolas', 'source-code-pro', monospace;
+
+  --grafana-font-size-xs: 10px;
+  --grafana-font-size-sm: 11px;
+  --grafana-font-size-base: 12px;
+  --grafana-font-size-lg: 14px;
+  --grafana-font-size-xl: 16px;
+
+  --grafana-line-height-xs: 1.2;
+  --grafana-line-height-sm: 1.3;
+  --grafana-line-height-base: 1.4;
+  --grafana-line-height-lg: 1.5;
+  --grafana-line-height-xl: 1.6;
+
+  --grafana-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
+  --grafana-shadow-md: 0 4px 6px rgba(0, 0, 0, 0.07);
+  --grafana-shadow-lg: 0 10px 15px rgba(0, 0, 0, 0.1);
+  --grafana-shadow-panel: 0 2px 8px rgba(0, 0, 0, 0.1);
+
+  --grafana-z-index-dropdown: 1000;
+  --grafana-z-index-modal: 1040;
+  --grafana-z-index-tooltip: 1060;
+}
+
+/* Modern animations */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes slideIn {
+  from {
+    opacity: 0;
+    transform: translateX(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes scaleIn {
+  from {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.animate-fadeIn {
+  animation: fadeIn 0.3s ease-out;
+}
+
+.animate-slideIn {
+  animation: slideIn 0.3s ease-out;
+}
+
+.animate-scaleIn {
+  animation: scaleIn 0.2s ease-out;
+}
+
+
+/* Sparkle icon animation */
+@keyframes sparkle {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.8;
+    transform: scale(1.1);
+  }
+}
+
+.animate-sparkle {
+  animation: sparkle 2s ease-in-out infinite;
+}
+
+/* Suggestion pill styling */
+.suggestion-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  border-radius: 20px;
+  font-size: 13px;
+  background: var(--grafana-color-background-secondary);
+  border: 1px solid var(--grafana-color-border-weak);
+  color: var(--grafana-color-text-primary);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.suggestion-pill:hover {
+  background: var(--grafana-color-background-canvas);
+  border-color: var(--grafana-color-border-medium);
+  transform: translateY(-1px);
+}
+
+
+/* Apply Grafana UI ExplorePage pattern for independent scrolling panes
+ * Targets: Scene containers with flex-grow divs (used by EmbeddedScene components)
+ * Purpose: Enable independent scrolling for each visualization pane
+ */
+[data-scene-container] > div > div[style*="flex-grow"] {
+  overflow: auto !important;
+  display: flex !important;
+  flex-direction: column !important;
+}
+
+/* Force EmbeddedScene wrappers to respect parent height constraints
+ * Targets: Direct children of scene containers (EmbeddedScene wrapper divs)
+ * Purpose: Prevent scene wrappers from exceeding container height
+ */
+[data-scene-container] > div {
+  max-height: 100% !important;
+  overflow: hidden !important;
+}
+
+/* Constrain chat scene wrappers using viewport height to account for Grafana header
+ * Purpose: Prevent scene wrappers from overflowing viewport (they start at y=40 due to header)
+ * Using calc(100vh - 40px) instead of 100% to account for the Grafana header positioning
+ * Target ONLY the direct parent container using direct child selector (>)
+ * Scoped to plugin's split layout to avoid interfering with Grafana's native split view
+ */
+[data-plugin-split-layout] div:has(> [data-scene-container="chat"]) {
+  max-height: calc(100vh - 40px) !important;
+  overflow: hidden !important;
+}
+
+/* Ensure chat scene container uses viewport-based height */
+[data-scene-container="chat"] {
+  max-height: calc(100vh - 40px) !important;
+}
+
+/* Ensure chat interface has proper scrolling behavior within SplitLayout scenes
+ * Purpose: Enable scrolling for chat messages when embedded in scene-based layouts
+ */
+[data-scene-container="chat"] > .chat-interface-scroll-container {
+  overflow: auto !important;
+}
+
+/* Hide side panel when isVisible is false
+ * Purpose: Completely hide the GrafanaPageScene pane when side panel is closed
+ * This allows the scene to always exist without taking up visual space
+ * Target the parent wrapper div that contains the hidden child
+ * Scoped to plugin's split layout to avoid interfering with Grafana's native split view
+ */
+[data-plugin-split-layout] div:has(> div[style*="display: none"]) {
+  width: 0 !important;
+  min-width: 0 !important;
+  max-width: 0 !important;
+  overflow: hidden !important;
+  flex: 0 0 0 !important;
+}
+
+/* Hide separator when any sibling pane is hidden (both positions)
+ * Use descendant selector (space) instead of child (>) to handle any nesting depth
+ * This accounts for SceneComponentWrapper or other intermediate elements
+ * Scoped to plugin's split layout to avoid interfering with Grafana's native split view
+ */
+[data-plugin-split-layout] div:has(> div div[style*="display: none"]) > div[role="separator"] {
+  display: none !important;
+}
+
+/* Expand visible pane to full width when sibling pane is hidden (both positions)
+ * Use descendant selector to handle any nesting depth (SceneComponentWrapper, etc.)
+ * Target panes that don't contain a hidden div and aren't the separator
+ * Scoped to plugin's split layout to avoid interfering with Grafana's native split view
+ */
+[data-plugin-split-layout] div:has(> div div[style*="display: none"]) > div:not(:has(div[style*="display: none"])):not([role="separator"]) {
+  flex: 1 1 auto !important;
+  max-width: 100% !important;
+}

@@ -3,7 +3,7 @@
  */
 
 import React from 'react';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { ChatMessage } from './ChatMessage';
 import { ChatMessage as ChatMessageType } from '../../types';
 
@@ -14,9 +14,21 @@ jest.mock('@grafana/ui', () => ({
     colors: {
       text: { primary: '#000', secondary: '#666', disabled: '#999' },
       background: { primary: '#fff', secondary: '#f5f5f5' },
+      border: { weak: '#ddd' },
       primary: { main: '#7c3aed' },
     },
   }),
+  Button: ({ children, disabled, onClick, 'data-testid': dataTestId }: any) => (
+    <button disabled={disabled} onClick={onClick} data-testid={dataTestId}>
+      {children}
+    </button>
+  ),
+  Icon: ({ name }: any) => <span data-testid={`icon-${name}`} />,
+  Alert: ({ children, title }: any) => (
+    <div role="alert" aria-label={title}>
+      {children}
+    </div>
+  ),
 }));
 
 // Mock child components to simplify testing
@@ -38,9 +50,17 @@ jest.mock('../TracesRenderer/TracesRenderer', () => ({
   TracesRenderer: () => <div data-testid="traces-renderer">Traces</div>,
 }));
 
-// Mock streamdown
-jest.mock('streamdown', () => ({
-  Streamdown: ({ text }: { text: string }) => <div data-testid="streamdown">{text}</div>,
+jest.mock('marked', () => ({
+  marked: {
+    parse: (content: string) => `<p data-testid="markdown-content">${content}</p>`,
+  },
+}));
+
+jest.mock('dompurify', () => ({
+  __esModule: true,
+  default: {
+    sanitize: (html: string) => html,
+  },
 }));
 
 // Mock the PromQL parser
@@ -105,7 +125,7 @@ describe('ChatMessage', () => {
 
       render(<ChatMessage message={message} />);
 
-      expect(screen.getByTestId('streamdown')).toBeInTheDocument();
+      expect(screen.getByTestId('markdown-content')).toBeInTheDocument();
     });
 
     it('should have assistant message aria label', () => {
@@ -147,6 +167,84 @@ describe('ChatMessage', () => {
       render(<ChatMessage message={message} />);
 
       expect(screen.queryByTestId('tool-calls-section')).not.toBeInTheDocument();
+    });
+
+    it('should hide approval action buttons after approval is resolved', () => {
+      const message: ChatMessageType = {
+        role: 'assistant',
+        content: 'Waiting on approval',
+        approvals: [
+          {
+            approvalId: 'tc_1',
+            toolCallId: 'tc_1',
+            toolName: 'grafana_alerting_manage_rules',
+            risk: 'destructive',
+            reason: 'Tool is destructive',
+            arguments: '{}',
+            decision: 'approved',
+            resolvedAt: '2026-05-29T12:00:00Z',
+          },
+        ],
+      };
+
+      render(<ChatMessage message={message} onResolveApproval={jest.fn()} />);
+
+      expect(screen.getByText('Approval resolved: grafana_alerting_manage_rules')).toBeInTheDocument();
+      expect(screen.getByText('approved')).toBeInTheDocument();
+      expect(screen.queryByText('Approve')).not.toBeInTheDocument();
+      expect(screen.queryByText('Reject')).not.toBeInTheDocument();
+    });
+
+    it('should collapse evidence details by default', () => {
+      const message: ChatMessageType = {
+        role: 'assistant',
+        content: 'Done',
+        evidence: [
+          {
+            id: 'tc_1',
+            title: 'Evidence from grafana query loki logs',
+            summary: '{"large":"raw payload"}',
+          },
+        ],
+      };
+
+      render(<ChatMessage message={message} />);
+
+      expect(screen.getByText('Evidence')).toBeInTheDocument();
+      expect(screen.getByText('1 collected')).toBeInTheDocument();
+      expect(screen.queryByText('Evidence from grafana query loki logs')).not.toBeInTheDocument();
+      expect(screen.queryByText('{"large":"raw payload"}')).not.toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole('button', { name: /Evidence 1 collected/i }));
+
+      expect(screen.getByText('Evidence from grafana query loki logs')).toBeInTheDocument();
+      expect(screen.getByText('{"large":"raw payload"}')).toBeInTheDocument();
+    });
+
+    it('should offer approve this time and approve for session for pending approvals', () => {
+      const onResolveApproval = jest.fn();
+      const message: ChatMessageType = {
+        role: 'assistant',
+        content: 'Waiting on approval',
+        approvals: [
+          {
+            approvalId: 'tc_1',
+            toolCallId: 'tc_1',
+            toolName: 'grafana_alerting_manage_rules',
+            risk: 'destructive',
+            reason: 'Tool is destructive',
+            arguments: '{}',
+          },
+        ],
+      };
+
+      render(<ChatMessage message={message} onResolveApproval={onResolveApproval} />);
+
+      screen.getByText('Approve this time').click();
+      expect(onResolveApproval).toHaveBeenCalledWith(message.approvals?.[0], 'approved', 'once');
+
+      screen.getByText('Approve for session').click();
+      expect(onResolveApproval).toHaveBeenCalledWith(message.approvals?.[0], 'approved', 'always');
     });
   });
 
@@ -191,6 +289,52 @@ describe('ChatMessage', () => {
       };
 
       render(<ChatMessage message={message} isGenerating={true} isLastMessage={false} />);
+
+      expect(screen.queryByText('Thinking...')).not.toBeInTheDocument();
+    });
+
+    it('should show thinking indicator when no content is present', () => {
+      const message: ChatMessageType = {
+        role: 'assistant',
+        content: '',
+      };
+
+      render(<ChatMessage message={message} isGenerating={true} isLastMessage={true} />);
+
+      expect(screen.getByText('Thinking...')).toBeInTheDocument();
+    });
+
+    it('should show content and hide thinking when content arrives', () => {
+      const message: ChatMessageType = {
+        role: 'assistant',
+        content: 'Here is the answer',
+      };
+
+      render(<ChatMessage message={message} isGenerating={true} isLastMessage={true} />);
+
+      expect(screen.queryByText('Thinking...')).not.toBeInTheDocument();
+      expect(screen.getByTestId('markdown-content')).toBeInTheDocument();
+    });
+
+    it('should show content and hide thinking when content is present', () => {
+      const message: ChatMessageType = {
+        role: 'assistant',
+        content: 'Here is the answer',
+      };
+
+      render(<ChatMessage message={message} isGenerating={true} isLastMessage={true} />);
+
+      expect(screen.getByTestId('markdown-content')).toBeInTheDocument();
+      expect(screen.queryByText('Thinking...')).not.toBeInTheDocument();
+    });
+
+    it('should not show thinking when generation completes with no content', () => {
+      const message: ChatMessageType = {
+        role: 'assistant',
+        content: '',
+      };
+
+      render(<ChatMessage message={message} isGenerating={false} isLastMessage={true} />);
 
       expect(screen.queryByText('Thinking...')).not.toBeInTheDocument();
     });
@@ -267,5 +411,45 @@ describe('ChatMessage', () => {
       expect(screen.getByText('Assistant message', { selector: '.sr-only' })).toBeInTheDocument();
     });
   });
-});
 
+  describe('error and retry', () => {
+    it('should render the error message when message.error is set', () => {
+      const message: ChatMessageType = {
+        role: 'assistant',
+        content: '',
+        error: 'The data is currently unavailable',
+      };
+
+      render(<ChatMessage message={message} />);
+
+      expect(screen.getByText('The data is currently unavailable')).toBeInTheDocument();
+    });
+
+    it('should render a Retry button for the last message and invoke onRetry', () => {
+      const message: ChatMessageType = {
+        role: 'assistant',
+        content: '',
+        error: 'Run failed',
+      };
+      const onRetry = jest.fn();
+
+      render(<ChatMessage message={message} isLastMessage={true} onRetry={onRetry} />);
+
+      const retryButton = screen.getByTestId('data-testid chat-retry-button');
+      fireEvent.click(retryButton);
+      expect(onRetry).toHaveBeenCalledTimes(1);
+    });
+
+    it('should not render a Retry button for non-last messages', () => {
+      const message: ChatMessageType = {
+        role: 'assistant',
+        content: '',
+        error: 'Run failed',
+      };
+
+      render(<ChatMessage message={message} isLastMessage={false} onRetry={jest.fn()} />);
+
+      expect(screen.queryByTestId('data-testid chat-retry-button')).not.toBeInTheDocument();
+    });
+  });
+});

@@ -1,166 +1,320 @@
 import React from 'react';
-import { Streamdown } from 'streamdown';
-import { useTheme2 } from '@grafana/ui';
+import DOMPurify from 'dompurify';
+import { marked } from 'marked';
+import { Alert, Button, Icon, useTheme2 } from '@grafana/ui';
+import { testIds } from '../../../testIds';
 import { ToolCallsSection } from '../ToolCallsSection/ToolCallsSection';
 import { GraphRenderer } from '../GraphRenderer/GraphRenderer';
 import { LogsRenderer } from '../LogsRenderer/LogsRenderer';
 import { TracesRenderer } from '../TracesRenderer/TracesRenderer';
-import { ChatMessage as ChatMessageType } from '../../types';
+import { AgentApprovalItem, ChatMessage as ChatMessageType, ContentSection } from '../../types';
 import { splitContentByPromQL } from '../../utils/promqlParser';
 
 interface ChatMessageProps {
   message: ChatMessageType;
   isGenerating?: boolean;
   isLastMessage?: boolean;
+  onResolveApproval?: (
+    approval: AgentApprovalItem,
+    decision: 'approved' | 'rejected',
+    approvalScope?: 'once' | 'always'
+  ) => Promise<void>;
+  onRetry?: () => void;
 }
 
-export const ChatMessage: React.FC<ChatMessageProps> = ({ message, isGenerating = false, isLastMessage = false }) => {
+function buildTimeRange(query: ContentSection['query']): { from: string; to: string } | undefined {
+  if (!query?.from) {
+    return undefined;
+  }
+  return { from: query.from, to: query.to || 'now' };
+}
+
+interface MarkdownContentProps {
+  content: string;
+}
+
+function MarkdownContent({ content }: MarkdownContentProps): React.ReactElement {
+  const html = React.useMemo(() => {
+    const rendered = marked.parse(content, {
+      async: false,
+      breaks: true,
+      gfm: true,
+    }) as string;
+
+    return DOMPurify.sanitize(rendered);
+  }, [content]);
+
+  return <div dangerouslySetInnerHTML={{ __html: html }} />;
+}
+
+interface QuerySectionProps {
+  section: ContentSection;
+}
+
+function QuerySection({ section }: QuerySectionProps): React.ReactElement | null {
+  const { query, type } = section;
+  if (!query) {
+    return null;
+  }
+
+  const timeRange = buildTimeRange(query);
+
+  if (type === 'promql') {
+    return <GraphRenderer query={query} defaultTimeRange={timeRange} visualizationType={query.visualization} />;
+  }
+  if (type === 'logql') {
+    return <LogsRenderer query={query} defaultTimeRange={timeRange} />;
+  }
+  if (type === 'traceql') {
+    return <TracesRenderer query={query} defaultTimeRange={timeRange} />;
+  }
+  return null;
+}
+
+function AgentTraceSummary({
+  message,
+  onResolveApproval,
+}: {
+  message: ChatMessageType;
+  onResolveApproval?: (
+    approval: AgentApprovalItem,
+    decision: 'approved' | 'rejected',
+    approvalScope?: 'once' | 'always'
+  ) => Promise<void>;
+}): React.ReactElement | null {
+  const theme = useTheme2();
+  const hasEvidence = Boolean(message.evidence?.length);
+  const hasApprovals = Boolean(message.approvals?.length);
+  const [isEvidenceOpen, setIsEvidenceOpen] = React.useState(false);
+
+  if (!hasEvidence && !hasApprovals) {
+    return null;
+  }
+
+  return (
+    <div
+      className="mb-4 rounded-lg overflow-hidden"
+      style={{
+        backgroundColor: theme.colors.background.secondary,
+        border: `1px solid ${theme.colors.border.weak}`,
+      }}
+    >
+      {hasApprovals && (
+        <div className="px-3 py-2 border-b border-weak">
+          {message.approvals?.map((approval) => (
+            <div key={approval.approvalId} className="flex flex-col gap-2 py-2">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <div className="text-sm font-medium" style={{ color: theme.colors.text.primary }}>
+                    {approval.decision ? 'Approval resolved' : 'Approval required'}: {approval.toolName}
+                  </div>
+                  <div className="text-xs mt-1" style={{ color: theme.colors.text.secondary }}>
+                    {approval.risk} · {approval.reason}
+                  </div>
+                  {approval.error && <div className="text-xs text-error mt-1">{approval.error}</div>}
+                </div>
+                {approval.decision ? (
+                  <span className="text-xs font-medium text-secondary">{approval.decision}</span>
+                ) : (
+                  <div className="flex flex-wrap justify-end gap-2">
+                    <Button
+                      size="sm"
+                      icon="check"
+                      disabled={approval.resolving || !onResolveApproval}
+                      onClick={() => onResolveApproval?.(approval, 'approved', 'once')}
+                    >
+                      Approve this time
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      icon="check"
+                      disabled={approval.resolving || !onResolveApproval}
+                      onClick={() => onResolveApproval?.(approval, 'approved', 'always')}
+                    >
+                      Approve for session
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      icon="times"
+                      disabled={approval.resolving || !onResolveApproval}
+                      onClick={() => onResolveApproval?.(approval, 'rejected')}
+                    >
+                      Reject
+                    </Button>
+                  </div>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {hasEvidence && (
+        <div className="px-3 py-2">
+          <button
+            type="button"
+            className="flex w-full items-center gap-3 text-left"
+            aria-expanded={isEvidenceOpen}
+            onClick={() => setIsEvidenceOpen((open) => !open)}
+            style={{
+              background: 'transparent',
+              border: 0,
+              color: 'inherit',
+              cursor: 'pointer',
+              padding: 0,
+            }}
+          >
+            <Icon name={isEvidenceOpen ? 'angle-down' : 'angle-right'} size="sm" />
+            <div className="flex min-w-0 flex-1 items-center justify-between gap-3">
+              <div className="text-xs font-medium truncate" style={{ color: theme.colors.text.secondary }}>
+                Evidence
+              </div>
+              <div className="text-xs" style={{ color: theme.colors.text.secondary }}>
+                {message.evidence?.length || 0} collected
+              </div>
+            </div>
+          </button>
+          {isEvidenceOpen && (
+            <div className="mt-3 space-y-2">
+              {message.evidence?.map((item) => (
+                <div
+                  key={item.id}
+                  className="rounded px-3 py-2 text-xs leading-relaxed"
+                  style={{
+                    backgroundColor: theme.colors.background.primary,
+                    border: `1px solid ${theme.colors.border.weak}`,
+                  }}
+                >
+                  <div className="font-medium" style={{ color: theme.colors.text.primary }}>
+                    {item.title}
+                  </div>
+                  <div className="mt-1 break-words" style={{ color: theme.colors.text.secondary }}>
+                    {item.summary}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+export const ChatMessage: React.FC<ChatMessageProps> = ({
+  message,
+  isGenerating = false,
+  isLastMessage = false,
+  onResolveApproval,
+  onRetry,
+}) => {
   const theme = useTheme2();
   const showThinking = message.role === 'assistant' && isGenerating && isLastMessage && !message.content;
   const isUser = message.role === 'user';
 
   if (isUser) {
-    // User messages: Sober colored bubble
     return (
       <div className="flex w-full justify-end mb-5 animate-slideIn" role="article" aria-label="User message">
         <div className="max-w-[75%]">
           <div
             className="px-4 py-3 rounded-xl rounded-br-sm"
             style={{
-              backgroundColor: theme.isDark ? '#3730a3' : '#4f46e5',
-              color: '#ffffff',
+              backgroundColor: theme.colors.primary.main,
+              color: theme.colors.primary.contrastText,
             }}
             tabIndex={0}
             aria-live="polite"
           >
             <span className="sr-only">User message</span>
-            <div className="text-sm leading-relaxed whitespace-normal break-words">{message.content}</div>
+            <div className="text-sm leading-relaxed whitespace-pre-wrap break-words">{message.content}</div>
           </div>
         </div>
       </div>
     );
   }
 
-  // Split content by PromQL queries for assistant messages
   const contentSections = message.content ? splitContentByPromQL(message.content) : [];
 
-  // Assistant messages: Plain text with modern styling and embedded graphs
   return (
     <div className="flex w-full mb-6 animate-fadeIn" role="article" aria-label="Assistant message">
       <div className="w-full max-w-none" tabIndex={0}>
         <span className="sr-only">Assistant message</span>
-        {/* Tool Calls Section */}
         {message.toolCalls && message.toolCalls.length > 0 && (
           <div className="mb-4">
             <ToolCallsSection toolCalls={message.toolCalls} />
           </div>
         )}
 
-        {/* Message Content */}
-        {showThinking ? (
-          <div
-            className="flex items-center gap-3 px-4 py-3 rounded-lg animate-pulse"
-            style={{
-              backgroundColor: theme.isDark ? 'rgba(255, 255, 255, 0.03)' : 'rgba(0, 0, 0, 0.02)',
-              color: theme.colors.text.secondary,
-            }}
-          >
+        <AgentTraceSummary message={message} onResolveApproval={onResolveApproval} />
+
+        {showThinking && (
+          <div className="flex items-center gap-3 px-4 py-3 rounded-lg animate-pulse bg-surface text-secondary">
             <div className="flex gap-1.5">
-              <div
-                className="w-2 h-2 rounded-full animate-pulse"
-                style={{
-                  backgroundColor: theme.colors.primary.main,
-                  animationDelay: '0ms',
-                }}
-              ></div>
-              <div
-                className="w-2 h-2 rounded-full animate-pulse"
-                style={{
-                  backgroundColor: theme.colors.primary.main,
-                  animationDelay: '150ms',
-                }}
-              ></div>
-              <div
-                className="w-2 h-2 rounded-full animate-pulse"
-                style={{
-                  backgroundColor: theme.colors.primary.main,
-                  animationDelay: '300ms',
-                }}
-              ></div>
+              {[0, 150, 300].map((delay) => (
+                <div
+                  key={delay}
+                  className="w-2 h-2 rounded-full animate-pulse"
+                  style={{
+                    backgroundColor: theme.colors.primary.main,
+                    animationDelay: `${delay}ms`,
+                  }}
+                />
+              ))}
             </div>
             <span className="text-sm font-medium">Thinking...</span>
           </div>
-        ) : contentSections.length > 0 ? (
-          <div
-            className="text-sm leading-relaxed whitespace-normal break-words"
-            style={{ color: theme.colors.text.primary }}
-          >
+        )}
+
+        {!showThinking && contentSections.length > 0 && (
+          <div className="text-sm leading-relaxed whitespace-normal break-words text-primary">
             {contentSections.map((section, index) => {
               if (section.type === 'text') {
                 return (
                   <div key={index} className="prose prose-sm max-w-none">
-                    <Streamdown>{section.content}</Streamdown>
-                  </div>
-                );
-              } else if (section.type === 'promql' && section.query) {
-                return (
-                  <div key={index} className="my-3">
-                    <GraphRenderer
-                      query={section.query}
-                      defaultTimeRange={
-                        section.query.from
-                          ? {
-                              from: section.query.from,
-                              to: section.query.to || 'now',
-                            }
-                          : undefined
-                      }
-                      visualizationType={section.query.visualization}
-                    />
-                  </div>
-                );
-              } else if (section.type === 'logql' && section.query) {
-                return (
-                  <div key={index} className="my-3">
-                    <LogsRenderer
-                      query={section.query}
-                      defaultTimeRange={
-                        section.query.from
-                          ? {
-                              from: section.query.from,
-                              to: section.query.to || 'now',
-                            }
-                          : undefined
-                      }
-                    />
-                  </div>
-                );
-              } else if (section.type === 'traceql' && section.query) {
-                return (
-                  <div key={index} className="my-3">
-                    <TracesRenderer
-                      query={section.query}
-                      defaultTimeRange={
-                        section.query.from
-                          ? {
-                              from: section.query.from,
-                              to: section.query.to || 'now',
-                            }
-                          : undefined
-                      }
-                    />
+                    <MarkdownContent content={section.content} />
                   </div>
                 );
               }
+
+              if (section.query) {
+                return (
+                  <div key={index} className="my-3">
+                    <QuerySection section={section} />
+                  </div>
+                );
+              }
+
               return null;
             })}
           </div>
-        ) : (
-          <div
-            className="text-sm leading-relaxed whitespace-normal break-words prose prose-sm max-w-none"
-            style={{ color: theme.colors.text.primary }}
-          >
-            <Streamdown>{message.content}</Streamdown>
+        )}
+
+        {!showThinking && contentSections.length === 0 && (
+          <div className="text-sm leading-relaxed whitespace-normal break-words prose prose-sm max-w-none text-primary">
+            <MarkdownContent content={message.content} />
+          </div>
+        )}
+
+        {message.error && (
+          <div className="mt-3">
+            <Alert title="Something went wrong" severity="error">
+              <div className="flex flex-col items-start gap-2">
+                <span className="break-words">{message.error}</span>
+                {isLastMessage && onRetry && (
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    icon="sync"
+                    onClick={onRetry}
+                    data-testid={testIds.chat.retryButton}
+                  >
+                    Retry
+                  </Button>
+                )}
+              </div>
+            </Alert>
           </div>
         )}
       </div>

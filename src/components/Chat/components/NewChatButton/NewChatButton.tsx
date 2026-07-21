@@ -1,0 +1,97 @@
+import React, { useState, useRef, useEffect } from 'react';
+import { Button, useStyles2, useTheme2 } from '@grafana/ui';
+import { cx } from '@emotion/css';
+import { GrafanaTheme2 } from '@grafana/data';
+import { getHoverButtonStyle } from '../../../../theme';
+import { testIds } from '../../../testIds';
+
+interface NewChatButtonProps {
+  onConfirm: () => void;
+  isGenerating?: boolean;
+}
+
+export function NewChatButton({ onConfirm, isGenerating }: NewChatButtonProps): React.ReactElement {
+  const theme = useTheme2();
+  const styles = useStyles2(getStyles);
+  const [isOpen, setIsOpen] = useState(false);
+  const popupRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!isOpen) {
+      return;
+    }
+
+    function handleClickOutside(event: MouseEvent): void {
+      if (popupRef.current && !popupRef.current.contains(event.target as Node)) {
+        setIsOpen(false);
+      }
+    }
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [isOpen]);
+
+  function handleConfirm(): void {
+    onConfirm();
+    setIsOpen(false);
+  }
+
+  return (
+    <div className="relative">
+      <Button
+        type="button"
+        size="sm"
+        variant="secondary"
+        icon="plus"
+        onClick={() => setIsOpen(!isOpen)}
+        aria-label="New chat"
+        data-testid={testIds.chat.newChatButton}
+      >
+        New chat
+      </Button>
+
+      {isOpen && (
+        <div
+          ref={popupRef}
+          className="absolute bottom-full left-0 mb-2 w-48 p-3 rounded-lg shadow-xl border z-50 flex flex-col gap-2"
+          style={{
+            backgroundColor: theme.colors.background.primary,
+            borderColor: theme.colors.border.weak,
+          }}
+        >
+          <p className="text-xs font-medium mb-1" style={{ color: theme.colors.text.primary }}>
+            {isGenerating ? 'This will stop the current response. Start a new chat?' : 'Start a new chat?'}
+          </p>
+          <div className="flex gap-2">
+            <button
+              onClick={handleConfirm}
+              className="flex-1 px-2 py-1 text-xs rounded font-medium transition-colors"
+              style={{
+                backgroundColor: theme.colors.primary.main,
+                color: theme.colors.text.primary,
+              }}
+            >
+              Yes
+            </button>
+            <button
+              onClick={() => setIsOpen(false)}
+              className={cx('flex-1 px-2 py-1 text-xs rounded font-medium transition-colors', styles.hoverButton)}
+              style={{
+                color: theme.colors.text.secondary,
+                border: `1px solid ${theme.colors.border.weak}`,
+              }}
+            >
+              No
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+const getStyles = (theme: GrafanaTheme2) => ({
+  hoverButton: getHoverButtonStyle(theme),
+});

@@ -4,17 +4,42 @@ export interface MCPServerConfig {
   url: string;
   enabled: boolean;
   type?: 'openapi' | 'standard' | 'sse' | 'streamable-http';
+  trusted?: boolean;
   headers?: Record<string, string>;
+  toolSelections?: Record<string, boolean>;
+  riskOverrides?: Record<string, ToolRiskOverride>;
 }
 
-export type SystemPromptMode = 'default' | 'replace' | 'append';
+export interface ToolRiskOverride {
+  requiresApproval?: boolean;
+  readOnly?: boolean;
+  destructive?: boolean;
+  openWorld?: boolean;
+  reason?: string;
+}
 
 export type AppPluginSettings = {
-  maxTotalTokens?: number;
   mcpServers?: MCPServerConfig[];
-  systemPromptMode?: SystemPromptMode;
-  customSystemPrompt?: string;
+  useBuiltInMCP?: boolean;
+  builtInMCPToolSelections?: Record<string, boolean>;
+  trustedMCPServers?: Record<string, boolean>;
+  riskOverrides?: Record<string, ToolRiskOverride>;
+
+  defaultSystemPrompt?: string;
+  investigationPrompt?: string;
+  performancePrompt?: string;
+
+  maxTotalTokens?: number;
+  recentMessageCount?: number;
+
   kioskModeEnabled?: boolean;
   chatPanelPosition?: 'left' | 'right';
-  useBuiltInMCP?: boolean;
+
+  graphitiScanInterval?: string;
+  serviceGraphMaxNodes?: number;
+  serviceGraphMaxEdges?: number;
+
+  approvalPolicy?: string;
+  maxParallelToolCalls?: number;
+  agentEvalCaptureEnabled?: boolean;
 };

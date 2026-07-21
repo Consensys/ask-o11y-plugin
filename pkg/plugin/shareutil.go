@@ -8,7 +8,15 @@ import (
 	"time"
 )
 
-// generateShareID generates a cryptographically secure share ID
+func isValidSecureID(id string) bool {
+	expectedLen := base64.RawURLEncoding.EncodedLen(ShareIDBytes)
+	if len(id) != expectedLen {
+		return false
+	}
+	_, err := base64.RawURLEncoding.DecodeString(id)
+	return err == nil
+}
+
 func generateShareID() (string, error) {
 	bytes := make([]byte, ShareIDBytes)
 	if _, err := rand.Read(bytes); err != nil {

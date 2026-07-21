@@ -1,79 +1,15 @@
 import React from 'react';
 import { SceneObjectBase, SceneObjectState, SceneComponentProps } from '@grafana/scenes';
 import { useTheme2 } from '@grafana/ui';
-import { ChatMessage as ChatMessageType } from '../types';
+import { ChatInterfaceProps } from '../types';
 import { ChatHeader } from '../components/ChatHeader/ChatHeader';
 import { ChatHistory } from '../components/ChatHistory/ChatHistory';
-import { ChatInput, ChatInputRef } from '../components/ChatInput/ChatInput';
-import { SummarizationIndicator } from '../components/SummarizationIndicator/SummarizationIndicator';
+import { ChatInput } from '../components/ChatInput/ChatInput';
 import { WelcomeMessage } from '../components/WelcomeMessage/WelcomeMessage';
 import { QuickSuggestions } from '../components/QuickSuggestions/QuickSuggestions';
 
-export interface ChatInterfaceState extends SceneObjectState {
-  // Chat history and state
-  chatHistory: ChatMessageType[];
-  currentInput: string;
-  isGenerating: boolean;
-  toolsLoading: boolean;
-
-  // Session info
-  currentSessionTitle?: string;
-  isSummarizing: boolean;
-  hasSummary: boolean;
-
-  // Callbacks
-  setCurrentInput: (value: string) => void;
-  sendMessage: () => void;
-  handleKeyPress: (e: React.KeyboardEvent) => void;
-
-  // Refs
-  chatContainerRef: React.RefObject<HTMLDivElement>;
-  chatInputRef: React.RefObject<ChatInputRef>;
-  bottomSpacerRef: React.RefObject<HTMLDivElement>;
-
-  // Slots for custom buttons
-  leftSlot?: React.ReactNode;
-  rightSlot?: React.ReactNode;
-
-  // Read-only mode flag
-  readOnly?: boolean;
-
-  // Welcome screen props (for when chatHistory is empty)
-  onSuggestionClick?: (message: string) => void;
-}
-
-export interface ChatInterfaceProps {
-  // Chat history and state
-  chatHistory: ChatMessageType[];
-  currentInput: string;
-  isGenerating: boolean;
-  toolsLoading: boolean;
-
-  // Session info
-  currentSessionTitle?: string;
-  isSummarizing: boolean;
-  hasSummary: boolean;
-
-  // Callbacks
-  setCurrentInput: (value: string) => void;
-  sendMessage: () => void;
-  handleKeyPress: (e: React.KeyboardEvent) => void;
-
-  // Refs
-  chatContainerRef: React.RefObject<HTMLDivElement>;
-  chatInputRef: React.RefObject<ChatInputRef>;
-  bottomSpacerRef: React.RefObject<HTMLDivElement>;
-
-  // Slots for custom buttons
-  leftSlot?: React.ReactNode;
-  rightSlot?: React.ReactNode;
-
-  // Read-only mode flag
-  readOnly?: boolean;
-
-  // Welcome screen props (for when chatHistory is empty)
-  onSuggestionClick?: (message: string) => void;
-}
+/** Scene state extends the props with SceneObjectState for Grafana scenes */
+export interface ChatInterfaceState extends SceneObjectState, ChatInterfaceProps {}
 
 function useChatInterface(model: ChatInterfaceScene): ChatInterfaceProps {
   const state = model.useState();
@@ -81,10 +17,8 @@ function useChatInterface(model: ChatInterfaceScene): ChatInterfaceProps {
     chatHistory: state.chatHistory,
     currentInput: state.currentInput,
     isGenerating: state.isGenerating,
-    toolsLoading: state.toolsLoading,
     currentSessionTitle: state.currentSessionTitle,
-    isSummarizing: state.isSummarizing,
-    hasSummary: state.hasSummary,
+    currentModelLabel: state.currentModelLabel,
     setCurrentInput: state.setCurrentInput,
     sendMessage: state.sendMessage,
     handleKeyPress: state.handleKeyPress,
@@ -95,6 +29,10 @@ function useChatInterface(model: ChatInterfaceScene): ChatInterfaceProps {
     rightSlot: state.rightSlot,
     readOnly: state.readOnly,
     onSuggestionClick: state.onSuggestionClick,
+    queuedMessageCount: state.queuedMessageCount,
+    onStopGeneration: state.onStopGeneration,
+    onResolveApproval: state.onResolveApproval,
+    onRetry: state.onRetry,
   };
 }
 
@@ -114,10 +52,8 @@ function ChatInterfaceRenderer({ model }: SceneComponentProps<ChatInterfaceScene
     chatHistory,
     currentInput,
     isGenerating,
-    toolsLoading,
     currentSessionTitle,
-    isSummarizing,
-    hasSummary,
+    currentModelLabel,
     setCurrentInput,
     sendMessage,
     handleKeyPress,
@@ -128,6 +64,10 @@ function ChatInterfaceRenderer({ model }: SceneComponentProps<ChatInterfaceScene
     rightSlot,
     readOnly,
     onSuggestionClick,
+    queuedMessageCount,
+    onStopGeneration,
+    onResolveApproval,
+    onRetry,
   } = props;
 
   const hasMessages = chatHistory.length > 0;
@@ -137,16 +77,18 @@ function ChatInterfaceRenderer({ model }: SceneComponentProps<ChatInterfaceScene
       {hasMessages ? (
         <>
           {/* Scrollable chat history area */}
-          <div className="chat-interface-scroll-container w-full px-4 max-w-4xl mx-auto" style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, overflow: 'auto' }}>
-            {/* Header - only show when there are messages */}
-            <ChatHeader isGenerating={isGenerating} currentSessionTitle={currentSessionTitle} />
+          <div
+            ref={chatContainerRef}
+            className="chat-interface-scroll-container w-full px-4 max-w-4xl mx-auto"
+            style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, overflow: 'auto' }}
+          >
+            <ChatHeader
+              isGenerating={isGenerating}
+              currentSessionTitle={currentSessionTitle}
+              currentModelLabel={currentModelLabel}
+            />
 
-            {/* Summarization indicator */}
-            <SummarizationIndicator isSummarizing={isSummarizing} hasSummary={hasSummary} />
-
-            {/* Chat messages */}
             <div
-              ref={chatContainerRef}
               className="py-6 rounded-lg"
               role="log"
               aria-label="Chat messages"
@@ -154,11 +96,16 @@ function ChatInterfaceRenderer({ model }: SceneComponentProps<ChatInterfaceScene
               aria-relevant="additions"
               tabIndex={0}
               style={{
-                backgroundColor: theme.isDark ? '#1a1b1f' : theme.colors.background.primary,
+                backgroundColor: theme.colors.background.primary,
               }}
             >
               <div className="px-4">
-                <ChatHistory chatHistory={chatHistory} isGenerating={isGenerating} />
+                <ChatHistory
+                  chatHistory={chatHistory}
+                  isGenerating={isGenerating}
+                  onResolveApproval={onResolveApproval}
+                  onRetry={onRetry}
+                />
                 <div ref={bottomSpacerRef} className="h-16" style={{ scrollMarginBottom: '100px' }} />
               </div>
             </div>
@@ -171,19 +118,20 @@ function ChatInterfaceRenderer({ model }: SceneComponentProps<ChatInterfaceScene
               role="region"
               aria-label="Message input"
               style={{
-                backgroundColor: theme.isDark ? '#111217' : theme.colors.background.canvas,
+                backgroundColor: theme.colors.background.canvas,
               }}
             >
               <ChatInput
                 ref={chatInputRef}
                 currentInput={currentInput}
                 isGenerating={isGenerating}
-                toolsLoading={toolsLoading}
                 setCurrentInput={setCurrentInput}
                 sendMessage={sendMessage}
                 handleKeyPress={handleKeyPress}
                 leftSlot={leftSlot}
                 rightSlot={rightSlot}
+                queuedMessageCount={queuedMessageCount}
+                onStopGeneration={onStopGeneration}
               />
             </div>
           )}
@@ -191,21 +139,20 @@ function ChatInterfaceRenderer({ model }: SceneComponentProps<ChatInterfaceScene
       ) : (
         <div className="flex-1 flex flex-col min-h-0 w-full max-w-3xl mx-auto px-4">
           <div className="flex-1 flex flex-col items-center justify-center py-8">
-            {/* Welcome header */}
             <WelcomeMessage />
 
-            {/* Chat Input */}
             <div className="w-full mt-10 mb-4" role="region" aria-label="Message input">
               <ChatInput
                 ref={chatInputRef}
                 currentInput={currentInput}
                 isGenerating={isGenerating}
-                toolsLoading={toolsLoading}
                 setCurrentInput={setCurrentInput}
                 sendMessage={sendMessage}
                 handleKeyPress={handleKeyPress}
-                leftSlot={undefined}
+                leftSlot={leftSlot}
                 rightSlot={rightSlot}
+                queuedMessageCount={queuedMessageCount}
+                onStopGeneration={onStopGeneration}
               />
             </div>
 
