@@ -78,7 +78,7 @@ test.describe('Side Panel', () => {
       if (!isPanelVisible) {
         // Inject a test iframe to simulate panel opening
         await page.evaluate(() => {
-          const mainContent = document.querySelector('[role="main"]');
+          const mainContent = document.querySelector('[data-plugin-split-layout]');
           if (mainContent) {
             // Find the SplitLayout container
             const containers = Array.from(mainContent.querySelectorAll('div'));
@@ -124,7 +124,7 @@ test.describe('Side Panel', () => {
       } else {
         // Simulate panel closing by injecting the hidden div
         await page.evaluate(() => {
-          const mainContent = document.querySelector('[role="main"]');
+          const mainContent = document.querySelector('[data-plugin-split-layout]');
           if (mainContent) {
             const containers = Array.from(mainContent.querySelectorAll('div'));
             for (const container of containers) {
@@ -146,7 +146,7 @@ test.describe('Side Panel', () => {
       // 2. The separator should be hidden
       // 3. The visible pane should expand (flex: 1 1 auto, max-width: 100%)
       const cssCheck = await page.evaluate(() => {
-        const mainContent = document.querySelector('[role="main"]');
+        const mainContent = document.querySelector('[data-plugin-split-layout]');
         if (!mainContent) return { success: false, reason: 'No main content' };
 
         const containers = Array.from(mainContent.querySelectorAll('div'));

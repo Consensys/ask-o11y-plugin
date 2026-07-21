@@ -4,6 +4,9 @@ import { of } from 'rxjs';
 import { PluginType } from '@grafana/data';
 import AppConfig, { AppConfigProps } from './AppConfig';
 import { testIds } from 'components/testIds';
+import { getPluginStorageKey } from '../../utils/storageKeys';
+
+const SETTINGS_TAB_STORAGE_KEY = getPluginStorageKey('settings.activeTab');
 
 jest.mock('@grafana/runtime', () => ({
   getBackendSrv: () => ({
@@ -102,7 +105,7 @@ describe('Components/AppConfig', () => {
 
     expect(screen.getByRole('group', { name: /mcp servers/i })).toBeInTheDocument();
     expect(screen.queryByTestId(testIds.appConfig.maxTotalTokens)).not.toBeInTheDocument();
-    expect(window.sessionStorage.getItem('ask-o11y.settings.activeTab')).toBe('mcp');
+    expect(window.sessionStorage.getItem(SETTINGS_TAB_STORAGE_KEY)).toBe('mcp');
   });
 
   test('shows unsaved changes notice for edited settings tabs', () => {
@@ -127,7 +130,7 @@ describe('Components/AppConfig', () => {
   });
 
   test('restores the active settings tab from session storage', () => {
-    window.sessionStorage.setItem('ask-o11y.settings.activeTab', 'prompts');
+    window.sessionStorage.setItem(SETTINGS_TAB_STORAGE_KEY, 'prompts');
 
     render(<AppConfig {...props} />);
 

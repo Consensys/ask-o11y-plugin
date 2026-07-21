@@ -35,7 +35,7 @@ test.describe('Session Sharing', () => {
 
     await test.step('Open sidebar and share session', async () => {
       // Open the sidebar
-      await page.getByRole('button', { name: /History/i }).click();
+      await page.getByRole('button', { name: 'Chat history', exact: true }).click();
       await expect(page.getByRole('heading', { name: 'Chat History' })).toBeVisible();
 
       // Wait for session items to appear
@@ -140,7 +140,7 @@ test.describe('Session Sharing', () => {
       await expect(page.getByRole('button', { name: 'Stop generating' })).toBeHidden({ timeout: 60000 });
 
       // Open sidebar and share
-      await page.getByRole('button', { name: /History/i }).click();
+      await page.getByRole('button', { name: 'Chat history', exact: true }).click();
       await expect(page.getByRole('heading', { name: 'Chat History' })).toBeVisible();
 
       const sessionItems = page.getByTestId('session-item');
@@ -255,7 +255,7 @@ test.describe('Session Sharing', () => {
       await expect(page.getByRole('button', { name: 'Stop generating' })).toBeHidden({ timeout: 60000 });
 
       // Share the session
-      await page.getByRole('button', { name: /History/i }).click();
+      await page.getByRole('button', { name: 'Chat history', exact: true }).click();
       await expect(page.getByRole('heading', { name: 'Chat History' })).toBeVisible();
 
       const sessionItems = page.getByTestId('session-item');
@@ -333,7 +333,7 @@ test.describe('Session Sharing', () => {
 
     await test.step('Verify imported session is available', async () => {
       // Open sidebar
-      await page.getByRole('button', { name: /History/i }).click();
+      await page.getByRole('button', { name: 'Chat history', exact: true }).click();
       await expect(page.getByRole('heading', { name: 'Chat History' })).toBeVisible();
 
       // Verify the imported message is visible in the session list
@@ -367,7 +367,7 @@ test.describe('Session Sharing', () => {
       await expect(page.getByRole('button', { name: 'Stop generating' })).toBeHidden({ timeout: 60000 });
 
       // Open sidebar and share
-      await page.getByRole('button', { name: /History/i }).click();
+      await page.getByRole('button', { name: 'Chat history', exact: true }).click();
       await expect(page.getByRole('heading', { name: 'Chat History' })).toBeVisible();
 
       const sessionItems = page.getByTestId('session-item');
@@ -478,7 +478,7 @@ test.describe('Session Sharing', () => {
       await expect(page.getByRole('button', { name: 'Stop generating' })).toBeHidden({ timeout: 60000 });
 
       // Open sidebar
-      await page.getByRole('button', { name: /History/i }).click();
+      await page.getByRole('button', { name: 'Chat history', exact: true }).click();
       await expect(page.getByRole('heading', { name: 'Chat History' })).toBeVisible();
 
       const sessionItems = page.getByTestId('session-item');
@@ -577,7 +577,7 @@ test.describe('Session Sharing', () => {
       await expect(page.getByRole('button', { name: 'Stop generating' })).toBeHidden({ timeout: 60000 });
 
       // Open sidebar and share
-      await page.getByRole('button', { name: /History/i }).click();
+      await page.getByRole('button', { name: 'Chat history', exact: true }).click();
       await expect(page.getByRole('heading', { name: 'Chat History' })).toBeVisible();
 
       const sessionItems = page.getByTestId('session-item');

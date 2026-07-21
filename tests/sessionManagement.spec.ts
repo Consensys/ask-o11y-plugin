@@ -22,14 +22,13 @@ test.describe('Session Management', () => {
   });
 
   test('should create a new chat session from sidebar', async ({ page }) => {
-    const historyButton = page.getByText(/View chat history/);
-    await historyButton.click();
+    // Sidebar is docked and open by default
     await expect(page.getByRole('heading', { name: 'Chat History' })).toBeVisible();
 
     await page.getByText('+ New Chat').click();
 
-    // Sidebar closes after creating session
-    await expect(page.getByRole('heading', { name: 'Chat History' })).not.toBeVisible({ timeout: 5000 });
+    // Docked sidebar stays open after creating a session
+    await expect(page.getByRole('heading', { name: 'Chat History' })).toBeVisible();
 
     // Welcome screen visible
     await expect(page.getByRole('heading', { name: 'Ask O11y Assistant' })).toBeVisible();
@@ -56,15 +55,15 @@ test.describe('Session Management', () => {
     await expect(page.locator('[aria-label="User message"]').first()).toBeVisible({ timeout: 30000 });
 
     // Header buttons visible
-    await expect(page.getByRole('button', { name: /History/i })).toBeVisible();
-    await expect(page.getByRole('button', { name: /New Chat/i })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Chat history', exact: true })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'New chat', exact: true })).toBeVisible();
 
     // Wait for assistant response to complete
     await expect(page.locator('[aria-label="Assistant message"]').first()).toBeVisible({ timeout: 60000 });
     await expect(page.getByRole('button', { name: 'Stop generating' })).toBeHidden({ timeout: 60000 });
 
     // Open sidebar from header
-    await page.getByRole('button', { name: /History/i }).click();
+    await page.getByRole('button', { name: 'Chat history', exact: true }).click();
     await expect(page.getByRole('heading', { name: 'Chat History' })).toBeVisible();
     await page.locator('button[title="Close"]').click();
   });
@@ -82,7 +81,7 @@ test.describe('Session Management', () => {
     await expect(page.locator('[aria-label="Assistant message"]').first()).toBeVisible({ timeout: 60000 });
     await expect(page.getByRole('button', { name: 'Stop generating' })).toBeHidden({ timeout: 60000 });
 
-    await page.getByRole('button', { name: /New Chat/i }).click();
+    await page.getByRole('button', { name: 'New chat', exact: true }).click();
     await page.getByRole('button', { name: 'Yes' }).click();
 
     await expect(page.getByRole('heading', { name: 'Ask O11y Assistant' })).toBeVisible();
@@ -104,7 +103,7 @@ test.describe('Session Management', () => {
     await expect(page.getByRole('button', { name: 'Stop generating' })).toBeHidden({ timeout: 60000 });
 
     // Open sidebar
-    await page.getByRole('button', { name: /History/i }).click();
+    await page.getByRole('button', { name: 'Chat history', exact: true }).click();
     await expect(page.getByRole('heading', { name: 'Chat History' })).toBeVisible();
 
     // Session item with date and message count
