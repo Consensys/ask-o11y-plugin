@@ -46,8 +46,8 @@ test.describe('Chat', () => {
     await expect(userMessage).toContainText('list your datasources');
 
     // Header controls appear
-    await expect(page.getByRole('button', { name: /History/i })).toBeVisible();
-    await expect(page.getByRole('button', { name: /New Chat/i })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Chat history', exact: true })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'New chat', exact: true })).toBeVisible();
 
     // Wait for assistant response
     await expect(page.locator('[aria-label="Assistant message"]').first()).toBeVisible({ timeout: 60000 });
