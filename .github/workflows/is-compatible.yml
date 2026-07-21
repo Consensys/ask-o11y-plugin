@@ -74,6 +74,10 @@ jobs:
           module: ${{ steps.find-module-ts.outputs.modulets }}
           comment-pr: 'no'
           fail-if-incompatible: 'yes'
+          # Pinned to our supported @grafana/* version instead of the action's default (@latest),
+          # which goes red on every upstream release regardless of relevance. Bump deliberately
+          # alongside the @grafana/* package.json versions when we upgrade.
+          targets: '@grafana/data@12.4.5,@grafana/ui@12.4.5,@grafana/runtime@12.4.5,@grafana/schema@12.4.5'
 
   # Fast pass for release-please PRs (no code changes)
   skip-compatibilitycheck:
