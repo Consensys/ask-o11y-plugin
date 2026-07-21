@@ -105,13 +105,13 @@
   },
   "dependencies": {
     "@emotion/css": "11.10.6",
-    "@grafana/data": "^12.4.0",
-    "@grafana/i18n": "^12.4.0",
-    "@grafana/llm": "^1.0.2",
-    "@grafana/runtime": "^12.4.5",
-    "@grafana/scenes": "^6.42.3",
-    "@grafana/schema": "^12.4.0",
-    "@grafana/ui": "^12.4.5",
+    "@grafana/data": "^13.1.1",
+    "@grafana/i18n": "^13.1.1",
+    "@grafana/llm": "^1.0.9",
+    "@grafana/runtime": "^13.1.1",
+    "@grafana/scenes": "^8.13.3",
+    "@grafana/schema": "^13.1.1",
+    "@grafana/ui": "^13.1.1",
     "@modelcontextprotocol/sdk": "^1.25.1",
     "d3-sankey": "^0.12.3",
     "dompurify": "^3.4.11",
@@ -134,6 +134,10 @@
     "lodash-es": "^4.18.1",
     "js-yaml": "^4.3.0",
     "undici": "^7.28.0",
-    "ws": "^8.21.1"
+    "ws": "^8.21.1",
+    "@grafana/llm": {
+      "@grafana/data": "$@grafana/data",
+      "@grafana/runtime": "$@grafana/runtime"
+    }
   }
 }

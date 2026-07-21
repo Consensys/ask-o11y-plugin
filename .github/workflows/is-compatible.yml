@@ -74,6 +74,11 @@ jobs:
           module: ${{ steps.find-module-ts.outputs.modulets }}
           comment-pr: 'no'
           fail-if-incompatible: 'yes'
+          # Pin to the Grafana 13.x baseline this plugin is built/tested against (see
+          # package.json) instead of the action's default `@latest`, so this check
+          # doesn't silently start failing (or passing) against a newer, unvalidated
+          # Grafana release. Bump alongside package.json when re-validating a newer version.
+          targets: '@grafana/data@13.1.1,@grafana/ui@13.1.1,@grafana/runtime@13.1.1,@grafana/schema@13.1.1,@grafana/e2e-selectors,@grafana/experimental'
 
   # Fast pass for release-please PRs (no code changes)
   skip-compatibilitycheck:
