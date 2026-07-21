@@ -148,7 +148,6 @@ const config = async (env: Env): Promise<Configuration> => {
       alias: {
         'react/jsx-runtime$': reactJsxRuntimeShim,
         'react/jsx-dev-runtime$': reactJsxRuntimeShim,
-        '@grafana/scenes$': path.resolve(process.cwd(), 'src/grafanaScenes.ts'),
       },
     },
     // Always generate source maps for Grafana plugin validator

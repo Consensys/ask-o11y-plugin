@@ -122,7 +122,7 @@
   "backend": true,
   "executable": "gpx_consensys-asko11y-app",
   "dependencies": {
-    "grafanaDependency": ">=12.3.0",
+    "grafanaDependency": ">=13.0.0",
     "plugins": [
       {
         "type": "app",

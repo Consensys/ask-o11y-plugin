@@ -39,7 +39,7 @@ docker compose restart grafana        # Reload after backend rebuild
 3. **Code review** — fix critical/major/medium issues
 4. **Clean AI noise** — remove comments that restate code; only keep non-obvious *why* comments
 5. **Tests & lint** — `npm run test:ci`, `go test ./pkg/...`, `npm run lint`, `npm run typecheck`
-6. **Plugin validator** — run `npm run validate` before PR. It builds, archives, and runs `@grafana/plugin-validator`. Expected benign findings: `unsigned plugin` (MANIFEST.txt is produced at CI sign step) and the optional sponsor-link recommendation. Any other `warning`/`error` must be fixed. Clean up with `npm run validate:clean`.
+6. **Plugin validator** — run `npm run validate` before PR. It builds, archives, and runs `@grafana/plugin-validator`. Expected benign findings: `unsigned plugin` (MANIFEST.txt is produced at CI sign step), the optional sponsor-link recommendation, and the `react-19-dep-jsxRuntimeImport` finding for `@floating-ui/react` (a transitive dependency of `@grafana/ui`/`@grafana/scenes`; Grafana's own migration guide documents this pattern as a common false positive once the jsx-runtime fix is applied — see the global `react/jsx-runtime$`/`react/jsx-dev-runtime$` aliases in `webpack.config.ts`, which are verified by `scripts/validate-react19.js` to keep the literal string out of the compiled `dist/*.js` output). Any other `warning`/`error` must be fixed. Clean up with `npm run validate:clean`.
 
 **Severity policy:** Critical = fix now. Major = fix before commit. Medium = fix before PR. Low = optional.
 
