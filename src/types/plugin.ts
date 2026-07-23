@@ -22,6 +22,8 @@ export type AppPluginSettings = {
   mcpServers?: MCPServerConfig[];
   useBuiltInMCP?: boolean;
   builtInMCPToolSelections?: Record<string, boolean>;
+  useLocalGrafanaURL?: boolean;
+  localGrafanaPort?: number;
   trustedMCPServers?: Record<string, boolean>;
   riskOverrides?: Record<string, ToolRiskOverride>;
 

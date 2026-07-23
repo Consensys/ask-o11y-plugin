@@ -88,6 +88,8 @@ type State = {
   useBuiltInMCP: boolean;
   builtInMCPAvailable: boolean | null;
   builtInMCPToolSelections: Record<string, boolean>;
+  useLocalGrafanaURL: boolean;
+  localGrafanaPort: number;
   expandedAdvanced: Set<string>;
   kioskModeEnabled: boolean;
   chatPanelPosition: 'left' | 'right';
@@ -260,6 +262,8 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
     useBuiltInMCP: jsonData?.useBuiltInMCP ?? false,
     builtInMCPAvailable: null,
     builtInMCPToolSelections: jsonData?.builtInMCPToolSelections ?? {},
+    useLocalGrafanaURL: jsonData?.useLocalGrafanaURL ?? false,
+    localGrafanaPort: jsonData?.localGrafanaPort || 3000,
     expandedAdvanced: new Set<string>(),
     kioskModeEnabled: jsonData?.kioskModeEnabled ?? true,
     chatPanelPosition: jsonData?.chatPanelPosition || 'right',
@@ -352,12 +356,16 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
     state.serviceGraphMaxNodes > SERVICE_GRAPH_MAX_NODES_LIMIT ||
     state.serviceGraphMaxEdges < 1 ||
     state.serviceGraphMaxEdges > SERVICE_GRAPH_MAX_EDGES_LIMIT;
+  const isLocalGrafanaPortInvalid =
+    state.useLocalGrafanaURL && (state.localGrafanaPort < 1 || state.localGrafanaPort > 65535);
   const orgId = String(config.bootData?.user?.orgId || '1');
 
   const dirtyTabs = useMemo<DirtyTabMap>(() => {
     const savedMCPSettings: AppPluginSettings = {
       mcpServers: savedJsonData.mcpServers,
       trustedMCPServers: savedJsonData.trustedMCPServers,
+      useLocalGrafanaURL: savedJsonData.useLocalGrafanaURL,
+      localGrafanaPort: savedJsonData.localGrafanaPort,
     };
     const currentMCPSettings: AppPluginSettings = {
       mcpServers: state.mcpServers,
@@ -367,10 +375,14 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
         }
         return acc;
       }, {}),
+      useLocalGrafanaURL: state.useLocalGrafanaURL,
+      localGrafanaPort: state.localGrafanaPort,
     };
 
     const mcpDirty =
       state.useBuiltInMCP !== (savedJsonData.useBuiltInMCP ?? false) ||
+      state.useLocalGrafanaURL !== (savedJsonData.useLocalGrafanaURL ?? false) ||
+      state.localGrafanaPort !== (savedJsonData.localGrafanaPort || 3000) ||
       stableStringify(cleanObject(state.builtInMCPToolSelections)) !==
         stableStringify(cleanObject(savedJsonData.builtInMCPToolSelections)) ||
       stableStringify(normalizeMCPServersForDirty(currentMCPSettings)) !==
@@ -967,6 +979,8 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
         mcpServers: cleanedServers,
         useBuiltInMCP: state.useBuiltInMCP,
         builtInMCPToolSelections: state.builtInMCPToolSelections,
+        useLocalGrafanaURL: state.useLocalGrafanaURL,
+        localGrafanaPort: state.localGrafanaPort,
         trustedMCPServers,
       },
       ...(hasSecureChanges ? { secureJsonData } : {}),
@@ -1088,6 +1102,25 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
               />
             </Field>
 
+            <Field
+              label="Local Grafana port"
+              description="The port Grafana listens on inside this container."
+              invalid={isLocalGrafanaPortInvalid}
+              error={isLocalGrafanaPortInvalid ? 'Enter a port from 1 to 65535' : undefined}
+              className="mb-3"
+            >
+              <Input
+                type="number"
+                min={1}
+                max={65535}
+                value={state.localGrafanaPort}
+                disabled={!state.useLocalGrafanaURL}
+                onChange={(event) =>
+                  setState((prev) => ({ ...prev, localGrafanaPort: Number(event.currentTarget.value) }))
+                }
+              />
+            </Field>
+
             <div className="mt-3">
               <Button onClick={onSubmitAgentRuntimeSettings} disabled={isAgentRuntimeDisabled}>
                 Save agent runtime
@@ -1143,6 +1176,19 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
                 </div>
               </div>
             </div>
+
+            <Field
+              label="Use local Grafana endpoint"
+              description="Routes Ask O11y's backend calls to the same container at http://127.0.0.1:3000. Enable this when the public Grafana URL is not reachable from the Grafana process."
+              className="mb-3"
+            >
+              <Switch
+                value={state.useLocalGrafanaURL}
+                onChange={(event) =>
+                  setState((prev) => ({ ...prev, useLocalGrafanaURL: event.currentTarget.checked }))
+                }
+              />
+            </Field>
 
             {state.mcpServers.map((server) => (
               <div
@@ -1366,7 +1412,7 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
               <Button
                 onClick={onSubmitMCPServers}
                 variant="primary"
-                disabled={Object.keys(validationErrors.mcpServers).length > 0}
+                disabled={Object.keys(validationErrors.mcpServers).length > 0 || isLocalGrafanaPortInvalid}
                 data-testid={testIds.appConfig.saveMcpServersButton}
               >
                 Save MCP Servers
