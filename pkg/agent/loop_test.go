@@ -837,6 +837,146 @@ func TestAgentLoop_TruncatedToolCall_KeepsValidDropsInvalid(t *testing.T) {
 	}
 }
 
+func TestAgentLoop_TruncatedToolCall_NudgeIsOneShot(t *testing.T) {
+	// The corrective nudge must steer only the retry request, not persist into
+	// later turns after the model recovers.
+	const truncatedArgs = `{"folderUid": "feveb7u5f1kaoc", "message": "Duplicate of`
+	const nudgeMarker = "cut off before its arguments were complete"
+
+	var mu sync.Mutex
+	var requestBodies []string
+	callIdx := 0
+	llmServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		mu.Lock()
+		requestBodies = append(requestBodies, string(body))
+		idx := callIdx
+		callIdx++
+		mu.Unlock()
+
+		switch idx {
+		case 0:
+			respondAsStream(w, ChatCompletionResponse{
+				ID: "trunc",
+				Choices: []Choice{{
+					Message: Message{
+						Role: "assistant",
+						ToolCalls: []ToolCall{{
+							ID: "tc_trunc", Type: "function",
+							Function: FunctionCall{Name: "update_dashboard", Arguments: truncatedArgs},
+						}},
+					},
+					FinishReason: "length",
+				}},
+			})
+		case 1:
+			// Recovery: a complete, valid tool call.
+			respondAsStream(w, ChatCompletionResponse{
+				ID: "recover",
+				Choices: []Choice{{
+					Message: Message{
+						Role: "assistant",
+						ToolCalls: []ToolCall{{
+							ID: "tc_ok", Type: "function",
+							Function: FunctionCall{Name: "search_dashboards", Arguments: `{"query":"metrics"}`},
+						}},
+					},
+					FinishReason: "tool_calls",
+				}},
+			})
+		default:
+			respondAsStream(w, ChatCompletionResponse{
+				ID: "final",
+				Choices: []Choice{{
+					Message:      Message{Role: "assistant", Content: "done"},
+					FinishReason: "stop",
+				}},
+			})
+		}
+	}))
+	defer llmServer.Close()
+
+	llmClient := NewLLMClient(log.DefaultLogger, &http.Client{Timeout: llmTimeout})
+	mcpProxy := mcp.NewProxy(context.Background(), log.DefaultLogger)
+	loop := NewAgentLoop(llmClient, mcpProxy, log.DefaultLogger)
+
+	eventCh := make(chan SSEEvent, 32)
+	req := LoopRequest{
+		Messages:     []Message{{Role: "user", Content: "duplicate my dashboard"}},
+		SystemPrompt: "sys",
+		GrafanaURL:   llmServer.URL,
+		AuthToken:    "test-token",
+		UserRole:     "Admin",
+		OrgID:        "1",
+	}
+
+	go loop.Run(context.Background(), req, eventCh)
+	collectEvents(eventCh)
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(requestBodies) != 3 {
+		t.Fatalf("expected 3 LLM calls (truncated, recovery, final), got %d", len(requestBodies))
+	}
+	if !strings.Contains(requestBodies[1], nudgeMarker) {
+		t.Errorf("retry request should carry the corrective nudge")
+	}
+	if strings.Contains(requestBodies[2], nudgeMarker) {
+		t.Errorf("nudge must not persist into later turns after recovery: %s", requestBodies[2])
+	}
+}
+
+func TestAgentLoop_TruncatedToolCall_LastIterationSurfacesCleanError(t *testing.T) {
+	// A truncation on the final iteration has no room to retry; it must still end
+	// with the clean llm_truncated_tool_call error, not the generic max-iterations
+	// message.
+	loop, serverURL, cleanup := setupTestLoop(t, []ChatCompletionResponse{
+		{
+			ID: "trunc",
+			Choices: []Choice{{
+				Message: Message{
+					Role: "assistant",
+					ToolCalls: []ToolCall{{
+						ID: "tc_trunc", Type: "function",
+						Function: FunctionCall{Name: "update_dashboard", Arguments: `{"uid": "feve`},
+					}},
+				},
+				FinishReason: "length",
+			}},
+		},
+	})
+	defer cleanup()
+
+	eventCh := make(chan SSEEvent, 32)
+	req := LoopRequest{
+		Messages:      []Message{{Role: "user", Content: "do it"}},
+		SystemPrompt:  "sys",
+		MaxIterations: 1,
+		GrafanaURL:    serverURL,
+		AuthToken:     "test-token",
+		UserRole:      "Admin",
+		OrgID:         "1",
+	}
+
+	go loop.Run(context.Background(), req, eventCh)
+	events := collectEvents(eventCh)
+
+	last := events[len(events)-1]
+	if last.Type != "error" {
+		t.Fatalf("expected error event, got %q (events: %+v)", last.Type, events)
+	}
+	errEvent, ok := last.Data.(ErrorEvent)
+	if !ok {
+		t.Fatalf("expected ErrorEvent, got %T", last.Data)
+	}
+	if errEvent.Code != "llm_truncated_tool_call" || !errEvent.Retryable {
+		t.Fatalf("expected clean truncation error, got %+v", errEvent)
+	}
+	if strings.Contains(errEvent.Message, "maximum iterations") {
+		t.Fatalf("should not surface generic max-iterations error: %s", errEvent.Message)
+	}
+}
+
 func TestAgentLoop_ContextCancellation(t *testing.T) {
 	// Slow server — context will be cancelled
 	slowServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

@@ -127,6 +127,7 @@ func (a *AgentLoop) Run(ctx context.Context, req LoopRequest, eventCh chan<- SSE
 	transportFailedTools := map[string]struct{}{}
 	mcpUnavailableEmitted := false
 	truncationRetries := 0
+	pendingTruncationNudge := false
 
 	for iteration := 0; iteration < maxIter; iteration++ {
 		if ctx.Err() != nil {
@@ -140,15 +141,21 @@ func (a *AgentLoop) Run(ctx context.Context, req LoopRequest, eventCh chan<- SSE
 			"messageCount", len(messages),
 			"toolCount", len(openAITools))
 
-		// One-shot warning on the second-to-last iteration so the LLM produces a
-		// final answer from tool results it actually retrieved rather than
-		// fabricating a summary when the loop aborts at maxIter.
+		// One-shot system messages that steer only the upcoming call without
+		// persisting in history: the near-limit warning (produce a final answer
+		// before the loop aborts at maxIter) and the truncation nudge (reissue a
+		// tool call that was discarded for having truncated arguments).
 		callMessages := messages
+		var oneShot []Message
 		if maxIter >= 2 && iteration == maxIter-2 {
-			callMessages = append(append([]Message{}, messages...), Message{
-				Role:    "system",
-				Content: nearLimitWarning,
-			})
+			oneShot = append(oneShot, Message{Role: "system", Content: nearLimitWarning})
+		}
+		if pendingTruncationNudge {
+			oneShot = append(oneShot, Message{Role: "system", Content: truncatedToolCallNudge})
+			pendingTruncationNudge = false
+		}
+		if len(oneShot) > 0 {
+			callMessages = append(append([]Message{}, messages...), oneShot...)
 		}
 
 		llmReq := ChatCompletionRequest{
@@ -189,19 +196,20 @@ func (a *AgentLoop) Run(ctx context.Context, req LoopRequest, eventCh chan<- SSE
 				msg.ToolCalls = validCalls
 			}
 
-			// Nothing executable survived the drop. Give the model one corrective
-			// nudge to reissue a smaller, complete call rather than aborting or
-			// spinning on identical context. The retry cap guarantees a
-			// persistently truncating model still ends with a clean error.
+			// Nothing executable survived the drop. Retry with a one-shot corrective
+			// nudge (not persisted, so it can't steer later turns) rather than
+			// spinning on identical context — unless the retry cap is reached or no
+			// iteration is left to retry in, in which case surface a clean,
+			// retryable error instead of the generic max-iterations one.
 			if dropped > 0 && len(validCalls) == 0 {
-				if truncationRetries >= maxTruncationRetries {
-					a.logger.Warn("LLM repeatedly truncated tool calls; aborting run",
+				if truncationRetries >= maxTruncationRetries || iteration >= maxIter-1 {
+					a.logger.Warn("LLM truncated tool calls with no viable retry; aborting run",
 						"retries", truncationRetries,
 						"iteration", iteration)
 					a.send(ctx, eventCh, SSEEvent{
 						Type: "error",
 						Data: ErrorEvent{
-							Message:   "The assistant's tool request was cut off before it finished, even after retrying. Please retry — if this keeps happening, simplify the request or narrow its scope.",
+							Message:   "The assistant's tool request was cut off before it finished. Please retry — if this keeps happening, simplify the request or narrow its scope.",
 							Code:      "llm_truncated_tool_call",
 							Retryable: true,
 						},
@@ -209,7 +217,7 @@ func (a *AgentLoop) Run(ctx context.Context, req LoopRequest, eventCh chan<- SSE
 					return
 				}
 				truncationRetries++
-				messages = append(messages, Message{Role: "system", Content: truncatedToolCallNudge})
+				pendingTruncationNudge = true
 				continue
 			}
 		}
