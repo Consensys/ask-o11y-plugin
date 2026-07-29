@@ -244,6 +244,68 @@ func TestLLMClient_ChatCompletion_MalformedChunk(t *testing.T) {
 	}
 }
 
+func TestLLMClient_ChatCompletion_IncompleteStreamRetriesThenSucceeds(t *testing.T) {
+	// First attempt is cut off mid tool-call: partial arguments, no finish_reason,
+	// no [DONE]. parseStream must reject it as incomplete and the client retries,
+	// so the truncated tool call never reaches the caller.
+	attempts := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts++
+		w.Header().Set("Content-Type", "text/event-stream")
+		if attempts == 1 {
+			fmt.Fprint(w, `data: {"id":"x","choices":[{"index":0,"delta":{"role":"assistant","tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"update_dashboard","arguments":"{\"uid\":"}}]},"finish_reason":null}]}`+"\n\n")
+			return
+		}
+		writeSSEChunks(w,
+			`{"id":"x","choices":[{"index":0,"delta":{"content":"ok"},"finish_reason":null}]}`,
+			`{"id":"x","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`,
+		)
+	}))
+	defer server.Close()
+
+	client := NewLLMClient(log.DefaultLogger, &http.Client{Timeout: llmTimeout})
+	resp, err := client.ChatCompletion(context.Background(), ChatCompletionRequest{
+		Messages: []Message{{Role: "user", Content: "hi"}},
+	}, server.URL, "token", "1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if attempts != 2 {
+		t.Fatalf("attempts = %d, want 2 (retry after incomplete stream)", attempts)
+	}
+	if resp.Choices[0].Message.Content != "ok" {
+		t.Fatalf("content = %q, want ok", resp.Choices[0].Message.Content)
+	}
+	if len(resp.Choices[0].Message.ToolCalls) != 0 {
+		t.Fatalf("partial tool call leaked into result: %+v", resp.Choices[0].Message.ToolCalls)
+	}
+}
+
+func TestLLMClient_ChatCompletion_IncompleteStreamExhausted(t *testing.T) {
+	attempts := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts++
+		w.Header().Set("Content-Type", "text/event-stream")
+		// Always cut mid tool-call — never a finish_reason.
+		fmt.Fprint(w, `data: {"id":"x","choices":[{"index":0,"delta":{"role":"assistant","tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"update_dashboard","arguments":"{\"uid\":"}}]},"finish_reason":null}]}`+"\n\n")
+	}))
+	defer server.Close()
+
+	client := NewLLMClient(log.DefaultLogger, &http.Client{Timeout: llmTimeout})
+	_, err := client.ChatCompletion(context.Background(), ChatCompletionRequest{
+		Messages: []Message{{Role: "user", Content: "hi"}},
+	}, server.URL, "token", "1")
+	if err == nil {
+		t.Fatal("expected error for persistently incomplete stream")
+	}
+	if !errors.Is(err, errIncompleteStream) {
+		t.Fatalf("expected errIncompleteStream, got %v", err)
+	}
+	if attempts != maxLLMAttempts {
+		t.Fatalf("attempts = %d, want %d", attempts, maxLLMAttempts)
+	}
+}
+
 func TestLLMClient_ChatCompletion_ErrorBody(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusTooManyRequests)

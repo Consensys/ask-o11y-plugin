@@ -26,6 +26,15 @@ const minCompletionTokens = 512
 // around missing data when the loop is about to abort at maxIter.
 const nearLimitWarning = "[SYSTEM: You are approaching the iteration limit. Produce a final answer NOW based ONLY on tool results you have actually retrieved this session. If you lack data, say so explicitly — do not fabricate.]"
 
+// maxTruncationRetries bounds how many times, per run, the loop will nudge the
+// model to reissue a tool call whose arguments arrived truncated/invalid. Beyond
+// this the run ends with a clean, retryable error instead of spinning.
+const maxTruncationRetries = 1
+
+// truncatedToolCallNudge is injected after a truncated tool call is discarded so
+// the model reissues a smaller, complete call rather than repeating the cutoff.
+const truncatedToolCallNudge = "[SYSTEM: Your previous tool call was cut off before its arguments were complete, so it was discarded. Reissue it now as a single, complete, valid JSON tool call. If the arguments are large (for example a full dashboard), reduce their size or split the work into smaller steps.]"
+
 type AgentLoop struct {
 	llmClient *LLMClient
 	mcpProxy  *mcp.Proxy
@@ -117,6 +126,7 @@ func (a *AgentLoop) Run(ctx context.Context, req LoopRequest, eventCh chan<- SSE
 	// is down rather than letting the agent chain fabricated summaries.
 	transportFailedTools := map[string]struct{}{}
 	mcpUnavailableEmitted := false
+	truncationRetries := 0
 
 	for iteration := 0; iteration < maxIter; iteration++ {
 		if ctx.Err() != nil {
@@ -160,6 +170,49 @@ func (a *AgentLoop) Run(ctx context.Context, req LoopRequest, eventCh chan<- SSE
 		}
 
 		msg := resp.Choices[0].Message
+
+		// Drop tool calls whose arguments are malformed JSON before they enter
+		// history. This happens when the model is cut off mid tool-call
+		// (finish_reason=length) or a stream is interrupted, leaving truncated
+		// arguments. Persisting such a message poisons the conversation: every
+		// later request re-sends it and the LLM API rejects the whole batch with
+		// 400 "Failed to parse JSON: {...}".
+		if len(msg.ToolCalls) > 0 {
+			validCalls, dropped := partitionValidToolCalls(msg.ToolCalls)
+			if dropped > 0 {
+				a.logger.Warn("Discarding tool calls with malformed arguments",
+					"dropped", dropped,
+					"kept", len(validCalls),
+					"finishReason", resp.Choices[0].FinishReason,
+					"completionBudget", completionBudget,
+					"iteration", iteration)
+				msg.ToolCalls = validCalls
+			}
+
+			// Nothing executable survived the drop. Give the model one corrective
+			// nudge to reissue a smaller, complete call rather than aborting or
+			// spinning on identical context. The retry cap guarantees a
+			// persistently truncating model still ends with a clean error.
+			if dropped > 0 && len(validCalls) == 0 {
+				if truncationRetries >= maxTruncationRetries {
+					a.logger.Warn("LLM repeatedly truncated tool calls; aborting run",
+						"retries", truncationRetries,
+						"iteration", iteration)
+					a.send(ctx, eventCh, SSEEvent{
+						Type: "error",
+						Data: ErrorEvent{
+							Message:   "The assistant's tool request was cut off before it finished, even after retrying. Please retry — if this keeps happening, simplify the request or narrow its scope.",
+							Code:      "llm_truncated_tool_call",
+							Retryable: true,
+						},
+					})
+					return
+				}
+				truncationRetries++
+				messages = append(messages, Message{Role: "system", Content: truncatedToolCallNudge})
+				continue
+			}
+		}
 
 		if len(msg.ToolCalls) == 0 {
 			if msg.Content != "" {
@@ -289,6 +342,13 @@ func (a *AgentLoop) chatCompletionWithFallback(ctx context.Context, llmReq ChatC
 }
 
 func llmErrorEvent(err error) ErrorEvent {
+	if errors.Is(err, errIncompleteStream) {
+		return ErrorEvent{
+			Message:   "The assistant's response was interrupted before it completed. Please retry.",
+			Code:      "llm_incomplete_stream",
+			Retryable: true,
+		}
+	}
 	var llmErr *LLMHTTPError
 	if errors.As(err, &llmErr) {
 		return ErrorEvent{
@@ -469,6 +529,28 @@ func riskLabel(risk mcp.ToolRisk) string {
 	default:
 		return "read"
 	}
+}
+
+// partitionValidToolCalls returns the tool calls whose arguments are safe to
+// send back to the LLM API, and a count of those dropped for having malformed
+// (typically truncated) JSON arguments. Order of the valid calls is preserved.
+func partitionValidToolCalls(toolCalls []ToolCall) (valid []ToolCall, dropped int) {
+	for _, tc := range toolCalls {
+		if toolCallHasValidArgs(tc) {
+			valid = append(valid, tc)
+		} else {
+			dropped++
+		}
+	}
+	return valid, dropped
+}
+
+// toolCallHasValidArgs reports whether a tool call's arguments can be re-sent to
+// the LLM API without triggering a 400. Empty arguments represent a no-parameter
+// call and are fine; any non-empty value must be parseable JSON.
+func toolCallHasValidArgs(tc ToolCall) bool {
+	args := strings.TrimSpace(tc.Function.Arguments)
+	return args == "" || json.Valid([]byte(args))
 }
 
 func extractText(result *mcp.CallToolResult) string {

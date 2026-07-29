@@ -591,6 +591,252 @@ func TestAgentLoop_NearLimitWarningInjected(t *testing.T) {
 	}
 }
 
+func TestAgentLoop_TruncatedToolCall_CorrectiveRetryRecovers(t *testing.T) {
+	// A tool call cut off mid-arguments (finish_reason=length) must not be
+	// persisted. The loop drops it, injects a corrective nudge, and the model's
+	// retry succeeds — the truncated arguments are never re-sent.
+	const truncatedArgs = `{"folderUid": "feveb7u5f1kaoc", "message": "Duplicate of`
+
+	var mu sync.Mutex
+	var requestBodies []string
+	callIdx := 0
+	llmServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		mu.Lock()
+		requestBodies = append(requestBodies, string(body))
+		idx := callIdx
+		callIdx++
+		mu.Unlock()
+
+		if idx == 0 {
+			respondAsStream(w, ChatCompletionResponse{
+				ID: "trunc",
+				Choices: []Choice{{
+					Message: Message{
+						Role: "assistant",
+						ToolCalls: []ToolCall{{
+							ID:       "tc_trunc",
+							Type:     "function",
+							Function: FunctionCall{Name: "update_dashboard", Arguments: truncatedArgs},
+						}},
+					},
+					FinishReason: "length",
+				}},
+			})
+			return
+		}
+		respondAsStream(w, ChatCompletionResponse{
+			ID: "recovered",
+			Choices: []Choice{{
+				Message:      Message{Role: "assistant", Content: "recovered"},
+				FinishReason: "stop",
+			}},
+		})
+	}))
+	defer llmServer.Close()
+
+	llmClient := NewLLMClient(log.DefaultLogger, &http.Client{Timeout: llmTimeout})
+	mcpProxy := mcp.NewProxy(context.Background(), log.DefaultLogger)
+	loop := NewAgentLoop(llmClient, mcpProxy, log.DefaultLogger)
+
+	eventCh := make(chan SSEEvent, 32)
+	req := LoopRequest{
+		Messages:     []Message{{Role: "user", Content: "duplicate my dashboard"}},
+		SystemPrompt: "sys",
+		GrafanaURL:   llmServer.URL,
+		AuthToken:    "test-token",
+		UserRole:     "Admin",
+		OrgID:        "1",
+	}
+
+	go loop.Run(context.Background(), req, eventCh)
+	events := collectEvents(eventCh)
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	if len(requestBodies) != 2 {
+		t.Fatalf("expected exactly 2 LLM calls (initial + corrective retry), got %d", len(requestBodies))
+	}
+	for i, body := range requestBodies {
+		if strings.Contains(body, "Duplicate of") {
+			t.Fatalf("request #%d re-sent truncated tool-call arguments (poisoned history): %s", i, body)
+		}
+	}
+	if !strings.Contains(requestBodies[1], "cut off before its arguments were complete") {
+		t.Errorf("expected corrective nudge in retry request, got: %s", requestBodies[1])
+	}
+
+	last := events[len(events)-1]
+	if last.Type != "done" {
+		t.Fatalf("expected run to recover with done, got %q (events: %+v)", last.Type, events)
+	}
+	var gotContent string
+	for _, e := range events {
+		if e.Type == "content" {
+			gotContent = e.Data.(ContentEvent).Content
+		}
+	}
+	if gotContent != "recovered" {
+		t.Errorf("expected recovered content, got %q", gotContent)
+	}
+}
+
+func TestAgentLoop_TruncatedToolCall_AbortsAfterRetryCap(t *testing.T) {
+	// A model that keeps truncating its tool call must not spin: after the
+	// bounded corrective retry it ends with a clean, retryable error and never
+	// re-sends the malformed arguments.
+	const truncatedArgs = `{"folderUid": "feveb7u5f1kaoc", "message": "Duplicate of`
+
+	var mu sync.Mutex
+	var callCount int
+	llmServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		mu.Lock()
+		callCount++
+		poisoned := strings.Contains(string(body), "Duplicate of")
+		mu.Unlock()
+		if poisoned {
+			t.Errorf("request re-sent truncated tool-call arguments: %s", body)
+		}
+		respondAsStream(w, ChatCompletionResponse{
+			ID: "trunc",
+			Choices: []Choice{{
+				Message: Message{
+					Role: "assistant",
+					ToolCalls: []ToolCall{{
+						ID:       "tc_trunc",
+						Type:     "function",
+						Function: FunctionCall{Name: "update_dashboard", Arguments: truncatedArgs},
+					}},
+				},
+				FinishReason: "length",
+			}},
+		})
+	}))
+	defer llmServer.Close()
+
+	llmClient := NewLLMClient(log.DefaultLogger, &http.Client{Timeout: llmTimeout})
+	mcpProxy := mcp.NewProxy(context.Background(), log.DefaultLogger)
+	loop := NewAgentLoop(llmClient, mcpProxy, log.DefaultLogger)
+
+	eventCh := make(chan SSEEvent, 32)
+	req := LoopRequest{
+		Messages:     []Message{{Role: "user", Content: "duplicate my dashboard"}},
+		SystemPrompt: "sys",
+		GrafanaURL:   llmServer.URL,
+		AuthToken:    "test-token",
+		UserRole:     "Admin",
+		OrgID:        "1",
+	}
+
+	go loop.Run(context.Background(), req, eventCh)
+	events := collectEvents(eventCh)
+
+	mu.Lock()
+	defer mu.Unlock()
+	// initial call + maxTruncationRetries corrective retries.
+	if callCount != maxTruncationRetries+1 {
+		t.Fatalf("expected %d LLM calls, got %d", maxTruncationRetries+1, callCount)
+	}
+
+	last := events[len(events)-1]
+	if last.Type != "error" {
+		t.Fatalf("expected final event to be a clean error, got %q (events: %+v)", last.Type, events)
+	}
+	errEvent, ok := last.Data.(ErrorEvent)
+	if !ok {
+		t.Fatalf("expected ErrorEvent, got %T", last.Data)
+	}
+	if errEvent.Code != "llm_truncated_tool_call" || !errEvent.Retryable {
+		t.Fatalf("unexpected error event: %+v", errEvent)
+	}
+}
+
+func TestAgentLoop_TruncatedToolCall_KeepsValidDropsInvalid(t *testing.T) {
+	// When a turn mixes a complete tool call with a truncated one, the valid call
+	// is executed and the malformed one is dropped — never executed, never re-sent.
+	const truncatedArgs = `{"folderUid": "fev", "message": "Duplicate of`
+
+	var mu sync.Mutex
+	var requestBodies []string
+	callIdx := 0
+	llmServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		mu.Lock()
+		requestBodies = append(requestBodies, string(body))
+		idx := callIdx
+		callIdx++
+		mu.Unlock()
+
+		if idx == 0 {
+			respondAsStream(w, ChatCompletionResponse{
+				ID: "mixed",
+				Choices: []Choice{{
+					Message: Message{
+						Role: "assistant",
+						ToolCalls: []ToolCall{
+							{ID: "tc_ok", Type: "function", Function: FunctionCall{Name: "search_dashboards", Arguments: `{"query":"metrics"}`}},
+							{ID: "tc_bad", Type: "function", Function: FunctionCall{Name: "update_dashboard", Arguments: truncatedArgs}},
+						},
+					},
+					FinishReason: "length",
+				}},
+			})
+			return
+		}
+		respondAsStream(w, ChatCompletionResponse{
+			ID: "final",
+			Choices: []Choice{{
+				Message:      Message{Role: "assistant", Content: "done"},
+				FinishReason: "stop",
+			}},
+		})
+	}))
+	defer llmServer.Close()
+
+	llmClient := NewLLMClient(log.DefaultLogger, &http.Client{Timeout: llmTimeout})
+	mcpProxy := mcp.NewProxy(context.Background(), log.DefaultLogger)
+	loop := NewAgentLoop(llmClient, mcpProxy, log.DefaultLogger)
+
+	eventCh := make(chan SSEEvent, 32)
+	req := LoopRequest{
+		Messages:     []Message{{Role: "user", Content: "find and update"}},
+		SystemPrompt: "sys",
+		GrafanaURL:   llmServer.URL,
+		AuthToken:    "test-token",
+		UserRole:     "Admin",
+		OrgID:        "1",
+	}
+
+	go loop.Run(context.Background(), req, eventCh)
+	events := collectEvents(eventCh)
+
+	mu.Lock()
+	defer mu.Unlock()
+	for i, body := range requestBodies {
+		if strings.Contains(body, "Duplicate of") {
+			t.Fatalf("request #%d re-sent dropped tool-call arguments: %s", i, body)
+		}
+	}
+
+	var starts []ToolCallStartEvent
+	for _, e := range events {
+		if e.Type == "tool_call_start" {
+			starts = append(starts, e.Data.(ToolCallStartEvent))
+		}
+	}
+	if len(starts) != 1 {
+		t.Fatalf("expected exactly 1 tool_call_start (valid call only), got %d: %+v", len(starts), starts)
+	}
+	if starts[0].ID != "tc_ok" {
+		t.Errorf("expected the valid tool call tc_ok to execute, got %q", starts[0].ID)
+	}
+	if len(requestBodies) > 1 && strings.Contains(requestBodies[1], "cut off before its arguments were complete") {
+		t.Errorf("did not expect corrective nudge when a valid tool call executed")
+	}
+}
+
 func TestAgentLoop_ContextCancellation(t *testing.T) {
 	// Slow server — context will be cancelled
 	slowServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
