@@ -1102,25 +1102,6 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
               />
             </Field>
 
-            <Field
-              label="Local Grafana port"
-              description="The port Grafana listens on inside this container."
-              invalid={isLocalGrafanaPortInvalid}
-              error={isLocalGrafanaPortInvalid ? 'Enter a port from 1 to 65535' : undefined}
-              className="mb-3"
-            >
-              <Input
-                type="number"
-                min={1}
-                max={65535}
-                value={state.localGrafanaPort}
-                disabled={!state.useLocalGrafanaURL}
-                onChange={(event) =>
-                  setState((prev) => ({ ...prev, localGrafanaPort: Number(event.currentTarget.value) }))
-                }
-              />
-            </Field>
-
             <div className="mt-3">
               <Button onClick={onSubmitAgentRuntimeSettings} disabled={isAgentRuntimeDisabled}>
                 Save agent runtime
@@ -1179,13 +1160,32 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
 
             <Field
               label="Use local Grafana endpoint"
-              description="Routes Ask O11y's backend calls to the same container at http://127.0.0.1:3000. Enable this when the public Grafana URL is not reachable from the Grafana process."
+              description="Routes Ask O11y's backend calls to the same container. Enable this when the public Grafana URL is not reachable from the Grafana process."
               className="mb-3"
             >
               <Switch
                 value={state.useLocalGrafanaURL}
                 onChange={(event) =>
                   setState((prev) => ({ ...prev, useLocalGrafanaURL: event.currentTarget.checked }))
+                }
+              />
+            </Field>
+
+            <Field
+              label="Local Grafana port"
+              description="The port Grafana listens on inside this container."
+              invalid={isLocalGrafanaPortInvalid}
+              error={isLocalGrafanaPortInvalid ? 'Enter a port from 1 to 65535' : undefined}
+              className="mb-3"
+            >
+              <Input
+                type="number"
+                min={1}
+                max={65535}
+                value={state.localGrafanaPort}
+                disabled={!state.useLocalGrafanaURL}
+                onChange={(event) =>
+                  setState((prev) => ({ ...prev, localGrafanaPort: Number(event.currentTarget.value) }))
                 }
               />
             </Field>
