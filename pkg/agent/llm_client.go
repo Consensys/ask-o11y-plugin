@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"maps"
 	"net/http"
@@ -26,6 +27,13 @@ const (
 	maxLLMAttempts    = 2
 	llmRetryBaseDelay = 250 * time.Millisecond
 )
+
+// errIncompleteStream is returned by parseStream when the SSE stream ends without
+// a terminal finish_reason — the response was cut off mid-generation (an
+// interrupted upstream stream). Any tool call accumulated so far is partial and
+// must not be treated as complete. It is retryable: re-requesting usually yields
+// a whole stream.
+var errIncompleteStream = errors.New("LLM stream ended before completion (no finish_reason)")
 
 type LLMHTTPError struct {
 	StatusCode   int
@@ -208,6 +216,15 @@ func (c *LLMClient) ChatCompletion(ctx context.Context, req ChatCompletionReques
 		result, err = parseStream(resp)
 		resp.Body.Close()
 		if err != nil {
+			// An interrupted stream is transient — retry the whole request rather
+			// than surfacing a partial (poisoned) response.
+			if errors.Is(err, errIncompleteStream) && attempt < maxLLMAttempts {
+				c.logger.Warn("LLM stream incomplete, retrying", "attempt", attempt)
+				if !sleepWithContext(ctx, retryDelay(nil, attempt)) {
+					return nil, ctx.Err()
+				}
+				continue
+			}
 			return nil, err
 		}
 		break
@@ -370,6 +387,14 @@ func parseStream(resp *http.Response) (*ChatCompletionResponse, error) {
 	}
 	if err := scanner.Err(); err != nil {
 		return nil, fmt.Errorf("read stream: %w", err)
+	}
+
+	// A complete OpenAI-compatible stream always terminates with a finish_reason
+	// chunk before [DONE]. Its absence means the stream was cut mid-generation, so
+	// any accumulated tool call has truncated arguments. Refuse to return it as
+	// complete — callers retry instead of persisting a partial tool call.
+	if finishReason == "" {
+		return nil, errIncompleteStream
 	}
 
 	msg := Message{Role: "assistant", Content: content.String()}
