@@ -5,6 +5,19 @@ All notable changes to the Ask O11y Grafana plugin will be documented in this fi
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.1](https://github.com/Consensys/ask-o11y-plugin/compare/v0.3.0...v0.3.1) (2026-08-03)
+
+
+### Features
+
+* add local Grafana endpoint override ([#159](https://github.com/Consensys/ask-o11y-plugin/issues/159)) ([42cbaf0](https://github.com/Consensys/ask-o11y-plugin/commit/42cbaf01adfe50cc921f7514ec504d245f410842))
+
+
+### Bug Fixes
+
+* **backend:** prevent truncated tool calls from poisoning LLM history ([#161](https://github.com/Consensys/ask-o11y-plugin/issues/161)) ([83137a2](https://github.com/Consensys/ask-o11y-plugin/commit/83137a2ff02519b20742d866a668d97b70da9281))
+* **deps:** revert react-router-dom to v6 for @grafana/scenes compatibility ([#166](https://github.com/Consensys/ask-o11y-plugin/issues/166)) ([05847d3](https://github.com/Consensys/ask-o11y-plugin/commit/05847d34d96d5cf10ee52e3f7da0465f3632cc8f))
+
 ## [0.3.0](https://github.com/Consensys/ask-o11y-plugin/compare/v0.2.37...v0.3.0) (2026-07-21)
 
 
