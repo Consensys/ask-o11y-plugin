@@ -112,22 +112,22 @@
     "@grafana/scenes": "^8.13.3",
     "@grafana/schema": "^13.1.1",
     "@grafana/ui": "^13.1.1",
-    "@modelcontextprotocol/sdk": "^1.25.1",
+    "@modelcontextprotocol/sdk": "^1.30.0",
     "d3-sankey": "^0.12.3",
-    "dompurify": "^3.4.11",
+    "dompurify": "^3.4.12",
     "js-tiktoken": "^1.0.21",
     "marked": "^17.0.6",
     "react": "^18.3.0",
     "react-dom": "^18.3.0",
-    "react-router-dom": "^6.22.0",
-    "react-use": "^17.6.0",
+    "react-router-dom": "^7.0.0",
+    "react-use": "^17.6.1",
     "rxjs": "7.8.2",
     "streamdown": "^2.1.0"
   },
   "packageManager": "npm@11.5.1",
   "overrides": {
     "serialize-javascript": "^7.0.4",
-    "immutable": "^5.1.5",
+    "immutable": "^5.1.9",
     "@grafana/data": {
       "dompurify": "^3.3.2"
     },
