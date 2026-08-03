@@ -32,6 +32,7 @@ import (
 const PluginID = "consensys-asko11y-app"
 
 const defaultApprovalTimeout = 30 * time.Minute
+const defaultLocalGrafanaPort = 3000
 
 var approvalTimeout = defaultApprovalTimeout
 
@@ -49,6 +50,13 @@ func builtInMCPBaseURL(settings PluginSettings) string {
 }
 
 func resolveGrafanaURL(settings PluginSettings, cfg *backend.GrafanaCfg) (url, source string) {
+	if settings.UseLocalGrafanaURL {
+		port := settings.LocalGrafanaPort
+		if port == 0 {
+			port = defaultLocalGrafanaPort
+		}
+		return fmt.Sprintf("http://127.0.0.1:%d", port), "plugin-settings.useLocalGrafanaURL"
+	}
 	if cfg != nil {
 		if appURL, err := cfg.AppURL(); err == nil && appURL != "" {
 			return strings.TrimRight(appURL, "/"), "GrafanaConfig.AppURL"
@@ -91,6 +99,11 @@ type PluginSettings struct {
 	RecentMessageCount int `json:"recentMessageCount,omitempty"`
 
 	BuiltInMCPBaseURL string `json:"builtInMCPBaseURL,omitempty"`
+	// UseLocalGrafanaURL routes backend-to-backend LLM and built-in MCP requests
+	// to the Grafana process's loopback listener. It is intended for single-container
+	// deployments where the public Grafana URL is not locally reachable.
+	UseLocalGrafanaURL bool `json:"useLocalGrafanaURL,omitempty"`
+	LocalGrafanaPort   int  `json:"localGrafanaPort,omitempty"`
 
 	GraphitiScanInterval string `json:"graphitiScanInterval,omitempty"`
 	ServiceGraphMaxNodes int    `json:"serviceGraphMaxNodes,omitempty"`
@@ -206,7 +219,14 @@ func NewPlugin(ctx context.Context, settings backend.AppInstanceSettings) (insta
 			pluginSettings.BuiltInMCPBaseURL = ""
 		}
 	}
-
+	if pluginSettings.UseLocalGrafanaURL && pluginSettings.LocalGrafanaPort != 0 &&
+		(pluginSettings.LocalGrafanaPort < 1 || pluginSettings.LocalGrafanaPort > 65535) {
+		logger.Error("localGrafanaPort is outside the valid range, using default",
+			"configured", pluginSettings.LocalGrafanaPort,
+			"fallback", defaultLocalGrafanaPort,
+		)
+		pluginSettings.LocalGrafanaPort = 0
+	}
 	promptRegistry, err := NewPromptRegistry(pluginSettings)
 	if err != nil {
 		logger.Error("Failed to initialize prompt registry, using defaults", "error", err)

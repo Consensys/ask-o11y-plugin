@@ -132,6 +132,18 @@ Use an external [mcp-grafana](https://github.com/grafana/mcp-grafana) sidecar wh
 - **Service Graph**: Graphiti status, topology scan interval, graph build action, max node and edge limits.
 - **Prompts**: system, investigation, and performance prompt templates.
 
+### Local Grafana Endpoint
+
+Ask O11y calls the Grafana LLM app and built-in MCP endpoints from its backend.
+By default, it uses Grafana's public application URL. If that public URL is not
+reachable from the Grafana process in a single-container deployment, enable
+`useLocalGrafanaURL` in Ask O11y's `jsonData`. It routes those calls to the
+loopback endpoint `http://127.0.0.1:<port>`. The port defaults to `3000` and
+can be set with `localGrafanaPort` (valid range: 1–65535).
+
+This setting takes precedence over the public application URL. Leave it unset
+to keep the default behavior.
+
 Unsaved changes are shown per settings tab so admins know exactly what still needs to be saved.
 
 ## High Availability

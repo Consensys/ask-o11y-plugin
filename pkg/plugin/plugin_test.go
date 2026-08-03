@@ -326,6 +326,26 @@ func TestBuiltInMCPBaseURL(t *testing.T) {
 }
 
 func TestResolveGrafanaURL(t *testing.T) {
+	t.Run("uses local Grafana URL before AppURL when enabled", func(t *testing.T) {
+		cfg := backend.NewGrafanaCfg(map[string]string{
+			"GF_APP_URL": "https://mystack.grafana.net/",
+		})
+		url, source := resolveGrafanaURL(PluginSettings{UseLocalGrafanaURL: true}, cfg)
+		if url != "http://127.0.0.1:3000" {
+			t.Errorf("url = %q, want %q", url, "http://127.0.0.1:3000")
+		}
+		if source != "plugin-settings.useLocalGrafanaURL" {
+			t.Errorf("source = %q, want %q", source, "plugin-settings.useLocalGrafanaURL")
+		}
+	})
+
+	t.Run("uses configured local Grafana port", func(t *testing.T) {
+		url, _ := resolveGrafanaURL(PluginSettings{UseLocalGrafanaURL: true, LocalGrafanaPort: 13000}, nil)
+		if url != "http://127.0.0.1:13000" {
+			t.Errorf("url = %q, want %q", url, "http://127.0.0.1:13000")
+		}
+	})
+
 	t.Run("uses AppURL from GrafanaCfg when available", func(t *testing.T) {
 		cfg := backend.NewGrafanaCfg(map[string]string{
 			"GF_APP_URL": "https://mystack.grafana.net/",
