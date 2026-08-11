@@ -1,3 +1,5 @@
+import { pluginUrl } from '../utils/subpath';
+
 export interface TopologyNode {
   id: string;
   label: string;
@@ -25,7 +27,7 @@ export interface AgentTopologyOptions {
   maxEdges?: number;
 }
 
-const AGENT_TOPOLOGY_URL = '/api/plugins/consensys-asko11y-app/resources/api/agent/topology';
+const AGENT_TOPOLOGY_URL = pluginUrl('/api/agent/topology');
 
 function orgIdHeaders(orgId?: string): Record<string, string> {
   if (orgId) {

@@ -1,3 +1,5 @@
+import { pluginUrl } from '../utils/subpath';
+
 export interface AgentRunRequest {
   message: string;
   type?: 'chat' | 'investigation' | 'performance';
@@ -139,8 +141,8 @@ export interface AgentRunStatus {
   error?: string;
 }
 
-const AGENT_RUN_URL = '/api/plugins/consensys-asko11y-app/resources/api/agent/run';
-const AGENT_RUNS_URL = '/api/plugins/consensys-asko11y-app/resources/api/agent/runs';
+const AGENT_RUN_URL = pluginUrl('/api/agent/run');
+const AGENT_RUNS_URL = pluginUrl('/api/agent/runs');
 
 export const SSE_IDLE_TIMEOUT_MS = 60_000;
 
