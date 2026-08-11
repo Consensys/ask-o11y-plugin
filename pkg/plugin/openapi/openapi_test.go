@@ -109,6 +109,7 @@ func TestSpecHasAllEndpoints(t *testing.T) {
 		"/api/sessions/current",
 		"/api/sessions/{sessionId}",
 		"/api/sessions/{sessionId}/shares",
+		"/api/sessions/{sessionId}/stats",
 		"/api/sessions/share",
 		"/api/sessions/shared/{shareId}",
 		"/api/sessions/share/{shareId}",

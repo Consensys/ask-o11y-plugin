@@ -80,6 +80,24 @@ describe('SessionSidebar utilities', () => {
     });
   });
 
+  describe('session stats formatting', () => {
+    const formatStats = (stats: { totalTokens: number; runCount: number; toolCallCount: number }): string =>
+      `${stats.totalTokens.toLocaleString()} tokens · ${stats.runCount} ${stats.runCount === 1 ? 'turn' : 'turns'} · ` +
+      `${stats.toolCallCount} tool ${stats.toolCallCount === 1 ? 'call' : 'calls'}`;
+
+    it('should pluralize turns and tool calls', () => {
+      expect(formatStats({ totalTokens: 1234, runCount: 3, toolCallCount: 5 })).toBe('1,234 tokens · 3 turns · 5 tool calls');
+    });
+
+    it('should use singular turn and tool call for a count of one', () => {
+      expect(formatStats({ totalTokens: 500, runCount: 1, toolCallCount: 1 })).toBe('500 tokens · 1 turn · 1 tool call');
+    });
+
+    it('should format large token counts with separators', () => {
+      expect(formatStats({ totalTokens: 1000000, runCount: 10, toolCallCount: 20 })).toBe('1,000,000 tokens · 10 turns · 20 tool calls');
+    });
+  });
+
   describe('session title generation', () => {
     const generateTitle = (firstMessage: string, maxLength = 50): string => {
       if (!firstMessage) { return 'New Session'; }
