@@ -1,3 +1,5 @@
+import { withSubpath } from '../utils/subpath';
+
 export type LLMModel = 'base' | 'large';
 export type LLMModelSelection = 'auto' | LLMModel;
 
@@ -28,8 +30,8 @@ interface LLMPluginSettingsResponse {
   };
 }
 
-const LLM_MODELS_URL = '/api/plugins/grafana-llm-app/resources/llm/v1/models';
-const LLM_SETTINGS_URL = '/api/plugins/grafana-llm-app/settings';
+const LLM_MODELS_URL = withSubpath('/api/plugins/grafana-llm-app/resources/llm/v1/models');
+const LLM_SETTINGS_URL = withSubpath('/api/plugins/grafana-llm-app/settings');
 const SUPPORTED_MODELS: LLMModel[] = ['base', 'large'];
 
 function isLLMModel(value: string | undefined): value is LLMModel {
