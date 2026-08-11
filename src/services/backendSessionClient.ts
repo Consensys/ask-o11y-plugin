@@ -30,6 +30,18 @@ export interface SessionUpdate {
   summary?: string;
 }
 
+export interface SessionStats {
+  sessionId: string;
+  runCount: number;
+  totalIterations: number;
+  toolCallCount: number;
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export async function createSession(
   title?: string,
   messages?: ChatMessage[]
@@ -61,6 +73,16 @@ export async function getSession(sessionId: string): Promise<BackendChatSession>
   });
   if (!resp.ok) {
     throw new Error(`Failed to get session (${resp.status})`);
+  }
+  return resp.json();
+}
+
+export async function getSessionStats(sessionId: string): Promise<SessionStats> {
+  const resp = await fetch(`${SESSIONS_URL}/${sessionId}/stats`, {
+    headers: orgHeaders(),
+  });
+  if (!resp.ok) {
+    throw new Error(`Failed to get session stats (${resp.status})`);
   }
   return resp.json();
 }

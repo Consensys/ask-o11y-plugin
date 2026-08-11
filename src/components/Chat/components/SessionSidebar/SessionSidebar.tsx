@@ -3,7 +3,7 @@ import { UseSessionManagerReturn, SessionMetadata } from '../../hooks/useSession
 import { LoadingButton, InlineLoading } from '../../../LoadingOverlay';
 import { ShareDialog } from '../ShareDialog/ShareDialog';
 import { sessionShareService, CreateShareResponse } from '../../../../services/sessionShare';
-import { getSession } from '../../../../services/backendSessionClient';
+import { getSession, getSessionStats, SessionStats } from '../../../../services/backendSessionClient';
 import { Icon, useTheme2 } from '@grafana/ui';
 
 interface SessionSidebarProps {
@@ -22,6 +22,7 @@ export function SessionSidebar({ sessionManager, currentSessionId, isOpen, onClo
   const [creatingSession, setCreatingSession] = useState(false);
   const [shareDialogSessionId, setShareDialogSessionId] = useState<string | null>(null);
   const [sessionShares, setSessionShares] = useState<Map<string, CreateShareResponse[]>>(new Map());
+  const [sessionStats, setSessionStats] = useState<Map<string, SessionStats>>(new Map());
   const previousSessionIdsRef = useRef<string>('');
   const isLoadingRef = useRef<boolean>(false);
 
@@ -45,9 +46,10 @@ export function SessionSidebar({ sessionManager, currentSessionId, isOpen, onClo
     previousSessionIdsRef.current = sessionIdsString;
     isLoadingRef.current = true;
 
-    const loadAllShares = async () => {
+    const loadSessionExtras = async () => {
       try {
         const sharesMap = new Map<string, CreateShareResponse[]>();
+        const statsMap = new Map<string, SessionStats>();
         for (const session of sessionManager.sessions) {
           try {
             const shares = await sessionShareService.getSessionShares(session.id);
@@ -55,13 +57,20 @@ export function SessionSidebar({ sessionManager, currentSessionId, isOpen, onClo
           } catch {
             // Best-effort share loading per session
           }
+          try {
+            const stats = await getSessionStats(session.id);
+            statsMap.set(session.id, stats);
+          } catch {
+            // Best-effort stats loading per session
+          }
         }
         setSessionShares(sharesMap);
+        setSessionStats(statsMap);
       } finally {
         isLoadingRef.current = false;
       }
     };
-    loadAllShares();
+    loadSessionExtras();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen, sessionIdsString]); // sessionIdsString is a stable string value, won't cause infinite loops
 
@@ -198,6 +207,7 @@ export function SessionSidebar({ sessionManager, currentSessionId, isOpen, onClo
                   isLoading={loadingAction === `loading-${session.id}`}
                   isDeleting={loadingAction === `deleting-${session.id}`}
                   hasShares={(sessionShares.get(session.id)?.length ?? 0) > 0}
+                  stats={sessionStats.get(session.id)}
                   onLoad={() => handleLoadSession(session.id)}
                   onDelete={(e) => handleDeleteClick(session.id, e)}
                   onConfirmDelete={() => confirmDelete(session.id)}
@@ -302,6 +312,7 @@ interface SessionItemProps {
   isLoading?: boolean;
   isDeleting?: boolean;
   hasShares?: boolean;
+  stats?: SessionStats;
   onLoad: () => void;
   onDelete: (e: React.MouseEvent) => void;
   onConfirmDelete: () => void;
@@ -317,6 +328,7 @@ function SessionItem({
   isLoading = false,
   isDeleting = false,
   hasShares = false,
+  stats,
   onLoad,
   onDelete,
   onConfirmDelete,
@@ -377,6 +389,15 @@ function SessionItem({
             <span>{formatDate(session.updatedAt)}</span>
             <span>•</span>
             <span>{session.messageCount} messages</span>
+            {stats && stats.runCount > 0 && (
+              <>
+                <span>•</span>
+                <span data-testid="session-stats">
+                  {stats.totalTokens.toLocaleString()} tokens · {stats.runCount} {stats.runCount === 1 ? 'turn' : 'turns'} ·{' '}
+                  {stats.toolCallCount} tool {stats.toolCallCount === 1 ? 'call' : 'calls'}
+                </span>
+              </>
+            )}
           </div>
         </div>
 

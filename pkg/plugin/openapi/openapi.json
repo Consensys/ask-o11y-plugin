@@ -1527,6 +1527,55 @@
         }
       }
     },
+    "/api/sessions/{sessionId}/stats": {
+      "get": {
+        "summary": "Get session usage stats",
+        "description": "Returns cumulative usage stats (tokens, turns, tool calls) for a session, accumulated across all its agent runs. Only the session owner (same user + org) can access it. Omits the full message history — use GET /api/sessions/{sessionId} for the full transcript.",
+        "operationId": "getSessionStats",
+        "tags": [
+          "Sessions"
+        ],
+        "parameters": [
+          {
+            "name": "sessionId",
+            "in": "path",
+            "required": true,
+            "description": "Session ID (base64 URL-safe 32-byte token)",
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{43}$"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/X-Grafana-Org-Id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Session usage stats",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionStats"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    },
     "/api/sessions/share": {
       "post": {
         "summary": "Create share link",
@@ -3100,6 +3149,33 @@
               "large"
             ],
             "description": "LLM app model abstraction locked to this session, if selected"
+          },
+          "runCount": {
+            "type": "integer",
+            "description": "Number of completed agent runs (turns) in this session"
+          },
+          "totalIterations": {
+            "type": "integer",
+            "description": "Sum of agent-loop iterations (LLM round-trips) across all runs"
+          },
+          "toolCallCount": {
+            "type": "integer",
+            "description": "Sum of tool calls executed across all runs"
+          },
+          "promptTokens": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Sum of LLM prompt tokens across all runs"
+          },
+          "completionTokens": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Sum of LLM completion tokens across all runs"
+          },
+          "totalTokens": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Sum of LLM prompt + completion tokens across all runs"
           }
         },
         "required": [
@@ -3154,6 +3230,62 @@
           "createdAt",
           "updatedAt",
           "messageCount"
+        ]
+      },
+      "SessionStats": {
+        "type": "object",
+        "description": "Cumulative usage stats for a session, accumulated across all its agent runs",
+        "properties": {
+          "sessionId": {
+            "type": "string",
+            "description": "Session ID (base64 URL-safe 32-byte token)"
+          },
+          "runCount": {
+            "type": "integer",
+            "description": "Number of completed agent runs (turns) in this session"
+          },
+          "totalIterations": {
+            "type": "integer",
+            "description": "Sum of agent-loop iterations (LLM round-trips) across all runs"
+          },
+          "toolCallCount": {
+            "type": "integer",
+            "description": "Sum of tool calls executed across all runs"
+          },
+          "promptTokens": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Sum of LLM prompt tokens across all runs"
+          },
+          "completionTokens": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Sum of LLM completion tokens across all runs"
+          },
+          "totalTokens": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Sum of LLM prompt + completion tokens across all runs"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "sessionId",
+          "runCount",
+          "totalIterations",
+          "toolCallCount",
+          "promptTokens",
+          "completionTokens",
+          "totalTokens",
+          "createdAt",
+          "updatedAt"
         ]
       }
     }

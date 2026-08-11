@@ -129,6 +129,11 @@ func (a *AgentLoop) Run(ctx context.Context, req LoopRequest, eventCh chan<- SSE
 	truncationRetries := 0
 	pendingTruncationNudge := false
 
+	// Run-level usage/tool-call totals, surfaced on the "done" event so the
+	// caller can persist per-session stats (tokens, turns, tool calls).
+	var promptTokens, completionTokens, totalTokens int64
+	toolCallCount := 0
+
 	for iteration := 0; iteration < maxIter; iteration++ {
 		if ctx.Err() != nil {
 			return
@@ -174,6 +179,12 @@ func (a *AgentLoop) Run(ctx context.Context, req LoopRequest, eventCh chan<- SSE
 				Data: llmErrorEvent(err),
 			})
 			return
+		}
+
+		if resp.Usage != nil {
+			promptTokens += int64(resp.Usage.PromptTokens)
+			completionTokens += int64(resp.Usage.CompletionTokens)
+			totalTokens += int64(resp.Usage.TotalTokens)
 		}
 
 		msg := resp.Choices[0].Message
@@ -239,7 +250,13 @@ func (a *AgentLoop) Run(ctx context.Context, req LoopRequest, eventCh chan<- SSE
 			}
 			a.send(ctx, eventCh, SSEEvent{
 				Type: "done",
-				Data: DoneEvent{TotalIterations: iteration + 1},
+				Data: DoneEvent{
+					TotalIterations:  iteration + 1,
+					PromptTokens:     promptTokens,
+					CompletionTokens: completionTokens,
+					TotalTokens:      totalTokens,
+					ToolCallCount:    toolCallCount,
+				},
 			})
 			return
 		}
@@ -251,6 +268,7 @@ func (a *AgentLoop) Run(ctx context.Context, req LoopRequest, eventCh chan<- SSE
 			if ctx.Err() != nil {
 				return
 			}
+			toolCallCount++
 
 			a.send(ctx, eventCh, SSEEvent{
 				Type: "tool_call_start",

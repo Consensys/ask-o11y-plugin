@@ -32,6 +32,13 @@ type redisSession struct {
 	Model        string           `json:"model,omitempty"`
 	UserID       int64            `json:"userId"`
 	OrgID        int64            `json:"orgId"`
+
+	RunCount         int   `json:"runCount"`
+	TotalIterations  int   `json:"totalIterations"`
+	ToolCallCount    int   `json:"toolCallCount"`
+	PromptTokens     int64 `json:"promptTokens"`
+	CompletionTokens int64 `json:"completionTokens"`
+	TotalTokens      int64 `json:"totalTokens"`
 }
 
 func toRedis(s *ChatSession) *redisSession {
@@ -40,6 +47,8 @@ func toRedis(s *ChatSession) *redisSession {
 		Summary: s.Summary, CreatedAt: s.CreatedAt, UpdatedAt: s.UpdatedAt,
 		MessageCount: s.MessageCount, ActiveRunID: s.ActiveRunID, Model: s.Model,
 		UserID: s.UserID, OrgID: s.OrgID,
+		RunCount: s.RunCount, TotalIterations: s.TotalIterations, ToolCallCount: s.ToolCallCount,
+		PromptTokens: s.PromptTokens, CompletionTokens: s.CompletionTokens, TotalTokens: s.TotalTokens,
 	}
 }
 
@@ -49,6 +58,8 @@ func fromRedis(rs *redisSession) *ChatSession {
 		Summary: rs.Summary, CreatedAt: rs.CreatedAt, UpdatedAt: rs.UpdatedAt,
 		MessageCount: rs.MessageCount, ActiveRunID: rs.ActiveRunID, Model: rs.Model,
 		UserID: rs.UserID, OrgID: rs.OrgID,
+		RunCount: rs.RunCount, TotalIterations: rs.TotalIterations, ToolCallCount: rs.ToolCallCount,
+		PromptTokens: rs.PromptTokens, CompletionTokens: rs.CompletionTokens, TotalTokens: rs.TotalTokens,
 	}
 }
 
@@ -385,6 +396,27 @@ func (s *RedisSessionStore) ClearActiveRunID(sessionID string, userID, orgID int
 
 	session := fromRedis(rs)
 	session.ActiveRunID = ""
+	return s.saveSession(session)
+}
+
+func (s *RedisSessionStore) IncrementStats(sessionID string, userID, orgID int64, delta SessionStatsDelta) error {
+	rs, err := s.getSessionRaw(sessionID)
+	if err != nil {
+		return err
+	}
+	if rs.UserID != userID || rs.OrgID != orgID {
+		return fmt.Errorf("session not found")
+	}
+
+	session := fromRedis(rs)
+	session.RunCount += delta.RunCount
+	session.TotalIterations += delta.TotalIterations
+	session.ToolCallCount += delta.ToolCallCount
+	session.PromptTokens += delta.PromptTokens
+	session.CompletionTokens += delta.CompletionTokens
+	session.TotalTokens += delta.TotalTokens
+	session.UpdatedAt = time.Now()
+
 	return s.saveSession(session)
 }
 

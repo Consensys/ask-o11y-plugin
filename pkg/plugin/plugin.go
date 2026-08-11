@@ -989,6 +989,21 @@ func (p *Plugin) consumeAgentEvents(runID, sessionID string, userID, orgID int64
 	switch lastEvent.Type {
 	case "done":
 		p.runStore.FinishRun(runID, RunStatusCompleted, "")
+		if sessionID != "" {
+			if de, ok := lastEvent.Data.(agent.DoneEvent); ok {
+				delta := SessionStatsDelta{
+					RunCount:         1,
+					TotalIterations:  de.TotalIterations,
+					ToolCallCount:    de.ToolCallCount,
+					PromptTokens:     de.PromptTokens,
+					CompletionTokens: de.CompletionTokens,
+					TotalTokens:      de.TotalTokens,
+				}
+				if err := p.sessionStore.IncrementStats(sessionID, userID, orgID, delta); err != nil {
+					p.logger.Warn("Failed to increment session stats", "error", err, "sessionId", sessionID)
+				}
+			}
+		}
 	case "error":
 		var errMsg string
 		if ee, ok := lastEvent.Data.(agent.ErrorEvent); ok {
@@ -2214,7 +2229,8 @@ func (p *Plugin) handleSessionCurrent(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// handleSessionRouter dispatches /api/sessions/{id} and /api/sessions/{id}/shares.
+// handleSessionRouter dispatches /api/sessions/{id}, /api/sessions/{id}/shares,
+// and /api/sessions/{id}/stats.
 func (p *Plugin) handleSessionRouter(w http.ResponseWriter, r *http.Request) {
 	path := r.URL.Path
 	prefix := "/api/sessions/"
@@ -2238,6 +2254,16 @@ func (p *Plugin) handleSessionRouter(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		p.handleGetSessionShares(w, r, sessionID)
+		return
+	}
+
+	// /api/sessions/{id}/stats → usage stats for session
+	if sessionID, isStats := strings.CutSuffix(remainder, "/stats"); isStats {
+		if !isValidSecureID(sessionID) {
+			http.Error(w, "Invalid session ID format", http.StatusBadRequest)
+			return
+		}
+		p.handleGetSessionStats(w, r, sessionID)
 		return
 	}
 
@@ -2326,6 +2352,39 @@ func (p *Plugin) handleGetSessionShares(w http.ResponseWriter, r *http.Request, 
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(userShares)
+}
+
+// handleGetSessionStats returns cumulative usage stats for a session (tokens,
+// turns, tool calls), accumulated across all agent runs the session has had.
+// Unlike GET /api/sessions/{id}, this omits the full message history so
+// callers tracking usage across many sessions don't have to pull transcripts.
+func (p *Plugin) handleGetSessionStats(w http.ResponseWriter, r *http.Request, sessionID string) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	userID := getUserID(r)
+	orgID := getOrgID(r)
+
+	session, err := p.sessionStore.GetSession(sessionID, userID, orgID)
+	if err != nil {
+		http.Error(w, "Session not found", http.StatusNotFound)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"sessionId":        session.ID,
+		"runCount":         session.RunCount,
+		"totalIterations":  session.TotalIterations,
+		"toolCallCount":    session.ToolCallCount,
+		"promptTokens":     session.PromptTokens,
+		"completionTokens": session.CompletionTokens,
+		"totalTokens":      session.TotalTokens,
+		"createdAt":        session.CreatedAt,
+		"updatedAt":        session.UpdatedAt,
+	})
 }
 
 func generateSessionTitleFromType(convType, message string) string {
