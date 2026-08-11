@@ -5,6 +5,19 @@ All notable changes to the Ask O11y Grafana plugin will be documented in this fi
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.3](https://github.com/Consensys/ask-o11y-plugin/compare/v0.3.2...v0.3.3) (2026-08-11)
+
+
+### Features
+
+* **frontend:** support Grafana subpath deployments ([#175](https://github.com/Consensys/ask-o11y-plugin/issues/175)) ([cd3e739](https://github.com/Consensys/ask-o11y-plugin/commit/cd3e739b4d67d000cb5a021223651d7809a1e451))
+* **session:** add per-session usage stats endpoint ([#176](https://github.com/Consensys/ask-o11y-plugin/issues/176)) ([b8d6871](https://github.com/Consensys/ask-o11y-plugin/commit/b8d68715083e4228868dc55730c9a66c3ea74abf))
+
+
+### Bug Fixes
+
+* **share:** apply Grafana subpath prefix to buildShareUrl() ([#178](https://github.com/Consensys/ask-o11y-plugin/issues/178)) ([34812eb](https://github.com/Consensys/ask-o11y-plugin/commit/34812eb536c231bb47878cc1fb3fb6a49ffca91e))
+
 ## [0.3.2](https://github.com/Consensys/ask-o11y-plugin/compare/v0.3.1...v0.3.2) (2026-08-03)
 
 
