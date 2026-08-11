@@ -23,11 +23,16 @@ export function SessionSidebar({ sessionManager, currentSessionId, isOpen, onClo
   const [shareDialogSessionId, setShareDialogSessionId] = useState<string | null>(null);
   const [sessionShares, setSessionShares] = useState<Map<string, CreateShareResponse[]>>(new Map());
   const [sessionStats, setSessionStats] = useState<Map<string, SessionStats>>(new Map());
-  const previousSessionIdsRef = useRef<string>('');
+  const previousSessionSignatureRef = useRef<string>('');
   const isLoadingRef = useRef<boolean>(false);
 
-  // Create a stable string representation of session IDs for comparison
-  const sessionIdsString = sessionManager.sessions.map((s) => s.id).sort().join(',');
+  // Stable signature that changes when the session set changes OR when any
+  // session's updatedAt changes (e.g. a completed run bumps it) — not just
+  // on creation/deletion — so shares/stats get refetched instead of going stale.
+  const sessionSignature = sessionManager.sessions
+    .map((s) => `${s.id}:${new Date(s.updatedAt).getTime()}`)
+    .sort()
+    .join(',');
 
   // Refresh sessions and load shares when sidebar opens
   useEffect(() => {
@@ -38,12 +43,12 @@ export function SessionSidebar({ sessionManager, currentSessionId, isOpen, onClo
     // Refresh sessions list when sidebar opens to ensure it's up to date
     sessionManager.refreshSessions();
 
-    // Only reload shares if session IDs actually changed and we're not already loading
-    if (sessionIdsString === previousSessionIdsRef.current || isLoadingRef.current) {
+    // Only reload shares/stats if the signature actually changed and we're not already loading
+    if (sessionSignature === previousSessionSignatureRef.current || isLoadingRef.current) {
       return;
     }
 
-    previousSessionIdsRef.current = sessionIdsString;
+    previousSessionSignatureRef.current = sessionSignature;
     isLoadingRef.current = true;
 
     const loadSessionExtras = async () => {
@@ -72,7 +77,7 @@ export function SessionSidebar({ sessionManager, currentSessionId, isOpen, onClo
     };
     loadSessionExtras();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isOpen, sessionIdsString]); // sessionIdsString is a stable string value, won't cause infinite loops
+  }, [isOpen, sessionSignature]); // sessionSignature is a stable string value, won't cause infinite loops
 
   const formatDate = (date: Date | string) => {
     const d = typeof date === 'string' ? new Date(date) : date;
