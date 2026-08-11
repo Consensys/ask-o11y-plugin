@@ -139,12 +139,20 @@ type MCPUnavailableEvent struct {
 	Message string `json:"message"`
 }
 
+type ModelUsage struct {
+	Model            string `json:"model"`            // "base" | "large"
+	PromptTokens     int    `json:"promptTokens"`     // Input Tokens
+	CompletionTokens int    `json:"completionTokens"` // Output Tokens
+	TotalTokens      int    `json:"totalTokens"`
+}
+
 type DoneEvent struct {
-	TotalIterations  int   `json:"totalIterations"`
-	PromptTokens     int64 `json:"promptTokens"`
-	CompletionTokens int64 `json:"completionTokens"`
-	TotalTokens      int64 `json:"totalTokens"`
-	ToolCallCount    int   `json:"toolCallCount"`
+	TotalIterations  int                    `json:"totalIterations"`
+	PromptTokens     int64                  `json:"promptTokens"`
+	CompletionTokens int64                  `json:"completionTokens"`
+	TotalTokens      int64                  `json:"totalTokens"`
+	ToolCallCount    int                    `json:"toolCallCount"`
+	UsageByModel     map[string]ModelUsage `json:"usageByModel,omitempty"`
 }
 
 type ErrorEvent struct {
