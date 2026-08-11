@@ -35,11 +35,19 @@ type OpenAIFunction struct {
 }
 
 type ChatCompletionRequest struct {
-	Model     string       `json:"model,omitempty"`
-	Messages  []Message    `json:"messages"`
-	Tools     []OpenAITool `json:"tools,omitempty"`
-	Stream    bool         `json:"stream,omitempty"`
-	MaxTokens int          `json:"max_tokens,omitempty"`
+	Model         string         `json:"model,omitempty"`
+	Messages      []Message      `json:"messages"`
+	Tools         []OpenAITool   `json:"tools,omitempty"`
+	Stream        bool           `json:"stream,omitempty"`
+	StreamOptions *StreamOptions `json:"stream_options,omitempty"`
+	MaxTokens     int            `json:"max_tokens,omitempty"`
+}
+
+// StreamOptions.IncludeUsage requests a final usage-bearing chunk on an
+// OpenAI-compatible streaming response — without it, providers omit token
+// counts entirely from the stream.
+type StreamOptions struct {
+	IncludeUsage bool `json:"include_usage"`
 }
 
 type ChatCompletionResponse struct {
@@ -132,7 +140,11 @@ type MCPUnavailableEvent struct {
 }
 
 type DoneEvent struct {
-	TotalIterations int `json:"totalIterations"`
+	TotalIterations  int   `json:"totalIterations"`
+	PromptTokens     int64 `json:"promptTokens"`
+	CompletionTokens int64 `json:"completionTokens"`
+	TotalTokens      int64 `json:"totalTokens"`
+	ToolCallCount    int   `json:"toolCallCount"`
 }
 
 type ErrorEvent struct {

@@ -253,6 +253,45 @@ func TestSessionStore_ActiveRunID(t *testing.T) {
 	}
 }
 
+func TestSessionStore_IncrementStats(t *testing.T) {
+	store := newTestSessionStore()
+
+	session, _ := store.CreateSession(1, 1, "", []SessionMessage{{Role: "user", Content: "hello"}})
+
+	delta := SessionStatsDelta{
+		RunCount: 1, TotalIterations: 3, ToolCallCount: 2,
+		PromptTokens: 100, CompletionTokens: 20, TotalTokens: 120,
+	}
+	if err := store.IncrementStats(session.ID, 1, 1, delta); err != nil {
+		t.Fatalf("IncrementStats failed: %v", err)
+	}
+	// A second run's worth of stats should accumulate, not overwrite.
+	if err := store.IncrementStats(session.ID, 1, 1, delta); err != nil {
+		t.Fatalf("IncrementStats (second call) failed: %v", err)
+	}
+
+	got, err := store.GetSession(session.ID, 1, 1)
+	if err != nil {
+		t.Fatalf("GetSession failed: %v", err)
+	}
+	if got.RunCount != 2 || got.TotalIterations != 6 || got.ToolCallCount != 4 {
+		t.Fatalf("unexpected accumulated counts: %+v", got)
+	}
+	if got.PromptTokens != 200 || got.CompletionTokens != 40 || got.TotalTokens != 240 {
+		t.Fatalf("unexpected accumulated tokens: %+v", got)
+	}
+}
+
+func TestSessionStore_IncrementStats_WrongOwner(t *testing.T) {
+	store := newTestSessionStore()
+
+	session, _ := store.CreateSession(1, 1, "", []SessionMessage{{Role: "user", Content: "hello"}})
+
+	if err := store.IncrementStats(session.ID, 2, 1, SessionStatsDelta{RunCount: 1}); err == nil {
+		t.Fatal("expected error incrementing stats for another user's session")
+	}
+}
+
 func TestSessionStore_TitleGeneration(t *testing.T) {
 	store := newTestSessionStore()
 

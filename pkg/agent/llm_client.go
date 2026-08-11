@@ -140,6 +140,7 @@ func (c *LLMClient) ChatCompletion(ctx context.Context, req ChatCompletionReques
 	}()
 
 	req.Stream = true
+	req.StreamOptions = &StreamOptions{IncludeUsage: true}
 
 	body, err := json.Marshal(req)
 	if err != nil {
