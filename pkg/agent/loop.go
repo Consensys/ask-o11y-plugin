@@ -248,6 +248,10 @@ func (a *AgentLoop) Run(ctx context.Context, req LoopRequest, eventCh chan<- SSE
 					Data: ContentEvent{Content: msg.Content},
 				})
 			}
+			modelKey := req.Model
+			if modelKey == "" {
+				modelKey = "base"
+			}
 			a.send(ctx, eventCh, SSEEvent{
 				Type: "done",
 				Data: DoneEvent{
@@ -256,6 +260,14 @@ func (a *AgentLoop) Run(ctx context.Context, req LoopRequest, eventCh chan<- SSE
 					CompletionTokens: completionTokens,
 					TotalTokens:      totalTokens,
 					ToolCallCount:    toolCallCount,
+					UsageByModel: map[string]ModelUsage{
+						modelKey: {
+							Model:            modelKey,
+							PromptTokens:     int(promptTokens),
+							CompletionTokens: int(completionTokens),
+							TotalTokens:      int(totalTokens),
+						},
+					},
 				},
 			})
 			return

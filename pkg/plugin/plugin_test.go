@@ -699,7 +699,7 @@ func TestConsumeAgentEvents_IncrementsSessionStats(t *testing.T) {
 	}
 	close(eventCh)
 
-	p.consumeAgentEvents("run-1", session.ID, 7, 2, eventCh)
+	p.consumeAgentEvents("run-1", session.ID, 7, "admin", 2, "Org2", "base", eventCh)
 
 	got, err := p.sessionStore.GetSession(session.ID, 7, 2)
 	if err != nil {
@@ -725,7 +725,7 @@ func TestConsumeAgentEvents_DoesNotIncrementStatsOnError(t *testing.T) {
 	eventCh <- agent.SSEEvent{Type: "error", Data: agent.ErrorEvent{Message: "boom"}}
 	close(eventCh)
 
-	p.consumeAgentEvents("run-1", session.ID, 7, 2, eventCh)
+	p.consumeAgentEvents("run-1", session.ID, 7, "admin", 2, "Org2", "base", eventCh)
 
 	got, err := p.sessionStore.GetSession(session.ID, 7, 2)
 	if err != nil {
