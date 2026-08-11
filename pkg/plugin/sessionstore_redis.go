@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strconv"
 	"time"
 
 	"github.com/grafana/grafana-plugin-sdk-go/backend/log"
@@ -19,7 +20,14 @@ func sessionCurrentKey(userID, orgID int64) string {
 	return fmt.Sprintf("usersessions:%d:%d:current", userID, orgID)
 }
 
+// sessionStatsKey is a separate hash from the main session blob so
+// IncrementStats can HINCRBY atomically instead of racing with the
+// read-modify-write cycle every other session mutator uses on the blob.
+func sessionStatsKey(id string) string { return fmt.Sprintf("session:%s:stats", id) }
+
 // redisSession is the on-wire format stored in Redis (includes owner fields).
+// Usage-stats fields live in a separate hash (sessionStatsKey) so they never
+// round-trip through this struct's read-modify-write cycle — see IncrementStats.
 type redisSession struct {
 	ID           string           `json:"id"`
 	Title        string           `json:"title"`
@@ -32,13 +40,6 @@ type redisSession struct {
 	Model        string           `json:"model,omitempty"`
 	UserID       int64            `json:"userId"`
 	OrgID        int64            `json:"orgId"`
-
-	RunCount         int   `json:"runCount"`
-	TotalIterations  int   `json:"totalIterations"`
-	ToolCallCount    int   `json:"toolCallCount"`
-	PromptTokens     int64 `json:"promptTokens"`
-	CompletionTokens int64 `json:"completionTokens"`
-	TotalTokens      int64 `json:"totalTokens"`
 }
 
 func toRedis(s *ChatSession) *redisSession {
@@ -47,8 +48,6 @@ func toRedis(s *ChatSession) *redisSession {
 		Summary: s.Summary, CreatedAt: s.CreatedAt, UpdatedAt: s.UpdatedAt,
 		MessageCount: s.MessageCount, ActiveRunID: s.ActiveRunID, Model: s.Model,
 		UserID: s.UserID, OrgID: s.OrgID,
-		RunCount: s.RunCount, TotalIterations: s.TotalIterations, ToolCallCount: s.ToolCallCount,
-		PromptTokens: s.PromptTokens, CompletionTokens: s.CompletionTokens, TotalTokens: s.TotalTokens,
 	}
 }
 
@@ -58,8 +57,6 @@ func fromRedis(rs *redisSession) *ChatSession {
 		Summary: rs.Summary, CreatedAt: rs.CreatedAt, UpdatedAt: rs.UpdatedAt,
 		MessageCount: rs.MessageCount, ActiveRunID: rs.ActiveRunID, Model: rs.Model,
 		UserID: rs.UserID, OrgID: rs.OrgID,
-		RunCount: rs.RunCount, TotalIterations: rs.TotalIterations, ToolCallCount: rs.ToolCallCount,
-		PromptTokens: rs.PromptTokens, CompletionTokens: rs.CompletionTokens, TotalTokens: rs.TotalTokens,
 	}
 }
 
@@ -173,7 +170,35 @@ func (s *RedisSessionStore) GetSession(sessionID string, userID, orgID int64) (*
 	if rs.UserID != userID || rs.OrgID != orgID {
 		return nil, fmt.Errorf("session not found")
 	}
-	return fromRedis(rs), nil
+	session := fromRedis(rs)
+	if err := s.loadStats(session); err != nil {
+		s.logger.Warn("Failed to load session stats", "error", err, "sessionId", sessionID)
+	}
+	return session, nil
+}
+
+// loadStats fills in session's usage-stats fields from the stats hash.
+// Missing/absent fields default to zero (HGetAll returns an empty map for a
+// hash that was never incremented), so this is safe for sessions with no runs.
+func (s *RedisSessionStore) loadStats(session *ChatSession) error {
+	ctx, cancel := redisContext(s.ctx, RedisOpTimeout)
+	defer cancel()
+	fields, err := s.client.HGetAll(ctx, sessionStatsKey(session.ID)).Result()
+	if err != nil && err != redis.Nil {
+		return err
+	}
+	session.RunCount = parseStatsField(fields["runCount"])
+	session.TotalIterations = parseStatsField(fields["totalIterations"])
+	session.ToolCallCount = parseStatsField(fields["toolCallCount"])
+	session.PromptTokens = int64(parseStatsField(fields["promptTokens"]))
+	session.CompletionTokens = int64(parseStatsField(fields["completionTokens"]))
+	session.TotalTokens = int64(parseStatsField(fields["totalTokens"]))
+	return nil
+}
+
+func parseStatsField(v string) int {
+	n, _ := strconv.Atoi(v)
+	return n
 }
 
 func (s *RedisSessionStore) ListSessions(userID, orgID int64) ([]SessionMetadata, error) {
@@ -291,7 +316,7 @@ func (s *RedisSessionStore) DeleteSession(sessionID string, userID, orgID int64)
 
 	ctx, cancel := redisContext(s.ctx, RedisOpTimeout)
 	defer cancel()
-	s.client.Del(ctx, sessionKey(sessionID))
+	s.client.Del(ctx, sessionKey(sessionID), sessionStatsKey(sessionID))
 
 	ctx2, cancel2 := redisContext(s.ctx, RedisOpTimeout)
 	defer cancel2()
@@ -322,7 +347,7 @@ func (s *RedisSessionStore) DeleteAllSessions(userID, orgID int64) error {
 
 	for _, id := range ids {
 		ctx2, cancel2 := redisContext(s.ctx, RedisOpTimeout)
-		s.client.Del(ctx2, sessionKey(id))
+		s.client.Del(ctx2, sessionKey(id), sessionStatsKey(id))
 		cancel2()
 	}
 
@@ -399,6 +424,11 @@ func (s *RedisSessionStore) ClearActiveRunID(sessionID string, userID, orgID int
 	return s.saveSession(session)
 }
 
+// IncrementStats applies delta via HINCRBY on a hash separate from the main
+// session blob, so it can't race with the read-modify-write cycle every other
+// mutator (AppendMessages, SetActiveRunID, ...) uses — concurrent runs on the
+// same session (e.g. two tabs, or an automation retriggering a run) can't
+// silently drop a delta the way a read-modify-write on the blob would.
 func (s *RedisSessionStore) IncrementStats(sessionID string, userID, orgID int64, delta SessionStatsDelta) error {
 	rs, err := s.getSessionRaw(sessionID)
 	if err != nil {
@@ -408,16 +438,18 @@ func (s *RedisSessionStore) IncrementStats(sessionID string, userID, orgID int64
 		return fmt.Errorf("session not found")
 	}
 
-	session := fromRedis(rs)
-	session.RunCount += delta.RunCount
-	session.TotalIterations += delta.TotalIterations
-	session.ToolCallCount += delta.ToolCallCount
-	session.PromptTokens += delta.PromptTokens
-	session.CompletionTokens += delta.CompletionTokens
-	session.TotalTokens += delta.TotalTokens
-	session.UpdatedAt = time.Now()
-
-	return s.saveSession(session)
+	ctx, cancel := redisContext(s.ctx, RedisOpTimeout)
+	defer cancel()
+	statsKey := sessionStatsKey(sessionID)
+	pipe := s.client.Pipeline()
+	pipe.HIncrBy(ctx, statsKey, "runCount", int64(delta.RunCount))
+	pipe.HIncrBy(ctx, statsKey, "totalIterations", int64(delta.TotalIterations))
+	pipe.HIncrBy(ctx, statsKey, "toolCallCount", int64(delta.ToolCallCount))
+	pipe.HIncrBy(ctx, statsKey, "promptTokens", delta.PromptTokens)
+	pipe.HIncrBy(ctx, statsKey, "completionTokens", delta.CompletionTokens)
+	pipe.HIncrBy(ctx, statsKey, "totalTokens", delta.TotalTokens)
+	_, err = pipe.Exec(ctx)
+	return err
 }
 
 func (s *RedisSessionStore) CleanupOld() {
