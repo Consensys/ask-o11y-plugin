@@ -1,8 +1,9 @@
 import { config } from '@grafana/runtime';
 import type { ChatMessage } from '../components/Chat/types';
+import { pluginUrl } from '../utils/subpath';
 
-const SESSIONS_URL = '/api/plugins/consensys-asko11y-app/resources/api/sessions';
-const GRAPHITI_URL = '/api/plugins/consensys-asko11y-app/resources/api/graphiti';
+const SESSIONS_URL = pluginUrl('/api/sessions');
+const GRAPHITI_URL = pluginUrl('/api/graphiti');
 
 function orgHeaders(): Record<string, string> {
   const orgId = String(config.bootData.user.orgId || '1');
