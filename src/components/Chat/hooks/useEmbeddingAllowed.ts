@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { withSubpath } from '../../../utils/subpath';
 
 let cachedResult: boolean | null = null;
 let fetchPromise: Promise<boolean> | null = null;
@@ -18,7 +19,7 @@ export function useEmbeddingAllowed(): boolean | null {
     let mounted = true;
 
     if (!fetchPromise) {
-      fetchPromise = fetch(window.location.origin + '/api/health', { method: 'HEAD' })
+      fetchPromise = fetch(withSubpath('/api/health'), { method: 'HEAD' })
         .then((response) => {
           const xFrameOptions = response.headers.get('X-Frame-Options');
           cachedResult = !xFrameOptions || xFrameOptions.toLowerCase() !== 'deny';
