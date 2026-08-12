@@ -89,7 +89,8 @@ describe('SessionSidebar utilities', () => {
         return `${(tokens / 1000).toFixed(1)}k`;
       }
       if (tokens < 1000000) {
-        return `${Math.round(tokens / 1000)}k`;
+        const rounded = Math.round(tokens / 1000);
+        return rounded >= 1000 ? `${(tokens / 1000000).toFixed(1)}M` : `${rounded}k`;
       }
       return `${(tokens / 1000000).toFixed(1)}M`;
     };
@@ -112,6 +113,10 @@ describe('SessionSidebar utilities', () => {
 
     it('should abbreviate token counts in the millions with an "M" suffix', () => {
       expect(formatStats({ totalTokens: 1000000, runCount: 10, toolCallCount: 20 })).toBe('1.0M tokens · 10 turns · 20 tool calls');
+    });
+
+    it('should promote to the "M" suffix when rounding would otherwise reach "1000k"', () => {
+      expect(formatStats({ totalTokens: 999600, runCount: 2, toolCallCount: 4 })).toBe('1.0M tokens · 2 turns · 4 tool calls');
     });
   });
 
