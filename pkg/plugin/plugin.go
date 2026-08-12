@@ -989,6 +989,7 @@ func (p *Plugin) consumeAgentEvents(runID, sessionID string, userID int64, userL
 
 	userStr := fmt.Sprintf("%d", userID)
 	orgStr := fmt.Sprintf("%d", orgID)
+	orgName = sanitizeOrgNameLabel(orgName)
 
 	switch lastEvent.Type {
 	case "done":
