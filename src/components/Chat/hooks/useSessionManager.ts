@@ -32,6 +32,8 @@ export function useSessionManager(
 ): UseSessionManagerReturn {
   const [currentSessionId, setCurrentSessionId_] = useState<string | null>(sessionIdFromUrl);
   const [sessions, setSessions] = useState<SessionMetadata[]>([]);
+  const sessionsRef = useRef<SessionMetadata[]>([]);
+  sessionsRef.current = sessions;
 
   const lastInitializedOrgIdRef = useRef<string | null>(null);
 
@@ -47,8 +49,9 @@ export function useSessionManager(
       setSessions(loaded);
       return loaded;
     } catch {
-      // Best-effort refresh — UI stays on stale list
-      return [];
+      // Best-effort refresh — keep the displayed list and return it so callers
+      // (e.g. SessionSidebar) do not treat a failed fetch as an empty session set.
+      return sessionsRef.current;
     }
   }, []);
 
