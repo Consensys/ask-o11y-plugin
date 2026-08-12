@@ -139,7 +139,7 @@ test.describe('Session Management', () => {
     const firstSessionItem = page.locator('.p-1\\.5.rounded.group').first();
     await expect(firstSessionItem).toBeVisible({ timeout: 15000 });
     await expect(firstSessionItem.getByTestId('session-stats')).toBeVisible({ timeout: 15000 });
-    await expect(firstSessionItem.getByTestId('session-stats')).toHaveText(/\d+ tokens · \d+ turns? · \d+ tool calls?/);
+    await expect(firstSessionItem.getByTestId('session-stats')).toHaveText(/[\d.,]+[kM]? tokens · \d+ turns? · \d+ tool calls?/);
 
     await page.locator('button[title="Close"]').click();
   });
