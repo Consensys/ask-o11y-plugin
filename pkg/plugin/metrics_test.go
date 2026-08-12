@@ -5,9 +5,10 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
-func TestRegisterRoutesMetricsEndpoint(t *testing.T) {
+func TestRegisterRoutesDoesNotExposeMetricsEndpoint(t *testing.T) {
 	p := newAgentRunTestPlugin(t)
 	mux := http.NewServeMux()
 	p.registerRoutes(mux)
@@ -16,26 +17,34 @@ func TestRegisterRoutesMetricsEndpoint(t *testing.T) {
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	if !strings.Contains(rec.Header().Get("Content-Type"), "application/json") {
+		t.Fatalf("Content-Type = %q, want application/json from default handler", rec.Header().Get("Content-Type"))
 	}
-	body := rec.Body.String()
-	if !strings.Contains(body, "asko11y_agent_user_tokens_total") {
-		t.Fatalf("body missing asko11y_agent_user_tokens_total: %s", body)
-	}
-	if ct := rec.Header().Get("Content-Type"); !strings.HasPrefix(ct, "text/plain") {
-		t.Fatalf("Content-Type = %q, want text/plain", ct)
+	if strings.Contains(rec.Body.String(), "asko11y_agent_user_tokens_total") {
+		t.Fatalf("unexpected Prometheus metrics in response: %s", rec.Body.String())
 	}
 }
 
-func TestHandleMetricsRejectsPost(t *testing.T) {
-	p := newAgentRunTestPlugin(t)
-	req := httptest.NewRequest(http.MethodPost, "/metrics", nil)
-	rec := httptest.NewRecorder()
+func TestSanitizeOrgNameLabelTruncatesByRune(t *testing.T) {
+	got := sanitizeOrgNameLabel(strings.Repeat("世", 100))
+	if utf8.RuneCountInString(got) != maxOrgNameLabelLength {
+		t.Fatalf("rune count = %d, want %d", utf8.RuneCountInString(got), maxOrgNameLabelLength)
+	}
+	if !utf8.ValidString(got) {
+		t.Fatalf("invalid UTF-8: %q", got)
+	}
+}
 
-	p.handleMetrics(rec, req)
+func TestSanitizeOrgNameLabelSafeForPrometheusLabels(t *testing.T) {
+	got := sanitizeOrgNameLabel(strings.Repeat("世", 100))
+	agentUserTokens.WithLabelValues("1", "user", "base", "prompt", "1", got)
+}
 
-	if rec.Code != http.StatusMethodNotAllowed {
-		t.Fatalf("status = %d, want %d", rec.Code, http.StatusMethodNotAllowed)
+func TestSanitizeOrgNameLabelStripsControlsAndDefaultsEmpty(t *testing.T) {
+	if got := sanitizeOrgNameLabel("  \t\n  "); got != "unknown" {
+		t.Fatalf("got %q, want unknown", got)
+	}
+	if got := sanitizeOrgNameLabel("\x00\x1f\x7f"); got != "unknown" {
+		t.Fatalf("got %q, want unknown", got)
 	}
 }
