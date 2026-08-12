@@ -36,17 +36,18 @@ func sanitizeOrgNameLabel(name string) string {
 	}
 
 	var b strings.Builder
+	runeCount := 0
 	for _, r := range name {
 		if r < 0x20 || r == 0x7f {
 			continue
 		}
+		if runeCount >= maxOrgNameLabelLength {
+			break
+		}
 		b.WriteRune(r)
+		runeCount++
 	}
 	name = b.String()
-
-	if len(name) > maxOrgNameLabelLength {
-		name = name[:maxOrgNameLabelLength]
-	}
 
 	if name == "" {
 		return "unknown"
@@ -56,9 +57,10 @@ func sanitizeOrgNameLabel(name string) string {
 
 func init() {
 	// Initialize zero-value metric series on plugin startup for clean PromQL initialization.
+	// org_name uses "unknown" to match sanitizeOrgNameLabel's fallback for empty input.
 	for _, model := range []string{"base", "large"} {
-		agentUserTokens.WithLabelValues("0", "unknown", model, "prompt", "1", "")
-		agentUserTokens.WithLabelValues("0", "unknown", model, "completion", "1", "")
+		agentUserTokens.WithLabelValues("0", "unknown", model, "prompt", "1", "unknown")
+		agentUserTokens.WithLabelValues("0", "unknown", model, "completion", "1", "unknown")
 	}
 }
 
