@@ -310,6 +310,21 @@ function ShareDialogWrapper({
   );
 }
 
+function formatTokenCount(tokens: number): string {
+  if (tokens < 1000) {
+    return tokens.toString();
+  }
+  if (tokens < 10000) {
+    return `${(tokens / 1000).toFixed(1)}k`;
+  }
+  if (tokens < 1000000) {
+    const rounded = Math.round(tokens / 1000);
+    // Rounding can push values like 999,600 up to "1000k" — promote those to the M tier.
+    return rounded >= 1000 ? `${(tokens / 1000000).toFixed(1)}M` : `${rounded}k`;
+  }
+  return `${(tokens / 1000000).toFixed(1)}M`;
+}
+
 interface SessionItemProps {
   session: SessionMetadata;
   isActive: boolean;
@@ -390,20 +405,29 @@ function SessionItem({
             {isActive && <Icon name="arrow-right" size="xs" className="text-primary flex-shrink-0" />}
             <h3 className={`font-medium text-xs truncate ${isActive ? 'text-primary font-semibold' : 'text-primary'}`}>{session.title}</h3>
           </div>
-          <div className="flex items-center gap-1.5 mt-0.5 text-xs text-secondary">
+          <div className="flex items-center flex-wrap mt-0.5 text-xs text-secondary">
             <span>{formatDate(session.updatedAt)}</span>
-            <span>•</span>
+            {' · '}
             <span>{session.messageCount} messages</span>
-            {stats && stats.runCount > 0 && (
-              <>
-                <span>•</span>
-                <span data-testid="session-stats">
-                  {stats.totalTokens.toLocaleString()} tokens · {stats.runCount} {stats.runCount === 1 ? 'turn' : 'turns'} ·{' '}
-                  {stats.toolCallCount} tool {stats.toolCallCount === 1 ? 'call' : 'calls'}
-                </span>
-              </>
-            )}
           </div>
+          {stats && stats.runCount > 0 && (
+            <div data-testid="session-stats" className="flex items-center flex-wrap mt-1 text-xs text-secondary">
+              <span className="inline-flex items-center gap-0.5" title={`${stats.totalTokens.toLocaleString()} tokens`}>
+                <Icon name="bolt" size="xs" />
+                {formatTokenCount(stats.totalTokens)} tokens
+              </span>
+              {' · '}
+              <span className="inline-flex items-center gap-0.5">
+                <Icon name="repeat" size="xs" />
+                {stats.runCount} {stats.runCount === 1 ? 'turn' : 'turns'}
+              </span>
+              {' · '}
+              <span className="inline-flex items-center gap-0.5">
+                <Icon name="cog" size="xs" />
+                {stats.toolCallCount} tool {stats.toolCallCount === 1 ? 'call' : 'calls'}
+              </span>
+            </div>
+          )}
         </div>
 
         <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
