@@ -1,10 +1,12 @@
 package plugin
 
 import (
+	"net/http"
 	"strings"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 // maxOrgNameLabelLength bounds the org_name label value. orgName is supplied
@@ -22,6 +24,8 @@ var (
 		[]string{"user", "login", "model", "type", "org", "org_name"},
 	)
 )
+
+var metricsHandler = promhttp.Handler()
 
 // sanitizeOrgNameLabel cleans and bounds a client-supplied org name before it
 // is used as a Prometheus label value.
@@ -56,4 +60,12 @@ func init() {
 		agentUserTokens.WithLabelValues("0", "unknown", model, "prompt", "1", "")
 		agentUserTokens.WithLabelValues("0", "unknown", model, "completion", "1", "")
 	}
+}
+
+func (p *Plugin) handleMetrics(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	metricsHandler.ServeHTTP(w, r)
 }

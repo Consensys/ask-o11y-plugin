@@ -438,6 +438,7 @@ func (p *Plugin) CheckHealth(ctx context.Context, req *backend.CheckHealthReques
 
 func (p *Plugin) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/health", p.handleHealth)
+	mux.HandleFunc("/metrics", p.handleMetrics)
 	mux.HandleFunc("/openapi.json", p.handleOpenAPISpec)
 	mux.HandleFunc("/mcp", p.handleMCP)
 	mux.HandleFunc("/api/mcp/tools", p.handleMCPTools)
