@@ -19,7 +19,7 @@ export interface UseSessionManagerReturn {
   loadSession: (sessionId: string) => Promise<void>;
   deleteSession: (sessionId: string) => Promise<void>;
   deleteAllSessions: () => Promise<void>;
-  refreshSessions: () => Promise<void>;
+  refreshSessions: () => Promise<SessionMetadata[]>;
 }
 
 export function useSessionManager(
@@ -41,12 +41,14 @@ export function useSessionManager(
     }
   }, [sessionIdFromUrl, currentSessionId]);
 
-  const refreshSessions = useCallback(async () => {
+  const refreshSessions = useCallback(async (): Promise<SessionMetadata[]> => {
     try {
       const loaded = await listSessions();
       setSessions(loaded);
+      return loaded;
     } catch {
       // Best-effort refresh — UI stays on stale list
+      return [];
     }
   }, []);
 

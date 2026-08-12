@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import { UseSessionManagerReturn, SessionMetadata } from '../../hooks/useSessionManager';
 import { LoadingButton, InlineLoading } from '../../../LoadingOverlay';
 import { ShareDialog } from '../ShareDialog/ShareDialog';
@@ -23,8 +23,6 @@ export function SessionSidebar({ sessionManager, currentSessionId, isOpen, onClo
   const [shareDialogSessionId, setShareDialogSessionId] = useState<string | null>(null);
   const [sessionShares, setSessionShares] = useState<Map<string, CreateShareResponse[]>>(new Map());
   const [sessionStats, setSessionStats] = useState<Map<string, SessionStats>>(new Map());
-  const previousSessionSignatureRef = useRef<string>('');
-  const isLoadingRef = useRef<boolean>(false);
 
   // Stable signature that changes when the session set changes OR when any
   // session's updatedAt changes (e.g. a completed run bumps it) — not just
@@ -34,48 +32,50 @@ export function SessionSidebar({ sessionManager, currentSessionId, isOpen, onClo
     .sort()
     .join(',');
 
-  // Refresh sessions and load shares when sidebar opens
+  // Refresh sessions and load shares/stats when sidebar opens or sessions change.
   useEffect(() => {
     if (!isOpen) {
       return;
     }
 
-    // Refresh sessions list when sidebar opens to ensure it's up to date
-    sessionManager.refreshSessions();
-
-    // Only reload shares/stats if the signature actually changed and we're not already loading
-    if (sessionSignature === previousSessionSignatureRef.current || isLoadingRef.current) {
-      return;
-    }
-
-    previousSessionSignatureRef.current = sessionSignature;
-    isLoadingRef.current = true;
+    let cancelled = false;
 
     const loadSessionExtras = async () => {
-      try {
-        const sharesMap = new Map<string, CreateShareResponse[]>();
-        const statsMap = new Map<string, SessionStats>();
-        for (const session of sessionManager.sessions) {
-          try {
-            const shares = await sessionShareService.getSessionShares(session.id);
-            sharesMap.set(session.id, shares);
-          } catch {
-            // Best-effort share loading per session
-          }
-          try {
-            const stats = await getSessionStats(session.id);
-            statsMap.set(session.id, stats);
-          } catch {
-            // Best-effort stats loading per session
-          }
+      const sessions = await sessionManager.refreshSessions();
+      if (cancelled) {
+        return;
+      }
+
+      const sharesMap = new Map<string, CreateShareResponse[]>();
+      const statsMap = new Map<string, SessionStats>();
+      for (const session of sessions) {
+        try {
+          const shares = await sessionShareService.getSessionShares(session.id);
+          sharesMap.set(session.id, shares);
+        } catch {
+          // Best-effort share loading per session
         }
+        try {
+          const stats = await getSessionStats(session.id);
+          statsMap.set(session.id, stats);
+        } catch {
+          // Best-effort stats loading per session
+        }
+        if (cancelled) {
+          return;
+        }
+      }
+      if (!cancelled) {
         setSessionShares(sharesMap);
         setSessionStats(statsMap);
-      } finally {
-        isLoadingRef.current = false;
       }
     };
+
     loadSessionExtras();
+
+    return () => {
+      cancelled = true;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen, sessionSignature]); // sessionSignature is a stable string value, won't cause infinite loops
 

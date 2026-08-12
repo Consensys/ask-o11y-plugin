@@ -982,6 +982,25 @@ func (p *Plugin) consumeAgentEvents(runID, sessionID string, userID int64, userL
 	var lastEvent agent.SSEEvent
 	var allEvents []agent.SSEEvent
 	for event := range eventCh {
+		// Persist session stats before exposing the done event to reconnecting
+		// clients. The frontend refreshes sessions as soon as it sees done, so
+		// incrementing after the loop would race with GET /stats returning zeros.
+		if event.Type == "done" && sessionID != "" {
+			if de, ok := event.Data.(agent.DoneEvent); ok {
+				delta := SessionStatsDelta{
+					RunCount:         1,
+					TotalIterations:  de.TotalIterations,
+					ToolCallCount:    de.ToolCallCount,
+					PromptTokens:     de.PromptTokens,
+					CompletionTokens: de.CompletionTokens,
+					TotalTokens:      de.TotalTokens,
+				}
+				if err := p.sessionStore.IncrementStats(sessionID, userID, orgID, delta); err != nil {
+					p.logger.Warn("Failed to increment session stats", "error", err, "sessionId", sessionID)
+				}
+			}
+		}
+
 		p.runStore.AppendEvent(runID, event)
 		allEvents = append(allEvents, event)
 		lastEvent = event
@@ -1017,21 +1036,6 @@ func (p *Plugin) consumeAgentEvents(runID, sessionID string, userID int64, userL
 			}
 		}
 
-		if sessionID != "" {
-			if de, ok := lastEvent.Data.(agent.DoneEvent); ok {
-				delta := SessionStatsDelta{
-					RunCount:         1,
-					TotalIterations:  de.TotalIterations,
-					ToolCallCount:    de.ToolCallCount,
-					PromptTokens:     de.PromptTokens,
-					CompletionTokens: de.CompletionTokens,
-					TotalTokens:      de.TotalTokens,
-				}
-				if err := p.sessionStore.IncrementStats(sessionID, userID, orgID, delta); err != nil {
-					p.logger.Warn("Failed to increment session stats", "error", err, "sessionId", sessionID)
-				}
-			}
-		}
 	case "error":
 		var errMsg string
 		if ee, ok := lastEvent.Data.(agent.ErrorEvent); ok {
