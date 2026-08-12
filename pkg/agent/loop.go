@@ -131,7 +131,6 @@ func (a *AgentLoop) Run(ctx context.Context, req LoopRequest, eventCh chan<- SSE
 
 	// Run-level usage/tool-call totals, surfaced on the "done" event so the
 	// caller can persist per-session stats (tokens, turns, tool calls).
-	var promptTokens, completionTokens, totalTokens int64
 	usageByModel := make(map[string]ModelUsage)
 	toolCallCount := 0
 
@@ -183,9 +182,6 @@ func (a *AgentLoop) Run(ctx context.Context, req LoopRequest, eventCh chan<- SSE
 		}
 
 		if resp.Usage != nil {
-			promptTokens += int64(resp.Usage.PromptTokens)
-			completionTokens += int64(resp.Usage.CompletionTokens)
-			totalTokens += int64(resp.Usage.TotalTokens)
 			usage := usageByModel[effectiveModel]
 			usage.Model = effectiveModel
 			usage.PromptTokens += resp.Usage.PromptTokens
@@ -254,6 +250,12 @@ func (a *AgentLoop) Run(ctx context.Context, req LoopRequest, eventCh chan<- SSE
 					Type: "content",
 					Data: ContentEvent{Content: msg.Content},
 				})
+			}
+			var promptTokens, completionTokens, totalTokens int64
+			for _, u := range usageByModel {
+				promptTokens += int64(u.PromptTokens)
+				completionTokens += int64(u.CompletionTokens)
+				totalTokens += int64(u.TotalTokens)
 			}
 			a.send(ctx, eventCh, SSEEvent{
 				Type: "done",
