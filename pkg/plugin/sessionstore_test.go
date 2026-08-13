@@ -2,6 +2,7 @@ package plugin
 
 import (
 	"testing"
+	"time"
 
 	"github.com/grafana/grafana-plugin-sdk-go/backend/log"
 )
@@ -65,6 +66,7 @@ func TestSessionStore_ListSessions(t *testing.T) {
 	store := newTestSessionStore()
 
 	store.CreateSession(1, 1, "first", []SessionMessage{{Role: "user", Content: "a"}})
+	time.Sleep(10 * time.Millisecond)
 	store.CreateSession(1, 1, "second", []SessionMessage{{Role: "user", Content: "b"}})
 	store.CreateSession(2, 1, "other user", []SessionMessage{{Role: "user", Content: "c"}})
 

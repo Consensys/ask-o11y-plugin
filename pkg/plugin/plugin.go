@@ -736,6 +736,7 @@ func (p *Plugin) handleAgentRun(w http.ResponseWriter, r *http.Request) {
 
 	userRole := getUserRole(r)
 	userID := getUserID(r)
+	userLogin := getUserLogin(r)
 	orgID := r.Header.Get("X-Grafana-Org-Id")
 	if orgID == "" {
 		orgID = "1"
@@ -960,7 +961,7 @@ func (p *Plugin) handleAgentRun(w http.ResponseWriter, r *http.Request) {
 
 	go p.agentLoop.Run(runCtx, loopReq, eventCh)
 	go func() {
-		p.consumeAgentEvents(runID, sessionID, userID, numericOrgID, eventCh)
+		p.consumeAgentEvents(runID, sessionID, userID, userLogin, numericOrgID, req.OrgName, effectiveRunModel, eventCh)
 		runCancel()
 		p.runCancelsMu.Lock()
 		delete(p.runCancels, runID)
@@ -977,20 +978,15 @@ func (p *Plugin) handleAgentRun(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (p *Plugin) consumeAgentEvents(runID, sessionID string, userID, orgID int64, eventCh <-chan agent.SSEEvent) {
+func (p *Plugin) consumeAgentEvents(runID, sessionID string, userID int64, userLogin string, orgID int64, orgName string, effectiveModel string, eventCh <-chan agent.SSEEvent) {
 	var lastEvent agent.SSEEvent
 	var allEvents []agent.SSEEvent
 	for event := range eventCh {
-		p.runStore.AppendEvent(runID, event)
-		allEvents = append(allEvents, event)
-		lastEvent = event
-	}
-
-	switch lastEvent.Type {
-	case "done":
-		p.runStore.FinishRun(runID, RunStatusCompleted, "")
-		if sessionID != "" {
-			if de, ok := lastEvent.Data.(agent.DoneEvent); ok {
+		// Persist session stats before exposing the done event to reconnecting
+		// clients. The frontend refreshes sessions as soon as it sees done, so
+		// incrementing after the loop would race with GET /stats returning zeros.
+		if event.Type == "done" && sessionID != "" {
+			if de, ok := event.Data.(agent.DoneEvent); ok {
 				delta := SessionStatsDelta{
 					RunCount:         1,
 					TotalIterations:  de.TotalIterations,
@@ -1004,6 +1000,42 @@ func (p *Plugin) consumeAgentEvents(runID, sessionID string, userID, orgID int64
 				}
 			}
 		}
+
+		p.runStore.AppendEvent(runID, event)
+		allEvents = append(allEvents, event)
+		lastEvent = event
+	}
+
+	userStr := fmt.Sprintf("%d", userID)
+	orgStr := fmt.Sprintf("%d", orgID)
+	orgName = sanitizeOrgNameLabel(orgName)
+
+	switch lastEvent.Type {
+	case "done":
+		p.runStore.FinishRun(runID, RunStatusCompleted, "")
+		var usageMap map[string]agent.ModelUsage
+		if de, ok := lastEvent.Data.(agent.DoneEvent); ok {
+			usageMap = de.UsageByModel
+		} else if pdone, ok := lastEvent.Data.(*agent.DoneEvent); ok && pdone != nil {
+			usageMap = pdone.UsageByModel
+		}
+
+		if len(usageMap) == 0 {
+			if de, ok := lastEvent.Data.(agent.DoneEvent); ok && de.TotalTokens > 0 {
+				modelKey := effectiveModel
+				if modelKey == "" {
+					modelKey = "base"
+				}
+				agentUserTokens.WithLabelValues(userStr, userLogin, modelKey, "prompt", orgStr, orgName).Add(float64(de.PromptTokens))
+				agentUserTokens.WithLabelValues(userStr, userLogin, modelKey, "completion", orgStr, orgName).Add(float64(de.CompletionTokens))
+			}
+		} else {
+			for model, usage := range usageMap {
+				agentUserTokens.WithLabelValues(userStr, userLogin, model, "prompt", orgStr, orgName).Add(float64(usage.PromptTokens))
+				agentUserTokens.WithLabelValues(userStr, userLogin, model, "completion", orgStr, orgName).Add(float64(usage.CompletionTokens))
+			}
+		}
+
 	case "error":
 		var errMsg string
 		if ee, ok := lastEvent.Data.(agent.ErrorEvent); ok {
@@ -1647,6 +1679,17 @@ func getUserID(r *http.Request) int64 {
 	}
 
 	return 0
+}
+
+func getUserLogin(r *http.Request) string {
+	pluginContext := httpadapter.PluginConfigFromContext(r.Context())
+	if pluginContext.User != nil && pluginContext.User.Login != "" {
+		return pluginContext.User.Login
+	}
+	if pluginContext.User != nil && pluginContext.User.Email != "" {
+		return pluginContext.User.Email
+	}
+	return "unknown"
 }
 
 // isGraphitiAvailable returns true when the graphiti MCP server is registered
@@ -2429,6 +2472,7 @@ func truncateTitle(s string, maxLen int) string {
 
 func reconstructAssistantMessage(events []agent.SSEEvent) SessionMessage {
 	var content string
+	var tokenUsageRaw json.RawMessage
 	// Merge tool_call_start and tool_call_result by ID so each tool call
 	// produces exactly one entry (no duplicates when reopening a session).
 	toolCallsByID := make(map[string]map[string]interface{})
@@ -2436,6 +2480,18 @@ func reconstructAssistantMessage(events []agent.SSEEvent) SessionMessage {
 
 	for _, e := range events {
 		switch e.Type {
+		case "done":
+			if de, ok := e.Data.(agent.DoneEvent); ok && de.UsageByModel != nil {
+				if data, err := json.Marshal(de.UsageByModel); err == nil {
+					tokenUsageRaw = data
+				}
+			} else if m, ok := e.Data.(map[string]interface{}); ok {
+				if usage, exists := m["usageByModel"]; exists && usage != nil {
+					if data, err := json.Marshal(usage); err == nil {
+						tokenUsageRaw = data
+					}
+				}
+			}
 		case "content":
 			if ce, ok := e.Data.(agent.ContentEvent); ok {
 				content += ce.Content
@@ -2499,8 +2555,9 @@ func reconstructAssistantMessage(events []agent.SSEEvent) SessionMessage {
 	}
 
 	msg := SessionMessage{
-		Role:    "assistant",
-		Content: content,
+		Role:       "assistant",
+		Content:    content,
+		TokenUsage: tokenUsageRaw,
 	}
 
 	if len(toolCallOrder) > 0 {

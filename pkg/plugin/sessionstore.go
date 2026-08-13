@@ -11,10 +11,11 @@ import (
 )
 
 type SessionMessage struct {
-	Role      string          `json:"role"`
-	Content   string          `json:"content"`
-	ToolCalls json.RawMessage `json:"toolCalls,omitempty"`
-	PageRefs  json.RawMessage `json:"pageRefs,omitempty"`
+	Role       string          `json:"role"`
+	Content    string          `json:"content"`
+	ToolCalls  json.RawMessage `json:"toolCalls,omitempty"`
+	PageRefs   json.RawMessage `json:"pageRefs,omitempty"`
+	TokenUsage json.RawMessage `json:"tokenUsage,omitempty"`
 }
 
 type ChatSession struct {

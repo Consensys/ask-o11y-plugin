@@ -19,7 +19,7 @@ export interface UseSessionManagerReturn {
   loadSession: (sessionId: string) => Promise<void>;
   deleteSession: (sessionId: string) => Promise<void>;
   deleteAllSessions: () => Promise<void>;
-  refreshSessions: () => Promise<void>;
+  refreshSessions: () => Promise<SessionMetadata[]>;
 }
 
 export function useSessionManager(
@@ -32,6 +32,8 @@ export function useSessionManager(
 ): UseSessionManagerReturn {
   const [currentSessionId, setCurrentSessionId_] = useState<string | null>(sessionIdFromUrl);
   const [sessions, setSessions] = useState<SessionMetadata[]>([]);
+  const sessionsRef = useRef<SessionMetadata[]>([]);
+  sessionsRef.current = sessions;
 
   const lastInitializedOrgIdRef = useRef<string | null>(null);
 
@@ -41,12 +43,15 @@ export function useSessionManager(
     }
   }, [sessionIdFromUrl, currentSessionId]);
 
-  const refreshSessions = useCallback(async () => {
+  const refreshSessions = useCallback(async (): Promise<SessionMetadata[]> => {
     try {
       const loaded = await listSessions();
       setSessions(loaded);
+      return loaded;
     } catch {
-      // Best-effort refresh — UI stays on stale list
+      // Best-effort refresh — keep the displayed list and return it so callers
+      // (e.g. SessionSidebar) do not treat a failed fetch as an empty session set.
+      return sessionsRef.current;
     }
   }, []);
 
