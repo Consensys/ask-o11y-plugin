@@ -5,6 +5,18 @@ All notable changes to the Ask O11y Grafana plugin will be documented in this fi
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.4](https://github.com/Consensys/ask-o11y-plugin/compare/v0.3.3...v0.3.4) (2026-08-13)
+
+
+### Features
+
+* add per-user token metrics endpoint and chat message token footer ([#180](https://github.com/Consensys/ask-o11y-plugin/issues/180)) ([abe300b](https://github.com/Consensys/ask-o11y-plugin/commit/abe300b35f98a09a15b754623f0f95e690fc327e))
+
+
+### Bug Fixes
+
+* **chat:** improve session sidebar stats readability ([#181](https://github.com/Consensys/ask-o11y-plugin/issues/181)) ([26489ff](https://github.com/Consensys/ask-o11y-plugin/commit/26489ffbecd88808b80051c8da500b456fe3757d))
+
 ## [0.3.3](https://github.com/Consensys/ask-o11y-plugin/compare/v0.3.2...v0.3.3) (2026-08-11)
 
 
