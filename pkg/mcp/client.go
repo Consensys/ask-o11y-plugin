@@ -3,6 +3,7 @@ package mcp
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -653,17 +654,9 @@ func (c *Client) callMCPToolOnce(toolName string, arguments map[string]interface
 				Text: c.Text,
 			}
 		case *mcpsdk.ImageContent:
-			content[i] = ContentBlock{
-				Type:     "image",
-				Data:     string(c.Data),
-				MimeType: c.MIMEType,
-			}
+			content[i] = imageContentBlock(c)
 		case *mcpsdk.AudioContent:
-			content[i] = ContentBlock{
-				Type:     "audio",
-				Data:     string(c.Data),
-				MimeType: c.MIMEType,
-			}
+			content[i] = audioContentBlock(c)
 		case *mcpsdk.ResourceLink:
 			content[i] = ContentBlock{
 				Type:        "resource_link",
@@ -698,6 +691,22 @@ func (c *Client) callMCPToolOnce(toolName string, arguments map[string]interface
 		StructuredContent: result.StructuredContent,
 		IsError:           result.IsError,
 	}, nil
+}
+
+func imageContentBlock(content *mcpsdk.ImageContent) ContentBlock {
+	return ContentBlock{
+		Type:     "image",
+		Data:     base64.StdEncoding.EncodeToString(content.Data),
+		MimeType: content.MIMEType,
+	}
+}
+
+func audioContentBlock(content *mcpsdk.AudioContent) ContentBlock {
+	return ContentBlock{
+		Type:     "audio",
+		Data:     base64.StdEncoding.EncodeToString(content.Data),
+		MimeType: content.MIMEType,
+	}
 }
 
 // listOpenAPITools lists tools from an OpenAPI specification
