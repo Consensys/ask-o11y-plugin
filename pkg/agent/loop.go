@@ -129,6 +129,11 @@ func (a *AgentLoop) Run(ctx context.Context, req LoopRequest, eventCh chan<- SSE
 	truncationRetries := 0
 	pendingTruncationNudge := false
 
+	// Run-level usage/tool-call totals, surfaced on the "done" event so the
+	// caller can persist per-session stats (tokens, turns, tool calls).
+	usageByModel := make(map[string]ModelUsage)
+	toolCallCount := 0
+
 	for iteration := 0; iteration < maxIter; iteration++ {
 		if ctx.Err() != nil {
 			return
@@ -164,7 +169,7 @@ func (a *AgentLoop) Run(ctx context.Context, req LoopRequest, eventCh chan<- SSE
 			Tools:     openAITools,
 			MaxTokens: completionBudget,
 		}
-		resp, err := a.chatCompletionWithFallback(ctx, llmReq, req)
+		resp, effectiveModel, err := a.chatCompletionWithFallback(ctx, llmReq, req)
 		if err != nil {
 			if ctx.Err() != nil {
 				return
@@ -174,6 +179,15 @@ func (a *AgentLoop) Run(ctx context.Context, req LoopRequest, eventCh chan<- SSE
 				Data: llmErrorEvent(err),
 			})
 			return
+		}
+
+		if resp.Usage != nil {
+			usage := usageByModel[effectiveModel]
+			usage.Model = effectiveModel
+			usage.PromptTokens += resp.Usage.PromptTokens
+			usage.CompletionTokens += resp.Usage.CompletionTokens
+			usage.TotalTokens += resp.Usage.TotalTokens
+			usageByModel[effectiveModel] = usage
 		}
 
 		msg := resp.Choices[0].Message
@@ -237,9 +251,22 @@ func (a *AgentLoop) Run(ctx context.Context, req LoopRequest, eventCh chan<- SSE
 					Data: ContentEvent{Content: msg.Content},
 				})
 			}
+			var promptTokens, completionTokens, totalTokens int64
+			for _, u := range usageByModel {
+				promptTokens += int64(u.PromptTokens)
+				completionTokens += int64(u.CompletionTokens)
+				totalTokens += int64(u.TotalTokens)
+			}
 			a.send(ctx, eventCh, SSEEvent{
 				Type: "done",
-				Data: DoneEvent{TotalIterations: iteration + 1},
+				Data: DoneEvent{
+					TotalIterations:  iteration + 1,
+					PromptTokens:     promptTokens,
+					CompletionTokens: completionTokens,
+					TotalTokens:      totalTokens,
+					ToolCallCount:    toolCallCount,
+					UsageByModel:     usageByModel,
+				},
 			})
 			return
 		}
@@ -251,6 +278,7 @@ func (a *AgentLoop) Run(ctx context.Context, req LoopRequest, eventCh chan<- SSE
 			if ctx.Err() != nil {
 				return
 			}
+			toolCallCount++
 
 			a.send(ctx, eventCh, SSEEvent{
 				Type: "tool_call_start",
@@ -320,15 +348,20 @@ func (a *AgentLoop) Run(ctx context.Context, req LoopRequest, eventCh chan<- SSE
 	})
 }
 
-func (a *AgentLoop) chatCompletionWithFallback(ctx context.Context, llmReq ChatCompletionRequest, req LoopRequest) (*ChatCompletionResponse, error) {
+func (a *AgentLoop) chatCompletionWithFallback(ctx context.Context, llmReq ChatCompletionRequest, req LoopRequest) (*ChatCompletionResponse, string, error) {
+	effectiveModel := llmReq.Model
+	if effectiveModel == "" {
+		effectiveModel = "base"
+	}
+
 	resp, err := a.llmClient.ChatCompletion(ctx, llmReq, req.GrafanaURL, req.AuthToken, req.OrgID)
 	if err == nil {
-		return resp, nil
+		return resp, effectiveModel, nil
 	}
 
 	var llmErr *LLMHTTPError
 	if !req.AllowModelFallback || llmReq.Model != "large" || !errors.As(err, &llmErr) || llmErr.StatusCode < 500 {
-		return nil, err
+		return nil, effectiveModel, err
 	}
 
 	fallbackReq := llmReq
@@ -342,11 +375,11 @@ func (a *AgentLoop) chatCompletionWithFallback(ctx context.Context, llmReq ChatC
 	resp, fallbackErr := a.llmClient.ChatCompletion(ctx, fallbackReq, req.GrafanaURL, req.AuthToken, req.OrgID)
 	if fallbackErr != nil {
 		a.logger.Warn("LLM base fallback failed", "error", fallbackErr)
-		return nil, fallbackErr
+		return nil, "base", fallbackErr
 	}
 
 	a.logger.Info("LLM base fallback succeeded after large model failure", "requestId", llmErr.RequestID)
-	return resp, nil
+	return resp, "base", nil
 }
 
 func llmErrorEvent(err error) ErrorEvent {

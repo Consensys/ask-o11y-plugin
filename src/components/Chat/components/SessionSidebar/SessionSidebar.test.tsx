@@ -80,6 +80,46 @@ describe('SessionSidebar utilities', () => {
     });
   });
 
+  describe('session stats formatting', () => {
+    const formatTokenCount = (tokens: number): string => {
+      if (tokens < 1000) {
+        return tokens.toString();
+      }
+      if (tokens < 10000) {
+        return `${(tokens / 1000).toFixed(1)}k`;
+      }
+      if (tokens < 1000000) {
+        const rounded = Math.round(tokens / 1000);
+        return rounded >= 1000 ? `${(tokens / 1000000).toFixed(1)}M` : `${rounded}k`;
+      }
+      return `${(tokens / 1000000).toFixed(1)}M`;
+    };
+
+    const formatStats = (stats: { totalTokens: number; runCount: number; toolCallCount: number }): string =>
+      `${formatTokenCount(stats.totalTokens)} tokens · ${stats.runCount} ${stats.runCount === 1 ? 'turn' : 'turns'} · ` +
+      `${stats.toolCallCount} tool ${stats.toolCallCount === 1 ? 'call' : 'calls'}`;
+
+    it('should pluralize turns and tool calls', () => {
+      expect(formatStats({ totalTokens: 1234, runCount: 3, toolCallCount: 5 })).toBe('1.2k tokens · 3 turns · 5 tool calls');
+    });
+
+    it('should use singular turn and tool call for a count of one', () => {
+      expect(formatStats({ totalTokens: 500, runCount: 1, toolCallCount: 1 })).toBe('500 tokens · 1 turn · 1 tool call');
+    });
+
+    it('should abbreviate large token counts with a "k" suffix', () => {
+      expect(formatStats({ totalTokens: 47015, runCount: 1, toolCallCount: 3 })).toBe('47k tokens · 1 turn · 3 tool calls');
+    });
+
+    it('should abbreviate token counts in the millions with an "M" suffix', () => {
+      expect(formatStats({ totalTokens: 1000000, runCount: 10, toolCallCount: 20 })).toBe('1.0M tokens · 10 turns · 20 tool calls');
+    });
+
+    it('should promote to the "M" suffix when rounding would otherwise reach "1000k"', () => {
+      expect(formatStats({ totalTokens: 999600, runCount: 2, toolCallCount: 4 })).toBe('1.0M tokens · 2 turns · 4 tool calls');
+    });
+  });
+
   describe('session title generation', () => {
     const generateTitle = (firstMessage: string, maxLength = 50): string => {
       if (!firstMessage) { return 'New Session'; }

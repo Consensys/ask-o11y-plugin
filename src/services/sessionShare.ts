@@ -2,6 +2,7 @@ import { getBackendSrv, config } from '@grafana/runtime';
 import { firstValueFrom } from 'rxjs';
 import { ChatMessage } from '../components/Chat/types';
 import pluginJson from '../plugin.json';
+import { withSubpath } from '../utils/subpath';
 
 /** Response from creating a share link */
 export interface CreateShareResponse {
@@ -164,11 +165,11 @@ export class SessionShareService {
     // If it's already a full path from backend (starts with /a/), use it as-is
     // Backend already includes orgId query param
     if (shareUrlOrId.startsWith('/a/')) {
-      return `${origin}${shareUrlOrId}`;
+      return `${origin}${withSubpath(shareUrlOrId)}`;
     }
 
     // Fallback for backward compatibility (just shareId)
-    return `${origin}/a/${pluginJson.id}/shared/${shareUrlOrId}?orgId=${orgId}`;
+    return `${origin}${withSubpath(`/a/${pluginJson.id}/shared/${shareUrlOrId}?orgId=${orgId}`)}`;
   }
 }
 

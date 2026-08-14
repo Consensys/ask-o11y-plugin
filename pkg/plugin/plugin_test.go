@@ -676,3 +676,164 @@ func TestHandlePromptDefaults(t *testing.T) {
 		}
 	})
 }
+
+func TestConsumeAgentEvents_IncrementsSessionStats(t *testing.T) {
+	p := newAgentRunTestPlugin(t)
+	session, err := p.sessionStore.CreateSession(7, 2, "", nil)
+	if err != nil {
+		t.Fatalf("CreateSession failed: %v", err)
+	}
+	p.runStore.CreateRun("run-1", 7, 2, session.ID)
+
+	eventCh := make(chan agent.SSEEvent, 4)
+	eventCh <- agent.SSEEvent{Type: "content", Data: agent.ContentEvent{Content: "hi"}}
+	eventCh <- agent.SSEEvent{
+		Type: "done",
+		Data: agent.DoneEvent{
+			TotalIterations:  2,
+			PromptTokens:     100,
+			CompletionTokens: 20,
+			TotalTokens:      120,
+			ToolCallCount:    3,
+		},
+	}
+	close(eventCh)
+
+	p.consumeAgentEvents("run-1", session.ID, 7, "admin", 2, "Org2", "base", eventCh)
+
+	got, err := p.sessionStore.GetSession(session.ID, 7, 2)
+	if err != nil {
+		t.Fatalf("GetSession failed: %v", err)
+	}
+	if got.RunCount != 1 || got.TotalIterations != 2 || got.ToolCallCount != 3 {
+		t.Fatalf("unexpected stats: %+v", got)
+	}
+	if got.PromptTokens != 100 || got.CompletionTokens != 20 || got.TotalTokens != 120 {
+		t.Fatalf("unexpected tokens: %+v", got)
+	}
+}
+
+func TestConsumeAgentEvents_DoesNotIncrementStatsOnError(t *testing.T) {
+	p := newAgentRunTestPlugin(t)
+	session, err := p.sessionStore.CreateSession(7, 2, "", nil)
+	if err != nil {
+		t.Fatalf("CreateSession failed: %v", err)
+	}
+	p.runStore.CreateRun("run-1", 7, 2, session.ID)
+
+	eventCh := make(chan agent.SSEEvent, 2)
+	eventCh <- agent.SSEEvent{Type: "error", Data: agent.ErrorEvent{Message: "boom"}}
+	close(eventCh)
+
+	p.consumeAgentEvents("run-1", session.ID, 7, "admin", 2, "Org2", "base", eventCh)
+
+	got, err := p.sessionStore.GetSession(session.ID, 7, 2)
+	if err != nil {
+		t.Fatalf("GetSession failed: %v", err)
+	}
+	if got.RunCount != 0 {
+		t.Fatalf("expected no stats increment on error, got RunCount=%d", got.RunCount)
+	}
+}
+
+func TestHandleGetSessionStats_ReturnsAccumulatedStats(t *testing.T) {
+	p := newAgentRunTestPlugin(t)
+	session, err := p.sessionStore.CreateSession(7, 2, "", []SessionMessage{{Role: "user", Content: "hi"}})
+	if err != nil {
+		t.Fatalf("CreateSession failed: %v", err)
+	}
+	delta := SessionStatsDelta{
+		RunCount: 1, TotalIterations: 3, ToolCallCount: 2,
+		PromptTokens: 100, CompletionTokens: 20, TotalTokens: 120,
+	}
+	if err := p.sessionStore.IncrementStats(session.ID, 7, 2, delta); err != nil {
+		t.Fatalf("IncrementStats failed: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/sessions/"+session.ID+"/stats", nil)
+	req.Header.Set("X-Grafana-Org-Id", "2")
+	req.Header.Set("X-Grafana-User-Id", "7")
+	rec := httptest.NewRecorder()
+
+	p.handleGetSessionStats(rec, req, session.ID)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	var body map[string]interface{}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if body["sessionId"] != session.ID {
+		t.Errorf("sessionId = %v, want %q", body["sessionId"], session.ID)
+	}
+	if body["runCount"].(float64) != 1 || body["toolCallCount"].(float64) != 2 {
+		t.Errorf("unexpected stats body: %+v", body)
+	}
+	if body["totalTokens"].(float64) != 120 {
+		t.Errorf("totalTokens = %v, want 120", body["totalTokens"])
+	}
+}
+
+func TestHandleGetSessionStats_NotFoundForMissingSession(t *testing.T) {
+	p := newAgentRunTestPlugin(t)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/sessions/does-not-exist/stats", nil)
+	req.Header.Set("X-Grafana-Org-Id", "2")
+	req.Header.Set("X-Grafana-User-Id", "7")
+	rec := httptest.NewRecorder()
+
+	p.handleGetSessionStats(rec, req, "does-not-exist")
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusNotFound)
+	}
+}
+
+func TestHandleGetSessionStats_NotFoundForWrongOwner(t *testing.T) {
+	p := newAgentRunTestPlugin(t)
+	session, err := p.sessionStore.CreateSession(7, 2, "", []SessionMessage{{Role: "user", Content: "hi"}})
+	if err != nil {
+		t.Fatalf("CreateSession failed: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/sessions/"+session.ID+"/stats", nil)
+	req.Header.Set("X-Grafana-Org-Id", "2")
+	req.Header.Set("X-Grafana-User-Id", "999") // different user
+	rec := httptest.NewRecorder()
+
+	p.handleGetSessionStats(rec, req, session.ID)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want %d (ownership must not leak as 403)", rec.Code, http.StatusNotFound)
+	}
+}
+
+func TestHandleSessionRouter_DispatchesStats(t *testing.T) {
+	p := newAgentRunTestPlugin(t)
+	session, err := p.sessionStore.CreateSession(7, 2, "", []SessionMessage{{Role: "user", Content: "hi"}})
+	if err != nil {
+		t.Fatalf("CreateSession failed: %v", err)
+	}
+	if err := p.sessionStore.IncrementStats(session.ID, 7, 2, SessionStatsDelta{RunCount: 1}); err != nil {
+		t.Fatalf("IncrementStats failed: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/sessions/"+session.ID+"/stats", nil)
+	req.Header.Set("X-Grafana-Org-Id", "2")
+	req.Header.Set("X-Grafana-User-Id", "7")
+	rec := httptest.NewRecorder()
+
+	p.handleSessionRouter(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	var body map[string]interface{}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if body["runCount"].(float64) != 1 {
+		t.Errorf("unexpected stats body: %+v", body)
+	}
+}

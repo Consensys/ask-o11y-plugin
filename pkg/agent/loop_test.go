@@ -977,6 +977,146 @@ func TestAgentLoop_TruncatedToolCall_LastIterationSurfacesCleanError(t *testing.
 	}
 }
 
+func TestAgentLoop_AccumulatesUsageAndToolCallsIntoDoneEvent(t *testing.T) {
+	// Two LLM calls: one with a tool call, one final text response. Each
+	// carries its own token usage — the done event must report the sum across
+	// both calls, plus a count of the one tool call actually executed.
+	loop, serverURL, cleanup := setupTestLoop(t, []ChatCompletionResponse{
+		{
+			ID: "1",
+			Choices: []Choice{{
+				Message: Message{
+					Role: "assistant",
+					ToolCalls: []ToolCall{{
+						ID:   "tc_1",
+						Type: "function",
+						Function: FunctionCall{
+							Name:      "unknown_tool",
+							Arguments: `{"query": "up"}`,
+						},
+					}},
+				},
+				FinishReason: "tool_calls",
+			}},
+			Usage: &Usage{PromptTokens: 100, CompletionTokens: 20, TotalTokens: 120},
+		},
+		{
+			ID: "2",
+			Choices: []Choice{{
+				Message:      Message{Role: "assistant", Content: "Based on the error..."},
+				FinishReason: "stop",
+			}},
+			Usage: &Usage{PromptTokens: 150, CompletionTokens: 30, TotalTokens: 180},
+		},
+	})
+	defer cleanup()
+
+	eventCh := make(chan SSEEvent, 32)
+	req := LoopRequest{
+		Messages:     []Message{{Role: "user", Content: "query prometheus"}},
+		SystemPrompt: "sys",
+		GrafanaURL:   serverURL,
+		AuthToken:    "test-token",
+		UserRole:     "Admin",
+		OrgID:        "1",
+	}
+
+	go loop.Run(context.Background(), req, eventCh)
+	events := collectEvents(eventCh)
+
+	last := events[len(events)-1]
+	if last.Type != "done" {
+		t.Fatalf("expected last event to be done, got %q", last.Type)
+	}
+	done, ok := last.Data.(DoneEvent)
+	if !ok {
+		t.Fatalf("expected DoneEvent, got %T", last.Data)
+	}
+	if done.PromptTokens != 250 || done.CompletionTokens != 50 || done.TotalTokens != 300 {
+		t.Fatalf("unexpected token totals: %+v", done)
+	}
+	if done.ToolCallCount != 1 {
+		t.Fatalf("expected ToolCallCount 1, got %d", done.ToolCallCount)
+	}
+	if done.TotalIterations != 2 {
+		t.Fatalf("expected TotalIterations 2, got %d", done.TotalIterations)
+	}
+	baseUsage, ok := done.UsageByModel["base"]
+	if !ok {
+		t.Fatalf("expected UsageByModel base entry, got %+v", done.UsageByModel)
+	}
+	if baseUsage.PromptTokens != 250 || baseUsage.CompletionTokens != 50 || baseUsage.TotalTokens != 300 {
+		t.Fatalf("unexpected base usage: %+v", baseUsage)
+	}
+}
+
+func TestAgentLoop_FallbackAttributesUsageToBaseModel(t *testing.T) {
+	var models []string
+	llmServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req ChatCompletionRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Fatalf("failed to decode request: %v", err)
+		}
+		models = append(models, req.Model)
+		if req.Model == "large" {
+			w.Header().Set("X-Request-Id", "large-req")
+			w.WriteHeader(http.StatusInternalServerError)
+			w.Write([]byte(`{"error":"large provider failed"}`)) //nolint:errcheck
+			return
+		}
+		respondAsStream(w, ChatCompletionResponse{
+			ID: "base-ok",
+			Choices: []Choice{{
+				Message:      Message{Role: "assistant", Content: "base recovered"},
+				FinishReason: "stop",
+			}},
+			Usage: &Usage{PromptTokens: 80, CompletionTokens: 20, TotalTokens: 100},
+		})
+	}))
+	defer llmServer.Close()
+
+	llmClient := NewLLMClient(log.DefaultLogger, &http.Client{Timeout: llmTimeout})
+	mcpProxy := mcp.NewProxy(context.Background(), log.DefaultLogger)
+	loop := NewAgentLoop(llmClient, mcpProxy, log.DefaultLogger)
+
+	eventCh := make(chan SSEEvent, 32)
+	req := LoopRequest{
+		Messages:           []Message{{Role: "user", Content: "investigate"}},
+		SystemPrompt:       "sys",
+		Model:              "large",
+		AllowModelFallback: true,
+		GrafanaURL:         llmServer.URL,
+		AuthToken:          "test-token",
+		UserRole:           "Admin",
+		OrgID:              "1",
+	}
+
+	go loop.Run(context.Background(), req, eventCh)
+	events := collectEvents(eventCh)
+
+	last := events[len(events)-1]
+	if last.Type != "done" {
+		t.Fatalf("expected last event to be done, got %q", last.Type)
+	}
+	done, ok := last.Data.(DoneEvent)
+	if !ok {
+		t.Fatalf("expected DoneEvent, got %T", last.Data)
+	}
+	if _, hasLarge := done.UsageByModel["large"]; hasLarge {
+		t.Fatalf("fallback tokens must not be attributed to large, got %+v", done.UsageByModel)
+	}
+	baseUsage, ok := done.UsageByModel["base"]
+	if !ok {
+		t.Fatalf("expected UsageByModel base entry, got %+v", done.UsageByModel)
+	}
+	if baseUsage.PromptTokens != 80 || baseUsage.CompletionTokens != 20 || baseUsage.TotalTokens != 100 {
+		t.Fatalf("unexpected base usage: %+v", baseUsage)
+	}
+	if len(models) < 1 || models[len(models)-1] != "base" {
+		t.Fatalf("expected final LLM call to use base, models = %v", models)
+	}
+}
+
 func TestAgentLoop_ContextCancellation(t *testing.T) {
 	// Slow server — context will be cancelled
 	slowServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

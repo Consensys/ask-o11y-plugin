@@ -1,8 +1,9 @@
 import { config } from '@grafana/runtime';
 import type { ChatMessage } from '../components/Chat/types';
+import { pluginUrl } from '../utils/subpath';
 
-const SESSIONS_URL = '/api/plugins/consensys-asko11y-app/resources/api/sessions';
-const GRAPHITI_URL = '/api/plugins/consensys-asko11y-app/resources/api/graphiti';
+const SESSIONS_URL = pluginUrl('/api/sessions');
+const GRAPHITI_URL = pluginUrl('/api/graphiti');
 
 function orgHeaders(): Record<string, string> {
   const orgId = String(config.bootData.user.orgId || '1');
@@ -28,6 +29,18 @@ export interface SessionUpdate {
   messages?: ChatMessage[];
   title?: string;
   summary?: string;
+}
+
+export interface SessionStats {
+  sessionId: string;
+  runCount: number;
+  totalIterations: number;
+  toolCallCount: number;
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens: number;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export async function createSession(
@@ -61,6 +74,16 @@ export async function getSession(sessionId: string): Promise<BackendChatSession>
   });
   if (!resp.ok) {
     throw new Error(`Failed to get session (${resp.status})`);
+  }
+  return resp.json();
+}
+
+export async function getSessionStats(sessionId: string): Promise<SessionStats> {
+  const resp = await fetch(`${SESSIONS_URL}/${sessionId}/stats`, {
+    headers: orgHeaders(),
+  });
+  if (!resp.ok) {
+    throw new Error(`Failed to get session stats (${resp.status})`);
   }
   return resp.json();
 }

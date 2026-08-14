@@ -118,4 +118,29 @@ test.describe('Session Management', () => {
 
     await page.locator('button[title="Close"]').click();
   });
+
+  test('should display token/turn/tool-call stats after a completed run', async ({ page }) => {
+    await deleteAllPersistedSessions(page);
+
+    const chatInput = page.getByLabel('Chat input');
+    await chatInput.fill('list your datasources');
+    await page.getByLabel('Send message (Enter)').click();
+
+    await expect(page.locator('[aria-label="User message"]').first()).toBeVisible({ timeout: 30000 });
+    await expect(page.locator('[aria-label="Assistant message"]').first()).toBeVisible({ timeout: 60000 });
+    await expect(page.getByRole('button', { name: 'Stop generating' })).toBeHidden({ timeout: 60000 });
+
+    // Open sidebar
+    await page.getByRole('button', { name: 'Chat history', exact: true }).click();
+    await expect(page.getByRole('heading', { name: 'Chat History' })).toBeVisible();
+
+    // Stats are fetched lazily per session once the sidebar is open — wait for
+    // the segment to appear rather than asserting immediately.
+    const firstSessionItem = page.locator('.p-1\\.5.rounded.group').first();
+    await expect(firstSessionItem).toBeVisible({ timeout: 15000 });
+    await expect(firstSessionItem.getByTestId('session-stats')).toBeVisible({ timeout: 15000 });
+    await expect(firstSessionItem.getByTestId('session-stats')).toHaveText(/[\d.,]+[kM]? tokens · \d+ turns? · \d+ tool calls?/);
+
+    await page.locator('button[title="Close"]').click();
+  });
 });

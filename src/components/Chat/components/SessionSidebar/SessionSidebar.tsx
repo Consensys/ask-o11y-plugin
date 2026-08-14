@@ -1,9 +1,9 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import { UseSessionManagerReturn, SessionMetadata } from '../../hooks/useSessionManager';
 import { LoadingButton, InlineLoading } from '../../../LoadingOverlay';
 import { ShareDialog } from '../ShareDialog/ShareDialog';
 import { sessionShareService, CreateShareResponse } from '../../../../services/sessionShare';
-import { getSession } from '../../../../services/backendSessionClient';
+import { getSession, getSessionStats, SessionStats } from '../../../../services/backendSessionClient';
 import { Icon, useTheme2 } from '@grafana/ui';
 
 interface SessionSidebarProps {
@@ -22,48 +22,62 @@ export function SessionSidebar({ sessionManager, currentSessionId, isOpen, onClo
   const [creatingSession, setCreatingSession] = useState(false);
   const [shareDialogSessionId, setShareDialogSessionId] = useState<string | null>(null);
   const [sessionShares, setSessionShares] = useState<Map<string, CreateShareResponse[]>>(new Map());
-  const previousSessionIdsRef = useRef<string>('');
-  const isLoadingRef = useRef<boolean>(false);
+  const [sessionStats, setSessionStats] = useState<Map<string, SessionStats>>(new Map());
 
-  // Create a stable string representation of session IDs for comparison
-  const sessionIdsString = sessionManager.sessions.map((s) => s.id).sort().join(',');
+  // Stable signature that changes when the session set changes OR when any
+  // session's updatedAt changes (e.g. a completed run bumps it) — not just
+  // on creation/deletion — so shares/stats get refetched instead of going stale.
+  const sessionSignature = sessionManager.sessions
+    .map((s) => `${s.id}:${new Date(s.updatedAt).getTime()}`)
+    .sort()
+    .join(',');
 
-  // Refresh sessions and load shares when sidebar opens
+  // Refresh sessions and load shares/stats when sidebar opens or sessions change.
   useEffect(() => {
     if (!isOpen) {
       return;
     }
 
-    // Refresh sessions list when sidebar opens to ensure it's up to date
-    sessionManager.refreshSessions();
+    let cancelled = false;
 
-    // Only reload shares if session IDs actually changed and we're not already loading
-    if (sessionIdsString === previousSessionIdsRef.current || isLoadingRef.current) {
-      return;
-    }
+    const loadSessionExtras = async () => {
+      const sessions = await sessionManager.refreshSessions();
+      if (cancelled) {
+        return;
+      }
 
-    previousSessionIdsRef.current = sessionIdsString;
-    isLoadingRef.current = true;
-
-    const loadAllShares = async () => {
-      try {
-        const sharesMap = new Map<string, CreateShareResponse[]>();
-        for (const session of sessionManager.sessions) {
-          try {
-            const shares = await sessionShareService.getSessionShares(session.id);
-            sharesMap.set(session.id, shares);
-          } catch {
-            // Best-effort share loading per session
-          }
+      const sharesMap = new Map<string, CreateShareResponse[]>();
+      const statsMap = new Map<string, SessionStats>();
+      for (const session of sessions) {
+        try {
+          const shares = await sessionShareService.getSessionShares(session.id);
+          sharesMap.set(session.id, shares);
+        } catch {
+          // Best-effort share loading per session
         }
+        try {
+          const stats = await getSessionStats(session.id);
+          statsMap.set(session.id, stats);
+        } catch {
+          // Best-effort stats loading per session
+        }
+        if (cancelled) {
+          return;
+        }
+      }
+      if (!cancelled) {
         setSessionShares(sharesMap);
-      } finally {
-        isLoadingRef.current = false;
+        setSessionStats(statsMap);
       }
     };
-    loadAllShares();
+
+    loadSessionExtras();
+
+    return () => {
+      cancelled = true;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isOpen, sessionIdsString]); // sessionIdsString is a stable string value, won't cause infinite loops
+  }, [isOpen, sessionSignature]); // sessionSignature is a stable string value, won't cause infinite loops
 
   const formatDate = (date: Date | string) => {
     const d = typeof date === 'string' ? new Date(date) : date;
@@ -198,6 +212,7 @@ export function SessionSidebar({ sessionManager, currentSessionId, isOpen, onClo
                   isLoading={loadingAction === `loading-${session.id}`}
                   isDeleting={loadingAction === `deleting-${session.id}`}
                   hasShares={(sessionShares.get(session.id)?.length ?? 0) > 0}
+                  stats={sessionStats.get(session.id)}
                   onLoad={() => handleLoadSession(session.id)}
                   onDelete={(e) => handleDeleteClick(session.id, e)}
                   onConfirmDelete={() => confirmDelete(session.id)}
@@ -295,6 +310,21 @@ function ShareDialogWrapper({
   );
 }
 
+function formatTokenCount(tokens: number): string {
+  if (tokens < 1000) {
+    return tokens.toString();
+  }
+  if (tokens < 10000) {
+    return `${(tokens / 1000).toFixed(1)}k`;
+  }
+  if (tokens < 1000000) {
+    const rounded = Math.round(tokens / 1000);
+    // Rounding can push values like 999,600 up to "1000k" — promote those to the M tier.
+    return rounded >= 1000 ? `${(tokens / 1000000).toFixed(1)}M` : `${rounded}k`;
+  }
+  return `${(tokens / 1000000).toFixed(1)}M`;
+}
+
 interface SessionItemProps {
   session: SessionMetadata;
   isActive: boolean;
@@ -302,6 +332,7 @@ interface SessionItemProps {
   isLoading?: boolean;
   isDeleting?: boolean;
   hasShares?: boolean;
+  stats?: SessionStats;
   onLoad: () => void;
   onDelete: (e: React.MouseEvent) => void;
   onConfirmDelete: () => void;
@@ -317,6 +348,7 @@ function SessionItem({
   isLoading = false,
   isDeleting = false,
   hasShares = false,
+  stats,
   onLoad,
   onDelete,
   onConfirmDelete,
@@ -373,11 +405,29 @@ function SessionItem({
             {isActive && <Icon name="arrow-right" size="xs" className="text-primary flex-shrink-0" />}
             <h3 className={`font-medium text-xs truncate ${isActive ? 'text-primary font-semibold' : 'text-primary'}`}>{session.title}</h3>
           </div>
-          <div className="flex items-center gap-1.5 mt-0.5 text-xs text-secondary">
+          <div className="flex items-center flex-wrap mt-0.5 text-xs text-secondary">
             <span>{formatDate(session.updatedAt)}</span>
-            <span>•</span>
+            {' · '}
             <span>{session.messageCount} messages</span>
           </div>
+          {stats && stats.runCount > 0 && (
+            <div data-testid="session-stats" className="flex items-center flex-wrap mt-1 text-xs text-secondary">
+              <span className="inline-flex items-center gap-0.5" title={`${stats.totalTokens.toLocaleString()} tokens`}>
+                <Icon name="bolt" size="xs" />
+                {formatTokenCount(stats.totalTokens)} tokens
+              </span>
+              {' · '}
+              <span className="inline-flex items-center gap-0.5">
+                <Icon name="repeat" size="xs" />
+                {stats.runCount} {stats.runCount === 1 ? 'turn' : 'turns'}
+              </span>
+              {' · '}
+              <span className="inline-flex items-center gap-0.5">
+                <Icon name="cog" size="xs" />
+                {stats.toolCallCount} tool {stats.toolCallCount === 1 ? 'call' : 'calls'}
+              </span>
+            </div>
+          )}
         </div>
 
         <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">

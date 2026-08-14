@@ -11,10 +11,11 @@ import (
 )
 
 type SessionMessage struct {
-	Role      string          `json:"role"`
-	Content   string          `json:"content"`
-	ToolCalls json.RawMessage `json:"toolCalls,omitempty"`
-	PageRefs  json.RawMessage `json:"pageRefs,omitempty"`
+	Role       string          `json:"role"`
+	Content    string          `json:"content"`
+	ToolCalls  json.RawMessage `json:"toolCalls,omitempty"`
+	PageRefs   json.RawMessage `json:"pageRefs,omitempty"`
+	TokenUsage json.RawMessage `json:"tokenUsage,omitempty"`
 }
 
 type ChatSession struct {
@@ -29,6 +30,28 @@ type ChatSession struct {
 	Model        string           `json:"model,omitempty"`
 	UserID       int64            `json:"-"`
 	OrgID        int64            `json:"-"`
+
+	// Usage stats, accumulated from each completed agent run's DoneEvent.
+	// Runs are TTL'd out of Redis after RunMaxAge, so these must be
+	// incremented on-write (see IncrementStats) rather than computed by
+	// summing historical runs.
+	RunCount         int   `json:"runCount"`
+	TotalIterations  int   `json:"totalIterations"`
+	ToolCallCount    int   `json:"toolCallCount"`
+	PromptTokens     int64 `json:"promptTokens"`
+	CompletionTokens int64 `json:"completionTokens"`
+	TotalTokens      int64 `json:"totalTokens"`
+}
+
+// SessionStatsDelta carries the per-run increments applied to a session's
+// cumulative usage stats when an agent run finishes.
+type SessionStatsDelta struct {
+	RunCount         int
+	TotalIterations  int
+	ToolCallCount    int
+	PromptTokens     int64
+	CompletionTokens int64
+	TotalTokens      int64
 }
 
 type SessionMetadata struct {
@@ -61,6 +84,7 @@ type SessionStoreInterface interface {
 	ClearCurrentSessionID(userID, orgID int64) error
 	SetActiveRunID(sessionID string, userID, orgID int64, runID string) error
 	ClearActiveRunID(sessionID string, userID, orgID int64) error
+	IncrementStats(sessionID string, userID, orgID int64, delta SessionStatsDelta) error
 }
 
 func sessionOwnerKey(userID, orgID int64) string {
@@ -366,6 +390,29 @@ func (s *SessionStore) ClearActiveRunID(sessionID string, userID, orgID int64) e
 	}
 
 	session.ActiveRunID = ""
+	return nil
+}
+
+func (s *SessionStore) IncrementStats(sessionID string, userID, orgID int64, delta SessionStatsDelta) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	session, exists := s.sessions[sessionID]
+	if !exists {
+		return fmt.Errorf("session not found")
+	}
+	if session.UserID != userID || session.OrgID != orgID {
+		return fmt.Errorf("session not found")
+	}
+
+	session.RunCount += delta.RunCount
+	session.TotalIterations += delta.TotalIterations
+	session.ToolCallCount += delta.ToolCallCount
+	session.PromptTokens += delta.PromptTokens
+	session.CompletionTokens += delta.CompletionTokens
+	session.TotalTokens += delta.TotalTokens
+	session.UpdatedAt = time.Now()
+
 	return nil
 }
 

@@ -736,6 +736,7 @@ func (p *Plugin) handleAgentRun(w http.ResponseWriter, r *http.Request) {
 
 	userRole := getUserRole(r)
 	userID := getUserID(r)
+	userLogin := getUserLogin(r)
 	orgID := r.Header.Get("X-Grafana-Org-Id")
 	if orgID == "" {
 		orgID = "1"
@@ -960,7 +961,7 @@ func (p *Plugin) handleAgentRun(w http.ResponseWriter, r *http.Request) {
 
 	go p.agentLoop.Run(runCtx, loopReq, eventCh)
 	go func() {
-		p.consumeAgentEvents(runID, sessionID, userID, numericOrgID, eventCh)
+		p.consumeAgentEvents(runID, sessionID, userID, userLogin, numericOrgID, req.OrgName, effectiveRunModel, eventCh)
 		runCancel()
 		p.runCancelsMu.Lock()
 		delete(p.runCancels, runID)
@@ -977,18 +978,64 @@ func (p *Plugin) handleAgentRun(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (p *Plugin) consumeAgentEvents(runID, sessionID string, userID, orgID int64, eventCh <-chan agent.SSEEvent) {
+func (p *Plugin) consumeAgentEvents(runID, sessionID string, userID int64, userLogin string, orgID int64, orgName string, effectiveModel string, eventCh <-chan agent.SSEEvent) {
 	var lastEvent agent.SSEEvent
 	var allEvents []agent.SSEEvent
 	for event := range eventCh {
+		// Persist session stats before exposing the done event to reconnecting
+		// clients. The frontend refreshes sessions as soon as it sees done, so
+		// incrementing after the loop would race with GET /stats returning zeros.
+		if event.Type == "done" && sessionID != "" {
+			if de, ok := event.Data.(agent.DoneEvent); ok {
+				delta := SessionStatsDelta{
+					RunCount:         1,
+					TotalIterations:  de.TotalIterations,
+					ToolCallCount:    de.ToolCallCount,
+					PromptTokens:     de.PromptTokens,
+					CompletionTokens: de.CompletionTokens,
+					TotalTokens:      de.TotalTokens,
+				}
+				if err := p.sessionStore.IncrementStats(sessionID, userID, orgID, delta); err != nil {
+					p.logger.Warn("Failed to increment session stats", "error", err, "sessionId", sessionID)
+				}
+			}
+		}
+
 		p.runStore.AppendEvent(runID, event)
 		allEvents = append(allEvents, event)
 		lastEvent = event
 	}
 
+	userStr := fmt.Sprintf("%d", userID)
+	orgStr := fmt.Sprintf("%d", orgID)
+	orgName = sanitizeOrgNameLabel(orgName)
+
 	switch lastEvent.Type {
 	case "done":
 		p.runStore.FinishRun(runID, RunStatusCompleted, "")
+		var usageMap map[string]agent.ModelUsage
+		if de, ok := lastEvent.Data.(agent.DoneEvent); ok {
+			usageMap = de.UsageByModel
+		} else if pdone, ok := lastEvent.Data.(*agent.DoneEvent); ok && pdone != nil {
+			usageMap = pdone.UsageByModel
+		}
+
+		if len(usageMap) == 0 {
+			if de, ok := lastEvent.Data.(agent.DoneEvent); ok && de.TotalTokens > 0 {
+				modelKey := effectiveModel
+				if modelKey == "" {
+					modelKey = "base"
+				}
+				agentUserTokens.WithLabelValues(userStr, userLogin, modelKey, "prompt", orgStr, orgName).Add(float64(de.PromptTokens))
+				agentUserTokens.WithLabelValues(userStr, userLogin, modelKey, "completion", orgStr, orgName).Add(float64(de.CompletionTokens))
+			}
+		} else {
+			for model, usage := range usageMap {
+				agentUserTokens.WithLabelValues(userStr, userLogin, model, "prompt", orgStr, orgName).Add(float64(usage.PromptTokens))
+				agentUserTokens.WithLabelValues(userStr, userLogin, model, "completion", orgStr, orgName).Add(float64(usage.CompletionTokens))
+			}
+		}
+
 	case "error":
 		var errMsg string
 		if ee, ok := lastEvent.Data.(agent.ErrorEvent); ok {
@@ -1634,6 +1681,17 @@ func getUserID(r *http.Request) int64 {
 	return 0
 }
 
+func getUserLogin(r *http.Request) string {
+	pluginContext := httpadapter.PluginConfigFromContext(r.Context())
+	if pluginContext.User != nil && pluginContext.User.Login != "" {
+		return pluginContext.User.Login
+	}
+	if pluginContext.User != nil && pluginContext.User.Email != "" {
+		return pluginContext.User.Email
+	}
+	return "unknown"
+}
+
 // isGraphitiAvailable returns true when the graphiti MCP server is registered
 // and has initialized its tools (i.e. graphiti_add_memory is in the tool list).
 func (p *Plugin) isGraphitiAvailable() bool {
@@ -2214,7 +2272,8 @@ func (p *Plugin) handleSessionCurrent(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// handleSessionRouter dispatches /api/sessions/{id} and /api/sessions/{id}/shares.
+// handleSessionRouter dispatches /api/sessions/{id}, /api/sessions/{id}/shares,
+// and /api/sessions/{id}/stats.
 func (p *Plugin) handleSessionRouter(w http.ResponseWriter, r *http.Request) {
 	path := r.URL.Path
 	prefix := "/api/sessions/"
@@ -2238,6 +2297,16 @@ func (p *Plugin) handleSessionRouter(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		p.handleGetSessionShares(w, r, sessionID)
+		return
+	}
+
+	// /api/sessions/{id}/stats → usage stats for session
+	if sessionID, isStats := strings.CutSuffix(remainder, "/stats"); isStats {
+		if !isValidSecureID(sessionID) {
+			http.Error(w, "Invalid session ID format", http.StatusBadRequest)
+			return
+		}
+		p.handleGetSessionStats(w, r, sessionID)
 		return
 	}
 
@@ -2328,6 +2397,39 @@ func (p *Plugin) handleGetSessionShares(w http.ResponseWriter, r *http.Request, 
 	json.NewEncoder(w).Encode(userShares)
 }
 
+// handleGetSessionStats returns cumulative usage stats for a session (tokens,
+// turns, tool calls), accumulated across all agent runs the session has had.
+// Unlike GET /api/sessions/{id}, this omits the full message history so
+// callers tracking usage across many sessions don't have to pull transcripts.
+func (p *Plugin) handleGetSessionStats(w http.ResponseWriter, r *http.Request, sessionID string) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	userID := getUserID(r)
+	orgID := getOrgID(r)
+
+	session, err := p.sessionStore.GetSession(sessionID, userID, orgID)
+	if err != nil {
+		http.Error(w, "Session not found", http.StatusNotFound)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"sessionId":        session.ID,
+		"runCount":         session.RunCount,
+		"totalIterations":  session.TotalIterations,
+		"toolCallCount":    session.ToolCallCount,
+		"promptTokens":     session.PromptTokens,
+		"completionTokens": session.CompletionTokens,
+		"totalTokens":      session.TotalTokens,
+		"createdAt":        session.CreatedAt,
+		"updatedAt":        session.UpdatedAt,
+	})
+}
+
 func generateSessionTitleFromType(convType, message string) string {
 	const maxTitleLen = 50
 	switch convType {
@@ -2370,6 +2472,7 @@ func truncateTitle(s string, maxLen int) string {
 
 func reconstructAssistantMessage(events []agent.SSEEvent) SessionMessage {
 	var content string
+	var tokenUsageRaw json.RawMessage
 	// Merge tool_call_start and tool_call_result by ID so each tool call
 	// produces exactly one entry (no duplicates when reopening a session).
 	toolCallsByID := make(map[string]map[string]interface{})
@@ -2377,6 +2480,18 @@ func reconstructAssistantMessage(events []agent.SSEEvent) SessionMessage {
 
 	for _, e := range events {
 		switch e.Type {
+		case "done":
+			if de, ok := e.Data.(agent.DoneEvent); ok && de.UsageByModel != nil {
+				if data, err := json.Marshal(de.UsageByModel); err == nil {
+					tokenUsageRaw = data
+				}
+			} else if m, ok := e.Data.(map[string]interface{}); ok {
+				if usage, exists := m["usageByModel"]; exists && usage != nil {
+					if data, err := json.Marshal(usage); err == nil {
+						tokenUsageRaw = data
+					}
+				}
+			}
 		case "content":
 			if ce, ok := e.Data.(agent.ContentEvent); ok {
 				content += ce.Content
@@ -2440,8 +2555,9 @@ func reconstructAssistantMessage(events []agent.SSEEvent) SessionMessage {
 	}
 
 	msg := SessionMessage{
-		Role:    "assistant",
-		Content: content,
+		Role:       "assistant",
+		Content:    content,
+		TokenUsage: tokenUsageRaw,
 	}
 
 	if len(toolCallOrder) > 0 {
