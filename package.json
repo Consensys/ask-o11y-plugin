@@ -114,7 +114,7 @@
     "@grafana/ui": "^13.1.1",
     "@modelcontextprotocol/sdk": "^1.30.0",
     "d3-sankey": "^0.12.3",
-    "dompurify": "^3.4.12",
+    "dompurify": "^3.4.13",
     "js-tiktoken": "^1.0.21",
     "marked": "^17.0.6",
     "react": "^18.3.0",
@@ -141,6 +141,52 @@
     "@grafana/llm": {
       "@grafana/data": "$@grafana/data",
       "@grafana/runtime": "$@grafana/runtime"
+    },
+    "react-router-dom-v5-compat": {
+      "react-router": "^6.30.4"
+    },
+    "hono": "^4.12.34",
+    "mermaid": "^11.16.1",
+    "@remix-run/router": "^1.23.3",
+    "istanbul-lib-processinfo": {
+      "uuid": "^11.1.1"
+    },
+    "brace-expansion": "^5.0.9",
+    "glob": {
+      "brace-expansion": "^2.1.2"
+    },
+    "eslint": {
+      "brace-expansion": "^1.1.18"
+    },
+    "@eslint/eslintrc": {
+      "brace-expansion": "^1.1.18"
+    },
+    "@eslint/config-array": {
+      "brace-expansion": "^1.1.18"
+    },
+    "eslint-plugin-react": {
+      "brace-expansion": "^1.1.18"
+    },
+    "fork-ts-checker-webpack-plugin": {
+      "brace-expansion": "^1.1.18"
+    },
+    "@jest/reporters": {
+      "brace-expansion": "^1.1.18"
+    },
+    "jest-config": {
+      "brace-expansion": "^1.1.18"
+    },
+    "jest-runtime": {
+      "brace-expansion": "^1.1.18"
+    },
+    "nyc": {
+      "brace-expansion": "^1.1.18"
+    },
+    "rimraf": {
+      "brace-expansion": "^1.1.18"
+    },
+    "test-exclude": {
+      "brace-expansion": "^1.1.18"
     }
   }
 }

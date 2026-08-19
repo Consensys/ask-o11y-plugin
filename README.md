@@ -80,6 +80,28 @@ helm template ask-o11y grafana/grafana -f deploy/helm/grafana-values-ask-o11y-ha
 
 The Redis URL is configured through Grafana plugin provisioning as `secureJsonData.redisURL`.
 
+### Monitoring Token Usage
+
+The plugin exposes an `asko11y_agent_user_tokens_total` Prometheus counter (labels: `user`, `login`, `model`, `type`, `org`, `org_name`), scraped from Grafana core's per-plugin diagnostics endpoint — **not** Grafana's own `/metrics`:
+
+```
+GET /api/plugins/consensys-asko11y-app/metrics
+```
+
+Minimal Grafana Alloy scrape config:
+
+```river
+prometheus.scrape "asko11y_plugin" {
+  targets      = [{ "__address__" = "grafana.internal:3000" }]
+  metrics_path = "/api/plugins/consensys-asko11y-app/metrics"
+  forward_to   = [prometheus.remote_write.mimir.receiver]
+}
+```
+
+A sample dashboard is provisioned at `provisioning/dashboards/agent-usage.json` (query with `increase(asko11y_agent_user_tokens_total[$__range])`).
+
+**Privacy note:** the `login` label carries the operator's own usernames (or email, as a fallback) into the TSDB, which typically has different access control and longer retention than Grafana itself. Anyone able to query that datasource can enumerate users via `label_values(login)` — worth considering before scraping in privacy-sensitive deployments.
+
 ---
 
 ## Architecture
