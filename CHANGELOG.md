@@ -5,6 +5,14 @@ All notable changes to the Ask O11y Grafana plugin will be documented in this fi
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.5](https://github.com/Consensys/ask-o11y-plugin/compare/v0.3.4...v0.3.5) (2026-08-19)
+
+
+### Bug Fixes
+
+* **deps:** correct metrics scrape endpoint, add privacy note, patch npm CVEs ([#183](https://github.com/Consensys/ask-o11y-plugin/issues/183)) ([e779007](https://github.com/Consensys/ask-o11y-plugin/commit/e779007c7cd35958e669e64baf01d1c144827e3f))
+* **mcp:** encode binary content blocks ([#171](https://github.com/Consensys/ask-o11y-plugin/issues/171)) ([bdf6cb6](https://github.com/Consensys/ask-o11y-plugin/commit/bdf6cb69ebc2f583f528d601d7f21b68038c45c1))
+
 ## [0.3.4](https://github.com/Consensys/ask-o11y-plugin/compare/v0.3.3...v0.3.4) (2026-08-13)
 
 
