@@ -5,6 +5,13 @@ All notable changes to the Ask O11y Grafana plugin will be documented in this fi
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.6](https://github.com/Consensys/ask-o11y-plugin/compare/v0.3.5...v0.3.6) (2026-08-19)
+
+
+### Bug Fixes
+
+* **backend:** bump Go toolchain to 1.26.6, suppress gosec G404 false positive ([#186](https://github.com/Consensys/ask-o11y-plugin/issues/186)) ([1cea5de](https://github.com/Consensys/ask-o11y-plugin/commit/1cea5de012ffc56a0a38895c59377651006d1e86))
+
 ## [0.3.5](https://github.com/Consensys/ask-o11y-plugin/compare/v0.3.4...v0.3.5) (2026-08-19)
 
 
