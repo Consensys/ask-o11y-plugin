@@ -475,7 +475,7 @@ var retrySchedule = []time.Duration{
 
 // retryRand seeds jitter; dedicated to retries so we don't perturb the
 // default rand source used elsewhere.
-var retryRand = mathrand.New(mathrand.NewSource(time.Now().UnixNano()))
+var retryRand = mathrand.New(mathrand.NewSource(time.Now().UnixNano())) // #nosec G404 -- retry backoff jitter timing, not security-sensitive
 var retryRandMu sync.Mutex
 
 // jitteredDuration applies symmetric jitter of ±fraction around base.
