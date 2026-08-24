@@ -61,11 +61,13 @@ func Presets() map[PresetID]Preset {
 			ID:          PresetAtlassian,
 			DisplayName: "Atlassian (Jira + Confluence)",
 			ServerID:    "atlassian",
-			MCPURL:      "https://mcp.atlassian.com/v1/sse",
-			Transport:   "sse",
-			Scopes:      []string{"offline_access"},
-			DCRCapable:  true,
-			PKCE:        true,
+			// Streamable HTTP endpoint; the legacy /v1/sse transport drops
+			// long-lived streams at Atlassian's Cloudflare edge.
+			MCPURL:     "https://mcp.atlassian.com/v1/mcp",
+			Transport:  "streamable-http",
+			Scopes:     []string{"offline_access"},
+			DCRCapable: true,
+			PKCE:       true,
 		},
 	}
 }
