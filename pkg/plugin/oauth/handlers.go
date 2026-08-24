@@ -63,7 +63,7 @@ func splitOAuthPath(p string) (serverID, action string, ok bool) {
 func (m *Manager) handleStart(w http.ResponseWriter, r *http.Request, serverID string, cfg *mcp.OAuthConfig, userIDFn UserIDFn) {
 	userID := userIDFn(r)
 	if userID == 0 {
-		http.Error(w, "unauthenticated", http.StatusUnauthorized)
+		http.Error(w, "Per-user OAuth requires a signed-in Grafana user; anonymous sessions have no identity to store a token for. Sign in and try Connect again.", http.StatusUnauthorized)
 		return
 	}
 
