@@ -41,6 +41,11 @@ type Client struct {
 	// forceReconnect can dedupe reconnect storms when the on-call retry path
 	// has already refreshed the session within the last few seconds.
 	sessionCreatedAt time.Time
+	// sessionCancel tears down the context backing the current session. The
+	// SSE transport binds its long-lived event stream to the ctx passed to
+	// Connect, so that ctx must outlive the connect call and only be
+	// cancelled when the session is replaced or the client closes.
+	sessionCancel context.CancelFunc
 	// perUserToken is set for servers with an OAuth block and supplies the
 	// per-request bearer token for the current user. Nil for static-header
 	// servers, which keeps the old behavior.
@@ -120,9 +125,47 @@ func NewClient(parent context.Context, config ServerConfig, logger log.Logger, h
 // Close closes the MCP client session
 func (c *Client) Close() error {
 	c.cancel()
+	if c.sessionCancel != nil {
+		c.sessionCancel()
+	}
 	if c.session != nil {
 		return c.session.Close()
 	}
+	return nil
+}
+
+// closeSessionLocked tears down the current session and its backing context.
+// Callers must hold c.mu.
+func (c *Client) closeSessionLocked() {
+	if c.session != nil {
+		c.session.Close()
+		c.session = nil
+	}
+	if c.sessionCancel != nil {
+		c.sessionCancel()
+		c.sessionCancel = nil
+	}
+}
+
+// connectSession dials the transport and installs the resulting session.
+// Callers must hold c.mu. The session context is rooted at the client context
+// (plus the caller's user identity) and is NOT cancelled when this returns —
+// the SSE transport keeps its event stream on that context, so it lives until
+// the session is replaced or the client closes. The dial timeout is enforced
+// by a timer that cancels the context only if the handshake is still pending.
+func (c *Client) connectSession(callerCtx context.Context, transport mcpsdk.Transport) error {
+	connectCtx, cancel := context.WithCancel(mergeUserCtx(c.ctx, callerCtx))
+	dialTimer := time.AfterFunc(connectDialTimeout, cancel)
+
+	session, err := c.mcpClient.Connect(connectCtx, transport, nil)
+	dialTimer.Stop()
+	if err != nil {
+		cancel()
+		return err
+	}
+	c.session = session
+	c.sessionCancel = cancel
+	c.sessionCreatedAt = time.Now()
 	return nil
 }
 
@@ -153,7 +196,7 @@ func (c *Client) connectMCP(callerCtx context.Context) error {
 	case "sse":
 		transport = &mcpsdk.SSEClientTransport{
 			Endpoint:   c.config.URL,
-			HTTPClient: httpClient,
+			HTTPClient: c.transportHTTPClient(httpClient),
 		}
 	case "streamable-http", "http+streamable":
 		transport = &mcpsdk.StreamableClientTransport{
@@ -173,14 +216,9 @@ func (c *Client) connectMCP(callerCtx context.Context) error {
 		return fmt.Errorf("unsupported MCP transport type: %s", c.config.Type)
 	}
 
-	connectCtx, connectCancel := context.WithTimeout(mergeUserCtx(c.ctx, callerCtx), connectDialTimeout)
-	defer connectCancel()
-
-	c.session, err = c.mcpClient.Connect(connectCtx, transport, nil)
-	if err != nil {
+	if err = c.connectSession(callerCtx, transport); err != nil {
 		return fmt.Errorf("failed to connect to MCP server: %w", err)
 	}
-	c.sessionCreatedAt = time.Now()
 
 	c.logger.Debug("Connected to MCP server", "type", c.config.Type, "url", c.config.URL)
 	return nil
@@ -198,10 +236,7 @@ func (c *Client) forceReconnect() error {
 		c.logger.Debug("forceReconnect skipped: session recently refreshed", "server", c.config.ID)
 		return nil
 	}
-	if c.session != nil {
-		c.session.Close()
-		c.session = nil
-	}
+	c.closeSessionLocked()
 	c.mu.Unlock()
 
 	// connectMCP takes c.mu internally; do not hold it across this call.
@@ -225,6 +260,20 @@ func (c *Client) sdkHTTPClientWithTransport(transport http.RoundTripper) *http.C
 	client := *c.httpClient
 	client.Transport = transport
 	return &client
+}
+
+// transportHTTPClient adapts an HTTP client for the configured transport.
+// http.Client.Timeout bounds the whole exchange including the response body,
+// which would sever an SSE event stream after the timeout elapses — so for
+// SSE servers the copy gets no client-level timeout (dialing stays bounded by
+// the SDK dial timeout and connectDialTimeout).
+func (c *Client) transportHTTPClient(client *http.Client) *http.Client {
+	if c.config.Type != "sse" || client.Timeout == 0 {
+		return client
+	}
+	clone := *client
+	clone.Timeout = 0
+	return &clone
 }
 
 func (c *Client) httpClientWithHeaders() *http.Client {
@@ -295,9 +344,8 @@ func (c *Client) connectMCPWithOrgContext(callerCtx context.Context, orgID strin
 	// This prevents race conditions where a stale session without org headers could be reused.
 	if c.session != nil {
 		c.logger.Debug("Closing existing session to reconnect with org context", "orgID", orgID, "orgName", orgName, "scopeOrgId", scopeOrgId)
-		c.session.Close()
-		c.session = nil
 	}
+	c.closeSessionLocked()
 
 	// Create MCP client
 	c.mcpClient = mcpsdk.NewClient(&mcpsdk.Implementation{
@@ -320,7 +368,7 @@ func (c *Client) connectMCPWithOrgContext(callerCtx context.Context, orgID strin
 	case "sse":
 		transport = &mcpsdk.SSEClientTransport{
 			Endpoint:   c.config.URL,
-			HTTPClient: customHTTPClient,
+			HTTPClient: c.transportHTTPClient(customHTTPClient),
 		}
 	case "streamable-http", "http+streamable":
 		transport = &mcpsdk.StreamableClientTransport{
@@ -337,14 +385,9 @@ func (c *Client) connectMCPWithOrgContext(callerCtx context.Context, orgID strin
 		return fmt.Errorf("unsupported MCP transport type: %s", c.config.Type)
 	}
 
-	connectCtx, connectCancel := context.WithTimeout(mergeUserCtx(c.ctx, callerCtx), connectDialTimeout)
-	defer connectCancel()
-
-	c.session, err = c.mcpClient.Connect(connectCtx, transport, nil)
-	if err != nil {
+	if err = c.connectSession(callerCtx, transport); err != nil {
 		return fmt.Errorf("failed to connect to MCP server with org context: %w", err)
 	}
-	c.sessionCreatedAt = time.Now()
 
 	c.logger.Debug("Connected to MCP server with org context", "type", c.config.Type, "url", c.config.URL, "orgID", orgID, "orgName", orgName, "scopeOrgId", scopeOrgId)
 	return nil
@@ -663,10 +706,7 @@ func (c *Client) callMCPToolOnce(callerCtx context.Context, toolName string, arg
 			} else {
 				// Clear the session to force reconnection
 				c.mu.Lock()
-				if c.session != nil {
-					c.session.Close()
-					c.session = nil
-				}
+				c.closeSessionLocked()
 				c.mu.Unlock()
 				reconnectErr = c.connectMCP(callerCtx)
 			}
