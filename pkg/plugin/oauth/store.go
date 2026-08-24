@@ -2,6 +2,7 @@ package oauth
 
 import (
 	"context"
+	"strings"
 	"sync"
 	"time"
 )
@@ -32,6 +33,9 @@ type UserTokenStore interface {
 	Get(ctx context.Context, serverID string, userID int64) (Token, bool, error)
 	Put(ctx context.Context, serverID string, userID int64, token Token) error
 	Delete(ctx context.Context, serverID string, userID int64) error
+	// DeleteServer removes every user's token for a server. Called when the
+	// server is deprovisioned so stale credentials can't outlive it.
+	DeleteServer(ctx context.Context, serverID string) error
 }
 
 // InMemoryUserTokenStore is a process-local token store used when Redis is
@@ -64,6 +68,18 @@ func (s *InMemoryUserTokenStore) Delete(_ context.Context, serverID string, user
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	delete(s.tokens, memTokenKey(serverID, userID))
+	return nil
+}
+
+func (s *InMemoryUserTokenStore) DeleteServer(_ context.Context, serverID string) error {
+	prefix := serverIDEscape(serverID) + "|"
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for k := range s.tokens {
+		if strings.HasPrefix(k, prefix) {
+			delete(s.tokens, k)
+		}
+	}
 	return nil
 }
 

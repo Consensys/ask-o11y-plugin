@@ -60,3 +60,17 @@ func (s *RedisUserTokenStore) Delete(ctx context.Context, serverID string, userI
 	}
 	return nil
 }
+
+func (s *RedisUserTokenStore) DeleteServer(ctx context.Context, serverID string) error {
+	pattern := "mcp_oauth:" + serverIDEscape(serverID) + ":*"
+	iter := s.client.Scan(ctx, 0, pattern, 100).Iterator()
+	for iter.Next(ctx) {
+		if err := s.client.Del(ctx, iter.Val()).Err(); err != nil {
+			return fmt.Errorf("redis del token %s: %w", iter.Val(), err)
+		}
+	}
+	if err := iter.Err(); err != nil {
+		return fmt.Errorf("redis scan tokens: %w", err)
+	}
+	return nil
+}

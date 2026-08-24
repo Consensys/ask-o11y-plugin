@@ -360,6 +360,11 @@ func (p *Plugin) deleteDynamicServer(ctx context.Context, serverID string) error
 	}
 	p.mcpProxy.RemoveServer(serverID)
 	p.oauthManager.UnregisterConfig(serverID)
+	// Purge every user's token: re-adding the server (a DCR may issue a new
+	// client_id) must not report stale tokens as Connected.
+	if err := p.oauthManager.Tokens().DeleteServer(ctx, serverID); err != nil {
+		return fmt.Errorf("purge user tokens: %w", err)
+	}
 	return nil
 }
 

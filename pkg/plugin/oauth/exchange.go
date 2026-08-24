@@ -79,10 +79,13 @@ func postToken(ctx context.Context, httpClient *http.Client, cfg *mcp.OAuthConfi
 		return Token{}, fmt.Errorf("token endpoint returned empty access_token")
 	}
 
-	expiresAt := time.Now().Add(time.Duration(parsed.ExpiresIn) * time.Second)
-	if parsed.ExpiresIn == 0 {
-		// Unknown expiry: assume a short window so we refresh conservatively.
-		expiresAt = time.Now().Add(15 * time.Minute)
+	// A missing expires_in means the token does not expire (e.g. GitHub OAuth
+	// app tokens). Leave ExpiresAt zero — Expired/NeedsRefresh treat zero as
+	// never — rather than inventing a lifetime that would force refreshes the
+	// provider cannot serve.
+	var expiresAt time.Time
+	if parsed.ExpiresIn > 0 {
+		expiresAt = time.Now().Add(time.Duration(parsed.ExpiresIn) * time.Second)
 	}
 	return Token{
 		AccessToken:  parsed.AccessToken,

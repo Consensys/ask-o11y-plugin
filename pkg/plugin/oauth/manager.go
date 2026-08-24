@@ -159,5 +159,14 @@ func (m *Manager) refresh(ctx context.Context, serverID string, tok Token) (Toke
 	if tok.RefreshToken == "" {
 		return Token{}, fmt.Errorf("no refresh token available")
 	}
-	return refreshToken(ctx, m.httpClient, cfg, tok.RefreshToken)
+	refreshed, err := refreshToken(ctx, m.httpClient, cfg, tok.RefreshToken)
+	if err != nil {
+		return Token{}, err
+	}
+	// Providers that don't rotate refresh tokens omit them from the refresh
+	// response; keep the current one so the next refresh still works.
+	if refreshed.RefreshToken == "" {
+		refreshed.RefreshToken = tok.RefreshToken
+	}
+	return refreshed, nil
 }

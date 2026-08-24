@@ -35,6 +35,27 @@ func TestInMemoryUserTokenStore(t *testing.T) {
 	}
 }
 
+func TestInMemoryUserTokenStoreDeleteServer(t *testing.T) {
+	s := NewInMemoryUserTokenStore()
+	ctx := context.Background()
+	_ = s.Put(ctx, "atlassian", 1, Token{AccessToken: "a"})
+	_ = s.Put(ctx, "atlassian", 2, Token{AccessToken: "b"})
+	_ = s.Put(ctx, "github-read", 1, Token{AccessToken: "c"})
+
+	if err := s.DeleteServer(ctx, "atlassian"); err != nil {
+		t.Fatalf("deleteServer: %v", err)
+	}
+	if _, ok, _ := s.Get(ctx, "atlassian", 1); ok {
+		t.Fatalf("token for user 1 survived DeleteServer")
+	}
+	if _, ok, _ := s.Get(ctx, "atlassian", 2); ok {
+		t.Fatalf("token for user 2 survived DeleteServer")
+	}
+	if _, ok, _ := s.Get(ctx, "github-read", 1); !ok {
+		t.Fatalf("token for other server was deleted")
+	}
+}
+
 func TestTokenExpiryHelpers(t *testing.T) {
 	past := Token{ExpiresAt: time.Now().Add(-time.Minute)}
 	if !past.Expired() {
