@@ -4,6 +4,7 @@ export { ChatInput } from './ChatInput/ChatInput';
 export { ChatMessage } from './ChatMessage/ChatMessage';
 export { GraphRenderer } from './GraphRenderer/GraphRenderer';
 export { HistoryButton } from './HistoryButton/HistoryButton';
+export { McpConnectionsButton } from './McpConnections/McpConnectionsButton';
 export { SaveToMemoryButton } from './SaveToMemoryButton/SaveToMemoryButton';
 export { LogsRenderer } from './LogsRenderer/LogsRenderer';
 export { ModelSelector } from './ModelSelector/ModelSelector';

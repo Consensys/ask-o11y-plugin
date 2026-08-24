@@ -25,7 +25,7 @@ func retryTestClient(ctx context.Context) *Client {
 
 func TestRetry_TransientTransportFailureThenSuccess(t *testing.T) {
 	var calls atomic.Int32
-	once := func(toolName string, args map[string]interface{}, orgID, orgName, scope string) (*CallToolResult, error) {
+	once := func(_ context.Context, toolName string, args map[string]interface{}, orgID, orgName, scope string) (*CallToolResult, error) {
 		n := calls.Add(1)
 		if n == 1 {
 			return nil, io.ErrUnexpectedEOF
@@ -35,7 +35,7 @@ func TestRetry_TransientTransportFailureThenSuccess(t *testing.T) {
 
 	c := retryTestClient(context.Background())
 	start := time.Now()
-	res, err := c.callMCPToolWithRetry(once, "t", nil, "", "", "")
+	res, err := c.callMCPToolWithRetry(context.Background(), once, "t", nil, "", "", "")
 	elapsed := time.Since(start)
 	if err != nil {
 		t.Fatalf("expected success after retry, got err %v", err)
@@ -54,13 +54,13 @@ func TestRetry_TransientTransportFailureThenSuccess(t *testing.T) {
 
 func TestRetry_PermanentTransportExhausts(t *testing.T) {
 	var calls atomic.Int32
-	once := func(toolName string, args map[string]interface{}, orgID, orgName, scope string) (*CallToolResult, error) {
+	once := func(_ context.Context, toolName string, args map[string]interface{}, orgID, orgName, scope string) (*CallToolResult, error) {
 		calls.Add(1)
 		return nil, errors.New("connection refused")
 	}
 
 	c := retryTestClient(context.Background())
-	res, err := c.callMCPToolWithRetry(once, "t", nil, "", "", "")
+	res, err := c.callMCPToolWithRetry(context.Background(), once, "t", nil, "", "", "")
 	if err == nil {
 		t.Fatal("expected error after exhaustion")
 	}
@@ -79,13 +79,13 @@ func TestRetry_PermanentTransportExhausts(t *testing.T) {
 
 func TestRetry_ProtocolErrorNotRetried(t *testing.T) {
 	var calls atomic.Int32
-	once := func(toolName string, args map[string]interface{}, orgID, orgName, scope string) (*CallToolResult, error) {
+	once := func(_ context.Context, toolName string, args map[string]interface{}, orgID, orgName, scope string) (*CallToolResult, error) {
 		calls.Add(1)
 		return nil, errors.New("unauthorized")
 	}
 
 	c := retryTestClient(context.Background())
-	_, err := c.callMCPToolWithRetry(once, "t", nil, "", "", "")
+	_, err := c.callMCPToolWithRetry(context.Background(), once, "t", nil, "", "", "")
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -101,7 +101,7 @@ func TestRetry_ProtocolErrorNotRetried(t *testing.T) {
 func TestRetry_ContextCancelStopsBackoff(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	var calls atomic.Int32
-	once := func(toolName string, args map[string]interface{}, orgID, orgName, scope string) (*CallToolResult, error) {
+	once := func(_ context.Context, toolName string, args map[string]interface{}, orgID, orgName, scope string) (*CallToolResult, error) {
 		n := calls.Add(1)
 		if n == 1 {
 			// Cancel the context mid-first-attempt so the retry loop trips ctx.Done
@@ -113,7 +113,7 @@ func TestRetry_ContextCancelStopsBackoff(t *testing.T) {
 
 	c := retryTestClient(ctx)
 	start := time.Now()
-	_, err := c.callMCPToolWithRetry(once, "t", nil, "", "", "")
+	_, err := c.callMCPToolWithRetry(context.Background(), once, "t", nil, "", "", "")
 	elapsed := time.Since(start)
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("expected context.Canceled, got %v", err)
@@ -131,13 +131,13 @@ func TestRetry_ToolLogicErrorNeverSeenByRetry(t *testing.T) {
 	// The MCP SDK signals tool logic errors via result.IsError=true with err=nil,
 	// so the retry loop shouldn't treat that as a retry trigger. Simulate here.
 	var calls atomic.Int32
-	once := func(toolName string, args map[string]interface{}, orgID, orgName, scope string) (*CallToolResult, error) {
+	once := func(_ context.Context, toolName string, args map[string]interface{}, orgID, orgName, scope string) (*CallToolResult, error) {
 		calls.Add(1)
 		return &CallToolResult{IsError: true, Content: []ContentBlock{{Type: "text", Text: "bad input"}}}, nil
 	}
 
 	c := retryTestClient(context.Background())
-	res, err := c.callMCPToolWithRetry(once, "t", nil, "", "", "")
+	res, err := c.callMCPToolWithRetry(context.Background(), once, "t", nil, "", "", "")
 	if err != nil {
 		t.Fatalf("tool logic error should come back with nil err, got %v", err)
 	}

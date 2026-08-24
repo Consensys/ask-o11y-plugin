@@ -474,6 +474,13 @@
                           "type": "integer"
                         }
                       }
+                    },
+                    "oauth": {
+                      "type": "object",
+                      "description": "Per-user OAuth connection state keyed by server ID; present only for servers configured with an oauth block.",
+                      "additionalProperties": {
+                        "$ref": "#/components/schemas/OAuthStatus"
+                      }
                     }
                   }
                 }
@@ -1530,7 +1537,7 @@
     "/api/sessions/{sessionId}/stats": {
       "get": {
         "summary": "Get session usage stats",
-        "description": "Returns cumulative usage stats (tokens, turns, tool calls) for a session, accumulated across all its agent runs. Only the session owner (same user + org) can access it. Omits the full message history — use GET /api/sessions/{sessionId} for the full transcript.",
+        "description": "Returns cumulative usage stats (tokens, turns, tool calls) for a session, accumulated across all its agent runs. Only the session owner (same user + org) can access it. Omits the full message history \u2014 use GET /api/sessions/{sessionId} for the full transcript.",
         "operationId": "getSessionStats",
         "tags": [
           "Sessions"
@@ -1975,6 +1982,417 @@
           },
           "500": {
             "description": "Failed to ingest session"
+          }
+        }
+      }
+    },
+    "/api/oauth/{serverId}/start": {
+      "get": {
+        "summary": "Start per-user OAuth flow",
+        "description": "Begins the OAuth 2.0 authorization-code flow (with PKCE when configured) for the current Grafana user against an OAuth-enabled MCP server. Responds with a 302 redirect to the provider's authorization endpoint. Intended to be opened in a popup window.",
+        "operationId": "startMCPOAuth",
+        "tags": [
+          "OAuth"
+        ],
+        "parameters": [
+          {
+            "name": "serverId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "MCP server ID"
+          }
+        ],
+        "responses": {
+          "302": {
+            "description": "Redirect to the provider's authorization endpoint"
+          },
+          "401": {
+            "description": "No authenticated Grafana user"
+          },
+          "404": {
+            "description": "Server unknown or has no OAuth configuration"
+          }
+        }
+      }
+    },
+    "/api/oauth/{serverId}/callback": {
+      "get": {
+        "summary": "OAuth authorization-code callback",
+        "description": "Redirect target registered with the authorization server. Validates the one-shot state, exchanges the code for tokens, persists them for the initiating user, and returns a small HTML page that notifies the opener window via postMessage and closes itself.",
+        "operationId": "mcpOAuthCallback",
+        "tags": [
+          "OAuth"
+        ],
+        "parameters": [
+          {
+            "name": "serverId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "MCP server ID"
+          },
+          {
+            "name": "code",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Authorization code issued by the provider"
+          },
+          {
+            "name": "state",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Opaque one-shot state issued at /start"
+          },
+          {
+            "name": "error",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Provider error code when the grant was denied"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "HTML page reporting the outcome to the opener window",
+            "content": {
+              "text/html": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/oauth/{serverId}/status": {
+      "get": {
+        "summary": "Per-user OAuth connection status",
+        "description": "Reports whether the current Grafana user has connected their account for an OAuth-enabled MCP server.",
+        "operationId": "getMCPOAuthStatus",
+        "tags": [
+          "OAuth"
+        ],
+        "parameters": [
+          {
+            "name": "serverId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "MCP server ID"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Connection status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OAuthStatus"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Server unknown or has no OAuth configuration"
+          }
+        }
+      }
+    },
+    "/api/oauth/{serverId}/disconnect": {
+      "post": {
+        "summary": "Disconnect per-user OAuth",
+        "description": "Deletes the current Grafana user's stored token for an OAuth-enabled MCP server.",
+        "operationId": "disconnectMCPOAuth",
+        "tags": [
+          "OAuth"
+        ],
+        "parameters": [
+          {
+            "name": "serverId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "MCP server ID"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Token deleted"
+          },
+          "401": {
+            "description": "No authenticated Grafana user"
+          },
+          "404": {
+            "description": "Server unknown or has no OAuth configuration"
+          }
+        }
+      }
+    },
+    "/api/mcp/provisioner/presets": {
+      "get": {
+        "summary": "List MCP provider presets",
+        "description": "Returns the built-in catalog of one-click external MCP providers (GitHub read-only, GitHub read/write, Atlassian) so the admin UI can render preset cards.",
+        "operationId": "listMCPPresets",
+        "tags": [
+          "MCP Provisioner"
+        ],
+        "responses": {
+          "200": {
+            "description": "Preset catalog",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "presets": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/MCPPreset"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/mcp/provisioner": {
+      "get": {
+        "summary": "List dynamically provisioned MCP servers",
+        "description": "Returns MCP servers added at runtime through the admin UI. OAuth client credentials are never included in responses.",
+        "operationId": "listDynamicMCPServers",
+        "tags": [
+          "MCP Provisioner"
+        ],
+        "responses": {
+          "200": {
+            "description": "Provisioned servers",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "servers": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/DynamicMCPServer"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/mcp/provisioner/preset": {
+      "post": {
+        "summary": "Provision an MCP server from a preset",
+        "description": "Admin-only. Attaches a preset external MCP server. For DCR-capable providers (Atlassian) OAuth endpoints are discovered via RFC 8414/9728 and a client is registered via RFC 7591 automatically; for others (GitHub) the admin supplies clientId and optionally clientSecret.",
+        "operationId": "addMCPPreset",
+        "tags": [
+          "MCP Provisioner"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "preset"
+                ],
+                "properties": {
+                  "preset": {
+                    "type": "string",
+                    "enum": [
+                      "github-read",
+                      "github-write",
+                      "atlassian"
+                    ]
+                  },
+                  "clientId": {
+                    "type": "string",
+                    "description": "OAuth client ID; required for presets without dynamic client registration"
+                  },
+                  "clientSecret": {
+                    "type": "string",
+                    "description": "Optional OAuth client secret (PKCE preferred)"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Server provisioned",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "serverId": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Unknown preset or missing clientId"
+          },
+          "403": {
+            "description": "Caller is not a Grafana Admin"
+          },
+          "502": {
+            "description": "OAuth discovery or dynamic client registration against the provider failed"
+          }
+        }
+      }
+    },
+    "/api/mcp/provisioner/generic": {
+      "post": {
+        "summary": "Provision a generic OAuth-gated MCP server",
+        "description": "Admin-only. Attaches any MCP server that authenticates users via OAuth 2.0 authorization-code. With discover=true the OAuth endpoints (and client registration when clientId is empty) are resolved automatically from the server's advertised metadata.",
+        "operationId": "addGenericMCP",
+        "tags": [
+          "MCP Provisioner"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "serverId",
+                  "mcpUrl",
+                  "transport"
+                ],
+                "properties": {
+                  "serverId": {
+                    "type": "string",
+                    "pattern": "^[a-z0-9-]{1,64}$"
+                  },
+                  "displayName": {
+                    "type": "string"
+                  },
+                  "mcpUrl": {
+                    "type": "string",
+                    "format": "uri"
+                  },
+                  "transport": {
+                    "type": "string",
+                    "enum": [
+                      "streamable-http",
+                      "sse"
+                    ]
+                  },
+                  "authorizationUrl": {
+                    "type": "string",
+                    "format": "uri"
+                  },
+                  "tokenUrl": {
+                    "type": "string",
+                    "format": "uri"
+                  },
+                  "clientId": {
+                    "type": "string"
+                  },
+                  "clientSecret": {
+                    "type": "string"
+                  },
+                  "scopes": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "pkce": {
+                    "type": "boolean"
+                  },
+                  "discover": {
+                    "type": "boolean",
+                    "description": "Resolve OAuth endpoints (and register a client when clientId is empty) from the server's advertised metadata"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Server provisioned",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "serverId": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Missing or invalid fields"
+          },
+          "403": {
+            "description": "Caller is not a Grafana Admin"
+          },
+          "502": {
+            "description": "OAuth discovery or dynamic client registration against the provider failed"
+          }
+        }
+      }
+    },
+    "/api/mcp/provisioner/{serverId}": {
+      "delete": {
+        "summary": "Remove a dynamically provisioned MCP server",
+        "description": "Admin-only. Detaches the server from the MCP proxy and deletes its persisted record and OAuth configuration.",
+        "operationId": "removeDynamicMCPServer",
+        "tags": [
+          "MCP Provisioner"
+        ],
+        "parameters": [
+          {
+            "name": "serverId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "MCP server ID"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Server removed"
+          },
+          "403": {
+            "description": "Caller is not a Grafana Admin"
           }
         }
       }
@@ -3287,6 +3705,91 @@
           "createdAt",
           "updatedAt"
         ]
+      },
+      "OAuthStatus": {
+        "type": "object",
+        "description": "Per-user OAuth connection state for an MCP server",
+        "properties": {
+          "configured": {
+            "type": "boolean",
+            "description": "The server has an OAuth block"
+          },
+          "connected": {
+            "type": "boolean",
+            "description": "The current user holds a usable token"
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "MCPPreset": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "enum": [
+              "github-read",
+              "github-write",
+              "atlassian"
+            ]
+          },
+          "displayName": {
+            "type": "string"
+          },
+          "serverId": {
+            "type": "string"
+          },
+          "mcpUrl": {
+            "type": "string",
+            "format": "uri"
+          },
+          "transport": {
+            "type": "string",
+            "enum": [
+              "streamable-http",
+              "sse"
+            ]
+          },
+          "scopes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "dcrCapable": {
+            "type": "boolean",
+            "description": "Provider supports RFC 7591 dynamic client registration"
+          }
+        }
+      },
+      "DynamicMCPServer": {
+        "type": "object",
+        "properties": {
+          "serverId": {
+            "type": "string"
+          },
+          "displayName": {
+            "type": "string"
+          },
+          "mcpUrl": {
+            "type": "string",
+            "format": "uri"
+          },
+          "transport": {
+            "type": "string"
+          },
+          "presetId": {
+            "type": "string"
+          },
+          "scopes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
       }
     }
   }

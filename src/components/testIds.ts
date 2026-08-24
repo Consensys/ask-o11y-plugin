@@ -43,6 +43,13 @@ export const testIds = {
     refreshServiceGraphButton: 'data-testid ac-refresh-service-graph',
     serviceGraphSummary: 'data-testid ac-service-graph-summary',
     saveServiceGraphSettingsButton: 'data-testid ac-save-service-graph-settings',
+    externalMcpSection: 'data-testid ac-external-mcp-section',
+    externalMcpPresetCard: (id: string) => `data-testid ac-external-mcp-preset-${id}`,
+    externalMcpPresetAddButton: (id: string) => `data-testid ac-external-mcp-preset-add-${id}`,
+    externalMcpPresetRemoveButton: (id: string) => `data-testid ac-external-mcp-preset-remove-${id}`,
+    externalMcpPresetClientIdInput: (id: string) => `data-testid ac-external-mcp-preset-client-id-${id}`,
+    externalMcpGenericForm: 'data-testid ac-external-mcp-generic-form',
+    externalMcpGenericAddButton: 'data-testid ac-external-mcp-generic-add',
   },
   home: {
     container: 'data-testid home-container',
@@ -50,6 +57,11 @@ export const testIds = {
   chat: {
     newChatButton: 'data-testid chat-new-chat-button',
     retryButton: 'data-testid chat-retry-button',
+    mcpConnectionsButton: 'data-testid chat-mcp-connections-button',
+    mcpConnectionsModal: 'data-testid chat-mcp-connections-modal',
+    mcpConnectionRow: (id: string) => `data-testid chat-mcp-connection-${id}`,
+    mcpConnectionConnect: (id: string) => `data-testid chat-mcp-connection-connect-${id}`,
+    mcpConnectionDisconnect: (id: string) => `data-testid chat-mcp-connection-disconnect-${id}`,
   },
   investigation: {
     error: 'data-testid investigation-error',

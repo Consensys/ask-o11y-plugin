@@ -41,6 +41,20 @@ type Client struct {
 	// forceReconnect can dedupe reconnect storms when the on-call retry path
 	// has already refreshed the session within the last few seconds.
 	sessionCreatedAt time.Time
+	// perUserToken is set for servers with an OAuth block and supplies the
+	// per-request bearer token for the current user. Nil for static-header
+	// servers, which keeps the old behavior.
+	perUserToken PerUserTokenProvider
+}
+
+// SetPerUserTokenProvider wires a provider that injects the current user's
+// bearer token on outbound requests for OAuth-enabled servers. It takes
+// effect on the next (re)connect; sessions reconnect per call when org
+// context is present, so in practice it applies immediately.
+func (c *Client) SetPerUserTokenProvider(p PerUserTokenProvider) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.perUserToken = p
 }
 
 // customRoundTripper wraps http.RoundTripper to add custom headers
@@ -74,9 +88,14 @@ func (t *customRoundTripper) RoundTrip(req *http.Request) (*http.Response, error
 
 	// Add any configured headers (can override the above if needed).
 	// "Host" must be set via req.Host, not req.Header — Go ignores Header["Host"].
+	// For OAuth-enabled servers the static Authorization header is never
+	// applied: the per-user token round tripper owns that slot.
+	skipAuth := t.config.OAuth != nil
 	for key, value := range t.config.Headers {
 		if strings.EqualFold(key, "Host") {
 			req.Host = value
+		} else if skipAuth && strings.EqualFold(key, "Authorization") {
+			continue
 		} else {
 			req.Header.Set(key, value)
 		}
@@ -107,8 +126,11 @@ func (c *Client) Close() error {
 	return nil
 }
 
-// connectMCP establishes a connection to an MCP server using the SDK
-func (c *Client) connectMCP() error {
+// connectMCP establishes a connection to an MCP server using the SDK.
+// callerCtx only contributes the per-user identity for the connection
+// handshake of OAuth-enabled servers; the session lifetime stays rooted at
+// the client context. Pass context.Background() for system-level connects.
+func (c *Client) connectMCP(callerCtx context.Context) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -151,7 +173,7 @@ func (c *Client) connectMCP() error {
 		return fmt.Errorf("unsupported MCP transport type: %s", c.config.Type)
 	}
 
-	connectCtx, connectCancel := context.WithTimeout(c.ctx, connectDialTimeout)
+	connectCtx, connectCancel := context.WithTimeout(mergeUserCtx(c.ctx, callerCtx), connectDialTimeout)
 	defer connectCancel()
 
 	c.session, err = c.mcpClient.Connect(connectCtx, transport, nil)
@@ -183,7 +205,7 @@ func (c *Client) forceReconnect() error {
 	c.mu.Unlock()
 
 	// connectMCP takes c.mu internally; do not hold it across this call.
-	return c.connectMCP()
+	return c.connectMCP(context.Background())
 }
 
 const connectDialTimeout = 10 * time.Second
@@ -206,18 +228,41 @@ func (c *Client) sdkHTTPClientWithTransport(transport http.RoundTripper) *http.C
 }
 
 func (c *Client) httpClientWithHeaders() *http.Client {
-	if len(c.config.Headers) == 0 {
+	needsHeaders := len(c.config.Headers) > 0
+	needsOAuth := c.config.OAuth != nil && c.perUserToken != nil
+	if !needsHeaders && !needsOAuth {
 		return c.httpClient
 	}
-	return c.sdkHTTPClientWithTransport(&configHeaderRoundTripper{
-		base:    c.baseTransport(),
-		headers: c.config.Headers,
-	})
+	transport := c.baseTransport()
+	if needsHeaders {
+		transport = &configHeaderRoundTripper{
+			base:              transport,
+			headers:           c.config.Headers,
+			skipAuthorization: c.config.OAuth != nil,
+		}
+	}
+	return c.sdkHTTPClientWithTransport(c.wrapPerUserToken(transport))
+}
+
+// wrapPerUserToken layers the per-user OAuth round tripper on top of the
+// given transport when this server authenticates users individually.
+func (c *Client) wrapPerUserToken(transport http.RoundTripper) http.RoundTripper {
+	if c.config.OAuth == nil || c.perUserToken == nil {
+		return transport
+	}
+	return &userTokenRoundTripper{
+		base:     transport,
+		serverID: c.config.ID,
+		provider: c.perUserToken,
+	}
 }
 
 type configHeaderRoundTripper struct {
 	base    http.RoundTripper
 	headers map[string]string
+	// skipAuthorization is set for OAuth-enabled servers: the per-user token
+	// round tripper owns the Authorization header there.
+	skipAuthorization bool
 }
 
 func (t *configHeaderRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
@@ -225,6 +270,8 @@ func (t *configHeaderRoundTripper) RoundTrip(req *http.Request) (*http.Response,
 	for key, value := range t.headers {
 		if strings.EqualFold(key, "Host") {
 			req.Host = value
+		} else if t.skipAuthorization && strings.EqualFold(key, "Authorization") {
+			continue
 		} else {
 			req.Header.Set(key, value)
 		}
@@ -237,7 +284,10 @@ func (t *configHeaderRoundTripper) RoundTrip(req *http.Request) (*http.Response,
 // Headers forwarded to all MCP servers:
 //   - X-Grafana-Org-Id: Grafana's numeric organization ID
 //   - X-Scope-OrgID: Tenant identifier (scopeOrgId takes priority over orgName)
-func (c *Client) connectMCPWithOrgContext(orgID string, orgName string, scopeOrgId string) error {
+//
+// callerCtx contributes the per-user identity for OAuth-enabled servers (see
+// connectMCP); the session lifetime stays rooted at the client context.
+func (c *Client) connectMCPWithOrgContext(callerCtx context.Context, orgID string, orgName string, scopeOrgId string) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -255,13 +305,13 @@ func (c *Client) connectMCPWithOrgContext(orgID string, orgName string, scopeOrg
 		Version: "1.0.0",
 	}, nil)
 
-	customHTTPClient := c.sdkHTTPClientWithTransport(&customRoundTripper{
+	customHTTPClient := c.sdkHTTPClientWithTransport(c.wrapPerUserToken(&customRoundTripper{
 		base:       c.baseTransport(),
 		orgID:      orgID,
 		orgName:    orgName,
 		scopeOrgId: scopeOrgId,
 		config:     c.config,
-	})
+	}))
 
 	var transport mcpsdk.Transport
 	var err error
@@ -287,7 +337,7 @@ func (c *Client) connectMCPWithOrgContext(orgID string, orgName string, scopeOrg
 		return fmt.Errorf("unsupported MCP transport type: %s", c.config.Type)
 	}
 
-	connectCtx, connectCancel := context.WithTimeout(c.ctx, connectDialTimeout)
+	connectCtx, connectCancel := context.WithTimeout(mergeUserCtx(c.ctx, callerCtx), connectDialTimeout)
 	defer connectCancel()
 
 	c.session, err = c.mcpClient.Connect(connectCtx, transport, nil)
@@ -302,6 +352,14 @@ func (c *Client) connectMCPWithOrgContext(orgID string, orgName string, scopeOrg
 
 // ListTools fetches tools from the MCP server
 func (c *Client) ListTools() ([]Tool, error) {
+	return c.ListToolsWithContext(context.Background())
+}
+
+// ListToolsWithContext fetches tools using the caller's context for identity.
+// For OAuth-enabled servers the user ID carried by ctx (mcp.WithUserID) lets
+// the connection handshake and tools/list authenticate as that user — an
+// anonymous probe would be rejected by providers that gate discovery.
+func (c *Client) ListToolsWithContext(ctx context.Context) ([]Tool, error) {
 	c.mu.RLock()
 	if c.tools != nil {
 		cached := c.tools
@@ -317,7 +375,7 @@ func (c *Client) ListTools() ([]Tool, error) {
 	case "openapi":
 		tools, err = c.listOpenAPITools()
 	case "sse", "streamable-http", "http+streamable":
-		tools, err = c.listMCPTools()
+		tools, err = c.listMCPTools(ctx)
 	default:
 		// Fallback to standard MCP protocol
 		tools, err = c.listStandardTools()
@@ -396,12 +454,12 @@ func schemaToMap(schema interface{}) map[string]interface{} {
 }
 
 // listMCPTools lists tools using the MCP SDK
-func (c *Client) listMCPTools() ([]Tool, error) {
-	if err := c.connectMCP(); err != nil {
+func (c *Client) listMCPTools(callerCtx context.Context) ([]Tool, error) {
+	if err := c.connectMCP(callerCtx); err != nil {
 		return nil, err
 	}
 
-	ctx, cancel := context.WithTimeout(c.ctx, 10*time.Second)
+	ctx, cancel := context.WithTimeout(mergeUserCtx(c.ctx, callerCtx), 10*time.Second)
 	defer cancel()
 
 	result, err := c.session.ListTools(ctx, &mcpsdk.ListToolsParams{})
@@ -444,10 +502,13 @@ func (c *Client) listMCPTools() ([]Tool, error) {
 
 // CallTool calls a tool on the MCP server
 func (c *Client) CallTool(toolName string, arguments map[string]interface{}) (*CallToolResult, error) {
-	return c.CallToolWithContext(toolName, arguments, "", "", "")
+	return c.CallToolWithContext(context.Background(), toolName, arguments, "", "", "")
 }
 
-func (c *Client) CallToolWithContext(toolName string, arguments map[string]interface{}, orgID string, orgName string, scopeOrgId string) (*CallToolResult, error) {
+// CallToolWithContext calls a tool with org headers. ctx carries per-request
+// values — notably the Grafana user ID (mcp.WithUserID) that OAuth-enabled
+// servers need to inject the caller's bearer token.
+func (c *Client) CallToolWithContext(ctx context.Context, toolName string, arguments map[string]interface{}, orgID string, orgName string, scopeOrgId string) (*CallToolResult, error) {
 	// Remove server ID prefix from tool name
 	originalName := strings.TrimPrefix(toolName, c.config.ID+"_")
 
@@ -455,7 +516,7 @@ func (c *Client) CallToolWithContext(toolName string, arguments map[string]inter
 	case "openapi":
 		return c.callOpenAPIToolWithContext(originalName, arguments, orgID, orgName, scopeOrgId)
 	case "sse", "streamable-http", "http+streamable":
-		return c.callMCPToolWithContext(originalName, arguments, orgID, orgName, scopeOrgId)
+		return c.callMCPToolWithContext(ctx, originalName, arguments, orgID, orgName, scopeOrgId)
 	default:
 		// Fallback to standard MCP protocol
 		return c.callStandardTool(originalName, arguments)
@@ -492,22 +553,22 @@ func jitteredDuration(base time.Duration, fraction float64) time.Duration {
 
 // callToolOncer is the inner function signature used for retry. Declared as a
 // type so tests can inject a stub without spinning up a streamable-http server.
-type callToolOncer func(toolName string, arguments map[string]interface{}, orgID, orgName, scopeOrgId string) (*CallToolResult, error)
+type callToolOncer func(ctx context.Context, toolName string, arguments map[string]interface{}, orgID, orgName, scopeOrgId string) (*CallToolResult, error)
 
 // callMCPToolWithContext wraps callMCPToolOnce with classification-aware retry.
 // Only ErrKindTransport errors are retried; tool-logic, protocol, and canceled
 // errors are returned immediately. After the last retry the underlying error
 // is wrapped in *TransportError so callers can distinguish transport outages
 // from tool-layer failures and avoid fabricating around missing data.
-func (c *Client) callMCPToolWithContext(toolName string, arguments map[string]interface{}, orgID string, orgName string, scopeOrgId string) (*CallToolResult, error) {
-	return c.callMCPToolWithRetry(c.callMCPToolOnce, toolName, arguments, orgID, orgName, scopeOrgId)
+func (c *Client) callMCPToolWithContext(ctx context.Context, toolName string, arguments map[string]interface{}, orgID string, orgName string, scopeOrgId string) (*CallToolResult, error) {
+	return c.callMCPToolWithRetry(ctx, c.callMCPToolOnce, toolName, arguments, orgID, orgName, scopeOrgId)
 }
 
-func (c *Client) callMCPToolWithRetry(once callToolOncer, toolName string, arguments map[string]interface{}, orgID, orgName, scopeOrgId string) (*CallToolResult, error) {
+func (c *Client) callMCPToolWithRetry(ctx context.Context, once callToolOncer, toolName string, arguments map[string]interface{}, orgID, orgName, scopeOrgId string) (*CallToolResult, error) {
 	var lastErr error
 	maxAttempts := len(retrySchedule) + 1 // initial try + one retry per backoff slot
 	for attempt := 0; attempt < maxAttempts; attempt++ {
-		result, err := once(toolName, arguments, orgID, orgName, scopeOrgId)
+		result, err := once(ctx, toolName, arguments, orgID, orgName, scopeOrgId)
 		if err == nil {
 			return result, nil
 		}
@@ -547,7 +608,7 @@ func (c *Client) callMCPToolWithRetry(once callToolOncer, toolName string, argum
 // is preserved here because it reuses the already-locked session path and has
 // been proven safe in production. The outer retry wrapper adds attempts on
 // top — these are two independent reliability layers.
-func (c *Client) callMCPToolOnce(toolName string, arguments map[string]interface{}, orgID string, orgName string, scopeOrgId string) (*CallToolResult, error) {
+func (c *Client) callMCPToolOnce(callerCtx context.Context, toolName string, arguments map[string]interface{}, orgID string, orgName string, scopeOrgId string) (*CallToolResult, error) {
 	// Track whether we're using org context for potential reconnection
 	// Forward org headers to all MCP servers (not just specific ones)
 	useOrgContext := orgID != "" || orgName != "" || scopeOrgId != ""
@@ -557,12 +618,12 @@ func (c *Client) callMCPToolOnce(toolName string, arguments map[string]interface
 	if useOrgContext {
 		c.logger.Debug("Calling tool with org context", "server", c.config.ID, "tool", toolName, "orgID", orgID, "orgName", orgName, "scopeOrgId", scopeOrgId)
 
-		if err := c.connectMCPWithOrgContext(orgID, orgName, scopeOrgId); err != nil {
+		if err := c.connectMCPWithOrgContext(callerCtx, orgID, orgName, scopeOrgId); err != nil {
 			c.logger.Error("Failed to connect to server with org context", "server", c.config.ID, "error", sanitizeError(err))
 			return nil, err
 		}
 	} else {
-		if err := c.connectMCP(); err != nil {
+		if err := c.connectMCP(callerCtx); err != nil {
 			return nil, err
 		}
 	}
@@ -578,7 +639,10 @@ func (c *Client) callMCPToolOnce(toolName string, arguments map[string]interface
 		return nil, fmt.Errorf("session not established for tool call")
 	}
 
-	ctx, cancel := context.WithTimeout(c.ctx, 30*time.Second)
+	// The caller ctx contributes per-request values (Grafana user ID for
+	// OAuth token injection); the timeout stays rooted at the client ctx so
+	// the session outlives short-lived caller contexts.
+	ctx, cancel := context.WithTimeout(mergeUserCtx(c.ctx, callerCtx), 30*time.Second)
 	defer cancel()
 
 	result, err := session.CallTool(ctx, &mcpsdk.CallToolParams{
@@ -595,7 +659,7 @@ func (c *Client) callMCPToolOnce(toolName string, arguments map[string]interface
 			var reconnectErr error
 			if useOrgContext {
 				// connectMCPWithOrgContext handles session cleanup atomically
-				reconnectErr = c.connectMCPWithOrgContext(orgID, orgName, scopeOrgId)
+				reconnectErr = c.connectMCPWithOrgContext(callerCtx, orgID, orgName, scopeOrgId)
 			} else {
 				// Clear the session to force reconnection
 				c.mu.Lock()
@@ -604,7 +668,7 @@ func (c *Client) callMCPToolOnce(toolName string, arguments map[string]interface
 					c.session = nil
 				}
 				c.mu.Unlock()
-				reconnectErr = c.connectMCP()
+				reconnectErr = c.connectMCP(callerCtx)
 			}
 
 			if reconnectErr != nil {
@@ -621,7 +685,7 @@ func (c *Client) callMCPToolOnce(toolName string, arguments map[string]interface
 				return nil, fmt.Errorf("session not established after reconnection")
 			}
 
-			retryCtx, retryCancel := context.WithTimeout(c.ctx, 30*time.Second)
+			retryCtx, retryCancel := context.WithTimeout(mergeUserCtx(c.ctx, callerCtx), 30*time.Second)
 			defer retryCancel()
 
 			result, err = session.CallTool(retryCtx, &mcpsdk.CallToolParams{
