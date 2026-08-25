@@ -23,6 +23,7 @@ import { testIds } from '../testIds';
 import { ValidationService } from '../../services/validation';
 import { PromptEditor } from './PromptEditor';
 import { ManageToolsModal } from './ManageToolsModal';
+import { ExternalMCPs } from './ExternalMCPs';
 import { mcpServerStatusService, type MCPServerStatus, type MCPTool } from '../../services/mcpServerStatus';
 import type { AppPluginSettings, MCPServerConfig } from '../../types/plugin';
 import { AgentTopologyResponse, getAgentTopology } from '../../services/agentTopologyClient';
@@ -1418,6 +1419,8 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
                 Save MCP Servers
               </Button>
             </div>
+
+            <ExternalMCPs />
           </FieldSet>
         )}
 

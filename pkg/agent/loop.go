@@ -63,7 +63,10 @@ type LoopRequest struct {
 	GrafanaURL string
 	AuthToken  string
 
-	UserRole   string
+	UserRole string
+	// UserID identifies the Grafana user running this loop. Carried into MCP
+	// tool-call contexts so OAuth-enabled servers use that user's token.
+	UserID     int64
 	OrgID      string
 	OrgName    string
 	ScopeOrgID string
@@ -96,7 +99,7 @@ func (a *AgentLoop) Run(ctx context.Context, req LoopRequest, eventCh chan<- SSE
 	completionBudget := completionTokenBudget(maxTokens)
 	promptBudget := maxTokens - completionBudget
 
-	mcpTools, err := a.mcpProxy.ListTools()
+	mcpTools, err := a.mcpProxy.ListToolsWithContext(mcp.WithUserID(ctx, req.UserID))
 	if err != nil {
 		a.logger.Error("Failed to list MCP tools, proceeding without tools", "error", err)
 		mcpTools = []mcp.Tool{}
@@ -452,7 +455,7 @@ func (a *AgentLoop) executeTool(ctx context.Context, tc ToolCall, req LoopReques
 	}
 	mcp.EnsureScopedGraphitiArgs(tool, args, req.OrgID)
 
-	result, err := a.mcpProxy.CallToolWithContext(tc.Function.Name, args, req.OrgID, req.OrgName, req.ScopeOrgID)
+	result, err := a.mcpProxy.CallToolWithContext(mcp.WithUserID(ctx, req.UserID), tc.Function.Name, args, req.OrgID, req.OrgName, req.ScopeOrgID)
 	if err != nil {
 		a.logger.Error("Tool call failed", "tool", tc.Function.Name, "error", err)
 		var te *mcp.TransportError

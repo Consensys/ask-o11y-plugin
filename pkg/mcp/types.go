@@ -98,6 +98,34 @@ type ServerConfig struct {
 	Headers        map[string]string           `json:"headers,omitempty"`
 	ToolSelections map[string]bool             `json:"toolSelections,omitempty"`
 	RiskOverrides  map[string]ToolRiskOverride `json:"riskOverrides,omitempty"`
+	// OAuth, when set, makes the server authenticate per Grafana user via an
+	// OAuth2 authorization-code flow. Any static Authorization entry in Headers
+	// is ignored for OAuth-enabled servers; each user's access token is
+	// injected per request by the per-user token round tripper.
+	//
+	// Known limitation: the plugin keeps one MCP session per server, shared
+	// across users, and only swaps the Authorization header per request. A
+	// provider that binds authorization state to the identity used during the
+	// initialize handshake would need per-user sessions, which this v1 does
+	// not open.
+	OAuth *OAuthConfig `json:"oauth,omitempty"`
+}
+
+// OAuthConfig declares how to run the authorization-code flow for a server.
+type OAuthConfig struct {
+	AuthorizationURL string   `json:"authorizationURL"`
+	TokenURL         string   `json:"tokenURL"`
+	ClientID         string   `json:"clientID"`
+	ClientSecret     string   `json:"clientSecret,omitempty"`
+	Scopes           []string `json:"scopes,omitempty"`
+	// PKCE enables the RFC 7636 code_challenge. Strongly recommended when the
+	// authorization server supports it; required when ClientSecret is empty.
+	PKCE bool `json:"pkce,omitempty"`
+	// RedirectURI is the callback URL registered with the authorization
+	// server. It must match the plugin resource path
+	// /api/plugins/consensys-asko11y-app/resources/api/oauth/{serverID}/callback.
+	// When empty the handler derives it from the incoming request.
+	RedirectURI string `json:"redirectURI,omitempty"`
 }
 
 // ToolRiskOverride lets administrators override a tool's MCP annotations or

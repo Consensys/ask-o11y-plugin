@@ -8,7 +8,14 @@ import { useChatScene } from './hooks/useChatScene';
 import { useSidePanelState } from './hooks/useSidePanelState';
 import { ChatInterfaceState } from './scenes/ChatInterfaceScene';
 import { GrafanaPageState } from './scenes/GrafanaPageScene';
-import { SessionSidebar, NewChatButton, HistoryButton, SaveToMemoryButton, ModelSelector } from './components';
+import {
+  SessionSidebar,
+  NewChatButton,
+  HistoryButton,
+  SaveToMemoryButton,
+  ModelSelector,
+  McpConnectionsButton,
+} from './components';
 import { ChatInputRef } from './components/ChatInput/ChatInput';
 import { ChatErrorBoundary } from '../ErrorBoundary';
 import type { SessionMetadata } from './hooks/useSessionManager';
@@ -175,6 +182,7 @@ function ChatComponent({
       rightSlot: (
         <div className="flex items-center gap-1">
           {graphitiEnabled && hasMessages && <SaveToMemoryButton messages={chatHistory} />}
+          <McpConnectionsButton />
           <HistoryButton onClick={openHistory} sessionCount={sessionManager.sessions.length} />
         </div>
       ),

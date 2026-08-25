@@ -1,6 +1,7 @@
 package plugin
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"sort"
@@ -69,7 +70,7 @@ func (p *Plugin) datasourceSnapshot(orgID, orgName, scopeOrgID string) string {
 			done <- dsSnapshotFailOpen
 			return
 		}
-		result, err := p.mcpProxy.CallToolWithContext(toolName, map[string]interface{}{}, orgID, orgName, scopeOrgID)
+		result, err := p.mcpProxy.CallToolWithContext(context.Background(), toolName, map[string]interface{}{}, orgID, orgName, scopeOrgID)
 		if err != nil {
 			p.logger.Warn("datasourceSnapshot: list_datasources failed", "error", err, "orgID", orgID)
 			done <- dsSnapshotFailOpen
