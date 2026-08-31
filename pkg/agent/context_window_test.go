@@ -226,7 +226,7 @@ func TestEvictStaleToolResults_KeepsAllWhenUnderLimit(t *testing.T) {
 		toolResultMessage("2", "result two"),
 	}
 
-	result := evictStaleToolResults(messages, 5, nil)
+	result := evictStaleToolResults(messages, 5, nil, nil)
 	if result[2].Content != "result one" || result[3].Content != "result two" {
 		t.Fatalf("expected results untouched when under keepRecent, got %+v", result)
 	}
@@ -240,7 +240,7 @@ func TestEvictStaleToolResults_EvictsOldestKeepsNewest(t *testing.T) {
 		messages = append(messages, toolResultMessage(id, "result "+id))
 	}
 
-	result := evictStaleToolResults(messages, 2, nil)
+	result := evictStaleToolResults(messages, 2, nil, nil)
 
 	var toolMsgs []Message
 	for _, m := range result {
@@ -275,7 +275,7 @@ func TestEvictStaleToolResults_NoSummarizerFallsBackToPlaceholder(t *testing.T) 
 		messages = append(messages, toolResultMessage(id, "result "+id))
 	}
 
-	result := evictStaleToolResults(messages, 0, nil)
+	result := evictStaleToolResults(messages, 0, nil, nil)
 	for _, m := range result {
 		if m.Role != "tool" {
 			continue
@@ -300,7 +300,7 @@ func TestEvictStaleToolResults_UsesSummarizerOncePerResult(t *testing.T) {
 		return "summary of: " + content
 	}
 
-	first := evictStaleToolResults(messages, 2, summarize)
+	first := evictStaleToolResults(messages, 2, summarize, nil)
 
 	var evicted int
 	for _, m := range first {
@@ -320,7 +320,7 @@ func TestEvictStaleToolResults_UsesSummarizerOncePerResult(t *testing.T) {
 
 	// Re-running eviction on the already-evicted output must not call the
 	// summarizer again — evictStaleToolResults is idempotent.
-	second := evictStaleToolResults(first, 2, summarize)
+	second := evictStaleToolResults(first, 2, summarize, nil)
 	if len(calls) != 3 {
 		t.Fatalf("expected no additional summarizer calls on re-eviction, got %d total calls", len(calls))
 	}
@@ -333,6 +333,53 @@ func TestEvictStaleToolResults_UsesSummarizerOncePerResult(t *testing.T) {
 		}
 		if m.Content != first[i].Content {
 			t.Errorf("message[%d] changed on re-eviction: %q -> %q", i, first[i].Content, m.Content)
+		}
+	}
+}
+
+func TestEvictStaleToolResults_ErrorResultsSkipSummarizerVerbatim(t *testing.T) {
+	var messages []Message
+	for i := 1; i <= 5; i++ {
+		id := fmt.Sprintf("%d", i)
+		messages = append(messages, toolCallMessage("", id))
+		content := "raw content " + id
+		if id == "2" {
+			content = "[SYSTEM: MCP transport failure for tool 'query_loki_logs' after retries. Result is UNAVAILABLE — do not fabricate output.]"
+		}
+		messages = append(messages, toolResultMessage(id, content))
+	}
+
+	summarize := func(toolName, content string) string {
+		return "PARAPHRASED (should never appear for error results)"
+	}
+	isError := func(toolCallID string) bool {
+		return toolCallID == "2"
+	}
+
+	result := evictStaleToolResults(messages, 2, summarize, isError)
+
+	for _, m := range result {
+		if m.Role != "tool" || m.ToolCallID != "2" {
+			continue
+		}
+		if !strings.HasPrefix(m.Content, EvictedToolResultMarker) {
+			t.Fatalf("expected error tool result to be evicted, got %q", m.Content)
+		}
+		if strings.Contains(m.Content, "PARAPHRASED") {
+			t.Errorf("error tool result must never be paraphrased by the summarizer, got %q", m.Content)
+		}
+		if !strings.Contains(m.Content, "do not fabricate output") {
+			t.Errorf("expected the anti-hallucination directive preserved verbatim, got %q", m.Content)
+		}
+	}
+
+	// Non-error stale results should still go through the summarizer as before.
+	for _, m := range result {
+		if m.Role != "tool" || m.ToolCallID == "2" || !strings.HasPrefix(m.Content, EvictedToolResultMarker) {
+			continue
+		}
+		if !strings.Contains(m.Content, "PARAPHRASED") {
+			t.Errorf("expected non-error stale result to use the summarizer, got %q", m.Content)
 		}
 	}
 }

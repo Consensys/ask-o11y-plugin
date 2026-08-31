@@ -244,7 +244,7 @@ func toolNamesByCallID(messages []Message) map[string]string {
 // larger savings of not resending the raw content every remaining iteration.
 type toolResultSummarizer func(toolName, content string) string
 
-func evictStaleToolResults(messages []Message, keepRecent int, summarize toolResultSummarizer) []Message {
+func evictStaleToolResults(messages []Message, keepRecent int, summarize toolResultSummarizer, isError func(toolCallID string) bool) []Message {
 	if keepRecent <= 0 {
 		keepRecent = keepRecentToolResults
 	}
@@ -274,8 +274,14 @@ func evictStaleToolResults(messages []Message, keepRecent int, summarize toolRes
 			name = "unknown tool"
 		}
 
-		summary := ""
-		if summarize != nil {
+		var summary string
+		if isError != nil && isError(m.ToolCallID) {
+			// Error results are short, deterministic diagnostics — one of them
+			// is the anti-hallucination "do not fabricate output" directive on
+			// transport failures. Never paraphrase these through an LLM; keep
+			// the exact wording (truncated only if unexpectedly long).
+			summary = truncateWhitespace(m.Content, evictionSummaryFallbackChars)
+		} else if summarize != nil {
 			summary = strings.TrimSpace(summarize(name, m.Content))
 		}
 		if summary == "" {

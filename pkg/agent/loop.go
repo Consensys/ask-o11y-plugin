@@ -146,6 +146,13 @@ func (a *AgentLoop) Run(ctx context.Context, req LoopRequest, eventCh chan<- SSE
 	usageByModel := make(map[string]ModelUsage)
 	toolCallCount := 0
 
+	// toolResultIsError records which tool_call ids produced an error result,
+	// so evictStaleToolResults can skip LLM summarization for them — error
+	// content is short, deterministic diagnostic text (including the
+	// anti-hallucination directive on transport failures) that must never be
+	// paraphrased.
+	toolResultIsError := make(map[string]bool)
+
 	for iteration := 0; iteration < maxIter; iteration++ {
 		if ctx.Err() != nil {
 			return
@@ -153,6 +160,8 @@ func (a *AgentLoop) Run(ctx context.Context, req LoopRequest, eventCh chan<- SSE
 
 		messages = evictStaleToolResults(messages, keepRecentToolResults, func(toolName, content string) string {
 			return a.summarizeForEviction(ctx, req, usageByModel, toolName, content)
+		}, func(toolCallID string) bool {
+			return toolResultIsError[toolCallID]
 		})
 		messages = TrimMessagesToTokenLimit(messages, openAITools, promptBudget)
 
@@ -331,6 +340,7 @@ func (a *AgentLoop) Run(ctx context.Context, req LoopRequest, eventCh chan<- SSE
 				ToolCallID: tc.ID,
 				Content:    llmContent,
 			})
+			toolResultIsError[tc.ID] = isError
 
 			if !mcpUnavailableEmitted && len(transportFailedTools) >= 2 {
 				mcpUnavailableEmitted = true
