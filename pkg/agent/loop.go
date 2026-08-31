@@ -31,6 +31,15 @@ const nearLimitWarning = "[SYSTEM: You are approaching the iteration limit. Prod
 // this the run ends with a clean, retryable error instead of spinning.
 const maxTruncationRetries = 1
 
+// Eviction-summary tunables: evictStaleToolResults calls out to the cheap
+// "base" model once per stale tool result to compress it before dropping the
+// raw content — see summarizeForEviction.
+const evictionSummaryMaxTokens = 200
+const evictionSummaryMaxInputChars = 20000
+const evictionSummaryFallbackChars = 300
+
+const evictionSummarySystemPrompt = "Summarize the following observability tool result in 2-3 concise sentences for later reference during an ongoing investigation. Preserve concrete facts: numbers, identifiers, timestamps, error messages, and anomalies. Do not add commentary or speculation."
+
 // truncatedToolCallNudge is injected after a truncated tool call is discarded so
 // the model reissues a smaller, complete call rather than repeating the cutoff.
 const truncatedToolCallNudge = "[SYSTEM: Your previous tool call was cut off before its arguments were complete, so it was discarded. Reissue it now as a single, complete, valid JSON tool call. If the arguments are large (for example a full dashboard), reduce their size or split the work into smaller steps.]"
@@ -142,6 +151,9 @@ func (a *AgentLoop) Run(ctx context.Context, req LoopRequest, eventCh chan<- SSE
 			return
 		}
 
+		messages = evictStaleToolResults(messages, keepRecentToolResults, func(toolName, content string) string {
+			return a.summarizeForEviction(ctx, req, usageByModel, toolName, content)
+		})
 		messages = TrimMessagesToTokenLimit(messages, openAITools, promptBudget)
 
 		a.logger.Debug("Agent loop iteration",
@@ -349,6 +361,56 @@ func (a *AgentLoop) Run(ctx context.Context, req LoopRequest, eventCh chan<- SSE
 		Type: "error",
 		Data: ErrorEvent{Message: fmt.Sprintf("Agent loop reached maximum iterations (%d)", maxIter)},
 	})
+}
+
+// summarizeForEviction condenses a stale tool result with a cheap ("base")
+// model call before evictStaleToolResults drops the raw content, so the model
+// keeps the gist of earlier evidence instead of nothing. Any failure (network
+// error, empty response, exhausted quota) falls back to a plain whitespace
+// truncation of the original content rather than surfacing an error — this is
+// a cost optimization on top of an already-working eviction path, not a
+// critical request, so degrading quietly is preferable to failing the run.
+func (a *AgentLoop) summarizeForEviction(ctx context.Context, req LoopRequest, usageByModel map[string]ModelUsage, toolName, content string) string {
+	fallback := truncateWhitespace(content, evictionSummaryFallbackChars)
+
+	trimmed := strings.TrimSpace(content)
+	if trimmed == "" {
+		return fallback
+	}
+	if len(trimmed) > evictionSummaryMaxInputChars {
+		trimmed = trimmed[:evictionSummaryMaxInputChars]
+	}
+
+	resp, err := a.llmClient.ChatCompletion(ctx, ChatCompletionRequest{
+		Model: "base",
+		Messages: []Message{
+			{Role: "system", Content: evictionSummarySystemPrompt},
+			{Role: "user", Content: fmt.Sprintf("Tool: %s\n\nResult:\n%s", toolName, trimmed)},
+		},
+		MaxTokens: evictionSummaryMaxTokens,
+	}, req.GrafanaURL, req.AuthToken, req.OrgID)
+	if err != nil {
+		a.logger.Warn("Tool result eviction summary failed, falling back to truncation", "error", err, "tool", toolName)
+		return fallback
+	}
+
+	if resp.Usage != nil {
+		usage := usageByModel["base"]
+		usage.Model = "base"
+		usage.PromptTokens += resp.Usage.PromptTokens
+		usage.CompletionTokens += resp.Usage.CompletionTokens
+		usage.TotalTokens += resp.Usage.TotalTokens
+		usageByModel["base"] = usage
+	}
+
+	if len(resp.Choices) == 0 {
+		return fallback
+	}
+	summary := strings.TrimSpace(resp.Choices[0].Message.Content)
+	if summary == "" {
+		return fallback
+	}
+	return summary
 }
 
 func (a *AgentLoop) chatCompletionWithFallback(ctx context.Context, llmReq ChatCompletionRequest, req LoopRequest) (*ChatCompletionResponse, string, error) {
