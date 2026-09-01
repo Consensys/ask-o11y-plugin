@@ -174,6 +174,34 @@ func (p *Proxy) CallTool(toolName string, arguments map[string]interface{}) (*Ca
 	return p.CallToolWithContext(context.Background(), toolName, arguments, "", "", "")
 }
 
+// NewStandaloneClient returns a fresh Client for the named server, entirely
+// independent of the shared pool's session state. Client.CallToolWithContext
+// with a non-empty org context ALWAYS tears down and replaces the shared
+// session (connectMCPWithOrgContext) on every call, by design, so a
+// long-running or backgrounded caller sharing the pooled Client with a live
+// request risks closing the session out from under that request's in-flight
+// tool call. Use a standalone client for exactly that case — background
+// prefetch/cache-warming that must not race with concurrent foreground
+// traffic on the same server. Callers must Close() the returned client.
+func (p *Proxy) NewStandaloneClient(id string) (*Client, bool) {
+	p.mu.RLock()
+	existing, ok := p.clients[id]
+	p.mu.RUnlock()
+	if !ok {
+		return nil, false
+	}
+
+	sdkHTTPClient, err := p.sdkClient()
+	if err != nil {
+		return nil, false
+	}
+	c := NewClient(p.ctx, existing.config, p.logger, sdkHTTPClient)
+	if p.perUserToken != nil {
+		c.SetPerUserTokenProvider(p.perUserToken)
+	}
+	return c, true
+}
+
 // CallToolWithContext routes a tool call to the appropriate MCP server with additional context (e.g., Org ID, Org Name, Scope Org ID).
 // ctx carries the Grafana user ID (via mcp.WithUserID) for servers using per-user OAuth.
 func (p *Proxy) CallToolWithContext(ctx context.Context, toolName string, arguments map[string]interface{}, orgID string, orgName string, scopeOrgId string) (*CallToolResult, error) {

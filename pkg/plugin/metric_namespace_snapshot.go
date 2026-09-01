@@ -1,6 +1,7 @@
 package plugin
 
 import (
+	"consensys-asko11y-app/pkg/mcp"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -94,7 +95,7 @@ func (p *Plugin) refreshMetricNamespaceSnapshot(cacheKey, orgID, orgName, scopeO
 		return
 	}
 
-	dsResult, err := p.mcpProxy.CallToolWithContext(ctx, dsToolName, map[string]interface{}{}, orgID, orgName, scopeOrgID)
+	dsResult, err := p.callToolStandalone(ctx, dsToolName, map[string]interface{}{}, orgID, orgName, scopeOrgID)
 	if err != nil || dsResult == nil || dsResult.IsError || len(dsResult.Content) == 0 {
 		p.logger.Warn("metricNamespaceSnapshot: list_datasources failed", "orgID", orgID)
 		return
@@ -130,7 +131,7 @@ func (p *Plugin) fetchMetricNames(ctx context.Context, toolName, datasourceUID, 
 	callCtx, cancel := context.WithTimeout(ctx, msFetchTimeout)
 	defer cancel()
 
-	result, err := p.mcpProxy.CallToolWithContext(callCtx, toolName, map[string]interface{}{
+	result, err := p.callToolStandalone(callCtx, toolName, map[string]interface{}{
 		"datasourceUid": datasourceUID,
 		"regex":         ".*",
 		"limit":         msFetchLimit,
@@ -145,6 +146,28 @@ func (p *Plugin) fetchMetricNames(ctx context.Context, toolName, datasourceUID, 
 		return nil
 	}
 	return names
+}
+
+// callToolStandalone calls toolName via a fresh, standalone Client for its
+// server (see mcp.Proxy.NewStandaloneClient) instead of the shared pool.
+// The background metric-namespace refresh runs concurrently with whatever
+// live agent-loop tool calls the request that triggered it is making on the
+// same server; routing through the shared pool would let either side's
+// connectMCPWithOrgContext (which tears down and replaces the session on
+// every org-context call, by design) close the session out from under the
+// other's in-flight call.
+func (p *Plugin) callToolStandalone(ctx context.Context, toolName string, arguments map[string]interface{}, orgID, orgName, scopeOrgID string) (*mcp.CallToolResult, error) {
+	serverID, _, ok := strings.Cut(toolName, "_")
+	if !ok {
+		return nil, fmt.Errorf("invalid tool name %q: expected serverid_toolname", toolName)
+	}
+	client, ok := p.mcpProxy.NewStandaloneClient(serverID)
+	if !ok {
+		return nil, fmt.Errorf("no MCP client registered for server %q", serverID)
+	}
+	defer client.Close()
+
+	return client.CallToolWithContext(ctx, toolName, arguments, orgID, orgName, scopeOrgID)
 }
 
 // deriveNamespaces buckets metric names by their first one or two
