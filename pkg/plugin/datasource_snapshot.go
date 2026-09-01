@@ -171,24 +171,26 @@ func datasourceCacheTTL(snapshot string) time.Duration {
 	return dsCacheTTL
 }
 
-// renderDatasourceSnapshot parses list_datasources output into a stable bullet
-// list. The tool returns JSON but the exact shape varies across Grafana
-// versions — be defensive and fall open on parse failure rather than let the
-// LLM see a corrupted-looking block.
-func renderDatasourceSnapshot(raw string) string {
+// datasourceRow is one entry from list_datasources, normalized so callers
+// don't each re-implement the "which JSON shape did this Grafana version
+// return" defensiveness in parseDatasourceRows.
+type datasourceRow struct{ dsType, name, uid string }
+
+// parseDatasourceRows parses list_datasources output into normalized rows.
+// The tool returns JSON but the exact shape varies across Grafana versions —
+// accept either a top-level array or an object with a "datasources" key, and
+// return nil (not an error) on anything else so callers can fall open.
+func parseDatasourceRows(raw string) []datasourceRow {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
-		return dsSnapshotFailOpen
+		return nil
 	}
 
 	var parsed interface{}
 	if err := json.Unmarshal([]byte(raw), &parsed); err != nil {
-		// Some MCP servers wrap arrays as {"datasources": [...]} or similar;
-		// if we can't parse, fall open.
-		return dsSnapshotFailOpen
+		return nil
 	}
 
-	// Accept either a top-level array or an object with "datasources".
 	var entries []map[string]interface{}
 	switch v := parsed.(type) {
 	case []interface{}:
@@ -207,12 +209,7 @@ func renderDatasourceSnapshot(raw string) string {
 		}
 	}
 
-	if len(entries) == 0 {
-		return dsSnapshotFailOpen
-	}
-
-	type row struct{ dsType, name, uid string }
-	var rows []row
+	var rows []datasourceRow
 	for _, e := range entries {
 		uid, _ := e["uid"].(string)
 		name, _ := e["name"].(string)
@@ -226,8 +223,16 @@ func renderDatasourceSnapshot(raw string) string {
 		if name == "" {
 			name = dsType
 		}
-		rows = append(rows, row{dsType: dsType, name: name, uid: uid})
+		rows = append(rows, datasourceRow{dsType: dsType, name: name, uid: uid})
 	}
+	return rows
+}
+
+// renderDatasourceSnapshot parses list_datasources output into a stable
+// bullet list, falling open on parse failure or an empty result rather than
+// let the LLM see a corrupted-looking block.
+func renderDatasourceSnapshot(raw string) string {
+	rows := parseDatasourceRows(raw)
 	if len(rows) == 0 {
 		return dsSnapshotFailOpen
 	}

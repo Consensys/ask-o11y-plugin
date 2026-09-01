@@ -295,7 +295,7 @@ func TestEvictStaleToolResults_UsesSummarizerOncePerResult(t *testing.T) {
 	}
 
 	var calls []string
-	summarize := func(toolName, content string) string {
+	summarize := func(toolCallID, toolName, content string) string {
 		calls = append(calls, content)
 		return "summary of: " + content
 	}
@@ -349,7 +349,7 @@ func TestEvictStaleToolResults_ErrorResultsSkipSummarizerVerbatim(t *testing.T) 
 		messages = append(messages, toolResultMessage(id, content))
 	}
 
-	summarize := func(toolName, content string) string {
+	summarize := func(toolCallID, toolName, content string) string {
 		return "PARAPHRASED (should never appear for error results)"
 	}
 	isError := func(toolCallID string) bool {
@@ -404,6 +404,24 @@ func TestTrimToolResponses_HighVolumeToolGetsTighterLimit(t *testing.T) {
 	}
 }
 
+// TestTrimToolResponses_StructuredContentConvergesInOnePass guards against a
+// Bugbot-reported regression: trimToolResponses cut at limit*4 characters
+// regardless of content, but EstimateTokens re-checks structured content at
+// a tighter 2.5-chars-per-token ratio. A single trim pass on JSON content
+// used to still estimate ~1.6x over the target, forcing an unnecessary
+// escalation to more aggressive truncation.
+func TestTrimToolResponses_StructuredContentConvergesInOnePass(t *testing.T) {
+	toolNames := map[string]string{"1": "query_prometheus"}
+	jsonContent := strings.Repeat(`{"target_group":"tg-1","value":12345,"ts":"2026-09-01T00:00:00Z"},`, 5000)
+	messages := []Message{toolResultMessage("1", jsonContent)}
+
+	result := trimToolResponses(messages, 8000, 3000, toolNames)
+
+	if got := EstimateTokens(result[0].Content); got > 3000+10 {
+		t.Errorf("expected structured content trimmed in one pass to land near the 3000 token limit, got %d", got)
+	}
+}
+
 func TestIsHighVolumeTool(t *testing.T) {
 	cases := map[string]bool{
 		"query_prometheus":      true,
@@ -429,5 +447,21 @@ func TestEstimateTokens(t *testing.T) {
 	}
 	if got := EstimateTokens(""); got != 0 {
 		t.Errorf("EstimateTokens('') = %d, expected 0", got)
+	}
+}
+
+// TestEstimateTokens_StructuredContentGetsTighterRatio guards against the
+// Sept 2026 production trace where a single LLM call actually billed 291K
+// prompt tokens while our own estimate thought it was under budget — the
+// flat chars/4 ratio undercounts JSON-heavy tool results. Structured content
+// must estimate to more tokens per byte than equivalent-length prose.
+func TestEstimateTokens_StructuredContentGetsTighterRatio(t *testing.T) {
+	prose := strings.Repeat("the quick brown fox jumps over lazy dogs ", 100)
+	jsonish := strings.Repeat(`{"target_group":"tg-1","value":12345,"ts":"2026-09-01T00:00:00Z"},`, 100)
+
+	proseTokensPerByte := float64(EstimateTokens(prose)) / float64(len(prose))
+	jsonTokensPerByte := float64(EstimateTokens(jsonish)) / float64(len(jsonish))
+	if jsonTokensPerByte <= proseTokensPerByte {
+		t.Fatalf("expected structured content to estimate more tokens per byte than prose: json=%.4f prose=%.4f", jsonTokensPerByte, proseTokensPerByte)
 	}
 }

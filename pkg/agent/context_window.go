@@ -3,7 +3,9 @@ package agent
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"strings"
+	"unicode"
 )
 
 // DefaultMaxTotalTokens was 128,000 until a production cost audit (Aug 2026)
@@ -61,8 +63,46 @@ func isHighVolumeTool(toolName string) bool {
 	return false
 }
 
+// structuredContentCharsPerToken and proseCharsPerToken bound EstimateTokens.
+// A flat chars/4 ratio is tuned for English prose; dense structured content
+// (JSON tool results, metric/label listings, dashboard payloads) packs more
+// tokens per character because delimiters, quotes, and short numeric or
+// identifier fields each cost close to a full token. A production trace
+// (2026-09-01) showed a single LLM call actually billed 291K prompt tokens
+// against an estimated-under-budget request, because the flat ratio let a
+// context dominated by tool-result JSON through without triggering the trim
+// pass early enough. Tool results are the dominant source of context growth
+// (see keepRecentToolResults), so undercounting them is what matters most.
+const proseCharsPerToken = 4.0
+const structuredContentCharsPerToken = 2.5
+
 func EstimateTokens(text string) int {
-	return (len(text) + 3) / 4
+	if text == "" {
+		return 0
+	}
+	charsPerToken := proseCharsPerToken
+	if looksStructured(text) {
+		charsPerToken = structuredContentCharsPerToken
+	}
+	return int(math.Ceil(float64(len(text)) / charsPerToken))
+}
+
+// looksStructured reports whether text reads as dense structured data (JSON,
+// metric/label output) rather than prose, using the fraction of letter
+// characters as a proxy: prose is mostly letters, while structured data is
+// dominated by punctuation, digits, and short quoted tokens.
+func looksStructured(text string) bool {
+	letters, total := 0, 0
+	for _, r := range text {
+		total++
+		if unicode.IsLetter(r) {
+			letters++
+		}
+	}
+	if total == 0 {
+		return false
+	}
+	return float64(letters)/float64(total) < 0.55
 }
 
 func estimateMessagesTokens(messages []Message, tools []OpenAITool) int {
@@ -204,7 +244,16 @@ func trimToolResponses(messages []Message, maxTokens, maxTokensHighVolume int, t
 			limit = maxTokensHighVolume
 		}
 		if m.Role == "tool" && EstimateTokens(m.Content) > limit {
-			maxChars := limit * 4
+			// Use the same chars-per-token ratio EstimateTokens will apply when
+			// re-checking this content, so a single trim pass actually lands
+			// under limit instead of still estimating ~1.6x over it for
+			// structured content and falling through to more aggressive
+			// truncation than necessary.
+			charsPerToken := proseCharsPerToken
+			if looksStructured(m.Content) {
+				charsPerToken = structuredContentCharsPerToken
+			}
+			maxChars := int(float64(limit) * charsPerToken)
 			if maxChars > len(m.Content) {
 				maxChars = len(m.Content)
 			}
@@ -242,7 +291,10 @@ func toolNamesByCallID(messages []Message) map[string]string {
 // most once per tool result (evictStaleToolResults is idempotent), so an
 // LLM-backed implementation is a reasonable one-time cost against the much
 // larger savings of not resending the raw content every remaining iteration.
-type toolResultSummarizer func(toolName, content string) string
+// Receives the tool_call id so callers can resolve a summary that was already
+// kicked off in the background (see loop.go's pendingSummaries) instead of
+// blocking here.
+type toolResultSummarizer func(toolCallID, toolName, content string) string
 
 func evictStaleToolResults(messages []Message, keepRecent int, summarize toolResultSummarizer, isError func(toolCallID string) bool) []Message {
 	if keepRecent <= 0 {
@@ -282,7 +334,7 @@ func evictStaleToolResults(messages []Message, keepRecent int, summarize toolRes
 			// the exact wording (truncated only if unexpectedly long).
 			summary = truncateWhitespace(m.Content, evictionSummaryFallbackChars)
 		} else if summarize != nil {
-			summary = strings.TrimSpace(summarize(name, m.Content))
+			summary = strings.TrimSpace(summarize(m.ToolCallID, name, m.Content))
 		}
 		if summary == "" {
 			summary = "no summary available"

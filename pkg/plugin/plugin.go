@@ -197,6 +197,11 @@ type Plugin struct {
 	// system prompt. See datasource_snapshot.go.
 	dsCache   map[string]dsCacheEntry
 	dsCacheMu sync.Mutex
+	// msCache memoises the per-org metric-namespace snapshot injected into the
+	// system prompt for alert investigations. See metric_namespace_snapshot.go.
+	msCache    map[string]dsCacheEntry
+	msCacheMu  sync.Mutex
+	msInFlight map[string]bool
 }
 
 func NewPlugin(ctx context.Context, settings backend.AppInstanceSettings) (instancemgmt.Instance, error) {
@@ -883,7 +888,14 @@ func (p *Plugin) handleAgentRun(w http.ResponseWriter, r *http.Request) {
 
 	toolCtx := BuildToolContext(req.OrgName, userRole)
 	toolCtx.ConversationType = req.Type
+	toolCtx.IsAlertInvestigation = isAlertInvestigation(req.Type, req.Message)
 	toolCtx.DatasourceSnapshot = p.datasourceSnapshot(orgID, req.OrgName, req.ScopeOrgID)
+	if toolCtx.IsAlertInvestigation {
+		// Only fetched for alert investigations: the underlying fetch is a
+		// (cached, backgrounded) scan of each Prometheus datasource's metric
+		// catalog, not worth the overhead for plain chat.
+		toolCtx.MetricNamespaceSnapshot = p.metricNamespaceSnapshot(orgID, req.OrgName, req.ScopeOrgID)
+	}
 
 	systemPrompt, err := p.promptRegistry.BuildSystemPrompt(toolCtx)
 	if err != nil {
