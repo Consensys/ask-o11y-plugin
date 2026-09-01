@@ -5,6 +5,13 @@ All notable changes to the Ask O11y Grafana plugin will be documented in this fi
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.9](https://github.com/Consensys/ask-o11y-plugin/compare/v0.3.8...v0.3.9) (2026-09-01)
+
+
+### Bug Fixes
+
+* **deps:** override browserslist to patch CVE-2026-73088 and CVE-2026-73089 ([#193](https://github.com/Consensys/ask-o11y-plugin/issues/193)) ([8eafe1e](https://github.com/Consensys/ask-o11y-plugin/commit/8eafe1e830ca2a8476facd3c54ddb4fb02f16430))
+
 ## [0.3.8](https://github.com/Consensys/ask-o11y-plugin/compare/v0.3.7...v0.3.8) (2026-09-01)
 
 
