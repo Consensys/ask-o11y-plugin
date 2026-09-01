@@ -244,7 +244,16 @@ func trimToolResponses(messages []Message, maxTokens, maxTokensHighVolume int, t
 			limit = maxTokensHighVolume
 		}
 		if m.Role == "tool" && EstimateTokens(m.Content) > limit {
-			maxChars := limit * 4
+			// Use the same chars-per-token ratio EstimateTokens will apply when
+			// re-checking this content, so a single trim pass actually lands
+			// under limit instead of still estimating ~1.6x over it for
+			// structured content and falling through to more aggressive
+			// truncation than necessary.
+			charsPerToken := proseCharsPerToken
+			if looksStructured(m.Content) {
+				charsPerToken = structuredContentCharsPerToken
+			}
+			maxChars := int(float64(limit) * charsPerToken)
 			if maxChars > len(m.Content) {
 				maxChars = len(m.Content)
 			}

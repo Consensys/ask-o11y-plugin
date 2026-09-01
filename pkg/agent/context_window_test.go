@@ -404,6 +404,24 @@ func TestTrimToolResponses_HighVolumeToolGetsTighterLimit(t *testing.T) {
 	}
 }
 
+// TestTrimToolResponses_StructuredContentConvergesInOnePass guards against a
+// Bugbot-reported regression: trimToolResponses cut at limit*4 characters
+// regardless of content, but EstimateTokens re-checks structured content at
+// a tighter 2.5-chars-per-token ratio. A single trim pass on JSON content
+// used to still estimate ~1.6x over the target, forcing an unnecessary
+// escalation to more aggressive truncation.
+func TestTrimToolResponses_StructuredContentConvergesInOnePass(t *testing.T) {
+	toolNames := map[string]string{"1": "query_prometheus"}
+	jsonContent := strings.Repeat(`{"target_group":"tg-1","value":12345,"ts":"2026-09-01T00:00:00Z"},`, 5000)
+	messages := []Message{toolResultMessage("1", jsonContent)}
+
+	result := trimToolResponses(messages, 8000, 3000, toolNames)
+
+	if got := EstimateTokens(result[0].Content); got > 3000+10 {
+		t.Errorf("expected structured content trimmed in one pass to land near the 3000 token limit, got %d", got)
+	}
+}
+
 func TestIsHighVolumeTool(t *testing.T) {
 	cases := map[string]bool{
 		"query_prometheus":      true,
