@@ -126,6 +126,7 @@
   },
   "packageManager": "npm@11.5.1",
   "overrides": {
+    "browserslist": "^4.28.7",
     "serialize-javascript": "^7.0.4",
     "immutable": "^5.1.9",
     "@grafana/data": {
