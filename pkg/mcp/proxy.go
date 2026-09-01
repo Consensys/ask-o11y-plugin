@@ -23,6 +23,9 @@ type Proxy struct {
 	// perUserToken, when set, is passed to every Client so OAuth-enabled
 	// servers can inject a per-user bearer on outbound MCP requests.
 	perUserToken PerUserTokenProvider
+	// resultCache holds short-lived results for the slow, read-only tool
+	// calls named in cacheableToolTTL — see result_cache.go.
+	resultCache *resultCache
 }
 
 // SetPerUserTokenProvider registers the provider for per-user OAuth tokens
@@ -39,9 +42,10 @@ func (p *Proxy) SetPerUserTokenProvider(provider PerUserTokenProvider) {
 // NewProxy creates a new MCP proxy
 func NewProxy(ctx context.Context, logger log.Logger) *Proxy {
 	p := &Proxy{
-		clients: make(map[string]*Client),
-		logger:  logger,
-		ctx:     ctx,
+		clients:     make(map[string]*Client),
+		logger:      logger,
+		ctx:         ctx,
+		resultCache: newResultCache(),
 	}
 	p.healthMonitor = NewHealthMonitor(p, logger)
 	return p
@@ -199,7 +203,23 @@ func (p *Proxy) CallToolWithContext(ctx context.Context, toolName string, argume
 
 	p.logger.Debug("Calling tool on MCP server", "tool", toolName, "server", serverID, "orgID", orgID, "orgName", orgName, "scopeOrgId", scopeOrgId)
 
-	return client.CallToolWithContext(ctx, toolName, arguments, orgID, orgName, scopeOrgId)
+	ttl, cacheable := cacheableTTL(toolName)
+	if !cacheable {
+		return client.CallToolWithContext(ctx, toolName, arguments, orgID, orgName, scopeOrgId)
+	}
+
+	userID, _ := UserIDFromContext(ctx)
+	key := cacheKey(toolName, orgID, scopeOrgId, userID, arguments)
+	if cached, hit := p.resultCache.get(key); hit {
+		p.logger.Debug("Serving cached MCP tool result", "tool", toolName, "server", serverID)
+		return cached, nil
+	}
+
+	result, err := client.CallToolWithContext(ctx, toolName, arguments, orgID, orgName, scopeOrgId)
+	if err == nil && result != nil && !result.IsError {
+		p.resultCache.set(key, result, ttl)
+	}
+	return result, err
 }
 
 // HandleMCPRequest handles an MCP JSON-RPC request
