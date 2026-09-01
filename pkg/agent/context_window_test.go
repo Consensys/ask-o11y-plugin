@@ -431,3 +431,19 @@ func TestEstimateTokens(t *testing.T) {
 		t.Errorf("EstimateTokens('') = %d, expected 0", got)
 	}
 }
+
+// TestEstimateTokens_StructuredContentGetsTighterRatio guards against the
+// Sept 2026 production trace where a single LLM call actually billed 291K
+// prompt tokens while our own estimate thought it was under budget — the
+// flat chars/4 ratio undercounts JSON-heavy tool results. Structured content
+// must estimate to more tokens per byte than equivalent-length prose.
+func TestEstimateTokens_StructuredContentGetsTighterRatio(t *testing.T) {
+	prose := strings.Repeat("the quick brown fox jumps over lazy dogs ", 100)
+	jsonish := strings.Repeat(`{"target_group":"tg-1","value":12345,"ts":"2026-09-01T00:00:00Z"},`, 100)
+
+	proseTokensPerByte := float64(EstimateTokens(prose)) / float64(len(prose))
+	jsonTokensPerByte := float64(EstimateTokens(jsonish)) / float64(len(jsonish))
+	if jsonTokensPerByte <= proseTokensPerByte {
+		t.Fatalf("expected structured content to estimate more tokens per byte than prose: json=%.4f prose=%.4f", jsonTokensPerByte, proseTokensPerByte)
+	}
+}
