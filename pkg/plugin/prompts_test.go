@@ -16,6 +16,7 @@ func TestBuildSystemPrompt_InvestigationAppendsAddendum(t *testing.T) {
 	}
 	ctx := BuildToolContext("Org1", "Admin")
 	ctx.ConversationType = "investigation"
+	ctx.IsAlertInvestigation = true
 	withAdd, err := r.BuildSystemPrompt(ctx)
 	if err != nil {
 		t.Fatal(err)
@@ -25,6 +26,30 @@ func TestBuildSystemPrompt_InvestigationAppendsAddendum(t *testing.T) {
 	}
 	if len(withAdd) <= len(base) {
 		t.Fatalf("investigation prompt should be longer than base; base=%d with=%d", len(base), len(withAdd))
+	}
+}
+
+// TestBuildSystemPrompt_FiringMessageInChatAppendsAddendum guards against the
+// Sept 2026 production incident: a user pasted a raw "[FIRING:1] ..." alert
+// notification into plain chat (reqType "chat", not the "investigation" deep
+// link), which got the bigger AlertInvestigationMaxIter budget via
+// isAlertInvestigation but not these efficiency guardrails, because the two
+// were gated on different conditions. IsAlertInvestigation must now be
+// computed from the same helper for both, so this case gets the addendum too.
+func TestBuildSystemPrompt_FiringMessageInChatAppendsAddendum(t *testing.T) {
+	r, err := NewPromptRegistry(PluginSettings{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := BuildToolContext("Org1", "Admin")
+	ctx.ConversationType = "chat"
+	ctx.IsAlertInvestigation = isAlertInvestigation("chat", "Prometheus]: [FIRING:1] mmcx-prd alb P2 (SecurityAlertsApiTrafficNearZero prd mmcx noc)")
+	out, err := r.BuildSystemPrompt(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, DefaultInvestigationModeSystemAddendum) {
+		t.Fatal("expected investigation system addendum for a firing-alert message pasted into plain chat")
 	}
 }
 

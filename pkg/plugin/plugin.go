@@ -883,6 +883,7 @@ func (p *Plugin) handleAgentRun(w http.ResponseWriter, r *http.Request) {
 
 	toolCtx := BuildToolContext(req.OrgName, userRole)
 	toolCtx.ConversationType = req.Type
+	toolCtx.IsAlertInvestigation = isAlertInvestigation(req.Type, req.Message)
 	toolCtx.DatasourceSnapshot = p.datasourceSnapshot(orgID, req.OrgName, req.ScopeOrgID)
 
 	systemPrompt, err := p.promptRegistry.BuildSystemPrompt(toolCtx)

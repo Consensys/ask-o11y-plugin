@@ -23,6 +23,13 @@ type PromptContext struct {
 	// Used to append mode-specific system instructions (e.g. tighter tool discipline for investigations).
 	ConversationType string
 
+	// IsAlertInvestigation mirrors resolveMaxIterations' isAlertInvestigation
+	// check (reqType == "investigation" OR the message looks like a firing-alert
+	// notification pasted into chat). Gates DefaultInvestigationModeSystemAddendum
+	// so a request that gets the bigger iteration budget always also gets the
+	// efficiency guardrails that keep it fast — see isAlertInvestigation's comment.
+	IsAlertInvestigation bool
+
 	AvailableTools []ToolInfo
 	DisabledTools  []ToolInfo
 	FailedTools    []ToolInfo
@@ -99,7 +106,7 @@ func (r *PromptRegistry) BuildSystemPrompt(ctx PromptContext) (string, error) {
 		return "", err
 	}
 	out := system + tools
-	if ctx.ConversationType == "investigation" {
+	if ctx.IsAlertInvestigation {
 		out += "\n\n---\n\n" + DefaultInvestigationModeSystemAddendum
 	}
 	return out, nil
