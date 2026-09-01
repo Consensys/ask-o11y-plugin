@@ -5,6 +5,13 @@ All notable changes to the Ask O11y Grafana plugin will be documented in this fi
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.8](https://github.com/Consensys/ask-o11y-plugin/compare/v0.3.7...v0.3.8) (2026-09-01)
+
+
+### Bug Fixes
+
+* **backend:** speed up alert-investigation runs (guardrails, async eviction, token accounting, metric-catalog caching) ([#191](https://github.com/Consensys/ask-o11y-plugin/issues/191)) ([a3da53e](https://github.com/Consensys/ask-o11y-plugin/commit/a3da53ef79b1af63bae6d0a56815a67d78e08ab2))
+
 ## [0.3.7](https://github.com/Consensys/ask-o11y-plugin/compare/v0.3.6...v0.3.7) (2026-08-31)
 
 
