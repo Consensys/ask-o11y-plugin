@@ -41,6 +41,15 @@ type PromptContext struct {
 	// injected at session start so the LLM cannot hallucinate UIDs. Empty string
 	// renders no block.
 	DatasourceSnapshot string
+
+	// MetricNamespaceSnapshot is a compact, per-Prometheus-datasource list of
+	// metric-name namespaces (prefixes, not full names) injected for alert
+	// investigations so the agent can build a targeted regex on its first
+	// list_prometheus_metric_names call instead of guessing across several
+	// datasources and regex attempts. Empty string renders no block — either
+	// there are no Prometheus datasources, or the snapshot hasn't finished its
+	// background refresh yet (see metricNamespaceSnapshot).
+	MetricNamespaceSnapshot string
 }
 
 type PromptRegistry struct {

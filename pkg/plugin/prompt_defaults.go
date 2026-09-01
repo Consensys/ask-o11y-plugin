@@ -88,6 +88,17 @@ This keeps each tool call payload small and reliable.
 
 {{.DatasourceSnapshot}}
 {{end}}
+{{if .MetricNamespaceSnapshot}}
+
+## Known Metric Namespaces (this run)
+
+These are metric-name PREFIXES, not full metric names — use one to build a
+targeted regex for ` + "`list_prometheus_metric_names`" + ` (e.g. a namespace
+"aws_applicationelb" suggests trying the regex "aws_applicationelb.*")
+instead of scanning a datasource with a broad ".*" regex.
+
+{{.MetricNamespaceSnapshot}}
+{{end}}
 
 ---
 
