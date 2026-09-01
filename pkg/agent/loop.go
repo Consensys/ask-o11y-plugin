@@ -299,9 +299,18 @@ func (a *AgentLoop) Run(ctx context.Context, req LoopRequest, eventCh chan<- SSE
 					Data: ContentEvent{Content: msg.Content},
 				})
 			}
+			// Snapshot into a fresh map under the lock: background eviction-summary
+			// goroutines for tool results still within keepRecentToolResults (never
+			// evicted before the run ended) may still be writing to usageByModel
+			// after this point. DoneEvent crosses into another goroutine over
+			// eventCh, so handing out the live map risks a concurrent read/write
+			// (and, for callers that marshal it to JSON, a fatal concurrent map
+			// access) — the copy is the only value anything ever reads again.
 			usageMu.Lock()
+			usageSnapshot := make(map[string]ModelUsage, len(usageByModel))
 			var promptTokens, completionTokens, totalTokens int64
-			for _, u := range usageByModel {
+			for model, u := range usageByModel {
+				usageSnapshot[model] = u
 				promptTokens += int64(u.PromptTokens)
 				completionTokens += int64(u.CompletionTokens)
 				totalTokens += int64(u.TotalTokens)
@@ -315,7 +324,7 @@ func (a *AgentLoop) Run(ctx context.Context, req LoopRequest, eventCh chan<- SSE
 					CompletionTokens: completionTokens,
 					TotalTokens:      totalTokens,
 					ToolCallCount:    toolCallCount,
-					UsageByModel:     usageByModel,
+					UsageByModel:     usageSnapshot,
 				},
 			})
 			return
