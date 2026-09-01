@@ -242,7 +242,10 @@ func toolNamesByCallID(messages []Message) map[string]string {
 // most once per tool result (evictStaleToolResults is idempotent), so an
 // LLM-backed implementation is a reasonable one-time cost against the much
 // larger savings of not resending the raw content every remaining iteration.
-type toolResultSummarizer func(toolName, content string) string
+// Receives the tool_call id so callers can resolve a summary that was already
+// kicked off in the background (see loop.go's pendingSummaries) instead of
+// blocking here.
+type toolResultSummarizer func(toolCallID, toolName, content string) string
 
 func evictStaleToolResults(messages []Message, keepRecent int, summarize toolResultSummarizer, isError func(toolCallID string) bool) []Message {
 	if keepRecent <= 0 {
@@ -282,7 +285,7 @@ func evictStaleToolResults(messages []Message, keepRecent int, summarize toolRes
 			// the exact wording (truncated only if unexpectedly long).
 			summary = truncateWhitespace(m.Content, evictionSummaryFallbackChars)
 		} else if summarize != nil {
-			summary = strings.TrimSpace(summarize(name, m.Content))
+			summary = strings.TrimSpace(summarize(m.ToolCallID, name, m.Content))
 		}
 		if summary == "" {
 			summary = "no summary available"

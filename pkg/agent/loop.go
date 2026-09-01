@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"go.opentelemetry.io/otel/attribute"
@@ -143,7 +144,11 @@ func (a *AgentLoop) Run(ctx context.Context, req LoopRequest, eventCh chan<- SSE
 
 	// Run-level usage/tool-call totals, surfaced on the "done" event so the
 	// caller can persist per-session stats (tokens, turns, tool calls).
+	// usageMu guards it: eviction summaries now run in background goroutines
+	// (see pendingSummaries below) that write into it concurrently with the
+	// main loop's own writes after each LLM call.
 	usageByModel := make(map[string]ModelUsage)
+	var usageMu sync.Mutex
 	toolCallCount := 0
 
 	// toolResultIsError records which tool_call ids produced an error result,
@@ -153,13 +158,30 @@ func (a *AgentLoop) Run(ctx context.Context, req LoopRequest, eventCh chan<- SSE
 	// paraphrased.
 	toolResultIsError := make(map[string]bool)
 
+	// pendingSummaries holds eviction summaries kicked off in the background
+	// as soon as each tool result is appended (see the tool-call loop below),
+	// keyed by tool_call id. A result typically doesn't go stale for several
+	// iterations (keepRecentToolResults=8 tool calls later), so by the time
+	// evictStaleToolResults actually needs the summary it has almost always
+	// already finished — turning what used to be a blocking "base" model call
+	// on the hot path into a wait that resolves instantly. Only ever read and
+	// deleted from the main loop goroutine, so it needs no lock of its own.
+	pendingSummaries := make(map[string]*toolResultSummaryFuture)
+
 	for iteration := 0; iteration < maxIter; iteration++ {
 		if ctx.Err() != nil {
 			return
 		}
 
-		messages = evictStaleToolResults(messages, keepRecentToolResults, func(toolName, content string) string {
-			return a.summarizeForEviction(ctx, req, usageByModel, toolName, content)
+		messages = evictStaleToolResults(messages, keepRecentToolResults, func(toolCallID, toolName, content string) string {
+			if future, ok := pendingSummaries[toolCallID]; ok {
+				delete(pendingSummaries, toolCallID)
+				return future.wait(ctx)
+			}
+			// No background future found (shouldn't normally happen since every
+			// non-error tool result starts one on append) — fall back to a
+			// synchronous summary so eviction still completes correctly.
+			return a.summarizeForEviction(ctx, req, usageByModel, &usageMu, toolName, content)
 		}, func(toolCallID string) bool {
 			return toolResultIsError[toolCallID]
 		})
@@ -206,12 +228,14 @@ func (a *AgentLoop) Run(ctx context.Context, req LoopRequest, eventCh chan<- SSE
 		}
 
 		if resp.Usage != nil {
+			usageMu.Lock()
 			usage := usageByModel[effectiveModel]
 			usage.Model = effectiveModel
 			usage.PromptTokens += resp.Usage.PromptTokens
 			usage.CompletionTokens += resp.Usage.CompletionTokens
 			usage.TotalTokens += resp.Usage.TotalTokens
 			usageByModel[effectiveModel] = usage
+			usageMu.Unlock()
 		}
 
 		msg := resp.Choices[0].Message
@@ -275,12 +299,14 @@ func (a *AgentLoop) Run(ctx context.Context, req LoopRequest, eventCh chan<- SSE
 					Data: ContentEvent{Content: msg.Content},
 				})
 			}
+			usageMu.Lock()
 			var promptTokens, completionTokens, totalTokens int64
 			for _, u := range usageByModel {
 				promptTokens += int64(u.PromptTokens)
 				completionTokens += int64(u.CompletionTokens)
 				totalTokens += int64(u.TotalTokens)
 			}
+			usageMu.Unlock()
 			a.send(ctx, eventCh, SSEEvent{
 				Type: "done",
 				Data: DoneEvent{
@@ -342,6 +368,18 @@ func (a *AgentLoop) Run(ctx context.Context, req LoopRequest, eventCh chan<- SSE
 			})
 			toolResultIsError[tc.ID] = isError
 
+			// Kick off this result's eviction summary now, in the background,
+			// instead of waiting until it's actually stale. Error results are
+			// never LLM-summarized (see evictStaleToolResults), so skip them.
+			if !isError {
+				future := newToolResultSummaryFuture()
+				pendingSummaries[tc.ID] = future
+				toolName, toolResultContent := tc.Function.Name, toolContent
+				go func() {
+					future.resolve(a.summarizeForEviction(ctx, req, usageByModel, &usageMu, toolName, toolResultContent))
+				}()
+			}
+
 			if !mcpUnavailableEmitted && len(transportFailedTools) >= 2 {
 				mcpUnavailableEmitted = true
 				a.send(ctx, eventCh, SSEEvent{
@@ -373,6 +411,34 @@ func (a *AgentLoop) Run(ctx context.Context, req LoopRequest, eventCh chan<- SSE
 	})
 }
 
+// toolResultSummaryFuture carries the result of a summarizeForEviction call
+// started in the background as soon as a tool result is appended to history.
+// wait blocks until the goroutine resolves it (or ctx is cancelled) — in
+// steady state this is a no-op because keepRecentToolResults gives the
+// summary several iterations' worth of head start before it's actually needed.
+type toolResultSummaryFuture struct {
+	done   chan struct{}
+	result string
+}
+
+func newToolResultSummaryFuture() *toolResultSummaryFuture {
+	return &toolResultSummaryFuture{done: make(chan struct{})}
+}
+
+func (f *toolResultSummaryFuture) resolve(result string) {
+	f.result = result
+	close(f.done)
+}
+
+func (f *toolResultSummaryFuture) wait(ctx context.Context) string {
+	select {
+	case <-f.done:
+		return f.result
+	case <-ctx.Done():
+		return ""
+	}
+}
+
 // summarizeForEviction condenses a stale tool result with a cheap ("base")
 // model call before evictStaleToolResults drops the raw content, so the model
 // keeps the gist of earlier evidence instead of nothing. Any failure (network
@@ -380,7 +446,10 @@ func (a *AgentLoop) Run(ctx context.Context, req LoopRequest, eventCh chan<- SSE
 // truncation of the original content rather than surfacing an error — this is
 // a cost optimization on top of an already-working eviction path, not a
 // critical request, so degrading quietly is preferable to failing the run.
-func (a *AgentLoop) summarizeForEviction(ctx context.Context, req LoopRequest, usageByModel map[string]ModelUsage, toolName, content string) string {
+// usageMu guards usageByModel: this now runs concurrently from a background
+// goroutine per tool result (see the Run loop) as well as, in the fallback
+// path, the main loop goroutine itself.
+func (a *AgentLoop) summarizeForEviction(ctx context.Context, req LoopRequest, usageByModel map[string]ModelUsage, usageMu *sync.Mutex, toolName, content string) string {
 	fallback := truncateWhitespace(content, evictionSummaryFallbackChars)
 
 	trimmed := strings.TrimSpace(content)
@@ -405,12 +474,14 @@ func (a *AgentLoop) summarizeForEviction(ctx context.Context, req LoopRequest, u
 	}
 
 	if resp.Usage != nil {
+		usageMu.Lock()
 		usage := usageByModel["base"]
 		usage.Model = "base"
 		usage.PromptTokens += resp.Usage.PromptTokens
 		usage.CompletionTokens += resp.Usage.CompletionTokens
 		usage.TotalTokens += resp.Usage.TotalTokens
 		usageByModel["base"] = usage
+		usageMu.Unlock()
 	}
 
 	if len(resp.Choices) == 0 {

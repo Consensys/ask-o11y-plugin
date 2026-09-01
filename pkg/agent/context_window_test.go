@@ -295,7 +295,7 @@ func TestEvictStaleToolResults_UsesSummarizerOncePerResult(t *testing.T) {
 	}
 
 	var calls []string
-	summarize := func(toolName, content string) string {
+	summarize := func(toolCallID, toolName, content string) string {
 		calls = append(calls, content)
 		return "summary of: " + content
 	}
@@ -349,7 +349,7 @@ func TestEvictStaleToolResults_ErrorResultsSkipSummarizerVerbatim(t *testing.T) 
 		messages = append(messages, toolResultMessage(id, content))
 	}
 
-	summarize := func(toolName, content string) string {
+	summarize := func(toolCallID, toolName, content string) string {
 		return "PARAPHRASED (should never appear for error results)"
 	}
 	isError := func(toolCallID string) bool {
