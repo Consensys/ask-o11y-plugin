@@ -5,6 +5,18 @@ All notable changes to the Ask O11y Grafana plugin will be documented in this fi
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.10](https://github.com/Consensys/ask-o11y-plugin/compare/v0.3.9...v0.3.10) (2026-09-04)
+
+
+### Features
+
+* **mcp:** pin graphiti image, add community detection, auto-save, and retention TTLs ([#198](https://github.com/Consensys/ask-o11y-plugin/issues/198)) ([8ce432a](https://github.com/Consensys/ask-o11y-plugin/commit/8ce432a9a4cb9820868936abcd8eba76f9fc3ed5))
+
+
+### Bug Fixes
+
+* **doc:** add gcx guide ([#197](https://github.com/Consensys/ask-o11y-plugin/issues/197)) ([b115e8c](https://github.com/Consensys/ask-o11y-plugin/commit/b115e8ccd35b897966ad62ee7c40eee257e1fab0))
+
 ## [0.3.9](https://github.com/Consensys/ask-o11y-plugin/compare/v0.3.8...v0.3.9) (2026-09-01)
 
 
