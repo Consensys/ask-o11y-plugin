@@ -9,39 +9,55 @@ server:
     - "127.0.0.1"
 
 llm:
-  provider: "anthropic"
-  model: ${LLM_MODEL:-claude-haiku-4-5-20251001}
+  # Routed through the shared litellm gateway (OpenAI-compatible) rather than
+  # a native anthropic provider, matching Consensys/w3f-observability#630 —
+  # avoids needing an anthropic client in the image at all.
+  #
+  # NOTE: this config loader's ${VAR:default} substitution (YamlSettingsSource
+  # in the MCP server) only supports a single colon, not bash's ${VAR:-default}
+  # — the regex is `\$\{([^:}]+)(:([^}]*))?\}`, so a stray dash right after the
+  # colon becomes part of the literal default string. Every default below is
+  # deliberately written as `:default`, not `:-default`.
+  provider: "openai"
+  # litellm's OpenAI-compatible /v1 surface expects the plain model id from
+  # GET /v1/models (e.g. "gemini-3.8-flash") — the "gemini/" provider-prefixed
+  # form is litellm's own SDK routing syntax, not what the proxy accepts here.
+  model: ${LLM_MODEL:gemini-3.8-flash}
   temperature: 1.0
   max_tokens: 8192
   providers:
-    anthropic:
-      api_key: ${ANTHROPIC_API_KEY:-}
+    openai:
+      api_key: ${LITELLM_API_KEY:}
+      api_url: ${LITELLM_BASE_URL:https://litellm.consensys.info}
 
 embedder:
+  # Also routed through litellm (see llm.provider above) rather than a local
+  # Ollama container — nothing else in this stack needs Ollama, so this
+  # avoids an extra service + local model pull for zero functional gain.
+  # text-embedding-3-large defaults to 3072 dims; pinned to 1024 to match
+  # Consensys/w3f-observability#630's Neo4j vector index sizing. Same "no
+  # provider prefix" note as llm.model above — this is litellm's proxy-facing
+  # model id, not the "azure/text-embedding-3-large" SDK routing form.
   provider: "openai"
-  model: ${EMBEDDING_MODEL:-nomic-embed-text}
-  # Must match the container's EMBEDDING_DIM (nomic-embed-text is 768-dim, not the
-  # 1536-dim OpenAI default) — pydantic-settings only maps env vars via the
-  # EMBEDDER__DIMENSIONS nested-delimiter form, so EMBEDDING_DIM alone is a no-op
-  # unless referenced here through this config's own ${VAR} substitution.
-  dimensions: ${EMBEDDING_DIM:-768}
+  model: ${EMBEDDING_MODEL:text-embedding-3-large}
+  dimensions: ${EMBEDDING_DIM:1024}
   providers:
     openai:
-      api_key: "ollama"
-      api_url: ${OLLAMA_URL:-http://ollama:11434/v1}
+      api_key: ${LITELLM_API_KEY:}
+      api_url: ${LITELLM_BASE_URL:https://litellm.consensys.info}
 
 database:
   provider: "neo4j"
   providers:
     neo4j:
-      uri: ${NEO4J_URI:-bolt://neo4j:7687}
-      username: ${NEO4J_USER:-neo4j}
-      password: ${NEO4J_PASSWORD:-demodemo}
-      database: ${NEO4J_DATABASE:-neo4j}
+      uri: ${NEO4J_URI:bolt://neo4j:7687}
+      username: ${NEO4J_USER:neo4j}
+      password: ${NEO4J_PASSWORD:demodemo}
+      database: ${NEO4J_DATABASE:neo4j}
       use_parallel_runtime: false
 
 graphiti:
-  group_id: ${GRAPHITI_GROUP_ID:-main}
+  group_id: ${GRAPHITI_GROUP_ID:main}
   entity_types:
     - name: "Service"
       description: "A microservice, application, or workload identified by a service/job/app metric label or trace resource.service.name"
