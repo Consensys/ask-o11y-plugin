@@ -1,6 +1,5 @@
 FROM zepai/knowledge-graph-mcp:1.1.0-standalone
-RUN pip install --no-cache-dir --target=/app/mcp/.venv/lib/python3.11/site-packages anthropic \
-    && groupadd --system --gid 1000 graphiti \
+RUN groupadd --system --gid 1000 graphiti \
     && useradd --system --uid 1000 --gid graphiti --home-dir /tmp --shell /usr/sbin/nologin graphiti \
     && cp /root/.local/bin/uv /usr/local/bin/uv \
     && cp /root/.local/bin/uvx /usr/local/bin/uvx \
