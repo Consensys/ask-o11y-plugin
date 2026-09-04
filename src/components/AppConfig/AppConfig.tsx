@@ -105,6 +105,9 @@ type State = {
   graphitiError: string | null;
   serviceGraphMaxNodes: number;
   serviceGraphMaxEdges: number;
+  graphitiAutoSaveSessionsDisabled: boolean;
+  sessionTTLDays: number;
+  graphitiEpisodeTTLDays: number;
   approvalPolicy: string;
   maxParallelToolCalls: number;
   agentEvalCaptureEnabled: boolean;
@@ -126,6 +129,9 @@ const DEFAULT_SERVICE_GRAPH_MAX_NODES = 100;
 const DEFAULT_SERVICE_GRAPH_MAX_EDGES = 200;
 const SERVICE_GRAPH_MAX_NODES_LIMIT = 500;
 const SERVICE_GRAPH_MAX_EDGES_LIMIT = 1000;
+const DEFAULT_SESSION_TTL_DAYS = 90;
+const DEFAULT_GRAPHITI_EPISODE_TTL_DAYS = 30;
+const TTL_DAYS_LIMIT = 3650;
 const DEFAULT_TOPOLOGY_QUERY = 'service topology dependencies incidents upstream downstream';
 const SETTINGS_TAB_STORAGE_KEY = getPluginStorageKey('settings.activeTab');
 
@@ -279,6 +285,9 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
     graphitiError: null,
     serviceGraphMaxNodes: jsonData?.serviceGraphMaxNodes || DEFAULT_SERVICE_GRAPH_MAX_NODES,
     serviceGraphMaxEdges: jsonData?.serviceGraphMaxEdges || DEFAULT_SERVICE_GRAPH_MAX_EDGES,
+    graphitiAutoSaveSessionsDisabled: jsonData?.graphitiAutoSaveSessionsDisabled ?? false,
+    sessionTTLDays: jsonData?.sessionTTLDays || DEFAULT_SESSION_TTL_DAYS,
+    graphitiEpisodeTTLDays: jsonData?.graphitiEpisodeTTLDays || DEFAULT_GRAPHITI_EPISODE_TTL_DAYS,
     approvalPolicy: jsonData?.approvalPolicy || 'approval-gated-writes',
     maxParallelToolCalls: jsonData?.maxParallelToolCalls || 4,
     agentEvalCaptureEnabled: jsonData?.agentEvalCaptureEnabled ?? false,
@@ -356,7 +365,11 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
     state.serviceGraphMaxNodes < 1 ||
     state.serviceGraphMaxNodes > SERVICE_GRAPH_MAX_NODES_LIMIT ||
     state.serviceGraphMaxEdges < 1 ||
-    state.serviceGraphMaxEdges > SERVICE_GRAPH_MAX_EDGES_LIMIT;
+    state.serviceGraphMaxEdges > SERVICE_GRAPH_MAX_EDGES_LIMIT ||
+    state.sessionTTLDays < 1 ||
+    state.sessionTTLDays > TTL_DAYS_LIMIT ||
+    state.graphitiEpisodeTTLDays < 1 ||
+    state.graphitiEpisodeTTLDays > TTL_DAYS_LIMIT;
   const isLocalGrafanaPortInvalid =
     state.useLocalGrafanaURL && (state.localGrafanaPort < 1 || state.localGrafanaPort > 65535);
   const orgId = String(config.bootData?.user?.orgId || '1');
@@ -404,7 +417,10 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
       'service-graph':
         state.graphitiScanInterval !== (savedJsonData.graphitiScanInterval || 'off') ||
         state.serviceGraphMaxNodes !== (savedJsonData.serviceGraphMaxNodes || DEFAULT_SERVICE_GRAPH_MAX_NODES) ||
-        state.serviceGraphMaxEdges !== (savedJsonData.serviceGraphMaxEdges || DEFAULT_SERVICE_GRAPH_MAX_EDGES),
+        state.serviceGraphMaxEdges !== (savedJsonData.serviceGraphMaxEdges || DEFAULT_SERVICE_GRAPH_MAX_EDGES) ||
+        state.graphitiAutoSaveSessionsDisabled !== (savedJsonData.graphitiAutoSaveSessionsDisabled ?? false) ||
+        state.sessionTTLDays !== (savedJsonData.sessionTTLDays || DEFAULT_SESSION_TTL_DAYS) ||
+        state.graphitiEpisodeTTLDays !== (savedJsonData.graphitiEpisodeTTLDays || DEFAULT_GRAPHITI_EPISODE_TTL_DAYS),
       prompts:
         state.defaultSystemPrompt !== getPromptValue(savedJsonData, promptDefaults, 'defaultSystemPrompt') ||
         state.investigationPrompt !== getPromptValue(savedJsonData, promptDefaults, 'investigationPrompt') ||
@@ -803,6 +819,9 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
         graphitiScanInterval: state.graphitiScanInterval,
         serviceGraphMaxNodes: state.serviceGraphMaxNodes,
         serviceGraphMaxEdges: state.serviceGraphMaxEdges,
+        graphitiAutoSaveSessionsDisabled: state.graphitiAutoSaveSessionsDisabled,
+        sessionTTLDays: state.sessionTTLDays,
+        graphitiEpisodeTTLDays: state.graphitiEpisodeTTLDays,
       },
     });
   }
@@ -1592,6 +1611,60 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
                   onChange={onChange}
                   invalid={state.serviceGraphMaxEdges < 1 || state.serviceGraphMaxEdges > SERVICE_GRAPH_MAX_EDGES_LIMIT}
                   data-testid={testIds.appConfig.serviceGraphMaxEdges}
+                />
+              </Field>
+            </div>
+
+            <Field
+              label="Auto-save sessions to knowledge graph"
+              description="Feed every completed session's messages into Graphiti automatically, instead of requiring the manual 'Feed to Knowledge Graph' action."
+              className="mt-2"
+            >
+              <Switch
+                value={!state.graphitiAutoSaveSessionsDisabled}
+                onChange={(e) =>
+                  setState({ ...state, graphitiAutoSaveSessionsDisabled: !e.currentTarget.checked })
+                }
+                data-testid={testIds.appConfig.graphitiAutoSaveToggle}
+              />
+            </Field>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-2">
+              <Field
+                label="Session retention (days)"
+                description={`How long chat sessions are kept before being deleted. Default ${DEFAULT_SESSION_TTL_DAYS}.`}
+                invalid={state.sessionTTLDays < 1 || state.sessionTTLDays > TTL_DAYS_LIMIT}
+                error={`Enter a value from 1 to ${TTL_DAYS_LIMIT}`}
+              >
+                <Input
+                  width={20}
+                  name="sessionTTLDays"
+                  type="number"
+                  min={1}
+                  max={TTL_DAYS_LIMIT}
+                  value={state.sessionTTLDays}
+                  onChange={onChange}
+                  invalid={state.sessionTTLDays < 1 || state.sessionTTLDays > TTL_DAYS_LIMIT}
+                  data-testid={testIds.appConfig.sessionTTLDays}
+                />
+              </Field>
+
+              <Field
+                label="Knowledge graph retention (days)"
+                description={`How long Graphiti episodes are kept before being pruned. Default ${DEFAULT_GRAPHITI_EPISODE_TTL_DAYS}.`}
+                invalid={state.graphitiEpisodeTTLDays < 1 || state.graphitiEpisodeTTLDays > TTL_DAYS_LIMIT}
+                error={`Enter a value from 1 to ${TTL_DAYS_LIMIT}`}
+              >
+                <Input
+                  width={20}
+                  name="graphitiEpisodeTTLDays"
+                  type="number"
+                  min={1}
+                  max={TTL_DAYS_LIMIT}
+                  value={state.graphitiEpisodeTTLDays}
+                  onChange={onChange}
+                  invalid={state.graphitiEpisodeTTLDays < 1 || state.graphitiEpisodeTTLDays > TTL_DAYS_LIMIT}
+                  data-testid={testIds.appConfig.graphitiEpisodeTTLDays}
                 />
               </Field>
             </div>

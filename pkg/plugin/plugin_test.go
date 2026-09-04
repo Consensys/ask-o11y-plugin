@@ -32,7 +32,7 @@ func newAgentRunTestPlugin(t *testing.T) *Plugin {
 		mcpProxy:       proxy,
 		agentLoop:      agent.NewAgentLoop(llmClient, proxy, logger),
 		runStore:       NewRunStore(logger),
-		sessionStore:   NewSessionStore(logger),
+		sessionStore:   NewSessionStore(logger, resolveTTLDays(0, DefaultSessionTTLDays)),
 		approvalBroker: NewInMemoryApprovalBroker(),
 		approvalGrants: NewInMemoryApprovalGrantStore(),
 		promptRegistry: promptRegistry,

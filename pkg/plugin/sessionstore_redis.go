@@ -61,28 +61,26 @@ func fromRedis(rs *redisSession) *ChatSession {
 }
 
 type RedisSessionStore struct {
-	client *redis.Client
-	logger log.Logger
-	ctx    context.Context
+	client     *redis.Client
+	logger     log.Logger
+	ctx        context.Context
+	sessionTTL time.Duration
 }
 
-func NewRedisSessionStore(ctx context.Context, client *redis.Client, logger log.Logger) *RedisSessionStore {
-	return &RedisSessionStore{client: client, logger: logger, ctx: ctx}
+func NewRedisSessionStore(ctx context.Context, client *redis.Client, logger log.Logger, sessionTTL time.Duration) *RedisSessionStore {
+	return &RedisSessionStore{client: client, logger: logger, ctx: ctx, sessionTTL: sessionTTL}
 }
 
 func (s *RedisSessionStore) CreateSession(userID, orgID int64, title string, messages []SessionMessage) (*ChatSession, error) {
 	idxKey := sessionUserIdxKey(userID, orgID)
 
-	ctx, cancel := redisContext(s.ctx, RedisOpTimeout)
-	defer cancel()
-	count, err := s.client.SCard(ctx, idxKey).Result()
-	if err != nil && err != redis.Nil {
-		return nil, fmt.Errorf("failed to count sessions: %w", err)
-	}
-	if count >= int64(SessionMaxPerUserOrg) {
-		if err := s.evictOldest(userID, orgID); err != nil {
-			s.logger.Warn("Failed to evict oldest session", "error", err)
-		}
+	// Session blobs now expire via TTL (see sessionTTL), which is the sole
+	// retention mechanism — there is no session-count cap. Still prune dead
+	// IDs from the index here so it doesn't grow unbounded between reads
+	// (Redis Sets have no per-member TTL; ListSessions self-heals lazily,
+	// but active writers like NOC automation may rarely call it).
+	if _, err := s.pruneStaleIndexEntries(idxKey); err != nil {
+		s.logger.Warn("Failed to prune stale session index entries", "error", err)
 	}
 
 	id, err := generateShareID()
@@ -108,7 +106,7 @@ func (s *RedisSessionStore) CreateSession(userID, orgID int64, title string, mes
 
 	ctx2, cancel2 := redisContext(s.ctx, RedisOpTimeout)
 	defer cancel2()
-	if err := s.client.Set(ctx2, sessionKey(id), data, 0).Err(); err != nil {
+	if err := s.client.Set(ctx2, sessionKey(id), data, s.sessionTTL).Err(); err != nil {
 		return nil, fmt.Errorf("failed to store session: %w", err)
 	}
 
@@ -124,14 +122,49 @@ func (s *RedisSessionStore) CreateSession(userID, orgID int64, title string, mes
 	return session, nil
 }
 
-func (s *RedisSessionStore) evictOldest(userID, orgID int64) error {
-	sessions, err := s.ListSessions(userID, orgID)
-	if err != nil || len(sessions) == 0 {
-		return err
+// pruneStaleIndexEntries removes session IDs from the user index whose
+// backing session blob has already expired via TTL, and returns the count of
+// entries that are still live. Without this, the index would only ever grow
+// (Redis Sets have no per-member TTL).
+func (s *RedisSessionStore) pruneStaleIndexEntries(idxKey string) (int64, error) {
+	ctx, cancel := redisContext(s.ctx, RedisBulkOpTimeout)
+	defer cancel()
+	ids, err := s.client.SMembers(ctx, idxKey).Result()
+	if err != nil && err != redis.Nil {
+		return 0, err
+	}
+	if len(ids) == 0 {
+		return 0, nil
 	}
 
-	oldest := sessions[len(sessions)-1] // ListSessions sorts newest-first
-	return s.DeleteSession(oldest.ID, userID, orgID)
+	ctx2, cancel2 := redisContext(s.ctx, RedisBulkOpTimeout)
+	defer cancel2()
+	pipe := s.client.Pipeline()
+	cmds := make([]*redis.IntCmd, len(ids))
+	for i, id := range ids {
+		cmds[i] = pipe.Exists(ctx2, sessionKey(id))
+	}
+	if _, err := pipe.Exec(ctx2); err != nil && err != redis.Nil {
+		return 0, err
+	}
+
+	var stale []string
+	var live int64
+	for i, cmd := range cmds {
+		if cmd.Val() > 0 {
+			live++
+		} else {
+			stale = append(stale, ids[i])
+		}
+	}
+	if len(stale) > 0 {
+		ctx3, cancel3 := redisContext(s.ctx, RedisOpTimeout)
+		defer cancel3()
+		if err := s.client.SRem(ctx3, idxKey, stale).Err(); err != nil {
+			s.logger.Warn("Failed to remove stale session index entries", "error", err)
+		}
+	}
+	return live, nil
 }
 
 func (s *RedisSessionStore) getSessionRaw(sessionID string) (*redisSession, error) {
@@ -159,7 +192,7 @@ func (s *RedisSessionStore) saveSession(session *ChatSession) error {
 	}
 	ctx, cancel := redisContext(s.ctx, RedisOpTimeout)
 	defer cancel()
-	return s.client.Set(ctx, sessionKey(session.ID), data, 0).Err()
+	return s.client.Set(ctx, sessionKey(session.ID), data, s.sessionTTL).Err()
 }
 
 func (s *RedisSessionStore) GetSession(sessionID string, userID, orgID int64) (*ChatSession, error) {
@@ -448,10 +481,12 @@ func (s *RedisSessionStore) IncrementStats(sessionID string, userID, orgID int64
 	pipe.HIncrBy(ctx, statsKey, "promptTokens", delta.PromptTokens)
 	pipe.HIncrBy(ctx, statsKey, "completionTokens", delta.CompletionTokens)
 	pipe.HIncrBy(ctx, statsKey, "totalTokens", delta.TotalTokens)
+	pipe.Expire(ctx, statsKey, s.sessionTTL)
 	_, err = pipe.Exec(ctx)
 	return err
 }
 
 func (s *RedisSessionStore) CleanupOld() {
-	// Redis sessions are persistent — no periodic cleanup needed.
+	// Sessions expire natively via the TTL set on every write (see
+	// saveSession) — no periodic sweep needed.
 }

@@ -20,6 +20,11 @@ llm:
 embedder:
   provider: "openai"
   model: ${EMBEDDING_MODEL:-nomic-embed-text}
+  # Must match the container's EMBEDDING_DIM (nomic-embed-text is 768-dim, not the
+  # 1536-dim OpenAI default) — pydantic-settings only maps env vars via the
+  # EMBEDDER__DIMENSIONS nested-delimiter form, so EMBEDDING_DIM alone is a no-op
+  # unless referenced here through this config's own ${VAR} substitution.
+  dimensions: ${EMBEDDING_DIM:-768}
   providers:
     openai:
       api_key: "ollama"

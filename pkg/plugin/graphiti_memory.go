@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"time"
 
 	"consensys-asko11y-app/pkg/agent"
 	"consensys-asko11y-app/pkg/mcp"
@@ -16,6 +17,17 @@ const (
 	graphitiMaxSessionTurns = 12
 	graphitiDiscoverySample = 12
 	graphitiTruncatedSuffix = " [...truncated]"
+	// graphitiPruneMaxEpisodes caps how many episodes a single prune pass
+	// inspects. graphiti_get_episodes has no date filter or pagination
+	// cursor and orders results by uuid DESC (i.e. arbitrary relative to
+	// created_at, not "newest" or "oldest") — so raising this cap is the
+	// only lever available to reduce the odds of an aged-out episode
+	// falling outside the fetched window. A graph whose total episode count
+	// stays under this cap gets fully inspected every pass; one that grows
+	// past it will under-prune; pruneGraphitiEpisodes reports that via its
+	// truncated return value so callers can log it as an observable
+	// condition rather than a silent gap.
+	graphitiPruneMaxEpisodes = 1000
 )
 
 // graphitiWriteToolNames are hidden from LLM sessions. Regular chat and
@@ -25,6 +37,7 @@ var graphitiWriteToolNames = []string{
 	"graphiti_delete_entity_edge",
 	"graphiti_delete_episode",
 	"graphiti_clear_graph",
+	"graphiti_build_communities",
 }
 
 func hasGraphitiMemoryTool(tools []mcp.Tool) bool {
@@ -130,6 +143,78 @@ func ingestGraphitiMemory(proxy *mcp.Proxy, orgID int64, name, body, source, sou
 		return fmt.Errorf("graphiti_add_memory failed")
 	}
 	return nil
+}
+
+// buildGraphitiCommunities triggers Graphiti's community detection for an org's
+// group_id, clustering related entities and refreshing their summaries. It is a
+// graph-wide recompute, so callers should run it on a schedule (e.g. after each
+// Scout scavenge) rather than per-request.
+func buildGraphitiCommunities(proxy *mcp.Proxy, orgID int64) error {
+	result, err := proxy.CallTool("graphiti_build_communities", map[string]interface{}{
+		"group_ids": []string{orgGroupID(orgID)},
+	})
+	if err != nil {
+		return err
+	}
+	if result != nil && result.IsError {
+		if text := callToolText(result); text != "" {
+			return fmt.Errorf("graphiti_build_communities failed: %s", text)
+		}
+		return fmt.Errorf("graphiti_build_communities failed")
+	}
+	return nil
+}
+
+type graphitiEpisode struct {
+	UUID      string `json:"uuid"`
+	CreatedAt string `json:"created_at"`
+}
+
+type graphitiEpisodesResponse struct {
+	Episodes []graphitiEpisode `json:"episodes"`
+}
+
+// pruneGraphitiEpisodes deletes episodes older than maxAge from an org's
+// group_id. Returns the number of episodes deleted, and whether the fetched
+// batch hit graphitiPruneMaxEpisodes — a true here means older episodes may
+// exist outside the inspected window (see the cap's comment) and is worth
+// surfacing to an operator rather than swallowing.
+func pruneGraphitiEpisodes(proxy *mcp.Proxy, orgID int64, maxAge time.Duration) (deleted int, truncated bool, err error) {
+	result, err := proxy.CallTool("graphiti_get_episodes", map[string]interface{}{
+		"group_ids":    []string{orgGroupID(orgID)},
+		"max_episodes": graphitiPruneMaxEpisodes,
+	})
+	if err != nil {
+		return 0, false, err
+	}
+	if result != nil && result.IsError {
+		if text := callToolText(result); text != "" {
+			return 0, false, fmt.Errorf("graphiti_get_episodes failed: %s", text)
+		}
+		return 0, false, fmt.Errorf("graphiti_get_episodes failed")
+	}
+
+	var payload graphitiEpisodesResponse
+	if err := json.Unmarshal([]byte(graphitiToolBody(result)), &payload); err != nil {
+		return 0, false, fmt.Errorf("failed to parse episodes: %w", err)
+	}
+
+	cutoff := time.Now().Add(-maxAge)
+	for _, ep := range payload.Episodes {
+		if ep.UUID == "" || ep.CreatedAt == "" {
+			continue
+		}
+		createdAt, err := time.Parse(time.RFC3339, ep.CreatedAt)
+		if err != nil || createdAt.After(cutoff) {
+			continue
+		}
+		delResult, err := proxy.CallTool("graphiti_delete_episode", map[string]interface{}{"uuid": ep.UUID})
+		if err != nil || (delResult != nil && delResult.IsError) {
+			continue
+		}
+		deleted++
+	}
+	return deleted, len(payload.Episodes) >= graphitiPruneMaxEpisodes, nil
 }
 
 func compactGraphitiLine(text string, maxChars int) string {
