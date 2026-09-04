@@ -389,6 +389,7 @@ func NewPlugin(ctx context.Context, settings backend.AppInstanceSettings) (insta
 	} else {
 		logger.Info("Scout auto-scan disabled (interval=off)")
 	}
+	go scout.StartRetention()
 
 	p := &Plugin{
 		logger:         logger,
@@ -437,19 +438,6 @@ func NewPlugin(ctx context.Context, settings backend.AppInstanceSettings) (insta
 			select {
 			case <-ticker.C:
 				runStore.CleanupOld()
-			case <-pluginCtx.Done():
-				return
-			}
-		}
-	}()
-
-	go func() {
-		ticker := time.NewTicker(GraphitiRetentionInterval)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ticker.C:
-				scout.RunRetention()
 			case <-pluginCtx.Done():
 				return
 			}

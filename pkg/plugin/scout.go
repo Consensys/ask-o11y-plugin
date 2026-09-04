@@ -22,6 +22,12 @@ import (
 type Scout struct {
 	ctx    context.Context
 	cancel context.CancelFunc
+	// wg tracks the Start/StartRetention loop goroutines. Stop() waits on it
+	// so Dispose() can't close the MCP proxy out from under a Scavenge/
+	// RunRetention call that was already in flight when shutdown began —
+	// both loops call these synchronously, so waiting for the loop to exit
+	// also waits for whichever call it's mid-way through.
+	wg sync.WaitGroup
 
 	interval  time.Duration
 	agentLoop *agent.AgentLoop
@@ -95,6 +101,9 @@ func (s *Scout) config() (orgID int64, grafanaURL, saToken string) {
 
 // Start runs the periodic scavenge loop. Call in a goroutine.
 func (s *Scout) Start() {
+	s.wg.Add(1)
+	defer s.wg.Done()
+
 	s.logger.Info("Scout started", "interval", s.interval)
 	ticker := time.NewTicker(s.interval)
 	defer ticker.Stop()
@@ -109,9 +118,30 @@ func (s *Scout) Start() {
 	}
 }
 
-// Stop signals the scavenge loop to exit.
+// StartRetention runs the periodic community-build + episode-prune loop,
+// independent of the discovery Start() loop above. Call in a goroutine.
+func (s *Scout) StartRetention() {
+	s.wg.Add(1)
+	defer s.wg.Done()
+
+	ticker := time.NewTicker(GraphitiRetentionInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-s.ctx.Done():
+			return
+		case <-ticker.C:
+			s.RunRetention()
+		}
+	}
+}
+
+// Stop signals both loops to exit and blocks until they have — including
+// whichever Scavenge/RunRetention call was already in flight — so callers
+// (see Plugin.Dispose) can safely close the MCP proxy immediately after.
 func (s *Scout) Stop() {
 	s.cancel()
+	s.wg.Wait()
 }
 
 // Scavenge runs one full agentic discovery session scoped to the lookback window
