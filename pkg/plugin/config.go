@@ -43,3 +43,21 @@ const (
 const (
 	GraphitiDiscoveryMaxIter = 50
 )
+
+// Retention defaults, used when the corresponding PluginSettings field is
+// unset (0). Both are user-configurable per org since auto-saving every
+// session to the knowledge graph (see autoSaveSessionToGraphiti) makes both
+// stores grow much faster than when ingestion was an opt-in button click.
+const (
+	DefaultSessionTTLDays         = 90
+	DefaultGraphitiEpisodeTTLDays = 30
+)
+
+// resolveTTLDays converts a user-configured retention window (in days, 0
+// meaning "use the default") into a duration.
+func resolveTTLDays(days, defaultDays int) time.Duration {
+	if days <= 0 {
+		days = defaultDays
+	}
+	return time.Duration(days) * 24 * time.Hour
+}

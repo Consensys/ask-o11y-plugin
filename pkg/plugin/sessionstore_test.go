@@ -8,7 +8,7 @@ import (
 )
 
 func newTestSessionStore() *SessionStore {
-	return NewSessionStore(log.DefaultLogger)
+	return NewSessionStore(log.DefaultLogger, resolveTTLDays(0, DefaultSessionTTLDays))
 }
 
 func TestSessionStore_CreateAndGet(t *testing.T) {

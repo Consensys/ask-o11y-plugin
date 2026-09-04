@@ -85,6 +85,10 @@ type SessionStoreInterface interface {
 	SetActiveRunID(sessionID string, userID, orgID int64, runID string) error
 	ClearActiveRunID(sessionID string, userID, orgID int64) error
 	IncrementStats(sessionID string, userID, orgID int64, delta SessionStatsDelta) error
+	// CleanupOld removes sessions past the store's configured retention
+	// window. Redis-backed stores expire sessions natively (see
+	// NewRedisSessionStore) and implement this as a no-op.
+	CleanupOld()
 }
 
 func sessionOwnerKey(userID, orgID int64) string {
@@ -105,19 +109,21 @@ func generateSessionTitle(messages []SessionMessage) string {
 }
 
 type SessionStore struct {
-	mu       sync.RWMutex
-	sessions map[string]*ChatSession        // sessionID -> session
-	userIdx  map[string]map[string]struct{} // ownerKey -> set of sessionIDs
-	current  map[string]string              // ownerKey -> current sessionID
-	logger   log.Logger
+	mu         sync.RWMutex
+	sessions   map[string]*ChatSession        // sessionID -> session
+	userIdx    map[string]map[string]struct{} // ownerKey -> set of sessionIDs
+	current    map[string]string              // ownerKey -> current sessionID
+	logger     log.Logger
+	sessionTTL time.Duration
 }
 
-func NewSessionStore(logger log.Logger) *SessionStore {
+func NewSessionStore(logger log.Logger, sessionTTL time.Duration) *SessionStore {
 	return &SessionStore{
-		sessions: make(map[string]*ChatSession),
-		userIdx:  make(map[string]map[string]struct{}),
-		current:  make(map[string]string),
-		logger:   logger,
+		sessions:   make(map[string]*ChatSession),
+		userIdx:    make(map[string]map[string]struct{}),
+		current:    make(map[string]string),
+		logger:     logger,
+		sessionTTL: sessionTTL,
 	}
 }
 
@@ -417,5 +423,25 @@ func (s *SessionStore) IncrementStats(sessionID string, userID, orgID int64, del
 }
 
 func (s *SessionStore) CleanupOld() {
-	// In-memory store doesn't need periodic cleanup — sessions are persistent.
+	if s.sessionTTL <= 0 {
+		return
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	cutoff := time.Now().Add(-s.sessionTTL)
+	for id, sess := range s.sessions {
+		if sess.UpdatedAt.After(cutoff) {
+			continue
+		}
+		ownerKey := sessionOwnerKey(sess.UserID, sess.OrgID)
+		delete(s.sessions, id)
+		if idx, ok := s.userIdx[ownerKey]; ok {
+			delete(idx, id)
+		}
+		if s.current[ownerKey] == id {
+			delete(s.current, ownerKey)
+		}
+	}
 }

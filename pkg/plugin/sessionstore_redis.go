@@ -61,13 +61,14 @@ func fromRedis(rs *redisSession) *ChatSession {
 }
 
 type RedisSessionStore struct {
-	client *redis.Client
-	logger log.Logger
-	ctx    context.Context
+	client     *redis.Client
+	logger     log.Logger
+	ctx        context.Context
+	sessionTTL time.Duration
 }
 
-func NewRedisSessionStore(ctx context.Context, client *redis.Client, logger log.Logger) *RedisSessionStore {
-	return &RedisSessionStore{client: client, logger: logger, ctx: ctx}
+func NewRedisSessionStore(ctx context.Context, client *redis.Client, logger log.Logger, sessionTTL time.Duration) *RedisSessionStore {
+	return &RedisSessionStore{client: client, logger: logger, ctx: ctx, sessionTTL: sessionTTL}
 }
 
 func (s *RedisSessionStore) CreateSession(userID, orgID int64, title string, messages []SessionMessage) (*ChatSession, error) {
@@ -108,7 +109,7 @@ func (s *RedisSessionStore) CreateSession(userID, orgID int64, title string, mes
 
 	ctx2, cancel2 := redisContext(s.ctx, RedisOpTimeout)
 	defer cancel2()
-	if err := s.client.Set(ctx2, sessionKey(id), data, 0).Err(); err != nil {
+	if err := s.client.Set(ctx2, sessionKey(id), data, s.sessionTTL).Err(); err != nil {
 		return nil, fmt.Errorf("failed to store session: %w", err)
 	}
 
@@ -159,7 +160,7 @@ func (s *RedisSessionStore) saveSession(session *ChatSession) error {
 	}
 	ctx, cancel := redisContext(s.ctx, RedisOpTimeout)
 	defer cancel()
-	return s.client.Set(ctx, sessionKey(session.ID), data, 0).Err()
+	return s.client.Set(ctx, sessionKey(session.ID), data, s.sessionTTL).Err()
 }
 
 func (s *RedisSessionStore) GetSession(sessionID string, userID, orgID int64) (*ChatSession, error) {
@@ -448,10 +449,12 @@ func (s *RedisSessionStore) IncrementStats(sessionID string, userID, orgID int64
 	pipe.HIncrBy(ctx, statsKey, "promptTokens", delta.PromptTokens)
 	pipe.HIncrBy(ctx, statsKey, "completionTokens", delta.CompletionTokens)
 	pipe.HIncrBy(ctx, statsKey, "totalTokens", delta.TotalTokens)
+	pipe.Expire(ctx, statsKey, s.sessionTTL)
 	_, err = pipe.Exec(ctx)
 	return err
 }
 
 func (s *RedisSessionStore) CleanupOld() {
-	// Redis sessions are persistent — no periodic cleanup needed.
+	// Sessions expire natively via the TTL set on every write (see
+	// saveSession) — no periodic sweep needed.
 }

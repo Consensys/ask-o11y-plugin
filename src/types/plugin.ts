@@ -40,6 +40,9 @@ export type AppPluginSettings = {
   graphitiScanInterval?: string;
   serviceGraphMaxNodes?: number;
   serviceGraphMaxEdges?: number;
+  graphitiAutoSaveSessionsDisabled?: boolean;
+  sessionTTLDays?: number;
+  graphitiEpisodeTTLDays?: number;
 
   approvalPolicy?: string;
   maxParallelToolCalls?: number;

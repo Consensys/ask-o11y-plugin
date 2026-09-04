@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"time"
 
 	"consensys-asko11y-app/pkg/agent"
 	"consensys-asko11y-app/pkg/mcp"
@@ -16,6 +17,10 @@ const (
 	graphitiMaxSessionTurns = 12
 	graphitiDiscoverySample = 12
 	graphitiTruncatedSuffix = " [...truncated]"
+	// graphitiPruneMaxEpisodes caps how many episodes a single prune pass
+	// inspects. A graph growing faster than the prune cadence lags behind
+	// rather than erroring — the next scheduled prune picks up the rest.
+	graphitiPruneMaxEpisodes = 500
 )
 
 // graphitiWriteToolNames are hidden from LLM sessions. Regular chat and
@@ -25,6 +30,7 @@ var graphitiWriteToolNames = []string{
 	"graphiti_delete_entity_edge",
 	"graphiti_delete_episode",
 	"graphiti_clear_graph",
+	"graphiti_build_communities",
 }
 
 func hasGraphitiMemoryTool(tools []mcp.Tool) bool {
@@ -130,6 +136,76 @@ func ingestGraphitiMemory(proxy *mcp.Proxy, orgID int64, name, body, source, sou
 		return fmt.Errorf("graphiti_add_memory failed")
 	}
 	return nil
+}
+
+// buildGraphitiCommunities triggers Graphiti's community detection for an org's
+// group_id, clustering related entities and refreshing their summaries. It is a
+// graph-wide recompute, so callers should run it on a schedule (e.g. after each
+// Scout scavenge) rather than per-request.
+func buildGraphitiCommunities(proxy *mcp.Proxy, orgID int64) error {
+	result, err := proxy.CallTool("graphiti_build_communities", map[string]interface{}{
+		"group_ids": []string{orgGroupID(orgID)},
+	})
+	if err != nil {
+		return err
+	}
+	if result != nil && result.IsError {
+		if text := callToolText(result); text != "" {
+			return fmt.Errorf("graphiti_build_communities failed: %s", text)
+		}
+		return fmt.Errorf("graphiti_build_communities failed")
+	}
+	return nil
+}
+
+type graphitiEpisode struct {
+	UUID      string `json:"uuid"`
+	CreatedAt string `json:"created_at"`
+}
+
+type graphitiEpisodesResponse struct {
+	Episodes []graphitiEpisode `json:"episodes"`
+}
+
+// pruneGraphitiEpisodes deletes episodes older than maxAge from an org's
+// group_id. Returns the number of episodes deleted.
+func pruneGraphitiEpisodes(proxy *mcp.Proxy, orgID int64, maxAge time.Duration) (int, error) {
+	result, err := proxy.CallTool("graphiti_get_episodes", map[string]interface{}{
+		"group_ids":    []string{orgGroupID(orgID)},
+		"max_episodes": graphitiPruneMaxEpisodes,
+	})
+	if err != nil {
+		return 0, err
+	}
+	if result != nil && result.IsError {
+		if text := callToolText(result); text != "" {
+			return 0, fmt.Errorf("graphiti_get_episodes failed: %s", text)
+		}
+		return 0, fmt.Errorf("graphiti_get_episodes failed")
+	}
+
+	var payload graphitiEpisodesResponse
+	if err := json.Unmarshal([]byte(graphitiToolBody(result)), &payload); err != nil {
+		return 0, fmt.Errorf("failed to parse episodes: %w", err)
+	}
+
+	cutoff := time.Now().Add(-maxAge)
+	deleted := 0
+	for _, ep := range payload.Episodes {
+		if ep.UUID == "" || ep.CreatedAt == "" {
+			continue
+		}
+		createdAt, err := time.Parse(time.RFC3339, ep.CreatedAt)
+		if err != nil || createdAt.After(cutoff) {
+			continue
+		}
+		delResult, err := proxy.CallTool("graphiti_delete_episode", map[string]interface{}{"uuid": ep.UUID})
+		if err != nil || (delResult != nil && delResult.IsError) {
+			continue
+		}
+		deleted++
+	}
+	return deleted, nil
 }
 
 func compactGraphitiLine(text string, maxChars int) string {

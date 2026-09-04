@@ -110,6 +110,18 @@ type PluginSettings struct {
 	ServiceGraphMaxNodes int    `json:"serviceGraphMaxNodes,omitempty"`
 	ServiceGraphMaxEdges int    `json:"serviceGraphMaxEdges,omitempty"`
 
+	// GraphitiAutoSaveSessionsDisabled turns off the default behavior of
+	// feeding every completed session into the knowledge graph. Named as a
+	// "disabled" flag (rather than an "enabled" one defaulting true) so the
+	// Go zero value keeps auto-save on for existing installs that predate
+	// this setting.
+	GraphitiAutoSaveSessionsDisabled bool `json:"graphitiAutoSaveSessionsDisabled,omitempty"`
+	// SessionTTLDays and GraphitiEpisodeTTLDays are retention windows in
+	// days; 0 (unset) falls back to DefaultSessionTTLDays /
+	// DefaultGraphitiEpisodeTTLDays.
+	SessionTTLDays         int `json:"sessionTTLDays,omitempty"`
+	GraphitiEpisodeTTLDays int `json:"graphitiEpisodeTTLDays,omitempty"`
+
 	ApprovalPolicy          string `json:"approvalPolicy,omitempty"`
 	MaxParallelToolCalls    int    `json:"maxParallelToolCalls,omitempty"`
 	AgentEvalCaptureEnabled bool   `json:"agentEvalCaptureEnabled,omitempty"`
@@ -284,17 +296,19 @@ func NewPlugin(ctx context.Context, settings backend.AppInstanceSettings) (insta
 		logger.Warn("Failed to create Redis client, falling back to in-memory storage", "error", redisErr.Error())
 	}
 
+	sessionTTL := resolveTTLDays(pluginSettings.SessionTTLDays, DefaultSessionTTLDays)
+
 	var runStore RunStoreInterface
 	var sessionStore SessionStoreInterface
 	if !usingRedis {
 		rateLimiter := NewInMemoryRateLimiter(logger)
 		shareStore = NewShareStore(logger, rateLimiter)
 		runStore = NewRunStore(logger)
-		sessionStore = NewSessionStore(logger)
+		sessionStore = NewSessionStore(logger, sessionTTL)
 		logger.Info("Using in-memory storage (not suitable for multi-replica deployments)")
 	} else {
 		runStore = NewRedisRunStore(pluginCtx, redisClient, logger)
-		sessionStore = NewRedisSessionStore(pluginCtx, redisClient, logger)
+		sessionStore = NewRedisSessionStore(pluginCtx, redisClient, logger, sessionTTL)
 	}
 
 	oauthHTTPClient, err := httpclient.New(httpclient.Options{
@@ -404,6 +418,7 @@ func NewPlugin(ctx context.Context, settings backend.AppInstanceSettings) (insta
 				select {
 				case <-ticker.C:
 					shareStore.CleanupExpired()
+					sessionStore.CleanupOld()
 				case <-pluginCtx.Done():
 					return
 				}
@@ -1158,6 +1173,45 @@ func (p *Plugin) consumeAgentEvents(runID, sessionID string, userID int64, userL
 			p.logger.Warn("Failed to append assistant message to session", "error", err, "sessionId", sessionID)
 		}
 		p.sessionStore.ClearActiveRunID(sessionID, userID, orgID)
+
+		if lastEvent.Type == "done" && !p.settings.GraphitiAutoSaveSessionsDisabled && p.isGraphitiAvailable() {
+			p.autoSaveSessionToGraphiti(sessionID, userID, orgID)
+		}
+	}
+}
+
+// autoSaveSessionToGraphiti feeds a session's messages into the knowledge
+// graph after every completed run, mirroring the manual "Feed to Knowledge
+// Graph" action (handleGraphitiIngestSession) so investigation findings are
+// captured by default. Disable via settings.graphitiAutoSaveSessionsDisabled.
+// Best-effort: failures are logged, never surfaced mid-conversation.
+func (p *Plugin) autoSaveSessionToGraphiti(sessionID string, userID, orgID int64) {
+	session, err := p.sessionStore.GetSession(sessionID, userID, orgID)
+	if err != nil {
+		p.logger.Warn("Auto-save: failed to load session", "error", err, "sessionId", sessionID)
+		return
+	}
+
+	messages := make([]ingestSessionMessage, len(session.Messages))
+	for i, m := range session.Messages {
+		messages[i] = ingestSessionMessage{Role: m.Role, Content: m.Content}
+	}
+
+	body, count := buildSessionMemoryBody(messages)
+	if count == 0 {
+		return
+	}
+
+	if err := ingestGraphitiMemory(
+		p.mcpProxy,
+		orgID,
+		"investigation_session",
+		body,
+		"message",
+		"Ask O11y investigation session (auto-saved)",
+	); err != nil {
+		p.logger.Warn("Auto-save: failed to ingest session into knowledge graph",
+			"error", err, "sessionId", sessionID, "orgID", orgID)
 	}
 }
 

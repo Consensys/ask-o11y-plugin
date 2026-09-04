@@ -194,6 +194,19 @@ func (s *Scout) Scavenge() {
 		return
 	}
 
+	if err := buildGraphitiCommunities(s.mcpProxy, orgID); err != nil {
+		// Best-effort: community summaries are an enhancement over raw facts,
+		// not required for search/topology to keep working.
+		s.logger.Warn("Scout: failed to build communities", "error", err, "orgID", orgID)
+	}
+
+	episodeTTL := resolveTTLDays(s.settings.GraphitiEpisodeTTLDays, DefaultGraphitiEpisodeTTLDays)
+	if deleted, err := pruneGraphitiEpisodes(s.mcpProxy, orgID, episodeTTL); err != nil {
+		s.logger.Warn("Scout: failed to prune graphiti episodes", "error", err, "orgID", orgID)
+	} else if deleted > 0 {
+		s.logger.Info("Scout: pruned graphiti episodes", "count", deleted, "orgID", orgID)
+	}
+
 	s.logger.Info("Scout scavenge completed", "orgID", orgID)
 }
 

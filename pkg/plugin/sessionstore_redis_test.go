@@ -12,7 +12,7 @@ func TestRedisSessionStore_ModelRoundTrip(t *testing.T) {
 	client := createTestRedisClient(t)
 	defer client.Close()
 
-	store := NewRedisSessionStore(context.Background(), client, log.DefaultLogger)
+	store := NewRedisSessionStore(context.Background(), client, log.DefaultLogger, resolveTTLDays(0, DefaultSessionTTLDays))
 	session, err := store.CreateSession(1, 1, "test", []SessionMessage{{Role: "user", Content: "hello"}})
 	if err != nil {
 		t.Fatalf("CreateSession failed: %v", err)
@@ -44,7 +44,7 @@ func TestRedisSessionStore_IncrementStats(t *testing.T) {
 	client := createTestRedisClient(t)
 	defer client.Close()
 
-	store := NewRedisSessionStore(context.Background(), client, log.DefaultLogger)
+	store := NewRedisSessionStore(context.Background(), client, log.DefaultLogger, resolveTTLDays(0, DefaultSessionTTLDays))
 	session, err := store.CreateSession(1, 1, "test", []SessionMessage{{Role: "user", Content: "hello"}})
 	if err != nil {
 		t.Fatalf("CreateSession failed: %v", err)
@@ -85,7 +85,7 @@ func TestRedisSessionStore_IncrementStats_ConcurrentNoLostUpdates(t *testing.T) 
 	client := createTestRedisClient(t)
 	defer client.Close()
 
-	store := NewRedisSessionStore(context.Background(), client, log.DefaultLogger)
+	store := NewRedisSessionStore(context.Background(), client, log.DefaultLogger, resolveTTLDays(0, DefaultSessionTTLDays))
 	session, err := store.CreateSession(1, 1, "test", []SessionMessage{{Role: "user", Content: "hello"}})
 	if err != nil {
 		t.Fatalf("CreateSession failed: %v", err)
