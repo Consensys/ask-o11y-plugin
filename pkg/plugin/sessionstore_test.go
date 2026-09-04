@@ -181,24 +181,46 @@ func TestSessionStore_DeleteAllSessions(t *testing.T) {
 	}
 }
 
-func TestSessionStore_MaxSessionsEviction(t *testing.T) {
+// TestSessionStore_NoCountEviction verifies sessions are no longer capped or
+// evicted by count — retention is TTL-only (see TestSessionStore_CleanupOld),
+// so active writers like NOC automation creating many sessions in a short
+// window don't lose older-but-still-fresh ones.
+func TestSessionStore_NoCountEviction(t *testing.T) {
 	store := newTestSessionStore()
 
-	for i := 0; i < SessionMaxPerUserOrg; i++ {
-		store.CreateSession(1, 1, "", []SessionMessage{{Role: "user", Content: "msg"}})
+	const created = 75 // comfortably above the old 50-session cap
+	for i := 0; i < created; i++ {
+		if _, err := store.CreateSession(1, 1, "", []SessionMessage{{Role: "user", Content: "msg"}}); err != nil {
+			t.Fatalf("CreateSession failed: %v", err)
+		}
 	}
 
 	sessions, _ := store.ListSessions(1, 1)
-	if len(sessions) != SessionMaxPerUserOrg {
-		t.Fatalf("expected %d sessions, got %d", SessionMaxPerUserOrg, len(sessions))
+	if len(sessions) != created {
+		t.Fatalf("expected %d sessions, got %d", created, len(sessions))
 	}
+}
 
-	// One more should evict the oldest
-	store.CreateSession(1, 1, "newest", []SessionMessage{{Role: "user", Content: "new"}})
+func TestSessionStore_CleanupOld(t *testing.T) {
+	store := NewSessionStore(log.DefaultLogger, time.Hour)
 
-	sessions, _ = store.ListSessions(1, 1)
-	if len(sessions) != SessionMaxPerUserOrg {
-		t.Fatalf("expected %d sessions after eviction, got %d", SessionMaxPerUserOrg, len(sessions))
+	fresh, err := store.CreateSession(1, 1, "fresh", []SessionMessage{{Role: "user", Content: "msg"}})
+	if err != nil {
+		t.Fatalf("CreateSession failed: %v", err)
+	}
+	stale, err := store.CreateSession(1, 1, "stale", []SessionMessage{{Role: "user", Content: "msg"}})
+	if err != nil {
+		t.Fatalf("CreateSession failed: %v", err)
+	}
+	store.sessions[stale.ID].UpdatedAt = time.Now().Add(-2 * time.Hour)
+
+	store.CleanupOld()
+
+	if _, err := store.GetSession(fresh.ID, 1, 1); err != nil {
+		t.Fatalf("expected fresh session to survive cleanup: %v", err)
+	}
+	if _, err := store.GetSession(stale.ID, 1, 1); err == nil {
+		t.Fatalf("expected stale session to be removed by cleanup")
 	}
 }
 

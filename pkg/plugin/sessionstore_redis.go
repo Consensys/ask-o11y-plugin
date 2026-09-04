@@ -74,17 +74,13 @@ func NewRedisSessionStore(ctx context.Context, client *redis.Client, logger log.
 func (s *RedisSessionStore) CreateSession(userID, orgID int64, title string, messages []SessionMessage) (*ChatSession, error) {
 	idxKey := sessionUserIdxKey(userID, orgID)
 
-	// Session blobs now expire via TTL, but nothing removes their ID from
-	// this index when that happens — SCard alone would count dead entries
-	// forever and evict live sessions well before the real cap is reached.
-	count, err := s.pruneStaleIndexEntries(idxKey)
-	if err != nil {
-		return nil, fmt.Errorf("failed to count sessions: %w", err)
-	}
-	if count >= int64(SessionMaxPerUserOrg) {
-		if err := s.evictOldest(userID, orgID); err != nil {
-			s.logger.Warn("Failed to evict oldest session", "error", err)
-		}
+	// Session blobs now expire via TTL (see sessionTTL), which is the sole
+	// retention mechanism — there is no session-count cap. Still prune dead
+	// IDs from the index here so it doesn't grow unbounded between reads
+	// (Redis Sets have no per-member TTL; ListSessions self-heals lazily,
+	// but active writers like NOC automation may rarely call it).
+	if _, err := s.pruneStaleIndexEntries(idxKey); err != nil {
+		s.logger.Warn("Failed to prune stale session index entries", "error", err)
 	}
 
 	id, err := generateShareID()
@@ -129,9 +125,7 @@ func (s *RedisSessionStore) CreateSession(userID, orgID int64, title string, mes
 // pruneStaleIndexEntries removes session IDs from the user index whose
 // backing session blob has already expired via TTL, and returns the count of
 // entries that are still live. Without this, the index would only ever grow
-// (Redis Sets have no per-member TTL), inflating the eviction check in
-// CreateSession until it starts evicting sessions long before
-// SessionMaxPerUserOrg genuinely-live sessions exist.
+// (Redis Sets have no per-member TTL).
 func (s *RedisSessionStore) pruneStaleIndexEntries(idxKey string) (int64, error) {
 	ctx, cancel := redisContext(s.ctx, RedisBulkOpTimeout)
 	defer cancel()
@@ -171,16 +165,6 @@ func (s *RedisSessionStore) pruneStaleIndexEntries(idxKey string) (int64, error)
 		}
 	}
 	return live, nil
-}
-
-func (s *RedisSessionStore) evictOldest(userID, orgID int64) error {
-	sessions, err := s.ListSessions(userID, orgID)
-	if err != nil || len(sessions) == 0 {
-		return err
-	}
-
-	oldest := sessions[len(sessions)-1] // ListSessions sorts newest-first
-	return s.DeleteSession(oldest.ID, userID, orgID)
 }
 
 func (s *RedisSessionStore) getSessionRaw(sessionID string) (*redisSession, error) {

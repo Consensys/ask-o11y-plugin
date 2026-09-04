@@ -37,10 +37,6 @@ const (
 )
 
 const (
-	SessionMaxPerUserOrg = 50
-)
-
-const (
 	GraphitiDiscoveryMaxIter = 50
 	// GraphitiRetentionInterval paces Scout.RunRetention (community build +
 	// episode prune), independent of GraphitiScanInterval so retention still

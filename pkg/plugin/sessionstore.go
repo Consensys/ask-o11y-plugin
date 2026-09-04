@@ -133,10 +133,6 @@ func (s *SessionStore) CreateSession(userID, orgID int64, title string, messages
 
 	ownerKey := sessionOwnerKey(userID, orgID)
 
-	if idx, ok := s.userIdx[ownerKey]; ok && len(idx) >= SessionMaxPerUserOrg {
-		s.evictOldest(ownerKey)
-	}
-
 	id, err := generateShareID()
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate session ID: %w", err)
@@ -166,32 +162,6 @@ func (s *SessionStore) CreateSession(userID, orgID int64, title string, messages
 	s.userIdx[ownerKey][id] = struct{}{}
 
 	return session, nil
-}
-
-func (s *SessionStore) evictOldest(ownerKey string) {
-	idx := s.userIdx[ownerKey]
-	if len(idx) == 0 {
-		return
-	}
-
-	var oldest *ChatSession
-	for id := range idx {
-		sess := s.sessions[id]
-		if sess == nil {
-			continue
-		}
-		if oldest == nil || sess.UpdatedAt.Before(oldest.UpdatedAt) {
-			oldest = sess
-		}
-	}
-
-	if oldest != nil {
-		delete(s.sessions, oldest.ID)
-		delete(idx, oldest.ID)
-		if s.current[ownerKey] == oldest.ID {
-			delete(s.current, ownerKey)
-		}
-	}
 }
 
 func (s *SessionStore) GetSession(sessionID string, userID, orgID int64) (*ChatSession, error) {
