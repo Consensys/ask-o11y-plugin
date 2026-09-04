@@ -377,9 +377,13 @@ func NewPlugin(ctx context.Context, settings backend.AppInstanceSettings) (insta
 	llmClient := agent.NewLLMClient(logger, llmHTTPClient)
 	agentLoop := agent.NewAgentLoop(llmClient, mcpProxy, logger)
 
-	var scout *Scout
-	if interval, ok := parseScanInterval(pluginSettings.GraphitiScanInterval); ok {
-		scout = NewScout(pluginCtx, agentLoop, mcpProxy, logger, interval, pluginSettings)
+	// scout is always constructed — even when discovery auto-scan is off —
+	// because handleAgentRun lazily feeds it orgID/GrafanaURL on every chat
+	// request (see p.scout.SetOrgID below), and RunRetention needs that same
+	// org binding to prune episodes independent of the discovery loop.
+	scanInterval, scanEnabled := parseScanInterval(pluginSettings.GraphitiScanInterval)
+	scout := NewScout(pluginCtx, agentLoop, mcpProxy, logger, scanInterval, pluginSettings)
+	if scanEnabled {
 		go scout.Start()
 		logger.Info("Scout started", "interval", pluginSettings.GraphitiScanInterval)
 	} else {
@@ -433,6 +437,19 @@ func NewPlugin(ctx context.Context, settings backend.AppInstanceSettings) (insta
 			select {
 			case <-ticker.C:
 				runStore.CleanupOld()
+			case <-pluginCtx.Done():
+				return
+			}
+		}
+	}()
+
+	go func() {
+		ticker := time.NewTicker(GraphitiRetentionInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				scout.RunRetention()
 			case <-pluginCtx.Done():
 				return
 			}

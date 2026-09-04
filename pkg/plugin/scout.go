@@ -194,20 +194,48 @@ func (s *Scout) Scavenge() {
 		return
 	}
 
+	s.logger.Info("Scout scavenge completed", "orgID", orgID)
+}
+
+// RunRetention builds community summaries and prunes aged-out episodes for
+// whichever org this Scout instance has learned about. It runs on its own
+// ticker (see NewPlugin) independent of the discovery scavenge cycle above,
+// because auto-saved sessions (on by default) feed the graph regardless of
+// whether GraphitiScanInterval is "off" or a scavenge fails/never completes —
+// without an independent pass, retention would silently never run at all.
+func (s *Scout) RunRetention() {
+	orgID, _, _ := s.config()
+	if orgID == 0 {
+		return
+	}
+	tools, err := s.mcpProxy.ListTools()
+	if err != nil {
+		s.logger.Warn("Retention: unable to list MCP tools", "error", err)
+		return
+	}
+	if !hasGraphitiMemoryTool(tools) {
+		return
+	}
+
 	if err := buildGraphitiCommunities(s.mcpProxy, orgID); err != nil {
 		// Best-effort: community summaries are an enhancement over raw facts,
 		// not required for search/topology to keep working.
-		s.logger.Warn("Scout: failed to build communities", "error", err, "orgID", orgID)
+		s.logger.Warn("Retention: failed to build communities", "error", err, "orgID", orgID)
 	}
 
 	episodeTTL := resolveTTLDays(s.settings.GraphitiEpisodeTTLDays, DefaultGraphitiEpisodeTTLDays)
-	if deleted, err := pruneGraphitiEpisodes(s.mcpProxy, orgID, episodeTTL); err != nil {
-		s.logger.Warn("Scout: failed to prune graphiti episodes", "error", err, "orgID", orgID)
-	} else if deleted > 0 {
-		s.logger.Info("Scout: pruned graphiti episodes", "count", deleted, "orgID", orgID)
+	deleted, truncated, err := pruneGraphitiEpisodes(s.mcpProxy, orgID, episodeTTL)
+	if err != nil {
+		s.logger.Warn("Retention: failed to prune graphiti episodes", "error", err, "orgID", orgID)
+		return
 	}
-
-	s.logger.Info("Scout scavenge completed", "orgID", orgID)
+	if deleted > 0 {
+		s.logger.Info("Retention: pruned graphiti episodes", "count", deleted, "orgID", orgID)
+	}
+	if truncated {
+		s.logger.Warn("Retention: episode count may exceed the prune window, some aged-out episodes could be missed this pass",
+			"orgID", orgID, "maxEpisodesInspected", graphitiPruneMaxEpisodes)
+	}
 }
 
 // discoveryMessage builds the initial user message scoped to the lookback window.

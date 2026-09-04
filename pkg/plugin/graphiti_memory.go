@@ -18,9 +18,16 @@ const (
 	graphitiDiscoverySample = 12
 	graphitiTruncatedSuffix = " [...truncated]"
 	// graphitiPruneMaxEpisodes caps how many episodes a single prune pass
-	// inspects. A graph growing faster than the prune cadence lags behind
-	// rather than erroring — the next scheduled prune picks up the rest.
-	graphitiPruneMaxEpisodes = 500
+	// inspects. graphiti_get_episodes has no date filter or pagination
+	// cursor and orders results by uuid DESC (i.e. arbitrary relative to
+	// created_at, not "newest" or "oldest") — so raising this cap is the
+	// only lever available to reduce the odds of an aged-out episode
+	// falling outside the fetched window. A graph whose total episode count
+	// stays under this cap gets fully inspected every pass; one that grows
+	// past it will under-prune; pruneGraphitiEpisodes reports that via its
+	// truncated return value so callers can log it as an observable
+	// condition rather than a silent gap.
+	graphitiPruneMaxEpisodes = 1000
 )
 
 // graphitiWriteToolNames are hidden from LLM sessions. Regular chat and
@@ -168,29 +175,31 @@ type graphitiEpisodesResponse struct {
 }
 
 // pruneGraphitiEpisodes deletes episodes older than maxAge from an org's
-// group_id. Returns the number of episodes deleted.
-func pruneGraphitiEpisodes(proxy *mcp.Proxy, orgID int64, maxAge time.Duration) (int, error) {
+// group_id. Returns the number of episodes deleted, and whether the fetched
+// batch hit graphitiPruneMaxEpisodes — a true here means older episodes may
+// exist outside the inspected window (see the cap's comment) and is worth
+// surfacing to an operator rather than swallowing.
+func pruneGraphitiEpisodes(proxy *mcp.Proxy, orgID int64, maxAge time.Duration) (deleted int, truncated bool, err error) {
 	result, err := proxy.CallTool("graphiti_get_episodes", map[string]interface{}{
 		"group_ids":    []string{orgGroupID(orgID)},
 		"max_episodes": graphitiPruneMaxEpisodes,
 	})
 	if err != nil {
-		return 0, err
+		return 0, false, err
 	}
 	if result != nil && result.IsError {
 		if text := callToolText(result); text != "" {
-			return 0, fmt.Errorf("graphiti_get_episodes failed: %s", text)
+			return 0, false, fmt.Errorf("graphiti_get_episodes failed: %s", text)
 		}
-		return 0, fmt.Errorf("graphiti_get_episodes failed")
+		return 0, false, fmt.Errorf("graphiti_get_episodes failed")
 	}
 
 	var payload graphitiEpisodesResponse
 	if err := json.Unmarshal([]byte(graphitiToolBody(result)), &payload); err != nil {
-		return 0, fmt.Errorf("failed to parse episodes: %w", err)
+		return 0, false, fmt.Errorf("failed to parse episodes: %w", err)
 	}
 
 	cutoff := time.Now().Add(-maxAge)
-	deleted := 0
 	for _, ep := range payload.Episodes {
 		if ep.UUID == "" || ep.CreatedAt == "" {
 			continue
@@ -205,7 +214,7 @@ func pruneGraphitiEpisodes(proxy *mcp.Proxy, orgID int64, maxAge time.Duration) 
 		}
 		deleted++
 	}
-	return deleted, nil
+	return deleted, len(payload.Episodes) >= graphitiPruneMaxEpisodes, nil
 }
 
 func compactGraphitiLine(text string, maxChars int) string {

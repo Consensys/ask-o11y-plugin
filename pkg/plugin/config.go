@@ -42,6 +42,10 @@ const (
 
 const (
 	GraphitiDiscoveryMaxIter = 50
+	// GraphitiRetentionInterval paces Scout.RunRetention (community build +
+	// episode prune), independent of GraphitiScanInterval so retention still
+	// runs when discovery auto-scan is off.
+	GraphitiRetentionInterval = 1 * time.Hour
 )
 
 // Retention defaults, used when the corresponding PluginSettings field is

@@ -74,10 +74,11 @@ func NewRedisSessionStore(ctx context.Context, client *redis.Client, logger log.
 func (s *RedisSessionStore) CreateSession(userID, orgID int64, title string, messages []SessionMessage) (*ChatSession, error) {
 	idxKey := sessionUserIdxKey(userID, orgID)
 
-	ctx, cancel := redisContext(s.ctx, RedisOpTimeout)
-	defer cancel()
-	count, err := s.client.SCard(ctx, idxKey).Result()
-	if err != nil && err != redis.Nil {
+	// Session blobs now expire via TTL, but nothing removes their ID from
+	// this index when that happens — SCard alone would count dead entries
+	// forever and evict live sessions well before the real cap is reached.
+	count, err := s.pruneStaleIndexEntries(idxKey)
+	if err != nil {
 		return nil, fmt.Errorf("failed to count sessions: %w", err)
 	}
 	if count >= int64(SessionMaxPerUserOrg) {
@@ -123,6 +124,53 @@ func (s *RedisSessionStore) CreateSession(userID, orgID int64, title string, mes
 	}
 
 	return session, nil
+}
+
+// pruneStaleIndexEntries removes session IDs from the user index whose
+// backing session blob has already expired via TTL, and returns the count of
+// entries that are still live. Without this, the index would only ever grow
+// (Redis Sets have no per-member TTL), inflating the eviction check in
+// CreateSession until it starts evicting sessions long before
+// SessionMaxPerUserOrg genuinely-live sessions exist.
+func (s *RedisSessionStore) pruneStaleIndexEntries(idxKey string) (int64, error) {
+	ctx, cancel := redisContext(s.ctx, RedisBulkOpTimeout)
+	defer cancel()
+	ids, err := s.client.SMembers(ctx, idxKey).Result()
+	if err != nil && err != redis.Nil {
+		return 0, err
+	}
+	if len(ids) == 0 {
+		return 0, nil
+	}
+
+	ctx2, cancel2 := redisContext(s.ctx, RedisBulkOpTimeout)
+	defer cancel2()
+	pipe := s.client.Pipeline()
+	cmds := make([]*redis.IntCmd, len(ids))
+	for i, id := range ids {
+		cmds[i] = pipe.Exists(ctx2, sessionKey(id))
+	}
+	if _, err := pipe.Exec(ctx2); err != nil && err != redis.Nil {
+		return 0, err
+	}
+
+	var stale []string
+	var live int64
+	for i, cmd := range cmds {
+		if cmd.Val() > 0 {
+			live++
+		} else {
+			stale = append(stale, ids[i])
+		}
+	}
+	if len(stale) > 0 {
+		ctx3, cancel3 := redisContext(s.ctx, RedisOpTimeout)
+		defer cancel3()
+		if err := s.client.SRem(ctx3, idxKey, stale).Err(); err != nil {
+			s.logger.Warn("Failed to remove stale session index entries", "error", err)
+		}
+	}
+	return live, nil
 }
 
 func (s *RedisSessionStore) evictOldest(userID, orgID int64) error {
