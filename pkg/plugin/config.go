@@ -34,6 +34,8 @@ const (
 	RunMaxAge                 = 1 * time.Hour
 	RunCleanupInterval        = 5 * time.Minute
 	RunMaxEventsPerRun        = 500
+	RunHeartbeatInterval      = 30 * time.Second
+	RunHeartbeatTTL           = 90 * time.Second
 )
 
 const (

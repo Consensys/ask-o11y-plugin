@@ -19,6 +19,7 @@ type RedisRunStore struct {
 	logger        log.Logger
 	mu            sync.RWMutex
 	subscriptions map[string]*runSubscription
+	heartbeats    map[string]context.CancelFunc
 	ctx           context.Context
 }
 
@@ -39,10 +40,14 @@ const (
 	runStreamKindFinished = "finished"
 )
 
-func runKey(runID string) string        { return fmt.Sprintf("run:%s", runID) }
-func eventsKey(runID string) string     { return fmt.Sprintf("run:%s:events", runID) }
-func sequenceKey(runID string) string   { return fmt.Sprintf("run:%s:sequence", runID) }
-func runChannelKey(runID string) string { return fmt.Sprintf("run:%s:channel", runID) }
+const runInterruptedMessage = "agent run was interrupted before it completed"
+
+func runKey(runID string) string         { return fmt.Sprintf("run:%s", runID) }
+func eventsKey(runID string) string      { return fmt.Sprintf("run:%s:events", runID) }
+func sequenceKey(runID string) string    { return fmt.Sprintf("run:%s:sequence", runID) }
+func runChannelKey(runID string) string  { return fmt.Sprintf("run:%s:channel", runID) }
+func heartbeatKey(runID string) string   { return fmt.Sprintf("run:%s:heartbeat", runID) }
+func interruptedKey(runID string) string { return fmt.Sprintf("run:%s:interrupted", runID) }
 func runIndexKey(userID, orgID int64) string {
 	return fmt.Sprintf("runs:user:%d:org:%d", userID, orgID)
 }
@@ -52,6 +57,7 @@ func NewRedisRunStore(ctx context.Context, client *redis.Client, logger log.Logg
 		client:        client,
 		logger:        logger,
 		subscriptions: make(map[string]*runSubscription),
+		heartbeats:    make(map[string]context.CancelFunc),
 		ctx:           ctx,
 	}
 }
@@ -82,13 +88,54 @@ func (s *RedisRunStore) CreateRun(runID string, userID, orgID int64, sessionID .
 	defer cancel()
 	pipe := s.client.Pipeline()
 	pipe.Set(ctx, runKey(runID), runJSON, RunMaxAge)
+	pipe.Set(ctx, heartbeatKey(runID), "1", RunHeartbeatTTL)
 	pipe.ZAdd(ctx, runIndexKey(userID, orgID), redis.Z{Score: float64(now.UnixNano()), Member: runID})
 	pipe.Expire(ctx, runIndexKey(userID, orgID), RunMaxAge)
 	if _, err := pipe.Exec(ctx); err != nil {
 		s.logger.Error("Failed to store run in Redis", "error", err, "runId", runID)
 	}
 
+	s.startHeartbeat(runID)
+
 	return run
+}
+
+func (s *RedisRunStore) startHeartbeat(runID string) {
+	ctx, cancel := context.WithCancel(s.ctx)
+
+	s.mu.Lock()
+	s.heartbeats[runID] = cancel
+	s.mu.Unlock()
+
+	go func() {
+		ticker := time.NewTicker(RunHeartbeatInterval)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-ticker.C:
+				beatCtx, beatCancel := redisContext(ctx, RedisOpTimeout)
+				err := s.client.Set(beatCtx, heartbeatKey(runID), "1", RunHeartbeatTTL).Err()
+				beatCancel()
+				if err != nil {
+					s.logger.Warn("Failed to refresh run heartbeat", "error", err, "runId", runID)
+				}
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+}
+
+func (s *RedisRunStore) stopHeartbeat(runID string) {
+	s.mu.Lock()
+	cancel, ok := s.heartbeats[runID]
+	delete(s.heartbeats, runID)
+	s.mu.Unlock()
+
+	if ok {
+		cancel()
+	}
 }
 
 func (s *RedisRunStore) AppendEvent(runID string, event agent.SSEEvent) {
@@ -131,6 +178,8 @@ func (s *RedisRunStore) AppendEvent(runID string, event agent.SSEEvent) {
 }
 
 func (s *RedisRunStore) FinishRun(runID string, status RunStatus, errMsg string) {
+	s.stopHeartbeat(runID)
+
 	ctx, cancel := redisContext(s.ctx, RedisOpTimeout)
 	defer cancel()
 
@@ -160,6 +209,7 @@ func (s *RedisRunStore) FinishRun(runID string, status RunStatus, errMsg string)
 	defer cancel2()
 	pipe := s.client.Pipeline()
 	pipe.Set(ctx2, runKey(runID), updatedJSON, RunMaxAge)
+	pipe.Del(ctx2, heartbeatKey(runID))
 	pipe.Expire(ctx2, eventsKey(runID), RunMaxAge)
 	pipe.ZAdd(ctx2, runIndexKey(run.UserID, run.OrgID), redis.Z{Score: float64(run.UpdatedAt.UnixNano()), Member: runID})
 	pipe.Expire(ctx2, runIndexKey(run.UserID, run.OrgID), RunMaxAge)
@@ -189,6 +239,8 @@ func (s *RedisRunStore) GetRun(runID string) (*AgentRun, error) {
 		return nil, fmt.Errorf("failed to unmarshal run: %w", err)
 	}
 
+	s.reconcileStalledRun(&run)
+
 	ctx2, cancel2 := redisContext(s.ctx, RedisBulkOpTimeout)
 	defer cancel2()
 
@@ -209,6 +261,42 @@ func (s *RedisRunStore) GetRun(runID string) (*AgentRun, error) {
 	}
 
 	return &run, nil
+}
+
+func (s *RedisRunStore) reconcileStalledRun(run *AgentRun) {
+	if run.Status != RunStatusRunning {
+		return
+	}
+	if time.Since(run.UpdatedAt) < RunHeartbeatTTL {
+		return
+	}
+
+	ctx, cancel := redisContext(s.ctx, RedisOpTimeout)
+	defer cancel()
+
+	alive, err := s.client.Exists(ctx, heartbeatKey(run.RunID)).Result()
+	if err != nil {
+		s.logger.Warn("Failed to check run heartbeat", "error", err, "runId", run.RunID)
+		return
+	}
+	if alive > 0 {
+		return
+	}
+
+	claimed, err := s.client.SetNX(ctx, interruptedKey(run.RunID), "1", RunMaxAge).Result()
+	if err != nil {
+		s.logger.Warn("Failed to claim interrupted run", "error", err, "runId", run.RunID)
+		return
+	}
+	if claimed {
+		s.logger.Warn("Marking abandoned agent run as failed", "runId", run.RunID)
+		errorEvent := agent.SSEEvent{Type: "error", Data: agent.ErrorEvent{Message: runInterruptedMessage}}
+		s.AppendEvent(run.RunID, errorEvent)
+		s.FinishRun(run.RunID, RunStatusFailed, runInterruptedMessage)
+	}
+
+	run.Status = RunStatusFailed
+	run.Error = runInterruptedMessage
 }
 
 func (s *RedisRunStore) ListRuns(userID, orgID int64, limit int) ([]*AgentRun, error) {
@@ -251,7 +339,7 @@ func (s *RedisRunStore) ListRuns(userID, orgID int64, limit int) ([]*AgentRun, e
 		cursor = nextCursor
 
 		for _, key := range keys {
-			if strings.Contains(key, ":events") || strings.Contains(key, ":sequence") {
+			if strings.Count(key, ":") != 1 {
 				continue
 			}
 			runJSON, err := s.client.Get(ctx, key).Result()
@@ -271,6 +359,7 @@ func (s *RedisRunStore) ListRuns(userID, orgID int64, limit int) ([]*AgentRun, e
 			if run.UserID != userID || run.OrgID != orgID {
 				continue
 			}
+			s.reconcileStalledRun(&run)
 			runs = append(runs, copyRun(&run))
 			s.client.ZAdd(ctx, runIndexKey(userID, orgID), redis.Z{Score: float64(run.UpdatedAt.UnixNano()), Member: run.RunID})
 		}
@@ -303,6 +392,7 @@ func (s *RedisRunStore) loadRunFromRedis(ctx context.Context, runID string) (*Ag
 		s.logger.Warn("Failed to unmarshal indexed run", "error", err, "runId", runID)
 		return nil, err
 	}
+	s.reconcileStalledRun(&run)
 	return copyRun(&run), nil
 }
 
