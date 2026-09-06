@@ -1527,6 +1527,7 @@ func (p *Plugin) handleAgentRunEvents(w http.ResponseWriter, r *http.Request, ru
 		return
 	}
 
+	replayedThrough := int64(-1)
 	for _, event := range run.Events {
 		data, err := agent.MarshalSSE(event)
 		if err != nil {
@@ -1536,6 +1537,7 @@ func (p *Plugin) handleAgentRunEvents(w http.ResponseWriter, r *http.Request, ru
 		if _, err := w.Write(data); err != nil {
 			return
 		}
+		replayedThrough = event.Sequence
 	}
 	flusher.Flush()
 
@@ -1554,6 +1556,9 @@ func (p *Plugin) handleAgentRunEvents(w http.ResponseWriter, r *http.Request, ru
 		case event, ok := <-subscriberCh:
 			if !ok {
 				return
+			}
+			if event.Sequence <= replayedThrough {
+				continue
 			}
 			data, err := agent.MarshalSSE(event)
 			if err != nil {

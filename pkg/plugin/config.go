@@ -37,6 +37,10 @@ const (
 )
 
 const (
+	RunStreamStatusCheckInterval = 30 * time.Second
+)
+
+const (
 	GraphitiDiscoveryMaxIter = 50
 	// GraphitiRetentionInterval paces Scout.RunRetention (community build +
 	// episode prune), independent of GraphitiScanInterval so retention still
