@@ -56,6 +56,7 @@ Feature is not done until: tests written, all tests pass, RBAC reviewed, no hard
 - `plugin/` — HTTP routes, RBAC, session store, shares, rate limiting
 - `mcp/` — MCP client/proxy, multi-server aggregation, health monitoring
 - `rbac/` — annotation-based RBAC (`readOnlyHint`)
+- `skills/` — Agent Skills registry: bundled SKILL.md skills + admin overrides; explicit/legacy-type/trigger activation, `load_skill` support
 
 **Agentic flow:** Frontend POSTs to `/api/agent/run` → backend streams SSE (`content`, `tool_call_start`, `tool_call_result`, `done`, `error`)
 
@@ -146,7 +147,7 @@ When asked for a code review or security review, produce concrete findings with 
 | | `ratelimit.go` | `RateLimiter` interface — `InMemoryRateLimiter` + `RedisRateLimiter` (per-user token bucket) |
 | | `prompts.go` / `prompt_defaults.go` | System prompt assembly, `/api/prompt-defaults` handler |
 | | `openapi/openapi.go` | OpenAPI spec serving + validation |
-| `pkg/agent/` | `loop.go` | Main agentic loop, SSE event streaming (max 25 iterations) |
+| `pkg/agent/` | `loop.go` | Main agentic loop, SSE event streaming (max 25 iterations); internal `load_skill` tool dispatch |
 | | `llm_client.go` | LLM API client (proxied via grafana-llm-app) |
 | | `tools.go` | Tool dispatch to MCP proxy, RBAC check |
 | | `context_window.go` | Message history truncation to fit LLM context window |
@@ -156,6 +157,9 @@ When asked for a code review or security review, produce concrete findings with 
 | | `health.go` | `HealthMonitor` — polls server health on interval |
 | | `types.go` | `ServerConfig`, `Tool`, `ToolAnnotations` |
 | `pkg/rbac/` | `rbac.go` | `IsReadOnlyTool()`, `CanAccessTool()`, `FilterToolsByRole()` — Viewer = readOnly tools only |
+| `pkg/skills/` | `skill.go` | SKILL.md parse/validate (Agent Skills spec: frontmatter, triggers, templates) |
+| | `registry.go` | Bundled skills (`go:embed bundled/`) + admin entries from jsonData (overrides, custom, disable) |
+| | `selection.go` | `Resolve()` — explicit + legacy-type + trigger activation; model/iteration preferences |
 
 **Frontend (`src/`)**
 | Path | Purpose |
@@ -183,6 +187,7 @@ When asked for a code review or security review, produce concrete findings with 
 plugin ──► agent ──► mcp
 plugin ──► rbac  ──► mcp
 agent  ──► mcp
+plugin ──► skills
 ```
 
 Frontend `src/services/` → HTTP → backend `pkg/plugin/`
@@ -202,7 +207,8 @@ Registered in [pkg/plugin/plugin.go:339](pkg/plugin/plugin.go#L339)
 | `GET /api/mcp/servers` | `handleMCPServers` | List MCP servers + health status |
 | `POST /api/agent/run` | `handleAgentRun` | Start agent run → SSE stream |
 | `GET/DELETE /api/agent/runs/{id}` | `handleAgentRuns` | Get or cancel a run |
-| `GET /api/prompt-defaults` | `handlePromptDefaults` | Default system prompts |
+| `GET /api/prompt-defaults` | `handlePromptDefaults` | Default system prompt + skill user-prompt templates |
+| `GET /api/skills` | `handleSkills` | Skill metadata listing (`?include=content` = Admin, SKILL.md sources) |
 | `GET,POST /api/sessions` | `handleSessionsRoot` | List / create sessions |
 | `GET,PUT,DELETE /api/sessions/{id}` | `handleSessionRouter` | Session CRUD |
 | `GET /api/sessions/current` | `handleSessionCurrent` | Get active session |
@@ -214,19 +220,23 @@ Registered in [pkg/plugin/plugin.go:339](pkg/plugin/plugin.go#L339)
 
 ```
 User input
-  → src/services/agentClient.ts         POST /api/agent/run
+  → src/components/Chat/components/ChatInput (slash command menu: /skill)
+  → src/components/Chat/hooks/useChat.ts     parseSlashSkill → skills[] in request
+  → src/services/agentClient.ts             POST /api/agent/run (message, type?, skills?)
   → pkg/plugin/plugin.go handleAgentRun
-      → pkg/plugin/ratelimit.go         CheckLimit(userID)
-      → pkg/plugin/prompts.go           assemble system prompt
-      → pkg/agent/loop.go               RunAgentLoop()
-          → pkg/agent/llm_client.go     stream from LLM (grafana-llm-app proxy)
-          → pkg/agent/tools.go          dispatch tool call
-              → pkg/rbac/rbac.go        CanAccessTool(role, tool)
-              → pkg/mcp/proxy.go        route to correct MCP server client
-                  → pkg/mcp/client.go   HTTP POST mcp/call-tool
-                      → Grafana APIs (Mimir/Loki/Tempo) or built-in MCP
-          → SSE events: content | tool_call_start | tool_call_result | done | error
-  → Chat component renders streaming response + inline visualizations
+       → pkg/plugin/ratelimit.go             CheckLimit(userID)
+       → pkg/skills/selection.go             Resolve skills: explicit ∪ legacy type ∪ triggers
+       → pkg/plugin/prompts.go               assemble system prompt (base + active skill bodies + catalog)
+       → pkg/agent/loop.go                   RunAgentLoop() — emits run_started (skills) first
+           → pkg/agent/llm_client.go         stream from LLM (grafana-llm-app proxy)
+           → pkg/agent/loop.go               load_skill → pkg/skills registry (internal, bypasses MCP)
+           → pkg/agent/tools.go              dispatch tool call
+               → pkg/rbac/rbac.go            CanAccessTool(role, tool)
+               → pkg/mcp/proxy.go            route to correct MCP server client
+                   → pkg/mcp/client.go       HTTP POST mcp/call-tool
+                       → Grafana APIs (Mimir/Loki/Tempo/Pyroscope/CloudWatch) or built-in MCP
+           → SSE events: run_started | content | tool_call_start | tool_call_result | done | error
+  → Chat component renders streaming response + inline visualizations + skill chips
 ```
 
 ### Test Locations
@@ -241,7 +251,7 @@ User input
 | Frontend unit | `src/**/*.test.{ts,tsx}` | `nvm use 22 && npm run test:ci` |
 | E2E Playwright | `tests/*.spec.ts` | `nvm use 22 && npm run e2e` |
 
-E2E specs: `chat`, `sessionManagement`, `sessionSharing`, `appConfig`, `mcpAdvancedOptions`, `combinedMCP`, `errorHandling`, `sidePanel`
+E2E specs: `chat`, `sessionManagement`, `sessionSharing`, `appConfig`, `mcpAdvancedOptions`, `combinedMCP`, `errorHandling`, `sidePanel`, `skills`
 
 ### Known Gotchas
 
@@ -253,3 +263,4 @@ E2E specs: `chat`, `sessionManagement`, `sessionSharing`, `appConfig`, `mcpAdvan
 6. **No bare `http.Client{}`** — always `httpclient.New()` from Grafana SDK; copy `.Timeout` into any wrapper. Never use `&http.Client{}` as fallback — propagate the error.
 7. **SSE stream termination** — `done` event ends the stream; `error` event must be surfaced to user (never swallowed).
 8. **Session vs Run** — a `Session` is a persistent conversation (stored in Redis); a `Run` is one agent execution within a session (streamed via SSE, also Redis-persisted).
+9. **Skills activation** — `?type=investigation` and the POST body `type` field are legacy-compatible (mapped to skills in `pkg/skills/selection.go`); a disabled mapped skill never breaks the deep link — the run falls back to heuristics. Legacy `investigationPrompt`/`performancePrompt` jsonData fields override the bundled skills' user-prompt templates (`applyLegacyPromptOverrides`). `load_skill` is an internal agent tool that bypasses MCP and RBAC by design (read-only instruction content).

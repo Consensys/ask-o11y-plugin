@@ -66,7 +66,7 @@ describe('QuickSuggestions', () => {
     const cpuButton = screen.getByText('Show me a graph of CPU usage').closest('button');
     fireEvent.click(cpuButton!);
     
-    expect(handleClick).toHaveBeenCalledWith('Show me a graph of CPU usage over time');
+    expect(handleClick).toHaveBeenCalledWith('Show me a graph of CPU usage over time', 'rendering-visualizations');
   });
 
   it('should call onSuggestionClick for each suggestion', () => {
@@ -77,16 +77,16 @@ describe('QuickSuggestions', () => {
     expect(buttons).toHaveLength(4);
     
     fireEvent.click(buttons[0]);
-    expect(handleClick).toHaveBeenCalledWith('Show me a graph of CPU usage over time');
+    expect(handleClick).toHaveBeenCalledWith('Show me a graph of CPU usage over time', 'rendering-visualizations');
     
     fireEvent.click(buttons[1]);
-    expect(handleClick).toHaveBeenCalledWith('Graph memory usage by pod in my default namespace');
+    expect(handleClick).toHaveBeenCalledWith('Graph memory usage by pod in my default namespace', 'writing-promql-and-logql');
     
     fireEvent.click(buttons[2]);
-    expect(handleClick).toHaveBeenCalledWith('Create a query to monitor user activity over the last 24 hours');
+    expect(handleClick).toHaveBeenCalledWith('Create a query to monitor user activity over the last 24 hours', undefined);
     
     fireEvent.click(buttons[3]);
-    expect(handleClick).toHaveBeenCalledWith('Help me build a dashboard for system performance metrics');
+    expect(handleClick).toHaveBeenCalledWith('Help me build a dashboard for system performance metrics', 'building-dashboards');
   });
 
   it('should not throw when clicked without onSuggestionClick', () => {

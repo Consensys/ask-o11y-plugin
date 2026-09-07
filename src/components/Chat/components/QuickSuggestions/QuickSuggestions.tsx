@@ -4,7 +4,7 @@ import { css, cx } from '@emotion/css';
 import { GrafanaTheme2 } from '@grafana/data';
 
 interface QuickSuggestionsProps {
-  onSuggestionClick?: (message: string) => void;
+  onSuggestionClick?: (message: string, skill?: string) => void;
 }
 
 const suggestions = [
@@ -12,11 +12,13 @@ const suggestions = [
     label: 'Show me a graph of CPU usage',
     message: 'Show me a graph of CPU usage over time',
     icon: '📊',
+    skill: 'rendering-visualizations',
   },
   {
     label: 'Graph memory by pod',
     message: 'Graph memory usage by pod in my default namespace',
     icon: '💾',
+    skill: 'writing-promql-and-logql',
   },
   {
     label: 'Monitor user activity',
@@ -27,6 +29,7 @@ const suggestions = [
     label: 'Build a dashboard',
     message: 'Help me build a dashboard for system performance metrics',
     icon: '🎯',
+    skill: 'building-dashboards',
   },
 ];
 
@@ -43,7 +46,7 @@ export const QuickSuggestions: React.FC<QuickSuggestionsProps> = ({ onSuggestion
         {suggestions.map((suggestion, index) => (
           <button
             key={index}
-            onClick={() => onSuggestionClick?.(suggestion.message)}
+            onClick={() => onSuggestionClick?.(suggestion.message, suggestion.skill)}
             className={cx('group inline-flex items-center gap-2.5 px-5 py-3 rounded-xl text-base cursor-pointer transition-all duration-300 hover:-translate-y-1 hover:shadow-lg', styles.pill)}
             style={{ animationDelay: `${(index + 1) * 50}ms` }}
           >

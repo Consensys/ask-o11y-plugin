@@ -1,4 +1,5 @@
 import type { Query } from './utils/promqlParser';
+import type { SkillCommand } from '../../services/skillsClient';
 
 /** Content item from MCP tool response */
 export interface ToolResponseContent {
@@ -66,6 +67,12 @@ export interface GrafanaPageRef {
   title?: string;
 }
 
+/** A skill active for the assistant turn, rendered as a chip. */
+export interface AgentSkillBadge {
+  name: string;
+  description?: string;
+}
+
 /** Chat message from user or assistant */
 export interface ChatMessage {
   role: 'user' | 'assistant';
@@ -75,6 +82,7 @@ export interface ChatMessage {
   approvals?: AgentApprovalItem[];
   finalReport?: AgentFinalReport;
   pageRefs?: GrafanaPageRef[];
+  skills?: AgentSkillBadge[];
   timestamp?: Date;
   /** Set when the agent run for this assistant turn failed; surfaced as a retryable error in the UI. */
   error?: string;
@@ -103,7 +111,9 @@ export interface ChatInterfaceProps {
   leftSlot?: React.ReactNode;
   rightSlot?: React.ReactNode;
   readOnly?: boolean;
-  onSuggestionClick?: (message: string) => void;
+  onSuggestionClick?: (message: string, skill?: string) => void;
+  /** Pickable skills offered as /name slash commands in the chat input. */
+  skillCommands?: SkillCommand[];
   queuedMessageCount: number;
   onStopGeneration?: () => void;
   onResolveApproval?: (

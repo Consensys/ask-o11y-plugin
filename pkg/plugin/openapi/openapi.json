@@ -2396,6 +2396,31 @@
           }
         }
       }
+    },
+    "/api/skills": {
+      "get": {
+        "summary": "List agent skills",
+        "description": "Returns metadata for all skills (bundled, customized, custom, disabled, invalid) without their bodies. Feeds the chat skill picker and the AppConfig Skills tab. Skill content is authored through the Grafana plugin admin API (jsonData.skills.entries), not through this endpoint.",
+        "operationId": "listSkills",
+        "tags": [
+          "Configuration"
+        ],
+        "responses": {
+          "200": {
+            "description": "Skill listing",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SkillListResponse"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "Method not allowed (only GET is supported)"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -2753,7 +2778,7 @@
       },
       "RunRequest": {
         "type": "object",
-        "description": "Request to start an agent run. The backend builds the system prompt and manages context window based on the message type and server-side session history.",
+        "description": "Request to start an agent run. The backend resolves skills (explicit selection, legacy type mapping, or message triggers), builds the system prompt, and manages the context window based on server-side session history.",
         "required": [
           "message"
         ],
@@ -2770,6 +2795,13 @@
               "chat"
             ],
             "description": "Message type that determines which server-side prompt template to use"
+          },
+          "skills": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Skill names to explicitly activate for this run (optional). Unknown, disabled, or hidden names return 400."
           },
           "sessionId": {
             "type": "string",
@@ -2868,11 +2900,19 @@
           },
           "sessionId": {
             "type": "string"
+          },
+          "skills": {
+            "type": "array",
+            "description": "Skills active for this run",
+            "items": {
+              "$ref": "#/components/schemas/RunStartedSkill"
+            }
           }
         },
         "required": [
           "runId"
-        ]
+        ],
+        "description": "Emitted as the first event of a run when a run ID is set, carrying the active skill metadata for the UI."
       },
       "ContentEvent": {
         "type": "object",
@@ -3790,6 +3830,105 @@
             }
           }
         }
+      },
+      "RunStartedSkill": {
+        "type": "object",
+        "description": "A skill active for an agent run",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "description"
+        ]
+      },
+      "SkillInfo": {
+        "type": "object",
+        "description": "Skill metadata. Bodies are excluded; this listing is safe for all roles.",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "bundled",
+              "custom"
+            ],
+            "description": "bundled skills ship in the plugin binary; custom skills are admin-authored"
+          },
+          "customized": {
+            "type": "boolean",
+            "description": "A bundled skill whose SKILL.md was overridden by an admin entry"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "hidden": {
+            "type": "boolean",
+            "description": "Hidden skills never appear in the picker or the load_skill catalog"
+          },
+          "model": {
+            "type": "string",
+            "enum": [
+              "base",
+              "large"
+            ],
+            "description": "Model preference when this skill is active"
+          },
+          "maxIterations": {
+            "type": "integer",
+            "description": "Iteration budget when this skill is active"
+          },
+          "triggers": {
+            "type": "string",
+            "description": "Case-insensitive regex that auto-activates the skill on match"
+          },
+          "version": {
+            "type": "string"
+          },
+          "hasUserPrompt": {
+            "type": "boolean"
+          },
+          "invalid": {
+            "type": "boolean",
+            "description": "The admin entry failed validation and is not active"
+          },
+          "invalidReason": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "description",
+          "source",
+          "customized",
+          "enabled",
+          "hidden",
+          "hasUserPrompt"
+        ]
+      },
+      "SkillListResponse": {
+        "type": "object",
+        "properties": {
+          "skills": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SkillInfo"
+            }
+          }
+        },
+        "required": [
+          "skills"
+        ]
       }
     }
   }

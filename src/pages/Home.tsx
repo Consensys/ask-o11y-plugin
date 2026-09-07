@@ -69,6 +69,7 @@ function Home({ pluginSettings }: HomeProps): React.ReactElement {
           pluginSettings={pluginSettings}
           initialMessage={investigation.initialMessage ?? undefined}
           initialMessageType={investigation.initialMessageType ?? undefined}
+          initialSkill={investigation.initialSkill ?? undefined}
           sessionIdFromUrl={sessionIdFromUrl}
           onSessionIdChange={handleSessionIdChange}
         />

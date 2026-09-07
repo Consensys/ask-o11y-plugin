@@ -42,6 +42,16 @@ const mockTheme = {
     radius: {
       default: '4px',
       sm: '2px',
+      pill: '999px',
+    },
+  },
+  shadows: {
+    z3: '0 4px 8px rgba(0, 0, 0, 0.2)',
+  },
+  typography: {
+    fontFamilyMonospace: 'monospace',
+    bodySmall: {
+      fontSize: '12px',
     },
   },
 };
@@ -298,5 +308,121 @@ describe('ChatInput', () => {
       const textarea = screen.getByLabelText('Chat input (message will be queued)');
       expect(textarea).toBeInTheDocument();
     });
+  });
+});
+
+describe('ChatInput slash commands', () => {
+  const skillCommands = [
+    { name: 'querying-profiles', description: 'Analyzes profiling data.' },
+    { name: 'analyzing-cloudwatch', description: 'Queries CloudWatch metrics.' },
+    { name: 'building-dashboards', description: 'Builds dashboards panel by panel.' },
+  ];
+
+  const renderInput = (props: Partial<React.ComponentProps<typeof ChatInput>> = {}) =>
+    render(
+      <ChatInput
+        currentInput=""
+        isGenerating={false}
+        setCurrentInput={jest.fn()}
+        sendMessage={jest.fn()}
+        handleKeyPress={jest.fn()}
+        queuedMessageCount={0}
+        skillCommands={skillCommands}
+        {...props}
+      />
+    );
+
+  it('shows the command hint in the placeholder when skills exist', () => {
+    renderInput();
+    expect(screen.getByLabelText('Chat input').getAttribute('placeholder')).toContain('type / to pick a skill');
+  });
+
+  it('opens the skill menu when typing a slash', () => {
+    const setCurrentInput = jest.fn();
+    renderInput({ currentInput: '/', setCurrentInput });
+    expect(screen.getByTestId('data-testid chat-skill-command-menu')).toBeInTheDocument();
+    expect(screen.getByTestId('data-testid chat-skill-command-item-querying-profiles')).toBeInTheDocument();
+    expect(screen.getByTestId('data-testid chat-skill-command-item-analyzing-cloudwatch')).toBeInTheDocument();
+  });
+
+  it('does not open the menu without skill commands', () => {
+    renderInput({ currentInput: '/', skillCommands: [] });
+    expect(screen.queryByTestId('data-testid chat-skill-command-menu')).not.toBeInTheDocument();
+  });
+
+  it('filters the menu by the typed token', () => {
+    renderInput({ currentInput: '/analyz' });
+    expect(screen.queryByTestId('data-testid chat-skill-command-item-querying-profiles')).not.toBeInTheDocument();
+    expect(screen.getByTestId('data-testid chat-skill-command-item-analyzing-cloudwatch')).toBeInTheDocument();
+  });
+
+  it('closes the menu once a space follows the command', () => {
+    renderInput({ currentInput: '/querying-profiles ' });
+    expect(screen.queryByTestId('data-testid chat-skill-command-menu')).not.toBeInTheDocument();
+  });
+
+  it('completes the active command on Enter and shows the skill chip', () => {
+    const setCurrentInput = jest.fn();
+    renderInput({ currentInput: '/querying', setCurrentInput });
+
+    fireEvent.keyDown(screen.getByLabelText('Chat input'), { key: 'Enter' });
+    expect(setCurrentInput).toHaveBeenCalledWith('/querying-profiles ');
+
+    // Committed skill is visible as a chip above the textarea.
+    renderInput({ currentInput: '/querying-profiles find hot functions' });
+    expect(screen.getByTestId('data-testid chat-active-skill-querying-profiles')).toBeInTheDocument();
+    expect(screen.getByTestId('data-testid chat-active-skill-querying-profiles')).toHaveTextContent(
+      'Skill: querying-profiles'
+    );
+  });
+
+  it('moves the active option with arrow keys and completes on Tab', () => {
+    const setCurrentInput = jest.fn();
+    renderInput({ currentInput: '/', setCurrentInput });
+
+    const textarea = screen.getByLabelText('Chat input');
+    fireEvent.keyDown(textarea, { key: 'ArrowDown' });
+    fireEvent.keyDown(textarea, { key: 'Tab' });
+    expect(setCurrentInput).toHaveBeenCalledWith('/analyzing-cloudwatch ');
+  });
+
+  it('dismisses the menu on Escape', () => {
+    renderInput({ currentInput: '/' });
+    fireEvent.keyDown(screen.getByLabelText('Chat input'), { key: 'Escape' });
+    expect(screen.queryByTestId('data-testid chat-skill-command-menu')).not.toBeInTheDocument();
+  });
+
+  it('completes a command on click', () => {
+    const setCurrentInput = jest.fn();
+    renderInput({ currentInput: '/build', setCurrentInput });
+    fireEvent.click(screen.getByTestId('data-testid chat-skill-command-item-building-dashboards'));
+    expect(setCurrentInput).toHaveBeenCalledWith('/building-dashboards ');
+  });
+
+  it('does not treat a non-skill slash token as a command chip', () => {
+    renderInput({ currentInput: '/etc/hosts is failing' });
+    expect(screen.queryByTestId(/chat-active-skill-/)).not.toBeInTheDocument();
+  });
+});
+
+describe('ChatInput slash menu portal', () => {
+  // Regression guard: the menu must escape the overflow:hidden wrappers
+  // around the chat input area (it was clipped/hidden behind the messages).
+  it('renders the menu in a body portal with fixed positioning', () => {
+    render(
+      <ChatInput
+        currentInput="/"
+        isGenerating={false}
+        setCurrentInput={jest.fn()}
+        sendMessage={jest.fn()}
+        handleKeyPress={jest.fn()}
+        queuedMessageCount={0}
+        skillCommands={[{ name: 'querying-profiles', description: 'Analyzes profiling data.' }]}
+      />
+    );
+    const menu = screen.getByTestId('data-testid chat-skill-command-menu');
+    expect(menu.parentElement).toBe(document.body);
+    expect(menu.style.position).toBe('fixed');
+    expect(menu.style.zIndex).toBe('1000');
   });
 });

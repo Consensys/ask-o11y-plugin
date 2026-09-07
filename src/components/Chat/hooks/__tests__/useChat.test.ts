@@ -1,7 +1,12 @@
 import { act } from 'react';
 import { renderHook } from '@testing-library/react';
 import { useChat } from '../useChat';
-import { resolveAgentApproval, getAgentRunStatus } from '../../../../services/agentClient';
+import {
+  resolveAgentApproval,
+  getAgentRunStatus,
+  runAgentDetached,
+  reconnectToAgentRun,
+} from '../../../../services/agentClient';
 import type { AgentApprovalItem, ChatMessage } from '../../types';
 
 jest.mock('@grafana/runtime', () => ({
@@ -166,5 +171,130 @@ describe('useChat approval handling', () => {
     expect(updatedApproval?.decision).toBe('approved');
     expect(updatedApproval?.error).toBeUndefined();
     expect(updatedApproval?.resolving).toBe(false);
+  });
+});
+
+describe('useChat slash-command skills', () => {
+  const runAgentDetachedMock = runAgentDetached as jest.MockedFunction<typeof runAgentDetached>;
+  const reconnectToAgentRunMock = reconnectToAgentRun as jest.MockedFunction<typeof reconnectToAgentRun>;
+  const skillNames = ['querying-profiles', 'building-dashboards'];
+
+  const renderChatHook = () => renderHook(() => useChat({}, null, jest.fn(), undefined, false, undefined, undefined, 'auto', undefined, skillNames));
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    runAgentDetachedMock.mockResolvedValue({ runId: 'run-s1', sessionId: 'sess-s1', status: 'running' });
+    reconnectToAgentRunMock.mockImplementation(async () => {});
+  });
+
+  it('sends a slash command as skills and strips the command from the message', async () => {
+    const { result } = renderChatHook();
+
+    await act(async () => {
+      await result.current.sendMessage('/querying-profiles find the hottest functions');
+    });
+
+    expect(runAgentDetachedMock).toHaveBeenCalledWith(
+      expect.objectContaining({ message: 'find the hottest functions', skills: ['querying-profiles'] })
+    );
+    const userMessage = result.current.chatHistory.find((m) => m.role === 'user');
+    expect(userMessage?.content).toBe('find the hottest functions');
+  });
+
+  it('omits skills for a plain message', async () => {
+    const { result } = renderChatHook();
+
+    await act(async () => {
+      await result.current.sendMessage('show me cpu usage');
+    });
+
+    const call = runAgentDetachedMock.mock.calls[0][0];
+    expect(call.skills).toBeUndefined();
+  });
+
+  it('passes an unknown slash token through verbatim', async () => {
+    const { result } = renderChatHook();
+
+    await act(async () => {
+      await result.current.sendMessage('/etc/hosts is failing');
+    });
+
+    expect(runAgentDetachedMock).toHaveBeenCalledWith(
+      expect.objectContaining({ message: '/etc/hosts is failing', skills: undefined })
+    );
+  });
+
+  it('rejects a bare skill command with no message', async () => {
+    const { result } = renderChatHook();
+
+    await act(async () => {
+      await result.current.sendMessage('/querying-profiles');
+    });
+
+    expect(runAgentDetachedMock).not.toHaveBeenCalled();
+    const last = result.current.chatHistory[result.current.chatHistory.length - 1];
+    expect(last.content).toMatch(/Add a message after the skill command/);
+  });
+
+  it('does not resend the skill on a following message', async () => {
+    const { result } = renderChatHook();
+
+    await act(async () => {
+      await result.current.sendMessage('/building-dashboards build me a dashboard');
+    });
+    await act(async () => {
+      await result.current.sendMessage('add another panel');
+    });
+
+    expect(runAgentDetachedMock).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ message: 'add another panel', skills: undefined })
+    );
+  });
+
+  it('attaches run_started skills to the assistant message as chips data', async () => {
+    reconnectToAgentRunMock.mockImplementation(async (_runId, callbacks) => {
+      callbacks.onRunStarted?.({
+        runId: 'run-s1',
+        skills: [{ name: 'investigating-alerts', description: 'Investigates firing alerts.' }],
+      });
+    });
+
+    const { result } = renderChatHook();
+
+    await act(async () => {
+      await result.current.sendMessage('investigate this alert');
+    });
+
+    const last = result.current.chatHistory[result.current.chatHistory.length - 1];
+    expect(last.role).toBe('assistant');
+    expect(last.skills).toEqual([{ name: 'investigating-alerts', description: 'Investigates firing alerts.' }]);
+  });
+
+  it('adds a chip when the agent loads a skill mid-run via load_skill', async () => {
+    reconnectToAgentRunMock.mockImplementation(async (_runId, callbacks) => {
+      callbacks.onRunStarted?.({ runId: 'run-s1' });
+      callbacks.onToolCallStart?.({
+        id: 'call-1',
+        name: 'load_skill',
+        arguments: '{"skill":"writing-promql-and-logql"}',
+      });
+      callbacks.onToolCallResult?.({
+        id: 'call-1',
+        name: 'load_skill',
+        content: 'SKILL INSTRUCTIONS',
+        isError: false,
+      });
+    });
+
+    const { result } = renderChatHook();
+
+    await act(async () => {
+      await result.current.sendMessage('how do I write logql');
+    });
+
+    const last = result.current.chatHistory[result.current.chatHistory.length - 1];
+    expect(last.skills).toEqual([{ name: 'writing-promql-and-logql' }]);
+    expect(last.toolCalls?.[0].name).toBe('load_skill');
   });
 });

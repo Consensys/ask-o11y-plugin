@@ -44,13 +44,30 @@ See [AGENTS.md](AGENTS.md) for detailed development documentation.
 
 ## Features
 
-- **Natural Language Queries**: Prometheus (PromQL), Loki (LogQL), Tempo (TraceQL)
+- **Natural Language Queries**: Prometheus (PromQL), Loki (LogQL), Tempo (TraceQL), Pyroscope (profiles), AWS CloudWatch
 - **8 Visualization Types**: Time Series, Stats, Gauge, Table, Pie Chart, Bar Chart, Heatmap, Histogram
 - **MCP Integration**: 56+ built-in Grafana tools, dynamic tool discovery, custom server support
+- **Agent Skills**: Modular SKILL.md instruction sets (Agent Skills open standard) activated per request — from the chat picker, by trigger keywords, or on demand by the assistant itself; admins can customize or add skills
 - **RBAC**: Admin/Editor (full access) vs Viewer (read-only), enforced per operation
 - **Session Management**: Auto-save, history, sharing with expiration, import shared sessions
 - **Alert Investigation**: One-click RCA from alert notifications
 - **Organization Isolation**: Sessions and data scoped per Grafana org
+
+---
+
+## Agent Skills
+
+Skills are modular instruction sets ([Agent Skills format](https://agentskills.io): a `SKILL.md` with YAML frontmatter) that teach the assistant specialized workflows — alert investigation, performance analysis, dashboard building, TraceQL, PromQL/LogQL, Pyroscope profiling, CloudWatch, and rendering visualizations. The always-on base prompt keeps the safety rules (anti-hallucination contract, write guardrails); skills add domain workflows only when relevant, keeping token usage low.
+
+A skill activates three ways:
+
+1. **Explicitly** — type `/` in the chat input to open the skill command menu (filter with the keyboard, Tab/Enter to complete), then write your message: `/querying-profiles find CPU hot spots`. The active command is shown as a chip above the input while composing, and as a chip on the reply. Deep links work too: `/a/consensys-asko11y-app?skill=analyzing-cloudwatch`; the legacy alert link `?type=investigation&alertName={alertName}` keeps working and maps to the `investigating-alerts` skill.
+2. **Automatically** — skills with `triggers` metadata (a regex) activate when the message matches; a pasted `[FIRING:...]` alert notification always activates the alert-investigation workflow, including its larger iteration budget and runbook-first guardrails.
+3. **On demand** — the assistant sees a catalog of skill names/descriptions in its system prompt and calls the internal `load_skill` tool when a task matches, loading the full instructions only then (progressive disclosure). Loaded skills are visualized as chips on the reply and as a friendly "Skill: name" entry in the tool execution panel.
+
+Skill metadata can also steer the run: `model: large|base`, `max-iterations: 60`, and a `user-prompt` template for the legacy investigation/performance request types. Active skills are shown as chips on the assistant's reply.
+
+**Administering skills** (Grafana Admin, plugin Configuration → Skills tab): edit any bundled skill's SKILL.md to customize it for your organization, disable it, or add your own (org-specific runbooks, naming conventions, query patterns). Custom skills live in the plugin's jsonData; `GET /api/skills` lists skill metadata for all roles, and `?include=content` (Admin) returns the SKILL.md sources. Bundled skills ship in `pkg/skills/bundled/`.
 
 ---
 

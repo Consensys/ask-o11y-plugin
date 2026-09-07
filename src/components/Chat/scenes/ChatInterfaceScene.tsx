@@ -29,6 +29,7 @@ function useChatInterface(model: ChatInterfaceScene): ChatInterfaceProps {
     rightSlot: state.rightSlot,
     readOnly: state.readOnly,
     onSuggestionClick: state.onSuggestionClick,
+    skillCommands: state.skillCommands,
     queuedMessageCount: state.queuedMessageCount,
     onStopGeneration: state.onStopGeneration,
     onResolveApproval: state.onResolveApproval,
@@ -64,6 +65,7 @@ function ChatInterfaceRenderer({ model }: SceneComponentProps<ChatInterfaceScene
     rightSlot,
     readOnly,
     onSuggestionClick,
+    skillCommands,
     queuedMessageCount,
     onStopGeneration,
     onResolveApproval,
@@ -132,6 +134,7 @@ function ChatInterfaceRenderer({ model }: SceneComponentProps<ChatInterfaceScene
                 rightSlot={rightSlot}
                 queuedMessageCount={queuedMessageCount}
                 onStopGeneration={onStopGeneration}
+                skillCommands={skillCommands}
               />
             </div>
           )}
@@ -153,6 +156,7 @@ function ChatInterfaceRenderer({ model }: SceneComponentProps<ChatInterfaceScene
                 rightSlot={rightSlot}
                 queuedMessageCount={queuedMessageCount}
                 onStopGeneration={onStopGeneration}
+                skillCommands={skillCommands}
               />
             </div>
 

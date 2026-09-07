@@ -102,6 +102,7 @@ func TestSpecHasAllEndpoints(t *testing.T) {
 		"/api/agent/evals/run",
 		"/api/agent/topology",
 		"/api/prompt-defaults",
+		"/api/skills",
 		"/api/graphiti/status",
 		"/api/graphiti/discover",
 		"/api/graphiti/ingest-session",

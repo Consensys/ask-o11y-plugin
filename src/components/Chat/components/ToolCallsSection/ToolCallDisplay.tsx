@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { useTheme2 } from '@grafana/ui';
 import { RenderedToolCall } from '../../types';
 
@@ -59,6 +59,20 @@ const SpinnerIcon: React.FC<{ size?: number }> = ({ size = 14 }) => (
 export const ToolCallDisplay: React.FC<ToolCallDisplayProps> = ({ toolCall }) => {
   const theme = useTheme2();
   const [isExpanded, setIsExpanded] = useState(false);
+
+  // load_skill is the internal skill-loading tool; show the requested skill
+  // name instead of the raw tool name so the run's skill usage is readable.
+  const loadedSkillName = useMemo(() => {
+    if (toolCall.name !== 'load_skill') {
+      return null;
+    }
+    try {
+      const parsed = JSON.parse(toolCall.arguments || '{}');
+      return typeof parsed?.skill === 'string' && parsed.skill ? parsed.skill : null;
+    } catch {
+      return null;
+    }
+  }, [toolCall.name, toolCall.arguments]);
 
   const formatInlineArguments = (args: string) => {
     try {
@@ -133,9 +147,10 @@ export const ToolCallDisplay: React.FC<ToolCallDisplayProps> = ({ toolCall }) =>
           <span
             className="font-mono text-xs font-medium truncate"
             style={{ color: theme.colors.text.primary }}
-            title={toolCall.name}
+            title={loadedSkillName ? `Skill: ${loadedSkillName}` : toolCall.name}
+            data-testid={loadedSkillName ? `chat-load-skill-${loadedSkillName}` : undefined}
           >
-            {toolCall.name}
+            {loadedSkillName ? `Skill: ${loadedSkillName}` : toolCall.name}
           </span>
           {hasArgs && (
             <span className="font-mono text-xs truncate" style={{ color: theme.colors.text.secondary }}>
