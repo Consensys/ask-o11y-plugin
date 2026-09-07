@@ -108,3 +108,37 @@ func runEventsHandler(t *testing.T, store RunStoreInterface, runID string) strin
 
 	return recorder.Body.String()
 }
+
+// Pub/sub delivery is at-most-once, so a dropped message can leave a hole that a
+// later delivered event papers over. The stream has to stop at the gap so the
+// client's reconnect replays the durable list instead of rendering a partial run.
+func TestHandleAgentRunEvents_StopsAtLiveSequenceGap(t *testing.T) {
+	live := make(chan agent.SSEEvent, 8)
+	store := &stubRunStore{
+		snapshot: &AgentRun{
+			RunID:  "run-gap",
+			Status: RunStatusRunning,
+			UserID: 7,
+			OrgID:  1,
+			Events: []agent.SSEEvent{contentEvent(0, "first")},
+		},
+		live: live,
+	}
+	live <- contentEvent(1, "second")
+	live <- contentEvent(3, "fourth")
+	live <- contentEvent(4, "fifth")
+	close(live)
+
+	body := runEventsHandler(t, store, "run-gap")
+
+	for _, want := range []string{"first", "second"} {
+		if got := strings.Count(body, `"content":"`+want+`"`); got != 1 {
+			t.Errorf("expected %q exactly once before the gap, got %d", want, got)
+		}
+	}
+	for _, unwanted := range []string{"fourth", "fifth"} {
+		if strings.Contains(body, `"content":"`+unwanted+`"`) {
+			t.Errorf("expected %q to be withheld: it arrived after a sequence gap", unwanted)
+		}
+	}
+}
