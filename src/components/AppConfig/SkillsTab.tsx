@@ -33,7 +33,7 @@ export function SkillsTab({ savedEntries, onSaveEntries, legacyPromptSkills = []
   const theme = useTheme2();
   const [skills, setSkills] = useState<SkillInfo[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [editing, setEditing] = useState<{ name: string | null; content: string; bundledDefault?: string } | null>(
+  const [editing, setEditing] = useState<{ name: string | null; content: string } | null>(
     null
   );
 
