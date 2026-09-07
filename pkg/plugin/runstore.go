@@ -59,7 +59,6 @@ type RunStoreInterface interface {
 	FinishRun(runID string, status RunStatus, errMsg string)
 	GetRun(runID string) (*AgentRun, error)
 	ListRuns(userID, orgID int64, limit int) ([]*AgentRun, error)
-	GetBroadcaster(runID string) *RunBroadcaster
 	SubscribeAndSnapshot(runID string) (*AgentRun, <-chan agent.SSEEvent, func(), error)
 	CleanupOld()
 }
@@ -251,13 +250,6 @@ func (s *RunStore) ListRuns(userID, orgID int64, limit int) ([]*AgentRun, error)
 		runs = runs[:limit]
 	}
 	return runs, nil
-}
-
-func (s *RunStore) GetBroadcaster(runID string) *RunBroadcaster {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
-	return s.broadcasters[runID]
 }
 
 // SubscribeAndSnapshot atomically subscribes and snapshots under one lock
