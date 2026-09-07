@@ -65,10 +65,11 @@ export function useChat(
 ) {
   const orgId = String(config.bootData.user.orgId || '1');
 
-  // A ?skill= deep link combined with an auto-sent message composes the
-  // slash command; a skill alone only prefills the input (see currentInput).
-  const effectiveInitialMessage =
-    initialSkill && initialMessage ? `/${initialSkill} ${initialMessage}` : initialMessage;
+  // A ?skill= deep link activates its skill on the next (auto-sent) message
+  // via this one-shot ref — the skill catalog may not have loaded yet when
+  // the deep link auto-sends, so it must not depend on parseSlashSkill.
+  // A skill without a message only prefills the input (see currentInput).
+  const autoSkillRef = useRef<string | null>(initialSkill ?? null);
 
   const initialMessages = initialSession?.messages || [];
   const [chatHistory, setChatHistory] = useState<ChatMessage[]>(initialMessages);
@@ -207,12 +208,12 @@ export function useChat(
 
   const hasLoadedFromUrlRef = useRef(false);
   useEffect(() => {
-    if (sessionIdFromUrl && !readOnly && !hasLoadedFromUrlRef.current && chatHistory.length === 0 && !effectiveInitialMessage) {
+    if (sessionIdFromUrl && !readOnly && !hasLoadedFromUrlRef.current && chatHistory.length === 0 && !initialMessage) {
       hasLoadedFromUrlRef.current = true;
       sessionManager.loadSession(sessionIdFromUrl).catch(() => {});
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sessionIdFromUrl, readOnly, effectiveInitialMessage]);
+  }, [sessionIdFromUrl, readOnly, initialMessage]);
 
   useEffect(() => {
     return () => {
@@ -504,7 +505,7 @@ export function useChat(
     [orgId]
   );
 
-  const sendMessage = async (explicitInput?: string): Promise<void> => {
+  const sendMessage = async (explicitInput?: string, explicitSkill?: string): Promise<void> => {
     const inputToSend = explicitInput ?? currentInput;
     if (!inputToSend.trim()) {
       return;
@@ -527,6 +528,11 @@ export function useChat(
       return;
     }
 
+    // Skill precedence: an explicit slash command in the text, then a
+    // caller-provided skill (retry reusing the original turn's skill), then
+    // the one-shot ?skill= deep-link activation.
+    const runSkill = slashSkill ?? explicitSkill ?? autoSkillRef.current;
+
     if (isGenerating) {
       // Only queue messages for the current session to prevent chat leaking
       if (!queuedForSessionRef.current || queuedForSessionRef.current === sessionManager.currentSessionId) {
@@ -536,8 +542,9 @@ export function useChat(
       setCurrentInput('');
       return;
     }
+    autoSkillRef.current = null;
 
-    const userMessage: ChatMessage = { role: 'user', content: messageText };
+    const userMessage: ChatMessage = { role: 'user', content: messageText, skill: runSkill ?? undefined };
     const newChatHistory = [...chatHistory, userMessage];
     setChatHistory(newChatHistory);
     setCurrentInput('');
@@ -562,7 +569,7 @@ export function useChat(
       const result = await runAgentDetached({
         message: messageText,
         type: messageType,
-        skills: slashSkill ? [slashSkill] : undefined,
+        skills: runSkill ? [runSkill] : undefined,
         sessionId: sessionManager.currentSessionId || undefined,
         model: runModel,
         orgId,
@@ -635,7 +642,9 @@ export function useChat(
     if (!lastUserMessage?.content) {
       return;
     }
-    void sendMessage(lastUserMessage.content);
+    // Re-send with the turn's original skill so a retried skill-activated
+    // request does not degrade to plain chat.
+    void sendMessage(lastUserMessage.content, lastUserMessage.skill);
   };
 
   useEffect(() => {
@@ -801,7 +810,7 @@ export function useChat(
   const [autoSendTrigger, setAutoSendTrigger] = useState(0);
 
   useEffect(() => {
-    if (!effectiveInitialMessage || readOnly) {
+    if (!initialMessage || readOnly) {
       return;
     }
 
@@ -818,16 +827,16 @@ export function useChat(
 
     if (state === 'creating-session' && chatHistory.length === 0 && !isGenerating) {
       autoSendStateRef.current = 'ready-to-send';
-      setCurrentInput(effectiveInitialMessage);
+      setCurrentInput(initialMessage);
       return;
     }
 
-    if (state === 'ready-to-send' && currentInput === effectiveInitialMessage && !isGenerating) {
+    if (state === 'ready-to-send' && currentInput === initialMessage && !isGenerating) {
       autoSendStateRef.current = 'sent';
       sendMessage();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [effectiveInitialMessage, readOnly, chatHistory.length, isGenerating, currentInput, autoSendTrigger]);
+  }, [initialMessage, readOnly, chatHistory.length, isGenerating, currentInput, autoSendTrigger]);
 
   const detectedPageRefs = useMemo((): Array<GrafanaPageRef & { messageIndex: number }> => {
     for (let i = chatHistory.length - 1; i >= 0; i--) {

@@ -10,6 +10,8 @@ interface SkillsTabProps {
   savedEntries: Record<string, SkillEntry>;
   /** Persists new entries through the plugin admin API and reloads. */
   onSaveEntries: (entries: Record<string, SkillEntry>) => void;
+  /** Bundled skills still driven by legacy pre-skills prompt fields. */
+  legacyPromptSkills?: string[];
 }
 
 const NEW_SKILL_TEMPLATE = `---
@@ -27,7 +29,7 @@ metadata:
 2. Second step
 `;
 
-export function SkillsTab({ savedEntries, onSaveEntries }: SkillsTabProps): React.ReactElement {
+export function SkillsTab({ savedEntries, onSaveEntries, legacyPromptSkills = [] }: SkillsTabProps): React.ReactElement {
   const theme = useTheme2();
   const [skills, setSkills] = useState<SkillInfo[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -124,10 +126,17 @@ export function SkillsTab({ savedEntries, onSaveEntries }: SkillsTabProps): Reac
     <FieldSet label="Skills" data-testid={testIds.appConfig.skills.section}>
       <p className="text-sm text-secondary mb-4">
         Skills are modular SKILL.md instruction sets (Agent Skills format) the assistant activates per request —
-        explicitly from the chat picker, automatically via trigger keywords, or on demand through its load_skill tool.
-        Bundled skills ship with the plugin; edit one to customize it for your organization, disable it, or add your
-        own.
+        explicitly from the chat input slash commands, automatically via trigger keywords, or on demand through its
+        load_skill tool. Bundled skills ship with the plugin; edit one to customize it for your organization, disable
+        it, or add your own.
       </p>
+
+      {legacyPromptSkills.length > 0 && (
+        <Alert title="Legacy prompt templates are still set" severity="info" className="mb-4">
+          Pre-skills prompt fields still apply to: {legacyPromptSkills.join(', ')}. Editing or disabling those skills
+          here takes precedence over the legacy fields.
+        </Alert>
+      )}
 
       <div className="flex flex-col gap-3">
         {skills.map((info) => {

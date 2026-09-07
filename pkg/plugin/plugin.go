@@ -1622,21 +1622,28 @@ func (p *Plugin) handlePromptDefaults(w http.ResponseWriter, r *http.Request) {
 		"defaultSystemPrompt": DefaultSystemPrompt,
 	}
 	// The investigation/performance user-prompt templates now live in the
-	// bundled skills; the keys are kept so older AppConfig integrations and
-	// the OpenAPI contract stay stable.
-	if s, ok := p.skillRegistry.Get(skills.TypeSkillNames["investigation"]); ok {
-		defaults["investigationPrompt"] = s.UserPrompt
-	}
-	if s, ok := p.skillRegistry.Get(skills.TypeSkillNames["performance"]); ok {
-		defaults["performancePrompt"] = s.UserPrompt
+	// bundled skills. The keys are always present for contract stability:
+	// an active skill contributes its (possibly overridden) template, and a
+	// disabled skill still falls back to the shipped bundled default.
+	for key, skillName := range map[string]string{
+		"investigationPrompt": skills.TypeSkillNames["investigation"],
+		"performancePrompt":   skills.TypeSkillNames["performance"],
+	} {
+		value := p.skillRegistry.BundledUserPrompt(skillName)
+		if s, ok := p.skillRegistry.Get(skillName); ok {
+			value = s.UserPrompt
+		}
+		defaults[key] = value
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(defaults)
 }
 
-// handleSkills lists skill metadata for the chat picker and the AppConfig
-// Skills tab. Safe for all roles. Admins may pass ?include=content to also
-// receive each skill's SKILL.md source for the editor.
+// handleSkills lists skill metadata for the chat slash commands and the
+// AppConfig Skills tab. Safe for all roles; hidden skills are excluded —
+// they are never offered to users or the model. Admins may pass
+// ?include=content to receive every skill (hidden included) with its
+// SKILL.md source for the editor.
 func (p *Plugin) handleSkills(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -1650,7 +1657,7 @@ func (p *Plugin) handleSkills(w http.ResponseWriter, r *http.Request) {
 		}
 		infos = p.skillRegistry.InfosWithContent()
 	} else {
-		infos = p.skillRegistry.Infos()
+		infos = p.skillRegistry.PublicInfos()
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
@@ -1682,16 +1689,24 @@ func skillEventInfos(list []*skills.Skill) []agent.RunStartedSkill {
 
 // applyLegacyPromptOverrides keeps pre-skills jsonData prompt customizations
 // working: a configured investigationPrompt/performancePrompt replaces the
-// matching bundled skill's user-prompt template.
+// matching bundled skill's user-prompt template — but only until the admin
+// manages that skill through the Skills tab (any entry for it exists), which
+// takes precedence so the override can be changed or cleared there.
 func applyLegacyPromptOverrides(registry *skills.Registry, settings PluginSettings, logger log.Logger) {
-	if settings.InvestigationPrompt != "" {
-		if err := registry.SetUserPromptOverride(skills.TypeSkillNames["investigation"], settings.InvestigationPrompt); err != nil {
-			logger.Warn("Legacy investigationPrompt override not applied — edit the skill in the Skills tab instead", "error", err)
-		}
+	legacyFields := map[string]string{
+		skills.TypeSkillNames["investigation"]: settings.InvestigationPrompt,
+		skills.TypeSkillNames["performance"]:   settings.PerformancePrompt,
 	}
-	if settings.PerformancePrompt != "" {
-		if err := registry.SetUserPromptOverride(skills.TypeSkillNames["performance"], settings.PerformancePrompt); err != nil {
-			logger.Warn("Legacy performancePrompt override not applied — edit the skill in the Skills tab instead", "error", err)
+	for skillName, legacyPrompt := range legacyFields {
+		if legacyPrompt == "" {
+			continue
+		}
+		if registry.HasEntry(skillName) {
+			logger.Info("Legacy prompt field ignored — skill is managed in the Skills tab", "skill", skillName)
+			continue
+		}
+		if err := registry.SetUserPromptOverride(skillName, legacyPrompt); err != nil {
+			logger.Warn("Legacy prompt override not applied — edit the skill in the Skills tab instead", "skill", skillName, "error", err)
 		}
 	}
 }

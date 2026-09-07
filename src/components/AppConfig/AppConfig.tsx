@@ -874,6 +874,19 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
     });
   }
 
+  // Pre-skills prompt fields still set in jsonData — they keep applying to
+  // their bundled skills until the admin manages those skills here.
+  const legacyPromptSkills = useMemo(() => {
+    const legacy: string[] = [];
+    if (savedJsonData.investigationPrompt) {
+      legacy.push('investigating-alerts');
+    }
+    if (savedJsonData.performancePrompt) {
+      legacy.push('analyzing-performance');
+    }
+    return legacy;
+  }, [savedJsonData.investigationPrompt, savedJsonData.performancePrompt]);
+
   function onSubmitLLMSettings() {
     if (isLLMSettingsDisabled || validationErrors.maxTotalTokens) {
       return;
@@ -1452,7 +1465,11 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
         )}
 
         {activeTab === 'skills' && (
-          <SkillsTab savedEntries={savedJsonData.skills?.entries ?? {}} onSaveEntries={saveSkillEntries} />
+          <SkillsTab
+            savedEntries={savedJsonData.skills?.entries ?? {}}
+            onSaveEntries={saveSkillEntries}
+            legacyPromptSkills={legacyPromptSkills}
+          />
         )}
 
         {activeTab === 'prompts' && promptDefaults && (

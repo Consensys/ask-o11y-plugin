@@ -1,6 +1,9 @@
 package plugin
 
 import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -286,5 +289,109 @@ func TestBuildUserPrompt_UnknownTypeErrors(t *testing.T) {
 	_, err = r.BuildUserPrompt("discovery-ish", "hi", BuildToolContext("Org1", "Admin"))
 	if err == nil {
 		t.Fatal("expected unknown conversation type error")
+	}
+}
+
+func TestHandlePromptDefaults_DisabledSkillStillReturnsStableKeys(t *testing.T) {
+	// Regression: the investigation/performance keys must always be present —
+	// a disabled skill falls back to the shipped bundled template instead of
+	// dropping the key.
+	disabled := false
+	p := &Plugin{
+		logger: log.DefaultLogger,
+		skillRegistry: skills.NewRegistry(skills.Settings{Entries: map[string]skills.Entry{
+			skills.TypeSkillNames["investigation"]: {Enabled: &disabled},
+		}}, log.DefaultLogger),
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/prompt-defaults", nil)
+	rec := httptest.NewRecorder()
+	p.handlePromptDefaults(rec, req)
+
+	var body map[string]string
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	for _, key := range []string{"investigationPrompt", "performancePrompt"} {
+		if value, ok := body[key]; !ok || value == "" {
+			t.Errorf("key %q must always be present and non-empty, got %q", key, value)
+		}
+	}
+	if !strings.Contains(body["investigationPrompt"], "{{.AlertName}}") {
+		t.Errorf("disabled skill must fall back to the bundled default template, got: %.60s", body["investigationPrompt"])
+	}
+}
+
+func TestHandleSkills_HiddenSkillsOnlyForAdminContentListing(t *testing.T) {
+	// Regression: hidden skill metadata must not leak to non-admin callers.
+	registry := skills.NewRegistry(skills.Settings{Entries: map[string]skills.Entry{
+		"internal-hidden-skill": {Content: "---\nname: internal-hidden-skill\ndescription: internal pipeline skill\nmetadata:\n  visibility: hidden\n---\nbody"},
+	}}, log.DefaultLogger)
+	p := &Plugin{logger: log.DefaultLogger, skillRegistry: registry}
+
+	decodeNames := func(rec *httptest.ResponseRecorder) map[string]bool {
+		var body struct {
+			Skills []skills.Info `json:"skills"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+			t.Fatalf("failed to decode response: %v", err)
+		}
+		names := map[string]bool{}
+		for _, info := range body.Skills {
+			names[info.Name] = true
+		}
+		return names
+	}
+
+	// Default (Viewer) listing excludes the hidden skill.
+	req := httptest.NewRequest(http.MethodGet, "/api/skills", nil)
+	rec := httptest.NewRecorder()
+	p.handleSkills(rec, req)
+	if names := decodeNames(rec); names["internal-hidden-skill"] {
+		t.Fatal("hidden skill must not appear in the non-admin listing")
+	}
+
+	// Admin content listing includes it for management.
+	req = httptest.NewRequest(http.MethodGet, "/api/skills?include=content", nil)
+	req.Header.Set("X-Grafana-User-Role", "Admin")
+	rec = httptest.NewRecorder()
+	p.handleSkills(rec, req)
+	if names := decodeNames(rec); !names["internal-hidden-skill"] {
+		t.Fatal("Admin content listing must include hidden skills for management")
+	}
+
+	// Non-admin content request is rejected.
+	req = httptest.NewRequest(http.MethodGet, "/api/skills?include=content", nil)
+	req.Header.Set("X-Grafana-User-Role", "Viewer")
+	rec = httptest.NewRecorder()
+	p.handleSkills(rec, req)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("non-admin include=content must be forbidden, got %d", rec.Code)
+	}
+}
+
+func TestApplyLegacyPromptOverrides_SkillsTabEntryWins(t *testing.T) {
+	// Regression: once a skill is managed through the Skills tab (any entry),
+	// the legacy pre-skills prompt field must stop overriding it so admins
+	// can change or clear the customization there.
+	legacyPrompt := "Investigate {{.AlertName}} the legacy way."
+
+	withEntry := skills.NewRegistry(skills.Settings{Entries: map[string]skills.Entry{
+		skills.TypeSkillNames["investigation"]: {Content: "---\nname: investigating-alerts\ndescription: d\nmetadata:\n  user-prompt: |\n    Skills tab version {{.AlertName}}\n---\nbody"},
+	}}, log.DefaultLogger)
+	applyLegacyPromptOverrides(withEntry, PluginSettings{InvestigationPrompt: legacyPrompt}, log.DefaultLogger)
+	s, ok := withEntry.Get(skills.TypeSkillNames["investigation"])
+	if !ok {
+		t.Fatal("skill must stay active")
+	}
+	if !strings.Contains(s.UserPrompt, "Skills tab version") {
+		t.Fatalf("Skills-tab entry must win over the legacy field, got: %.60s", s.UserPrompt)
+	}
+
+	withoutEntry := skills.NewRegistry(skills.Settings{}, log.DefaultLogger)
+	applyLegacyPromptOverrides(withoutEntry, PluginSettings{InvestigationPrompt: legacyPrompt}, log.DefaultLogger)
+	s, ok = withoutEntry.Get(skills.TypeSkillNames["investigation"])
+	if !ok || !strings.Contains(s.UserPrompt, "the legacy way") {
+		t.Fatalf("legacy field must still apply when the skill is unmanaged, got: %.60s", s.UserPrompt)
 	}
 }

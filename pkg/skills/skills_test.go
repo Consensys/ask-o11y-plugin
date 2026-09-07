@@ -290,3 +290,53 @@ func TestResolve_DisabledMappedSkillDoesNotBreakLegacyType(t *testing.T) {
 		t.Fatal("disabled skill must not activate")
 	}
 }
+
+func TestRegistry_HasEntryAndBundledUserPrompt(t *testing.T) {
+	disabled := false
+	enabled := true
+	r := NewRegistry(Settings{Entries: map[string]Entry{
+		"investigating-alerts": {Enabled: &disabled},
+		"analyzing-performance": {Content: "---\nname: analyzing-performance\ndescription: d\nmetadata:\n  user-prompt: |\n    Custom {{.Target}}\n---\nbody", Enabled: &enabled},
+	}}, log.DefaultLogger)
+
+	if !r.HasEntry("investigating-alerts") || !r.HasEntry("analyzing-performance") {
+		t.Fatal("HasEntry must report any admin-managed entry")
+	}
+	if r.HasEntry("building-dashboards") {
+		t.Fatal("HasEntry must not report unmanaged bundled skills")
+	}
+
+	// Bundled defaults survive enable/disable state for stable prompt-defaults keys.
+	if _, ok := r.Get("investigating-alerts"); ok {
+		t.Fatal("investigating-alerts should be disabled")
+	}
+	if got := r.BundledUserPrompt("investigating-alerts"); got == "" || !strings.Contains(got, "{{.AlertName}}") {
+		t.Fatalf("BundledUserPrompt must return the shipped template for a disabled skill, got: %.60s", got)
+	}
+	if got := r.BundledUserPrompt("no-such-skill"); got != "" {
+		t.Fatalf("BundledUserPrompt for unknown skill must be empty, got: %.60s", got)
+	}
+}
+
+func TestRegistry_PublicInfosExcludesHidden(t *testing.T) {
+	r := NewRegistry(Settings{Entries: map[string]Entry{
+		"internal-hidden-skill": {Content: "---\nname: internal-hidden-skill\ndescription: d\nmetadata:\n  visibility: hidden\n---\nbody"},
+	}}, log.DefaultLogger)
+
+	public := r.PublicInfos()
+	for _, info := range public {
+		if info.Hidden {
+			t.Fatalf("PublicInfos must exclude hidden skills, got %q", info.Name)
+		}
+	}
+	all := r.Infos()
+	hiddenFound := false
+	for _, info := range all {
+		if info.Name == "internal-hidden-skill" && info.Hidden {
+			hiddenFound = true
+		}
+	}
+	if !hiddenFound {
+		t.Fatal("Infos (admin view) must still list hidden skills for management")
+	}
+}

@@ -298,3 +298,62 @@ describe('useChat slash-command skills', () => {
     expect(last.toolCalls?.[0].name).toBe('load_skill');
   });
 });
+
+describe('useChat deep-link and retry skills', () => {
+  const runAgentDetachedMock = runAgentDetached as jest.MockedFunction<typeof runAgentDetached>;
+  const reconnectToAgentRunMock = reconnectToAgentRun as jest.MockedFunction<typeof reconnectToAgentRun>;
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    runAgentDetachedMock.mockResolvedValue({ runId: 'run-d1', sessionId: 'sess-d1', status: 'running' });
+    reconnectToAgentRunMock.mockImplementation(async () => {});
+  });
+
+  it('activates a ?skill= deep link without waiting for the skill catalog', async () => {
+    // Regression: the deep-link auto-send can fire before listSkills()
+    // resolves, so the skill must not depend on parseSlashSkill.
+    const { result } = renderHook(() =>
+      useChat({}, null, jest.fn(), undefined, false, undefined, undefined, 'auto', 'querying-profiles', [])
+    );
+
+    await act(async () => {
+      await result.current.sendMessage('find the hottest functions');
+    });
+
+    expect(runAgentDetachedMock).toHaveBeenCalledWith(
+      expect.objectContaining({ message: 'find the hottest functions', skills: ['querying-profiles'] })
+    );
+
+    // One-shot: the next plain message carries no skill.
+    await act(async () => {
+      await result.current.sendMessage('another question');
+    });
+    expect(runAgentDetachedMock).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ message: 'another question', skills: undefined })
+    );
+  });
+
+  it('retry reuses the original turn skill', async () => {
+    runAgentDetachedMock.mockRejectedValueOnce(new Error('boom'));
+    const { result } = renderHook(() =>
+      useChat({}, null, jest.fn(), undefined, false, undefined, undefined, 'auto', undefined, ['querying-profiles'])
+    );
+
+    await act(async () => {
+      await result.current.sendMessage('/querying-profiles find hot functions');
+    });
+    expect(runAgentDetachedMock).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      result.current.retryLastMessage();
+    });
+
+    // Regression: the retried request must keep the skill instead of
+    // degrading to plain chat.
+    expect(runAgentDetachedMock).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ message: 'find hot functions', skills: ['querying-profiles'] })
+    );
+  });
+});

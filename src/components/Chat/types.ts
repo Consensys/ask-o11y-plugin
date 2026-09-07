@@ -77,6 +77,8 @@ export interface AgentSkillBadge {
 export interface ChatMessage {
   role: 'user' | 'assistant';
   content: string;
+  /** Skill activated for this turn (slash command, deep link, or retry); stored so retry reuses it. */
+  skill?: string;
   toolCalls?: RenderedToolCall[];
   evidence?: AgentEvidenceItem[];
   approvals?: AgentApprovalItem[];

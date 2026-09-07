@@ -21,11 +21,16 @@ import (
 // load_skill tool is advertised to the LLM, internal dispatch bypasses the
 // MCP proxy and approvals, and loaded instructions are appended to the
 // conversation as a tool result without an evidence event.
+//
+// The mock handler routes by the presence of tools rather than call order:
+// the loop kicks off a background eviction-summary LLM call (no tools) as
+// soon as the tool result is appended, which can race ahead of the main
+// conversation's second call.
 func TestAgentLoop_LoadSkillAndRunStarted(t *testing.T) {
 	var mu sync.Mutex
 	var firstCallTools []OpenAITool
 	var secondCallMessages []Message
-	callIdx := 0
+	var mainCalls int32
 
 	llmServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
@@ -33,9 +38,23 @@ func TestAgentLoop_LoadSkillAndRunStarted(t *testing.T) {
 		if err := json.Unmarshal(body, &req); err != nil {
 			t.Errorf("failed to decode LLM request: %v", err)
 		}
+
+		if len(req.Tools) == 0 {
+			// Background eviction summarizer — answer with a stub summary.
+			respondAsStream(w, ChatCompletionResponse{
+				ID: "summary",
+				Choices: []Choice{{
+					Message:      Message{Role: "assistant", Content: "stub summary"},
+					FinishReason: "stop",
+				}},
+			})
+			return
+		}
+
 		mu.Lock()
-		callIdx++
-		if callIdx == 1 {
+		mainCalls++
+		switch mainCalls {
+		case 1:
 			firstCallTools = req.Tools
 			respondAsStream(w, ChatCompletionResponse{
 				ID: "1",
@@ -54,7 +73,7 @@ func TestAgentLoop_LoadSkillAndRunStarted(t *testing.T) {
 					FinishReason: "tool_calls",
 				}},
 			})
-		} else {
+		case 2:
 			secondCallMessages = req.Messages
 			respondAsStream(w, ChatCompletionResponse{
 				ID: "2",
@@ -62,6 +81,12 @@ func TestAgentLoop_LoadSkillAndRunStarted(t *testing.T) {
 					Message:      Message{Role: "assistant", Content: "Here is the LogQL guide."},
 					FinishReason: "stop",
 				}},
+			})
+		default:
+			t.Errorf("unexpected main-loop LLM call #%d", mainCalls)
+			respondAsStream(w, ChatCompletionResponse{
+				ID:     "extra",
+				Choices: []Choice{{Message: Message{Role: "assistant", Content: "unexpected"}, FinishReason: "stop"}},
 			})
 		}
 		mu.Unlock()

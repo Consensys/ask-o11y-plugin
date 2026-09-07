@@ -2400,7 +2400,7 @@
     "/api/skills": {
       "get": {
         "summary": "List agent skills",
-        "description": "Returns metadata for all skills (bundled, customized, custom, disabled, invalid) without their bodies. Feeds the chat skill picker and the AppConfig Skills tab. Skill content is authored through the Grafana plugin admin API (jsonData.skills.entries), not through this endpoint.",
+        "description": "Returns metadata for skills without their bodies, feeding the chat slash commands and the AppConfig Skills tab. Hidden skills are excluded from this listing \u2014 they are never offered to users or the model. Admins may pass ?include=content to receive every skill (hidden included) with its SKILL.md source for the editor. Skill content is authored through the Grafana plugin admin API (jsonData.skills.entries), not through this endpoint.",
         "operationId": "listSkills",
         "tags": [
           "Configuration"
@@ -3874,7 +3874,7 @@
           },
           "hidden": {
             "type": "boolean",
-            "description": "Hidden skills never appear in the picker or the load_skill catalog"
+            "description": "Hidden skills are excluded from non-admin listings and never offered to users or the model; visible only in the Admin ?include=content management listing"
           },
           "model": {
             "type": "string",

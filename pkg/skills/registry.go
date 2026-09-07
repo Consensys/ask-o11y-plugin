@@ -58,9 +58,12 @@ type Registry struct {
 	infos  []Info
 	// settingsEntries and bundledRaw back RawFor: the AppConfig editor needs
 	// the SKILL.md source for every listed skill, including invalid and
-	// disabled entries that are not in byName.
+	// disabled entries that are not in byName. bundledDefaults keeps the
+	// shipped user-prompt templates so handlePromptDefaults can return
+	// stable keys even when the skill is disabled.
 	settingsEntries map[string]Entry
 	bundledRaw      map[string]string
+	bundledDefaults map[string]string
 }
 
 // NewRegistry merges the embedded bundled skills with the admin-managed
@@ -71,6 +74,7 @@ func NewRegistry(settings Settings, logger log.Logger) *Registry {
 		byName:          map[string]*Skill{},
 		settingsEntries: settings.Entries,
 		bundledRaw:      map[string]string{},
+		bundledDefaults: map[string]string{},
 	}
 
 	bundled, bundledRefs := loadBundled(logger)
@@ -78,6 +82,7 @@ func NewRegistry(settings Settings, logger log.Logger) *Registry {
 		s.Source = SourceBundled
 		s.References = bundledRefs[s.Name]
 		r.bundledRaw[s.Name] = s.Raw
+		r.bundledDefaults[s.Name] = s.UserPrompt
 		r.insert(s)
 	}
 
@@ -196,6 +201,36 @@ func (r *Registry) InfosWithContent() []Info {
 	for i := range out {
 		if raw, ok := r.RawFor(out[i].Name); ok {
 			out[i].Raw = raw
+		}
+	}
+	return out
+}
+
+// HasEntry reports whether the admin manages this skill through the Skills
+// tab (any entry exists: override content, custom skill, or pure disable
+// toggle). Used to give Skills-tab management precedence over legacy
+// pre-skills prompt fields.
+func (r *Registry) HasEntry(name string) bool {
+	_, ok := r.settingsEntries[name]
+	return ok
+}
+
+// BundledUserPrompt returns the shipped default user-prompt template for a
+// bundled skill, independent of its enabled/disabled state — the
+// prompt-defaults endpoint needs stable keys even for disabled skills.
+func (r *Registry) BundledUserPrompt(name string) string {
+	return r.bundledDefaults[name]
+}
+
+// PublicInfos returns the metadata listing without hidden skills, for
+// callers that are not managing skills (hidden skills are never offered to
+// users or the model).
+func (r *Registry) PublicInfos() []Info {
+	all := r.Infos()
+	out := make([]Info, 0, len(all))
+	for _, info := range all {
+		if !info.Hidden {
+			out = append(out, info)
 		}
 	}
 	return out

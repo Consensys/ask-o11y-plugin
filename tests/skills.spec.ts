@@ -93,7 +93,7 @@ test.describe('Skills in chat', () => {
       }
     );
     await page.route(
-      /\/api\/plugins\/consensys-asko11y-app\/resources\/api\/agent\/run/,
+      /\/api\/plugins\/consensys-asko11y-app\/resources\/api\/agent\/run$/,
       (route) =>
         route.fulfill({
           contentType: 'application/json',
@@ -126,7 +126,7 @@ test.describe('Skills in chat', () => {
       }
     );
     await page.route(
-      /\/api\/plugins\/consensys-asko11y-app\/resources\/api\/agent\/run/,
+      /\/api\/plugins\/consensys-asko11y-app\/resources\/api\/agent\/run$/,
       (route) =>
         route.fulfill({
           contentType: 'application/json',
