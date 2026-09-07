@@ -202,3 +202,34 @@ func TestRedisRunStore_ReconcileIsClaimedOnce(t *testing.T) {
 		t.Fatalf("expected exactly one terminal error event, got %d", len(runB.Events))
 	}
 }
+
+// ListRuns re-indexes on UpdatedAt and sorts on it, so a reconciled run has to
+// carry a fresh timestamp or it lands behind the score FinishRun wrote and is
+// returned as though nothing changed.
+func TestRedisRunStore_ReconcileRefreshesUpdatedAt(t *testing.T) {
+	client := createTestRedisClient(t)
+	defer client.Close()
+
+	store := NewRedisRunStore(context.Background(), client, log.DefaultLogger)
+	seedRunningRun(t, client, "run-updated-at", 5*time.Minute)
+
+	before := time.Now()
+	run, err := store.GetRun("run-updated-at")
+	if err != nil {
+		t.Fatalf("GetRun failed: %v", err)
+	}
+	if run.Status != RunStatusFailed {
+		t.Fatalf("expected the abandoned run to be failed, got %s", run.Status)
+	}
+	if run.UpdatedAt.Before(before) {
+		t.Fatalf("expected UpdatedAt to be refreshed at reconcile, got %s (before %s)", run.UpdatedAt, before)
+	}
+
+	score, err := client.ZScore(context.Background(), runIndexKey(100, 1), "run-updated-at").Result()
+	if err != nil {
+		t.Fatalf("ZScore failed: %v", err)
+	}
+	if int64(score) < before.UnixNano() {
+		t.Fatalf("expected the run index score to advance past %d, got %d", before.UnixNano(), int64(score))
+	}
+}

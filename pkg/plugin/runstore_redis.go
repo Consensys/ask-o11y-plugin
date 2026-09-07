@@ -297,6 +297,9 @@ func (s *RedisRunStore) reconcileStalledRun(run *AgentRun) {
 
 	run.Status = RunStatusFailed
 	run.Error = runInterruptedMessage
+	// Callers index and sort on UpdatedAt, so leaving it stale would re-index this
+	// run behind the score FinishRun just wrote and sort it as if nothing changed.
+	run.UpdatedAt = time.Now()
 }
 
 func (s *RedisRunStore) ListRuns(userID, orgID int64, limit int) ([]*AgentRun, error) {
