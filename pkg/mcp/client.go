@@ -245,6 +245,21 @@ func (c *Client) forceReconnect() error {
 
 const connectDialTimeout = 10 * time.Second
 
+// defaultToolCallTimeout bounds a single MCP tool call when the server's
+// ServerConfig.TimeoutSeconds is unset. It matches the historical hard-coded
+// value so existing configs behave identically until they opt into a longer
+// budget.
+const defaultToolCallTimeout = 30 * time.Second
+
+// toolCallTimeout resolves the per-call budget: the server's configured
+// timeout when set, the package default otherwise.
+func (c *Client) toolCallTimeout() time.Duration {
+	if c.config.TimeoutSeconds > 0 {
+		return time.Duration(c.config.TimeoutSeconds) * time.Second
+	}
+	return defaultToolCallTimeout
+}
+
 // forceReconnectMinInterval is the dedupe window that prevents the health
 // monitor from thrashing a session that the on-call retry path just refreshed.
 const forceReconnectMinInterval = 5 * time.Second
@@ -685,7 +700,7 @@ func (c *Client) callMCPToolOnce(callerCtx context.Context, toolName string, arg
 	// The caller ctx contributes per-request values (Grafana user ID for
 	// OAuth token injection); the timeout stays rooted at the client ctx so
 	// the session outlives short-lived caller contexts.
-	ctx, cancel := context.WithTimeout(mergeUserCtx(c.ctx, callerCtx), 30*time.Second)
+	ctx, cancel := context.WithTimeout(mergeUserCtx(c.ctx, callerCtx), c.toolCallTimeout())
 	defer cancel()
 
 	result, err := session.CallTool(ctx, &mcpsdk.CallToolParams{
@@ -725,7 +740,7 @@ func (c *Client) callMCPToolOnce(callerCtx context.Context, toolName string, arg
 				return nil, fmt.Errorf("session not established after reconnection")
 			}
 
-			retryCtx, retryCancel := context.WithTimeout(mergeUserCtx(c.ctx, callerCtx), 30*time.Second)
+			retryCtx, retryCancel := context.WithTimeout(mergeUserCtx(c.ctx, callerCtx), c.toolCallTimeout())
 			defer retryCancel()
 
 			result, err = session.CallTool(retryCtx, &mcpsdk.CallToolParams{

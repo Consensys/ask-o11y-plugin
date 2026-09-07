@@ -25,16 +25,6 @@ apps:
           type: 'streamable-http'
           headers:
             Host: 'localhost:8000'
-        - id: 'time'
-          name: 'Time Server'
-          url: 'http://mcpo:8000/time'
-          enabled: true
-          type: 'openapi'
-        - id: 'sequential-thinking'
-          name: 'sequential-thinking Server'
-          url: 'http://mcpo:8000/sequential-thinking'
-          enabled: true
-          type: 'openapi'
         - id: 'fetch'
           name: 'fetch Server'
           url: 'http://mcpo:8000/fetch'
@@ -45,6 +35,7 @@ apps:
           url: 'http://mcp-grafana:8000/mcp'
           enabled: true
           type: 'streamable-http'
+          timeoutSeconds: 90
     secureJsonData:
       redisURL: 'redis://redis:6379/0'
   - type: grafana-llm-app
@@ -71,16 +62,6 @@ apps:
           type: 'streamable-http'
           headers:
             Host: 'localhost:8000'
-        - id: 'time'
-          name: 'Time Server'
-          url: 'http://mcpo:8000/time'
-          enabled: true
-          type: 'openapi'
-        - id: 'sequential-thinking'
-          name: 'sequential-thinking Server'
-          url: 'http://mcpo:8000/sequential-thinking'
-          enabled: true
-          type: 'openapi'
         - id: 'fetch'
           name: 'fetch Server'
           url: 'http://mcpo:8000/fetch'
@@ -91,5 +72,6 @@ apps:
           url: 'http://mcp-grafana:8000/mcp'
           enabled: true
           type: 'streamable-http'
+          timeoutSeconds: 90
     secureJsonData:
       redisURL: 'redis://redis:6379/0'

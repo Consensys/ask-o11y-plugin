@@ -199,6 +199,43 @@ func TestBuildSystemPrompt_DatasourceSnapshotSlot(t *testing.T) {
 	}
 }
 
+// TestBuildSystemPrompt_CurrentTimeSlot guards the current-time injection:
+// BuildToolContext always stamps the run start time so the agent anchors
+// relative windows without a time-tool round-trip, and a zero-value context
+// (custom builders) falls back to the legacy "time tool" wording instead of
+// rendering an empty block.
+func TestBuildSystemPrompt_CurrentTimeSlot(t *testing.T) {
+	r, err := NewPromptRegistry(PluginSettings{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := r.BuildSystemPrompt(BuildToolContext("Org1", "Admin"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "**Current time:") {
+		t.Fatal("BuildToolContext should render the Current time block")
+	}
+	if !strings.Contains(out, "RFC3339:") {
+		t.Fatal("Current time block should include an RFC3339 anchor")
+	}
+	if strings.Contains(out, "establish the real current time using the time tool") {
+		t.Fatal("fallback wording must disappear when CurrentTime is set")
+	}
+
+	blank, err := r.BuildSystemPrompt(PromptContext{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(blank, "**Current time:") {
+		t.Fatal("empty CurrentTime should not render the block")
+	}
+	if !strings.Contains(blank, "establish the real current time using the time tool") {
+		t.Fatal("empty CurrentTime should fall back to the legacy time-tool wording")
+	}
+}
+
 func TestBuildUserPrompt_LegacyTypeRendersSkillTemplate(t *testing.T) {
 	r, err := NewPromptRegistry(PluginSettings{})
 	if err != nil {

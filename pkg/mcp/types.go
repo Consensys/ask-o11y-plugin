@@ -98,6 +98,13 @@ type ServerConfig struct {
 	Headers        map[string]string           `json:"headers,omitempty"`
 	ToolSelections map[string]bool             `json:"toolSelections,omitempty"`
 	RiskOverrides  map[string]ToolRiskOverride `json:"riskOverrides,omitempty"`
+	// TimeoutSeconds bounds each tool call to this server. 0 uses the
+	// defaultToolCallTimeout (30s). Prod traces (2026-09-03..07) showed 47
+	// calls pinned at the 30s ceiling — 1,423s, 34% of all tool time — as
+	// heavy Prometheus/Loki queries failed and were re-issued; servers with
+	// expensive scan-style tools (the embedded grafana MCP) should raise
+	// this so the calls complete instead of failing into an LLM re-plan.
+	TimeoutSeconds int `json:"timeoutSeconds,omitempty"`
 	// OAuth, when set, makes the server authenticate per Grafana user via an
 	// OAuth2 authorization-code flow. Any static Authorization entry in Headers
 	// is ignored for OAuth-enabled servers; each user's access token is
