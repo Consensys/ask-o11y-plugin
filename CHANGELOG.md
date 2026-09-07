@@ -5,6 +5,21 @@ All notable changes to the Ask O11y Grafana plugin will be documented in this fi
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.11](https://github.com/Consensys/ask-o11y-plugin/compare/v0.3.10...v0.3.11) (2026-09-07)
+
+
+### Features
+
+* skills ([#206](https://github.com/Consensys/ask-o11y-plugin/issues/206)) ([d098a99](https://github.com/Consensys/ask-o11y-plugin/commit/d098a99a625ddcf74cea065302b7d703a26a29f2))
+
+
+### Bug Fixes
+
+* **backend:** fail agent runs abandoned by a dead replica ([#203](https://github.com/Consensys/ask-o11y-plugin/issues/203)) ([daff5d1](https://github.com/Consensys/ask-o11y-plugin/commit/daff5d131d8f4996a8742e29d4bc95c31417d715))
+* **backend:** fan out agent run events over redis pub/sub ([#202](https://github.com/Consensys/ask-o11y-plugin/issues/202)) ([4c92d98](https://github.com/Consensys/ask-o11y-plugin/commit/4c92d98546c39d89e7bfa9246a7a52dcd5d89951))
+* **mcp:** build graphiti from source, drop unused provider extras (6.4GB -&gt; 218MB) ([#201](https://github.com/Consensys/ask-o11y-plugin/issues/201)) ([63493ee](https://github.com/Consensys/ask-o11y-plugin/commit/63493eef5184f693146f9c34905c67864ded936b))
+* **mcp:** route local Graphiti through litellm, drop Ollama, fix config substitution ([#200](https://github.com/Consensys/ask-o11y-plugin/issues/200)) ([5646abc](https://github.com/Consensys/ask-o11y-plugin/commit/5646abc9e5981fd72e38cb429ce9264b3ea48f86))
+
 ## [0.3.10](https://github.com/Consensys/ask-o11y-plugin/compare/v0.3.9...v0.3.10) (2026-09-04)
 
 
