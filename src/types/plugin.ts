@@ -18,6 +18,21 @@ export interface ToolRiskOverride {
   reason?: string;
 }
 
+/**
+ * jsonData shape for the skills AppConfig tab. For a bundled skill name, an
+ * entry's content overrides the shipped SKILL.md; for a new name it defines a
+ * custom skill. An entry with empty content and enabled=false disables the
+ * bundled skill. Mirrors pkg/skills.Settings.
+ */
+export interface SkillsSettings {
+  entries?: Record<string, SkillEntry>;
+}
+
+export interface SkillEntry {
+  content?: string;
+  enabled?: boolean;
+}
+
 export type AppPluginSettings = {
   mcpServers?: MCPServerConfig[];
   useBuiltInMCP?: boolean;
@@ -30,6 +45,9 @@ export type AppPluginSettings = {
   defaultSystemPrompt?: string;
   investigationPrompt?: string;
   performancePrompt?: string;
+
+  /** Admin-managed skills from the AppConfig Skills tab. */
+  skills?: SkillsSettings;
 
   maxTotalTokens?: number;
   recentMessageCount?: number;

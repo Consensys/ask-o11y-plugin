@@ -43,6 +43,10 @@ export default defineConfig([
       '**/.env.production',
       'consensys-asko11y-app/',
       'consensys-asko11y-app.zip',
+      // Vendored build artifacts dropped inside agent worktrees.
+      '.claude/',
+      // Local Python virtualenv with vendored JS files.
+      '.codex-youtube-env/',
     ],
   },
   ...baseConfig,

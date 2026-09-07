@@ -17,6 +17,7 @@ import {
   type EvidenceEvent,
   type FinalReportEvent,
   type MCPUnavailableEvent,
+  type RunStartedEvent,
   type ToolCallStartEvent,
   type ToolCallResultEvent,
 } from '../../../services/agentClient';
@@ -27,6 +28,23 @@ import type { LLMModelSelection } from '../../../services/llmModels';
 interface InitialSessionData {
   id?: string;
   messages?: ChatMessage[];
+}
+
+/**
+ * Parses a leading slash command: `/skill-name rest of message`. The token is
+ * only treated as a skill command when it matches a known skill name;
+ * anything else (e.g. a pasted path) passes through verbatim.
+ */
+function parseSlashSkill(text: string, skillNames: string[]): { skill: string | null; message: string } {
+  if (!text.startsWith('/')) {
+    return { skill: null, message: text };
+  }
+  const match = text.match(/^\/([a-z0-9-]+)(?:\s+|$)/i);
+  const token = match?.[1]?.toLowerCase();
+  if (token && skillNames.includes(token)) {
+    return { skill: token, message: text.slice(1 + token.length).trim() };
+  }
+  return { skill: null, message: text };
 }
 
 function updateLastAssistantMessage(history: ChatMessage[], updater: (msg: ChatMessage) => ChatMessage): ChatMessage[] {
@@ -41,9 +59,17 @@ export function useChat(
   readOnly?: boolean,
   initialMessage?: string,
   initialMessageType?: 'chat' | 'investigation' | 'performance',
-  selectedModel: LLMModelSelection = 'auto'
+  selectedModel: LLMModelSelection = 'auto',
+  initialSkill?: string,
+  skillNames: string[] = []
 ) {
   const orgId = String(config.bootData.user.orgId || '1');
+
+  // A ?skill= deep link activates its skill on the next (auto-sent) message
+  // via this one-shot ref — the skill catalog may not have loaded yet when
+  // the deep link auto-sends, so it must not depend on parseSlashSkill.
+  // A skill without a message only prefills the input (see currentInput).
+  const autoSkillRef = useRef<string | null>(initialSkill ?? null);
 
   const initialMessages = initialSession?.messages || [];
   const [chatHistory, setChatHistory] = useState<ChatMessage[]>(initialMessages);
@@ -72,7 +98,10 @@ export function useChat(
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialSession?.id, initialSession?.messages?.length]);
 
-  const [currentInput, setCurrentInput] = useState('');
+  const [currentInput, setCurrentInput] = useState(
+    // ?skill= deep link without a message: prefill the slash command, no auto-send.
+    initialSkill && !initialMessage ? `/${initialSkill} ` : ''
+  );
   const [isGenerating, setIsGenerating] = useState(false);
   const [conversationType, setConversationType] = useState<'chat' | 'investigation' | 'performance'>(
     initialMessageType || 'chat'
@@ -164,6 +193,9 @@ export function useChat(
   const activeSessionIdRef = useRef<string | null>(null);
   const pendingRunSessionIdRef = useRef<string | null>(null);
   const approvalInFlightRef = useRef<Set<string>>(new Set());
+  // load_skill tool-call IDs → requested skill name, so a successful result
+  // can surface the self-loaded skill as a chip on the assistant message.
+  const pendingSkillLoadsRef = useRef<Map<string, string>>(new Map());
 
   const sessionManager = useSessionManager(
     orgId,
@@ -220,6 +252,16 @@ export function useChat(
         if (abortController.signal.aborted) {
           return;
         }
+        if (event.name === 'load_skill') {
+          try {
+            const parsed = JSON.parse(event.arguments || '{}');
+            if (typeof parsed?.skill === 'string' && parsed.skill) {
+              pendingSkillLoadsRef.current.set(event.id, parsed.skill);
+            }
+          } catch {
+            // Malformed arguments surface as a tool error on the result event.
+          }
+        }
         setToolCalls((prev) => {
           const next = new Map(prev);
           next.set(event.id, { name: event.name, arguments: event.arguments, running: true });
@@ -242,9 +284,35 @@ export function useChat(
           });
           return next;
         });
+        if (!event.isError && pendingSkillLoadsRef.current.has(event.id)) {
+          const skillName = pendingSkillLoadsRef.current.get(event.id);
+          pendingSkillLoadsRef.current.delete(event.id);
+          if (skillName) {
+            setChatHistory((prev) =>
+              updateLastAssistantMessage(prev, (msg) => {
+                const skills = msg.skills ?? [];
+                if (skills.some((skill) => skill.name === skillName)) {
+                  return msg;
+                }
+                return { ...msg, skills: [...skills, { name: skillName }] };
+              })
+            );
+          }
+        }
       },
       onDone: () => {
         // Terminal event; stream completion is handled by the reconnect loop.
+      },
+      onRunStarted: (event: RunStartedEvent) => {
+        if (abortController.signal.aborted || !event.skills?.length) {
+          return;
+        }
+        setChatHistory((prev) =>
+          updateLastAssistantMessage(prev, (msg) => ({
+            ...msg,
+            skills: event.skills?.map((skill) => ({ name: skill.name, description: skill.description })),
+          }))
+        );
       },
       onReconnect: () => {
         setChatHistory((prev) =>
@@ -437,7 +505,7 @@ export function useChat(
     [orgId]
   );
 
-  const sendMessage = async (explicitInput?: string): Promise<void> => {
+  const sendMessage = async (explicitInput?: string, explicitSkill?: string): Promise<void> => {
     const inputToSend = explicitInput ?? currentInput;
     if (!inputToSend.trim()) {
       return;
@@ -454,6 +522,17 @@ export function useChat(
       return;
     }
 
+    const { skill: slashSkill, message: messageText } = parseSlashSkill(validatedInput, skillNames);
+    if (slashSkill && !messageText) {
+      appendErrorMessage('Add a message after the skill command — e.g. /querying-profiles find CPU hot spots');
+      return;
+    }
+
+    // Skill precedence: an explicit slash command in the text, then a
+    // caller-provided skill (retry reusing the original turn's skill), then
+    // the one-shot ?skill= deep-link activation.
+    const runSkill = slashSkill ?? explicitSkill ?? autoSkillRef.current;
+
     if (isGenerating) {
       // Only queue messages for the current session to prevent chat leaking
       if (!queuedForSessionRef.current || queuedForSessionRef.current === sessionManager.currentSessionId) {
@@ -463,8 +542,9 @@ export function useChat(
       setCurrentInput('');
       return;
     }
+    autoSkillRef.current = null;
 
-    const userMessage: ChatMessage = { role: 'user', content: validatedInput };
+    const userMessage: ChatMessage = { role: 'user', content: messageText, skill: runSkill ?? undefined };
     const newChatHistory = [...chatHistory, userMessage];
     setChatHistory(newChatHistory);
     setCurrentInput('');
@@ -487,8 +567,9 @@ export function useChat(
 
     try {
       const result = await runAgentDetached({
-        message: validatedInput,
+        message: messageText,
         type: messageType,
+        skills: runSkill ? [runSkill] : undefined,
         sessionId: sessionManager.currentSessionId || undefined,
         model: runModel,
         orgId,
@@ -561,7 +642,9 @@ export function useChat(
     if (!lastUserMessage?.content) {
       return;
     }
-    void sendMessage(lastUserMessage.content);
+    // Re-send with the turn's original skill so a retried skill-activated
+    // request does not degrade to plain chat.
+    void sendMessage(lastUserMessage.content, lastUserMessage.skill);
   };
 
   useEffect(() => {

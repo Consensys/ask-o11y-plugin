@@ -6,6 +6,7 @@ import (
 	"consensys-asko11y-app/pkg/plugin/oauth"
 	"consensys-asko11y-app/pkg/plugin/openapi"
 	"consensys-asko11y-app/pkg/rbac"
+	"consensys-asko11y-app/pkg/skills"
 	"context"
 	"encoding/json"
 	"errors"
@@ -95,6 +96,10 @@ type PluginSettings struct {
 	DefaultSystemPrompt string `json:"defaultSystemPrompt,omitempty"`
 	InvestigationPrompt string `json:"investigationPrompt,omitempty"`
 	PerformancePrompt   string `json:"performancePrompt,omitempty"`
+
+	// Skills holds admin-managed entries from the AppConfig Skills tab:
+	// overrides of bundled skills and fully custom skills.
+	Skills skills.Settings `json:"skills,omitempty"`
 
 	MaxTotalTokens     int `json:"maxTotalTokens,omitempty"`
 	RecentMessageCount int `json:"recentMessageCount,omitempty"`
@@ -190,6 +195,7 @@ type Plugin struct {
 	approvalGrants ApprovalGrantStore
 	useBuiltInMCP  bool
 	promptRegistry *PromptRegistry
+	skillRegistry  *skills.Registry
 	settings       PluginSettings
 	settingsMu     sync.RWMutex
 	ctx            context.Context
@@ -259,6 +265,9 @@ func NewPlugin(ctx context.Context, settings backend.AppInstanceSettings) (insta
 		logger.Error("Failed to initialize prompt registry, using defaults", "error", err)
 		promptRegistry, _ = NewPromptRegistry(PluginSettings{})
 	}
+
+	skillRegistry := skills.NewRegistry(pluginSettings.Skills, logger)
+	applyLegacyPromptOverrides(skillRegistry, pluginSettings, logger)
 
 	// Use a standalone context instead of the SDK-provided ctx.
 	// The SDK ctx is scoped to the factory call and gets cancelled
@@ -405,6 +414,7 @@ func NewPlugin(ctx context.Context, settings backend.AppInstanceSettings) (insta
 		approvalGrants: approvalGrants,
 		useBuiltInMCP:  pluginSettings.UseBuiltInMCP,
 		promptRegistry: promptRegistry,
+		skillRegistry:  skillRegistry,
 		settings:       pluginSettings,
 		ctx:            pluginCtx,
 		cancel:         cancel,
@@ -529,6 +539,7 @@ func (p *Plugin) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/agent/evals/run", p.handleAgentEvalRun)
 	mux.HandleFunc("/api/agent/topology", p.handleAgentTopology)
 	mux.HandleFunc("/api/prompt-defaults", p.handlePromptDefaults)
+	mux.HandleFunc("/api/skills", p.handleSkills)
 	mux.HandleFunc("/api/graphiti/discover", p.handleGraphitiDiscover)
 	mux.HandleFunc("/api/graphiti/status", p.handleGraphitiStatus)
 	mux.HandleFunc("/api/graphiti/ingest-session", p.handleGraphitiIngestSession)
@@ -908,9 +919,21 @@ func (p *Plugin) handleAgentRun(w http.ResponseWriter, r *http.Request) {
 
 	toolCtx := BuildToolContext(req.OrgName, userRole)
 	toolCtx.ConversationType = req.Type
+	toolCtx.Message = req.Message
 	toolCtx.IsAlertInvestigation = isAlertInvestigation(req.Type, req.Message)
 	toolCtx.DatasourceSnapshot = p.datasourceSnapshot(orgID, req.OrgName, req.ScopeOrgID)
-	if toolCtx.IsAlertInvestigation {
+
+	activation, err := skills.Resolve(p.skillRegistry, req.Message, req.Skills, req.Type)
+	if err != nil {
+		p.logger.Warn("Invalid skill selection", "error", err, "type", req.Type)
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	activeSkillNames := skills.ActiveNames(activation)
+	toolCtx.ActiveSkills = activation.Skills
+	toolCtx.SkillsCatalog = p.skillRegistry.Catalog(activeSkillNames...)
+	toolCtx.UserPromptSkill = activation.UserPromptSkill
+	if skills.HasActive(activation, skills.TypeSkillNames["investigation"]) {
 		// Only fetched for alert investigations: the underlying fetch is a
 		// (cached, backgrounded) scan of each Prometheus datasource's metric
 		// catalog, not worth the overhead for plain chat.
@@ -1016,8 +1039,13 @@ func (p *Plugin) handleAgentRun(w http.ResponseWriter, r *http.Request) {
 
 	effectiveRunModel := runModel
 	if effectiveRunModel == "" {
-		effectiveRunModel = selectAgentModelForTask(req.Type, req.Message)
-		modelSource = "auto"
+		if m := skills.ModelPreference(activation); m != "" {
+			effectiveRunModel = m
+			modelSource = "skill"
+		} else {
+			effectiveRunModel = selectAgentModelForTask(req.Type, req.Message)
+			modelSource = "auto"
+		}
 	}
 
 	if err := p.sessionStore.SetActiveRunID(sessionID, userID, numericOrgID, runID); err != nil {
@@ -1032,6 +1060,7 @@ func (p *Plugin) handleAgentRun(w http.ResponseWriter, r *http.Request) {
 		"sessionId", sessionID,
 		"messageCount", len(messages),
 		"type", req.Type,
+		"skills", strings.Join(activeSkillNames, ","),
 		"model", effectiveRunModel,
 		"modelSource", modelSource,
 	)
@@ -1044,15 +1073,27 @@ func (p *Plugin) handleAgentRun(w http.ResponseWriter, r *http.Request) {
 
 	eventCh := make(chan agent.SSEEvent, 16)
 
+	maxIterations := skills.IterationBudget(activation)
+	if maxIterations == 0 {
+		maxIterations = resolveMaxIterations(req.Type, req.Message)
+	}
+
 	loopReq := agent.LoopRequest{
 		Messages:             messages,
 		SystemPrompt:         systemPrompt,
 		MaxTotalTokens:       p.settings.MaxTotalTokens,
 		RecentMessageCount:   p.settings.RecentMessageCount,
-		MaxIterations:        resolveMaxIterations(req.Type, req.Message),
+		MaxIterations:        maxIterations,
 		Model:                effectiveRunModel,
-		AllowModelFallback:   modelSource == "auto" && effectiveRunModel == "large",
+		AllowModelFallback:   (modelSource == "auto" || modelSource == "skill") && effectiveRunModel == "large",
 		ConversationType:     req.Type,
+		RunID:                runID,
+		SessionID:            sessionID,
+		ActiveSkillsEvent:    skillEventInfos(activation.Skills),
+		AvailableSkills:      skillSpecs(toolCtx.SkillsCatalog),
+		LoadSkill: func(ctx context.Context, name, file string) (string, error) {
+			return p.skillRegistry.Load(name, file, toolCtx)
+		},
 		GrafanaURL:           grafanaURL,
 		AuthToken:            saToken,
 		UserRole:             userRole,
@@ -1592,12 +1633,97 @@ func (p *Plugin) handlePromptDefaults(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{
+	defaults := map[string]string{
 		"defaultSystemPrompt": DefaultSystemPrompt,
-		"investigationPrompt": DefaultInvestigationPrompt,
-		"performancePrompt":   DefaultPerformancePrompt,
+	}
+	// The investigation/performance user-prompt templates now live in the
+	// bundled skills. The keys are always present for contract stability:
+	// an active skill contributes its (possibly overridden) template, and a
+	// disabled skill still falls back to the shipped bundled default.
+	for key, skillName := range map[string]string{
+		"investigationPrompt": skills.TypeSkillNames["investigation"],
+		"performancePrompt":   skills.TypeSkillNames["performance"],
+	} {
+		value := p.skillRegistry.BundledUserPrompt(skillName)
+		if s, ok := p.skillRegistry.Get(skillName); ok {
+			value = s.UserPrompt
+		}
+		defaults[key] = value
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(defaults)
+}
+
+// handleSkills lists skill metadata for the chat slash commands and the
+// AppConfig Skills tab. Safe for all roles; hidden skills are excluded —
+// they are never offered to users or the model. Admins may pass
+// ?include=content to receive every skill (hidden included) with its
+// SKILL.md source for the editor.
+func (p *Plugin) handleSkills(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var infos []skills.Info
+	if r.URL.Query().Get("include") == "content" {
+		if getUserRole(r) != "Admin" {
+			http.Error(w, "Admin role required to read skill content", http.StatusForbidden)
+			return
+		}
+		infos = p.skillRegistry.InfosWithContent()
+	} else {
+		infos = p.skillRegistry.PublicInfos()
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"skills": infos,
 	})
+}
+
+func skillSpecs(list []*skills.Skill) []agent.SkillSpec {
+	if len(list) == 0 {
+		return nil
+	}
+	out := make([]agent.SkillSpec, 0, len(list))
+	for _, s := range list {
+		out = append(out, agent.SkillSpec{Name: s.Name, Description: s.Description})
+	}
+	return out
+}
+
+func skillEventInfos(list []*skills.Skill) []agent.RunStartedSkill {
+	if len(list) == 0 {
+		return nil
+	}
+	out := make([]agent.RunStartedSkill, 0, len(list))
+	for _, s := range list {
+		out = append(out, agent.RunStartedSkill{Name: s.Name, Description: s.Description})
+	}
+	return out
+}
+
+// applyLegacyPromptOverrides keeps pre-skills jsonData prompt customizations
+// working: a configured investigationPrompt/performancePrompt replaces the
+// matching bundled skill's user-prompt template — but only until the admin
+// manages that skill through the Skills tab (any entry for it exists), which
+// takes precedence so the override can be changed or cleared there.
+func applyLegacyPromptOverrides(registry *skills.Registry, settings PluginSettings, logger log.Logger) {
+	legacyFields := map[string]string{
+		skills.TypeSkillNames["investigation"]: settings.InvestigationPrompt,
+		skills.TypeSkillNames["performance"]:   settings.PerformancePrompt,
+	}
+	for skillName, legacyPrompt := range legacyFields {
+		if legacyPrompt == "" {
+			continue
+		}
+		if registry.HasEntry(skillName) {
+			logger.Info("Legacy prompt field ignored — skill is managed in the Skills tab", "skill", skillName)
+			continue
+		}
+		if err := registry.SetUserPromptOverride(skillName, legacyPrompt); err != nil {
+			logger.Warn("Legacy prompt override not applied — edit the skill in the Skills tab instead", "skill", skillName, "error", err)
+		}
+	}
 }
 
 func (p *Plugin) handleAgentEvals(w http.ResponseWriter, r *http.Request) {

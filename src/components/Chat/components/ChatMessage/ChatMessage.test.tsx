@@ -8,16 +8,21 @@ import { ChatMessage } from './ChatMessage';
 import { ChatMessage as ChatMessageType } from '../../types';
 
 // Mock Grafana UI
+const mockTheme = {
+  isDark: false,
+  colors: {
+    text: { primary: '#000', secondary: '#666', disabled: '#999' },
+    background: { primary: '#fff', secondary: '#f5f5f5' },
+    border: { weak: '#ddd' },
+    primary: { main: '#7c3aed' },
+  },
+  spacing: (factor: number) => `${factor * 8}px`,
+  shape: { radius: { pill: '999px' } },
+};
+
 jest.mock('@grafana/ui', () => ({
-  useTheme2: () => ({
-    isDark: false,
-    colors: {
-      text: { primary: '#000', secondary: '#666', disabled: '#999' },
-      background: { primary: '#fff', secondary: '#f5f5f5' },
-      border: { weak: '#ddd' },
-      primary: { main: '#7c3aed' },
-    },
-  }),
+  useTheme2: () => mockTheme,
+  useStyles2: (getStyles: (theme: any) => any) => getStyles(mockTheme),
   Button: ({ children, disabled, onClick, 'data-testid': dataTestId }: any) => (
     <button disabled={disabled} onClick={onClick} data-testid={dataTestId}>
       {children}

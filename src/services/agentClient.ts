@@ -3,6 +3,8 @@ import { pluginUrl } from '../utils/subpath';
 export interface AgentRunRequest {
   message: string;
   type?: 'chat' | 'investigation' | 'performance';
+  /** Skill names to explicitly activate for this run (empty = auto). */
+  skills?: string[];
   sessionId?: string;
   model?: 'base' | 'large';
 
@@ -49,9 +51,16 @@ export interface ErrorEvent {
   retryable?: boolean;
 }
 
+/** A skill active for the run, carried by the run_started event. */
+export interface RunStartedSkill {
+  name: string;
+  description: string;
+}
+
 export interface RunStartedEvent {
   runId: string;
   sessionId?: string;
+  skills?: RunStartedSkill[];
 }
 
 export interface MCPUnavailableEvent {

@@ -1,10 +1,12 @@
 package plugin
 
 import (
-	"bytes"
 	"fmt"
 	"log"
+	"strings"
 	"text/template"
+
+	"consensys-asko11y-app/pkg/skills"
 )
 
 type ToolInfo struct {
@@ -19,15 +21,19 @@ type PromptContext struct {
 	AlertName string
 	Target    string
 
+	// Message is the raw user message for this run, available to skill
+	// templates alongside AlertName/Target.
+	Message string
+
 	// ConversationType matches the agent request type: "", chat, investigation, performance.
-	// Used to append mode-specific system instructions (e.g. tighter tool discipline for investigations).
+	// Kept for the legacy request contract and session titling.
 	ConversationType string
 
 	// IsAlertInvestigation mirrors resolveMaxIterations' isAlertInvestigation
 	// check (reqType == "investigation" OR the message looks like a firing-alert
-	// notification pasted into chat). Gates DefaultInvestigationModeSystemAddendum
-	// so a request that gets the bigger iteration budget always also gets the
-	// efficiency guardrails that keep it fast — see isAlertInvestigation's comment.
+	// notification pasted into chat). See iteration_budget.go's comment for the
+	// production incident that tied these conditions together. Skill bodies
+	// now carry the guardrails; this flag remains available to templates.
 	IsAlertInvestigation bool
 
 	AvailableTools []ToolInfo
@@ -50,12 +56,24 @@ type PromptContext struct {
 	// there are no Prometheus datasources, or the snapshot hasn't finished its
 	// background refresh yet (see metricNamespaceSnapshot).
 	MetricNamespaceSnapshot string
+
+	// ActiveSkills are the skills activated for this run (explicit selection,
+	// legacy type mapping, or trigger match). Their bodies are injected into
+	// the system prompt.
+	ActiveSkills []*skills.Skill
+
+	// SkillsCatalog lists the enabled public skills that were NOT activated,
+	// advertised in the system prompt for on-demand loading via load_skill.
+	SkillsCatalog []*skills.Skill
+
+	// UserPromptSkill is the skill whose user-prompt template wraps the first
+	// user message (set only by the legacy type mapping, preserving the
+	// ?type=investigation deep-link contract).
+	UserPromptSkill *skills.Skill
 }
 
 type PromptRegistry struct {
 	systemTemplate           *template.Template
-	investigationTemplate    *template.Template
-	performanceTemplate      *template.Template
 	toolInstructionsTemplate *template.Template
 }
 
@@ -64,14 +82,6 @@ func NewPromptRegistry(settings PluginSettings) (*PromptRegistry, error) {
 
 	var err error
 	registry.systemTemplate, err = parseTemplateWithFallback("system", settings.DefaultSystemPrompt, DefaultSystemPrompt)
-	if err != nil {
-		return nil, err
-	}
-	registry.investigationTemplate, err = parseTemplateWithFallback("investigation", settings.InvestigationPrompt, DefaultInvestigationPrompt)
-	if err != nil {
-		return nil, err
-	}
-	registry.performanceTemplate, err = parseTemplateWithFallback("performance", settings.PerformancePrompt, DefaultPerformancePrompt)
 	if err != nil {
 		return nil, err
 	}
@@ -115,12 +125,35 @@ func (r *PromptRegistry) BuildSystemPrompt(ctx PromptContext) (string, error) {
 		return "", err
 	}
 	out := system + tools
-	if ctx.IsAlertInvestigation {
-		out += "\n\n---\n\n" + DefaultInvestigationModeSystemAddendum
+
+	if len(ctx.ActiveSkills) > 0 {
+		var b strings.Builder
+		b.WriteString("\n\n---\n\n## Active skills\n\nThe following skills are active for this request — follow their instructions.\n")
+		for _, s := range ctx.ActiveSkills {
+			body, err := s.RenderBody(ctx)
+			if err != nil {
+				return "", fmt.Errorf("failed to render active skill %s: %w", s.Name, err)
+			}
+			b.WriteString("\n### " + s.Name + "\n\n" + body + "\n")
+		}
+		out += b.String()
 	}
+
+	if len(ctx.SkillsCatalog) > 0 {
+		var b strings.Builder
+		b.WriteString("\n\n---\n\n## Available skills\n\nThe `load_skill` tool loads a skill's full instructions. When the task matches a skill below, call `load_skill` with its name before proceeding.\n")
+		for _, s := range ctx.SkillsCatalog {
+			b.WriteString("\n- **" + s.Name + "**: " + s.Description)
+		}
+		out += b.String()
+	}
+
 	return out, nil
 }
 
+// BuildUserPrompt wraps the user message with the legacy type's skill
+// user-prompt template (investigation/performance deep-link contract), or
+// passes the message through verbatim for chat.
 func (r *PromptRegistry) BuildUserPrompt(convType, message string, ctx PromptContext) (string, error) {
 	switch convType {
 	case "investigation":
@@ -128,21 +161,29 @@ func (r *PromptRegistry) BuildUserPrompt(convType, message string, ctx PromptCon
 		if ctx.AlertName == "" {
 			return "", fmt.Errorf("investigation type requires alertName")
 		}
-		return renderTemplate(r.investigationTemplate, "investigation prompt", ctx)
 
 	case "performance":
 		ctx.Target = extractTargetForTitle(message)
 		if ctx.Target == "" {
 			ctx.Target = message
 		}
-		return renderTemplate(r.performanceTemplate, "performance prompt", ctx)
 
 	case "chat", "":
-		return message, nil
 
 	default:
 		return "", fmt.Errorf("unknown conversation type: %s", convType)
 	}
+
+	if ctx.UserPromptSkill != nil {
+		rendered, err := ctx.UserPromptSkill.RenderUserPrompt(ctx)
+		if err != nil {
+			return "", fmt.Errorf("failed to render %s user prompt: %w", ctx.UserPromptSkill.Name, err)
+		}
+		if rendered != "" {
+			return rendered, nil
+		}
+	}
+	return message, nil
 }
 
 func renderTemplate(t *template.Template, name string, data interface{}) (result string, err error) {
@@ -152,7 +193,7 @@ func renderTemplate(t *template.Template, name string, data interface{}) (result
 			err = fmt.Errorf("template panic in %s: %v", name, r)
 		}
 	}()
-	var buf bytes.Buffer
+	var buf strings.Builder
 	if execErr := t.Execute(&buf, data); execErr != nil {
 		return "", fmt.Errorf("failed to render %s: %w", name, execErr)
 	}

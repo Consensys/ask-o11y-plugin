@@ -48,6 +48,8 @@ RUN sed -i '/\[tool\.uv\.sources\]/,/graphiti-core/d' pyproject.toml \
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --no-group dev
 
+RUN pip install --no-cache-dir py-spy
+
 RUN groupadd --system --gid 1000 graphiti \
     && useradd --system --uid 1000 --gid graphiti --home-dir /tmp --shell /usr/sbin/nologin graphiti \
     && cp /root/.local/bin/uv /usr/local/bin/uv \

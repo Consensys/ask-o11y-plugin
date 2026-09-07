@@ -28,6 +28,7 @@ import {
   type LLMModelOption,
   type LLMModelSelection,
 } from '../../services/llmModels';
+import { listSkills, toSkillCommands, type SkillCommand } from '../../services/skillsClient';
 
 interface ChatProps {
   pluginSettings: AppPluginSettings;
@@ -35,6 +36,7 @@ interface ChatProps {
   initialSession?: { id?: string; messages?: ChatMessage[] };
   initialMessage?: string;
   initialMessageType?: 'chat' | 'investigation' | 'performance';
+  initialSkill?: string;
   sessionIdFromUrl: string | null;
   onSessionIdChange: (sessionId: string | null) => void;
 }
@@ -45,6 +47,7 @@ function ChatComponent({
   initialSession,
   initialMessage,
   initialMessageType,
+  initialSkill,
   sessionIdFromUrl,
   onSessionIdChange,
 }: ChatProps): React.ReactElement | null {
@@ -52,6 +55,7 @@ function ChatComponent({
   const allowEmbedding = useEmbeddingAllowed();
   const [modelOptions, setModelOptions] = useState<LLMModelOption[]>([]);
   const [selectedModel, setSelectedModel] = useState<LLMModelSelection>('auto');
+  const [skillCommands, setSkillCommands] = useState<SkillCommand[]>([]);
 
   const kioskModeEnabled = pluginSettings?.kioskModeEnabled ?? true;
   const chatPanelPosition = pluginSettings?.chatPanelPosition || 'right';
@@ -71,10 +75,21 @@ function ChatComponent({
           setModelOptions([]);
         }
       });
+    listSkills()
+      .then((skills) => {
+        if (!cancelled) {
+          setSkillCommands(toSkillCommands(skills));
+        }
+      })
+      .catch(() => {
+        // Skills are optional; the slash menu simply stays hidden.
+      });
     return () => {
       cancelled = true;
     };
   }, []);
+
+  const skillNames = useMemo(() => skillCommands.map((command) => command.name), [skillCommands]);
 
   const {
     chatHistory,
@@ -100,7 +115,9 @@ function ChatComponent({
     readOnly,
     initialMessage,
     initialMessageType,
-    selectedModel
+    selectedModel,
+    initialSkill,
+    skillNames
   );
 
   const chatInputRef = useRef<ChatInputRef>(null);
@@ -127,12 +144,15 @@ function ChatComponent({
 
   useKeyboardNavigation(containerRef);
 
-  const handleSuggestionClick = useCallback((message: string) => {
-    setCurrentInput(message);
-    setTimeout(() => {
-      chatInputRef.current?.focus();
-    }, 100);
-  }, [setCurrentInput]);
+  const handleSuggestionClick = useCallback(
+    (message: string, skill?: string) => {
+      setCurrentInput(skill ? `/${skill} ${message}` : message);
+      setTimeout(() => {
+        chatInputRef.current?.focus();
+      }, 100);
+    },
+    [setCurrentInput]
+  );
 
   const currentSession = sessionManager.sessions.find((s: SessionMetadata) => s.id === sessionManager.currentSessionId);
   const currentSessionTitle = currentSession?.title;
@@ -178,7 +198,9 @@ function ChatComponent({
           <NewChatButton onConfirm={clearChat} isGenerating={isGenerating} />
           {modelSelector}
         </div>
-      ) : modelSelector,
+      ) : (
+        modelSelector
+      ),
       rightSlot: (
         <div className="flex items-center gap-1">
           {graphitiEnabled && hasMessages && <SaveToMemoryButton messages={chatHistory} />}
@@ -187,6 +209,7 @@ function ChatComponent({
         </div>
       ),
       readOnly,
+      skillCommands,
       onSuggestionClick: handleSuggestionClick,
       queuedMessageCount: messageQueue.length,
       onStopGeneration: stopGeneration,
@@ -208,6 +231,7 @@ function ChatComponent({
       bottomSpacerRef,
       hasMessages,
       modelSelector,
+      skillCommands,
       graphitiEnabled,
       clearChat,
       openHistory,

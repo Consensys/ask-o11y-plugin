@@ -22,16 +22,17 @@ import { mcp } from '@grafana/llm';
 import { testIds } from '../testIds';
 import { ValidationService } from '../../services/validation';
 import { PromptEditor } from './PromptEditor';
+import { SkillsTab } from './SkillsTab';
 import { ManageToolsModal } from './ManageToolsModal';
 import { ExternalMCPs } from './ExternalMCPs';
 import { mcpServerStatusService, type MCPServerStatus, type MCPTool } from '../../services/mcpServerStatus';
-import type { AppPluginSettings, MCPServerConfig } from '../../types/plugin';
+import type { AppPluginSettings, MCPServerConfig, SkillEntry } from '../../types/plugin';
 import { AgentTopologyResponse, getAgentTopology } from '../../services/agentTopologyClient';
 import { ServiceGraphScene } from '../ServiceGraph/ServiceGraphScene';
 import { getPluginStorageKey } from '../../utils/storageKeys';
 
 type ServerStatusKind = MCPServerStatus['status'];
-type SettingsTab = 'general' | 'agent-runtime' | 'mcp' | 'service-graph' | 'prompts';
+type SettingsTab = 'general' | 'agent-runtime' | 'mcp' | 'service-graph' | 'skills' | 'prompts';
 type MCPServerType = NonNullable<MCPServerConfig['type']>;
 
 const STATUS_LABELS: Record<ServerStatusKind, string> = {
@@ -95,8 +96,6 @@ type State = {
   kioskModeEnabled: boolean;
   chatPanelPosition: 'left' | 'right';
   defaultSystemPrompt: string;
-  investigationPrompt: string;
-  performancePrompt: string;
   graphitiScanInterval: string;
   graphitiConnected: boolean | null;
   graphitiDiscovering: boolean;
@@ -140,6 +139,7 @@ const SETTINGS_TABS: Array<{ id: SettingsTab; label: string; icon: React.Compone
   { id: 'agent-runtime', label: 'Agent Runtime', icon: 'ai' },
   { id: 'mcp', label: 'MCP', icon: 'plug' },
   { id: 'service-graph', label: 'Service Graph', icon: 'sitemap' },
+  { id: 'skills', label: 'Skills', icon: 'layer-group' },
   { id: 'prompts', label: 'Prompts', icon: 'comment-alt-message' },
 ];
 
@@ -275,8 +275,6 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
     kioskModeEnabled: jsonData?.kioskModeEnabled ?? true,
     chatPanelPosition: jsonData?.chatPanelPosition || 'right',
     defaultSystemPrompt: jsonData?.defaultSystemPrompt || '',
-    investigationPrompt: jsonData?.investigationPrompt || '',
-    performancePrompt: jsonData?.performancePrompt || '',
     graphitiScanInterval: jsonData?.graphitiScanInterval || 'off',
     graphitiConnected: null,
     graphitiDiscovering: false,
@@ -346,8 +344,6 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
         ...prev,
         builtInMCPAvailable: available,
         defaultSystemPrompt: prev.defaultSystemPrompt || defaults?.defaultSystemPrompt || '',
-        investigationPrompt: prev.investigationPrompt || defaults?.investigationPrompt || '',
-        performancePrompt: prev.performancePrompt || defaults?.performancePrompt || '',
       }));
       if (defaults) {
         setPromptDefaults(defaults);
@@ -422,9 +418,10 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
         state.sessionTTLDays !== (savedJsonData.sessionTTLDays || DEFAULT_SESSION_TTL_DAYS) ||
         state.graphitiEpisodeTTLDays !== (savedJsonData.graphitiEpisodeTTLDays || DEFAULT_GRAPHITI_EPISODE_TTL_DAYS),
       prompts:
-        state.defaultSystemPrompt !== getPromptValue(savedJsonData, promptDefaults, 'defaultSystemPrompt') ||
-        state.investigationPrompt !== getPromptValue(savedJsonData, promptDefaults, 'investigationPrompt') ||
-        state.performancePrompt !== getPromptValue(savedJsonData, promptDefaults, 'performancePrompt'),
+        state.defaultSystemPrompt !== getPromptValue(savedJsonData, promptDefaults, 'defaultSystemPrompt'),
+      // Skills save immediately per action (like prompt editors), so the tab
+      // itself never carries unsaved state.
+      skills: false,
     };
   }, [deletedSecureKeys, promptDefaults, resetSecureKeys, savedJsonData, state]);
 
@@ -852,7 +849,7 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
     }
   }
 
-  function savePrompt(field: 'defaultSystemPrompt' | 'investigationPrompt' | 'performancePrompt', value: string) {
+  function savePrompt(field: 'defaultSystemPrompt', value: string) {
     if (value.length > 15000) {
       return;
     }
@@ -865,6 +862,30 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
       },
     });
   }
+
+  function saveSkillEntries(entries: Record<string, SkillEntry>) {
+    saveAndReload({
+      enabled,
+      pinned,
+      jsonData: {
+        ...savedJsonData,
+        skills: { entries },
+      },
+    });
+  }
+
+  // Pre-skills prompt fields still set in jsonData — they keep applying to
+  // their bundled skills until the admin manages those skills here.
+  const legacyPromptSkills = useMemo(() => {
+    const legacy: string[] = [];
+    if (savedJsonData.investigationPrompt) {
+      legacy.push('investigating-alerts');
+    }
+    if (savedJsonData.performancePrompt) {
+      legacy.push('analyzing-performance');
+    }
+    return legacy;
+  }, [savedJsonData.investigationPrompt, savedJsonData.performancePrompt]);
 
   function onSubmitLLMSettings() {
     if (isLLMSettingsDisabled || validationErrors.maxTotalTokens) {
@@ -1443,11 +1464,19 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
           </FieldSet>
         )}
 
+        {activeTab === 'skills' && (
+          <SkillsTab
+            savedEntries={savedJsonData.skills?.entries ?? {}}
+            onSaveEntries={saveSkillEntries}
+            legacyPromptSkills={legacyPromptSkills}
+          />
+        )}
+
         {activeTab === 'prompts' && promptDefaults && (
           <FieldSet label="Prompt Templates">
             <p className="text-sm text-secondary mb-3">
-              Customize the prompt templates used by the AI assistant. Templates use Go text/template syntax. Variables
-              like {'{{.AlertName}}'} and {'{{.Target}}'} are replaced at runtime.
+              Customize the base system prompt used across all conversations. Templates use Go text/template syntax.
+              Domain workflows live in skills — edit them in the Skills tab.
             </p>
 
             <PromptEditor
@@ -1457,24 +1486,6 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
               defaultValue={promptDefaults.defaultSystemPrompt}
               onSave={(value) => savePrompt('defaultSystemPrompt', value)}
               testIdPrefix={testIds.appConfig.promptEditor.system}
-            />
-
-            <PromptEditor
-              label="Investigation Prompt"
-              description="Template for alert investigation workflows. Use {{.AlertName}} for the alert name."
-              currentValue={state.investigationPrompt}
-              defaultValue={promptDefaults.investigationPrompt}
-              onSave={(value) => savePrompt('investigationPrompt', value)}
-              testIdPrefix={testIds.appConfig.promptEditor.investigation}
-            />
-
-            <PromptEditor
-              label="Performance Prompt"
-              description="Template for performance analysis workflows. Use {{.Target}} for the target system."
-              currentValue={state.performancePrompt}
-              defaultValue={promptDefaults.performancePrompt}
-              onSave={(value) => savePrompt('performancePrompt', value)}
-              testIdPrefix={testIds.appConfig.promptEditor.performance}
             />
           </FieldSet>
         )}

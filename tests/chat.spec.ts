@@ -19,11 +19,13 @@ test.describe('Chat', () => {
     await expect(page.getByText('Monitor user activity')).toBeVisible();
     await expect(page.getByText('Build a dashboard')).toBeVisible();
 
-    // Click suggestion populates input
+    // Click suggestion populates input with the bound slash command
     const chatInput = page.getByLabel('Chat input');
     await expect(chatInput).toHaveValue('');
     await page.getByText('Show me a graph of CPU usage').click();
-    await expect(chatInput).toHaveValue('Show me a graph of CPU usage over time');
+    await expect(chatInput).toHaveValue(
+      '/rendering-visualizations Show me a graph of CPU usage over time'
+    );
   });
 
   test('should send messages and transition to chat state', async ({ page }) => {
@@ -96,6 +98,7 @@ test.describe('Chat', () => {
 
   test('should have placeholder text', async ({ page }) => {
     const chatInput = page.getByLabel('Chat input');
-    await expect(chatInput).toHaveAttribute('placeholder', /Ask me anything about your metrics, logs, or observability/);
+    // With skills available the placeholder advertises the slash commands.
+    await expect(chatInput).toHaveAttribute('placeholder', /type \/ to pick a skill/);
   });
 });

@@ -114,15 +114,17 @@ test.describe('MCP Server Management', () => {
 });
 
 test.describe('Prompt Templates', () => {
-  test('should display all three prompt editors', async ({ appConfigPage, page }) => {
+  test('should display the base system prompt editor', async ({ appConfigPage, page }) => {
     void appConfigPage;
     await openSettingsTab(page, 'prompts');
 
     await expect(page.getByText('Prompt Templates', { exact: true })).toBeVisible();
 
     await expect(page.locator('[data-testid="ac-prompt-system-edit-button"]')).toBeVisible();
-    await expect(page.locator('[data-testid="ac-prompt-investigation-edit-button"]')).toBeVisible();
-    await expect(page.locator('[data-testid="ac-prompt-performance-edit-button"]')).toBeVisible();
+    // Domain workflows moved to skills; the investigation/performance
+    // editors were removed with the skills system.
+    await expect(page.locator('[data-testid="ac-prompt-investigation-edit-button"]')).toHaveCount(0);
+    await expect(page.locator('[data-testid="ac-prompt-performance-edit-button"]')).toHaveCount(0);
   });
 
   test('should open editor modal with working controls', async ({ appConfigPage, page }) => {

@@ -3,6 +3,7 @@ package plugin
 import (
 	"consensys-asko11y-app/pkg/agent"
 	"consensys-asko11y-app/pkg/mcp"
+	"consensys-asko11y-app/pkg/skills"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -36,6 +37,7 @@ func newAgentRunTestPlugin(t *testing.T) *Plugin {
 		approvalBroker: NewInMemoryApprovalBroker(),
 		approvalGrants: NewInMemoryApprovalGrantStore(),
 		promptRegistry: promptRegistry,
+		skillRegistry:  skills.NewRegistry(skills.Settings{}, logger),
 		settings: PluginSettings{
 			MaxTotalTokens:     agent.DefaultMaxTotalTokens,
 			RecentMessageCount: 10,
@@ -633,7 +635,7 @@ func TestReconstructAssistantMessage(t *testing.T) {
 }
 
 func TestHandlePromptDefaults(t *testing.T) {
-	p := &Plugin{logger: log.DefaultLogger}
+	p := &Plugin{logger: log.DefaultLogger, skillRegistry: skills.NewRegistry(skills.Settings{}, log.DefaultLogger)}
 
 	t.Run("GET returns all three defaults", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/api/prompt-defaults", nil)
@@ -658,11 +660,14 @@ func TestHandlePromptDefaults(t *testing.T) {
 		if body["defaultSystemPrompt"] != DefaultSystemPrompt {
 			t.Error("defaultSystemPrompt does not match Go constant")
 		}
-		if body["investigationPrompt"] != DefaultInvestigationPrompt {
-			t.Error("investigationPrompt does not match Go constant")
-		}
-		if body["performancePrompt"] != DefaultPerformancePrompt {
-			t.Error("performancePrompt does not match Go constant")
+		for key, skillName := range map[string]string{
+			"investigationPrompt": skills.TypeSkillNames["investigation"],
+			"performancePrompt":   skills.TypeSkillNames["performance"],
+		} {
+			s, ok := p.skillRegistry.Get(skillName)
+			if !ok || body[key] != s.UserPrompt {
+				t.Errorf("%s does not match the bundled skill user prompt", key)
+			}
 		}
 	})
 

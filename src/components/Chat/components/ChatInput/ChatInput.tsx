@@ -1,11 +1,15 @@
-import React, { forwardRef, useImperativeHandle, useRef, useEffect, useState, useCallback } from 'react';
+import React, { forwardRef, useImperativeHandle, useRef, useEffect, useState, useCallback, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import { Icon, Alert, useStyles2, useTheme2 } from '@grafana/ui';
 import { css, cx, keyframes } from '@emotion/css';
 import { GrafanaTheme2 } from '@grafana/data';
 import { ValidationService } from '../../../../services/validation';
 import { getHoverButtonStyle } from '../../../../theme';
+import { testIds } from '../../../testIds';
+import type { SkillCommand } from '../../../../services/skillsClient';
 
 const TEXTAREA_MAX_ROWS = 25;
+const MAX_SLASH_MENU_ITEMS = 8;
 
 interface ChatInputProps {
   currentInput: string;
@@ -17,12 +21,19 @@ interface ChatInputProps {
   leftSlot?: React.ReactNode;
   queuedMessageCount: number;
   onStopGeneration?: () => void;
+  /** Pickable skills offered as /name slash commands. */
+  skillCommands?: SkillCommand[];
 }
 
 export interface ChatInputRef {
   focus: () => void;
   clear: () => void;
 }
+
+/** Matches an unfinished slash command being typed: '/' plus name chars, no space yet. */
+const OPEN_SLASH_PATTERN = /^\/[a-z0-9-]*$/i;
+/** Matches a committed slash command: '/' plus a full name followed by whitespace or end. */
+const COMMITTED_SLASH_PATTERN = /^\/([a-z0-9-]+)(?:\s|$)/i;
 
 export const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(
   (
@@ -36,11 +47,20 @@ export const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(
       leftSlot,
       queuedMessageCount,
       onStopGeneration,
+      skillCommands = [],
     },
     ref
   ) => {
     const textareaRef = useRef<HTMLTextAreaElement>(null);
+    // The visible input box (gradient wrapper) anchors the slash menu.
+    const inputBoxRef = useRef<HTMLDivElement | null>(null);
+    const slashMenuRef = useRef<HTMLDivElement | null>(null);
     const [validationError, setValidationError] = useState<string | null>(null);
+    const [slashDismissed, setSlashDismissed] = useState(false);
+    const [activeSlashIndex, setActiveSlashIndex] = useState(0);
+    // Viewport coordinates for the portal-rendered menu (fixed positioning
+    // escapes the overflow:hidden wrappers around the chat input area).
+    const [menuAnchor, setMenuAnchor] = useState<{ bottom: number; left: number; width: number } | null>(null);
     const theme = useTheme2();
     const styles = useStyles2(getStyles);
     const isComposingRef = useRef(false);
@@ -80,6 +100,90 @@ export const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(
       }
     }, [autoResize, currentInput]);
 
+    // Re-open the menu whenever the slash token changes after a dismissal.
+    useEffect(() => {
+      setSlashDismissed(false);
+    }, [currentInput]);
+
+    const slashMatches = useMemo(() => {
+      if (skillCommands.length === 0 || slashDismissed || !OPEN_SLASH_PATTERN.test(currentInput)) {
+        return [];
+      }
+      const token = currentInput.slice(1).toLowerCase();
+      return skillCommands
+        .filter((command) => command.name.startsWith(token))
+        .slice(0, MAX_SLASH_MENU_ITEMS);
+    }, [skillCommands, slashDismissed, currentInput]);
+
+    useEffect(() => {
+      setActiveSlashIndex((prev) => Math.min(prev, Math.max(slashMatches.length - 1, 0)));
+    }, [slashMatches.length]);
+
+    const slashMenuOpen = slashMatches.length > 0;
+
+    // Measure the input box while the menu is open so the portal-rendered
+    // menu can float right above it. Re-measured on input changes (the
+    // textarea auto-resizes) and window resizes.
+    useEffect(() => {
+      if (!slashMenuOpen) {
+        setMenuAnchor(null);
+        return;
+      }
+      const measure = () => {
+        const box = inputBoxRef.current;
+        if (!box) {
+          return;
+        }
+        const rect = box.getBoundingClientRect();
+        setMenuAnchor({ bottom: window.innerHeight - rect.top + 8, left: rect.left, width: rect.width });
+      };
+      measure();
+      window.addEventListener('resize', measure);
+      return () => window.removeEventListener('resize', measure);
+    }, [slashMenuOpen, currentInput]);
+
+    // Dismiss when clicking outside the menu and the input.
+    useEffect(() => {
+      if (!slashMenuOpen) {
+        return;
+      }
+      const onPointerDown = (event: PointerEvent) => {
+        const target = event.target as Node | null;
+        if (!target) {
+          return;
+        }
+        if (slashMenuRef.current?.contains(target) || textareaRef.current?.contains(target)) {
+          return;
+        }
+        setSlashDismissed(true);
+      };
+      document.addEventListener('pointerdown', onPointerDown);
+      return () => document.removeEventListener('pointerdown', onPointerDown);
+    }, [slashMenuOpen]);
+
+    // A complete, known /skill token at the start of the input — show the
+    // activation chip once the command menu is no longer open.
+    const committedSkill = useMemo(() => {
+      if (skillCommands.length === 0 || slashMenuOpen) {
+        return null;
+      }
+      const match = currentInput.match(COMMITTED_SLASH_PATTERN);
+      const name = match?.[1]?.toLowerCase();
+      if (name && skillCommands.some((command) => command.name === name)) {
+        return name;
+      }
+      return null;
+    }, [skillCommands, slashMenuOpen, currentInput]);
+
+    const completeSlashCommand = useCallback(
+      (name: string) => {
+        setSlashDismissed(true);
+        setCurrentInput(`/${name} `);
+        textareaRef.current?.focus();
+      },
+      [setCurrentInput]
+    );
+
     const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
       const rawValue = e.target.value;
 
@@ -88,7 +192,7 @@ export const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(
         return;
       }
 
-      // Allow setting the value even if it's invalid (for better UX)
+      // Allow setting the value even if invalid (for better UX)
       setCurrentInput(rawValue);
 
       // Validate the input
@@ -113,7 +217,33 @@ export const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(
       sendMessage();
     };
 
-    const handleKeyDown = (e: React.KeyboardEvent) => {
+    const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+      if (slashMenuOpen) {
+        if (e.key === 'ArrowDown') {
+          e.preventDefault();
+          setActiveSlashIndex((prev) => (prev + 1) % slashMatches.length);
+          return;
+        }
+        if (e.key === 'ArrowUp') {
+          e.preventDefault();
+          setActiveSlashIndex((prev) => (prev - 1 + slashMatches.length) % slashMatches.length);
+          return;
+        }
+        if (e.key === 'Enter' || e.key === 'Tab') {
+          e.preventDefault();
+          const selected = slashMatches[activeSlashIndex];
+          if (selected) {
+            completeSlashCommand(selected.name);
+          }
+          return;
+        }
+        if (e.key === 'Escape') {
+          e.preventDefault();
+          setSlashDismissed(true);
+          return;
+        }
+      }
+
       if (e.key === 'Enter' && !e.shiftKey) {
         if (validationError) {
           e.preventDefault();
@@ -122,6 +252,11 @@ export const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(
         }
       }
     };
+
+    const placeholder =
+      skillCommands.length > 0
+        ? 'Ask anything about your metrics, logs, or traces — or type / to pick a skill…'
+        : 'Ask me anything about your metrics, logs, or observability...';
 
     return (
       <div className="relative">
@@ -133,9 +268,63 @@ export const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(
           </div>
         )}
 
+        {/* Slash command menu: portaled to the body with fixed positioning —
+            the overflow:hidden wrappers around the chat input area would clip
+            an in-flow menu floating above the input. Styling is entirely
+            emotion-based: the served Tailwind build does not include all
+            utilities (text-xs/truncate/fixed were missing). */}
+        {slashMenuOpen &&
+          menuAnchor &&
+          createPortal(
+            <div
+              ref={slashMenuRef}
+              className={styles.slashMenu}
+              style={{
+                position: 'fixed',
+                bottom: `${menuAnchor.bottom}px`,
+                left: `${menuAnchor.left}px`,
+                width: `${menuAnchor.width}px`,
+                maxHeight: `${Math.max(120, Math.min(280, menuAnchor.bottom - 16))}px`,
+                zIndex: 1000,
+              }}
+              role="listbox"
+              aria-label="Skill commands"
+              data-testid={testIds.chat.skillCommandMenu}
+            >
+              {slashMatches.map((command, index) => (
+                <button
+                  key={command.name}
+                  type="button"
+                  role="option"
+                  aria-selected={index === activeSlashIndex}
+                  className={cx(styles.slashItem, index === activeSlashIndex && styles.slashItemActive)}
+                  onMouseEnter={() => setActiveSlashIndex(index)}
+                  onClick={() => completeSlashCommand(command.name)}
+                  data-testid={testIds.chat.skillCommandItem(command.name)}
+                >
+                  <span className={styles.slashItemName}>/{command.name}</span>
+                  <span className={styles.slashItemDescription}>{command.description}</span>
+                </button>
+              ))}
+            </div>,
+            document.body
+          )}
+
         {/* Gradient border wrapper */}
-        <div className={cx(styles.gradientWrapper, styles.gradientGlow, validationError && 'opacity-50')}>
+        <div ref={inputBoxRef} className={cx(styles.gradientWrapper, styles.gradientGlow, validationError && 'opacity-50')}>
           <div className={cx(styles.gradientInner, 'px-5 py-4')}>
+            {committedSkill && (
+              <div className="flex items-center gap-2 mb-2" aria-label="Skill will be activated">
+                <span
+                  data-testid={testIds.chat.activeSkillHint(committedSkill)}
+                  className={styles.skillChip}
+                >
+                  <Icon name="layer-group" size="xs" />
+                  Skill: {committedSkill}
+                </span>
+              </div>
+            )}
+
             <textarea
               ref={textareaRef}
               defaultValue={currentInput}
@@ -148,7 +337,7 @@ export const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(
                 isComposingRef.current = false;
                 handleInputChange(e as any);
               }}
-              placeholder="Ask me anything about your metrics, logs, or observability..."
+              placeholder={placeholder}
               rows={1}
               className={cx(
                 'w-full resize-none bg-transparent border-0 text-base placeholder-secondary focus:outline-none focus:ring-0',
@@ -291,6 +480,61 @@ const getStyles = (theme: GrafanaTheme2) => {
     textarea: css({
       minHeight: theme.spacing(3.5),
       maxHeight: theme.spacing(TEXTAREA_MAX_ROWS),
+    }),
+    slashMenu: css({
+      backgroundColor: theme.colors.background.primary,
+      border: `1px solid ${theme.colors.border.weak}`,
+      borderRadius: theme.shape.radius.default,
+      boxShadow: theme.shadows.z3,
+      overflowY: 'auto',
+      overflowX: 'hidden',
+    }),
+    slashItem: css({
+      display: 'block',
+      width: '100%',
+      textAlign: 'left',
+      padding: `${theme.spacing(1)} ${theme.spacing(1.5)}`,
+      background: 'transparent',
+      border: 0,
+      cursor: 'pointer',
+      '& + button': {
+        borderTop: `1px solid ${theme.colors.border.weak}`,
+      },
+    }),
+    slashItemActive: css({
+      backgroundColor: theme.colors.action.hover,
+    }),
+    slashItemName: css({
+      display: 'block',
+      fontFamily: theme.typography.fontFamilyMonospace,
+      fontSize: theme.typography.bodySmall.fontSize,
+      fontWeight: 500,
+      color: theme.colors.text.primary,
+      whiteSpace: 'nowrap',
+      overflow: 'hidden',
+      textOverflow: 'ellipsis',
+    }),
+    slashItemDescription: css({
+      display: 'block',
+      marginTop: 2,
+      fontSize: 12,
+      lineHeight: 1.4,
+      color: theme.colors.text.secondary,
+      whiteSpace: 'nowrap',
+      overflow: 'hidden',
+      textOverflow: 'ellipsis',
+    }),
+    skillChip: css({
+      display: 'inline-flex',
+      alignItems: 'center',
+      gap: theme.spacing(0.5),
+      padding: `${theme.spacing(0.25)} ${theme.spacing(1)}`,
+      borderRadius: theme.shape.radius.pill,
+      fontSize: 12,
+      fontWeight: 500,
+      backgroundColor: theme.colors.background.secondary,
+      border: `1px solid ${theme.colors.border.weak}`,
+      color: theme.colors.text.secondary,
     }),
     hoverButton: getHoverButtonStyle(theme),
   };

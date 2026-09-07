@@ -164,17 +164,38 @@ type ErrorEvent struct {
 }
 
 type RunRequest struct {
-	Message    string `json:"message"`
-	Type       string `json:"type,omitempty"`
-	SessionID  string `json:"sessionId,omitempty"`
-	OrgName    string `json:"orgName,omitempty"`
-	ScopeOrgID string `json:"scopeOrgId,omitempty"`
+	Message    string   `json:"message"`
+	Type       string   `json:"type,omitempty"`
+	Skills     []string `json:"skills,omitempty"`
+	SessionID  string   `json:"sessionId,omitempty"`
+	OrgName    string   `json:"orgName,omitempty"`
+	ScopeOrgID string   `json:"scopeOrgId,omitempty"`
+}
+
+// RunStartedSkill is one skill active for the run, surfaced in the
+// run_started event so the UI can show skill chips on the message.
+type RunStartedSkill struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
 }
 
 type RunStartedEvent struct {
-	RunID     string `json:"runId"`
-	SessionID string `json:"sessionId,omitempty"`
+	RunID     string            `json:"runId"`
+	SessionID string            `json:"sessionId,omitempty"`
+	Skills    []RunStartedSkill `json:"skills,omitempty"`
 }
+
+// SkillSpec is one catalog entry advertised to the model through the
+// load_skill tool description and the system prompt's Available skills
+// section (progressive-disclosure level 1: metadata only).
+type SkillSpec struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+}
+
+// SkillLoader loads a skill's instructions (or one of its reference files)
+// for the internal load_skill tool. Implemented over the skills registry.
+type SkillLoader func(ctx context.Context, skill, file string) (string, error)
 
 func MarshalSSE(event SSEEvent) ([]byte, error) {
 	data, err := json.Marshal(event)

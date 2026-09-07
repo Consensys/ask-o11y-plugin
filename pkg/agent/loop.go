@@ -32,6 +32,12 @@ const nearLimitWarning = "[SYSTEM: You are approaching the iteration limit. Prod
 // this the run ends with a clean, retryable error instead of spinning.
 const maxTruncationRetries = 1
 
+// loadSkillToolName is the internal (non-MCP) tool the loop advertises when
+// a skill catalog is available. It is intercepted before MCP dispatch and
+// never reaches the proxy — loading instructions is read-only and
+// role-agnostic, so it bypasses RBAC by design.
+const loadSkillToolName = "load_skill"
+
 // Eviction-summary tunables: evictStaleToolResults calls out to the cheap
 // "base" model once per stale tool result to compress it before dropping the
 // raw content — see summarizeForEviction.
@@ -69,6 +75,20 @@ type LoopRequest struct {
 	Model              string
 	AllowModelFallback bool
 	ConversationType   string
+
+	// RunID/SessionID identify the run for the run_started SSE event (which
+	// carries the active-skill metadata for the UI). Empty RunID (internal
+	// Scout/discovery runs) suppresses the event.
+	RunID            string
+	SessionID        string
+	ActiveSkillsEvent []RunStartedSkill
+
+	// AvailableSkills is the load_skill catalog: enabled public skills that
+	// were not force-activated. When non-empty (and LoadSkill is set) the
+	// loop advertises the internal load_skill tool so the model can pull a
+	// skill's instructions on demand.
+	AvailableSkills []SkillSpec
+	LoadSkill       SkillLoader
 
 	GrafanaURL string
 	AuthToken  string
@@ -130,8 +150,22 @@ func (a *AgentLoop) Run(ctx context.Context, req LoopRequest, eventCh chan<- SSE
 		mcpTools = filtered
 	}
 	openAITools := ConvertMCPToolsToOpenAI(mcpTools)
+	if len(req.AvailableSkills) > 0 && req.LoadSkill != nil {
+		openAITools = append(openAITools, loadSkillToolSpec(req.AvailableSkills))
+	}
 
 	messages := BuildContextWindow(req.SystemPrompt, req.Messages, req.Summary, req.RecentMessageCount)
+
+	if req.RunID != "" {
+		a.send(ctx, eventCh, SSEEvent{
+			Type: "run_started",
+			Data: RunStartedEvent{
+				RunID:     req.RunID,
+				SessionID: req.SessionID,
+				Skills:    req.ActiveSkillsEvent,
+			},
+		})
+	}
 
 	// Per-run state for transport-failure aggregation. We emit at most one
 	// mcp_unavailable event per run, once at least 2 distinct tools have hit
@@ -348,7 +382,14 @@ func (a *AgentLoop) Run(ctx context.Context, req LoopRequest, eventCh chan<- SSE
 				},
 			})
 
-			toolContent, isError, errorKind := a.executeToolWithApproval(ctx, eventCh, tc, req)
+			var toolContent string
+		var isError bool
+		var errorKind string
+		if tc.Function.Name == loadSkillToolName && req.LoadSkill != nil {
+			toolContent, isError, errorKind = a.executeLoadSkill(ctx, tc, req)
+		} else {
+			toolContent, isError, errorKind = a.executeToolWithApproval(ctx, eventCh, tc, req)
+		}
 
 			a.send(ctx, eventCh, SSEEvent{
 				Type: "tool_call_result",
@@ -398,19 +439,19 @@ func (a *AgentLoop) Run(ctx context.Context, req LoopRequest, eventCh chan<- SSE
 					},
 				})
 			}
-			if !isError {
-				a.send(ctx, eventCh, SSEEvent{
-					Type: "evidence",
-					Data: EvidenceEvent{
-						ID:       tc.ID,
-						Title:    evidenceTitle(tc.Function.Name),
-						Summary:  summarizeToolEvidence(toolContent),
-						Source:   "mcp",
-						ToolName: tc.Function.Name,
-						Query:    extractEvidenceQuery(tc.Function.Arguments),
-					},
-				})
-			}
+		if !isError && tc.Function.Name != loadSkillToolName {
+			a.send(ctx, eventCh, SSEEvent{
+				Type: "evidence",
+				Data: EvidenceEvent{
+					ID:       tc.ID,
+					Title:    evidenceTitle(tc.Function.Name),
+					Summary:  summarizeToolEvidence(toolContent),
+					Source:   "mcp",
+					ToolName: tc.Function.Name,
+					Query:    extractEvidenceQuery(tc.Function.Arguments),
+				},
+			})
+		}
 		}
 
 	}
@@ -703,6 +744,58 @@ func (a *AgentLoop) executeToolWithApproval(ctx context.Context, eventCh chan<- 
 	}
 
 	return a.executeTool(ctx, tc, req)
+}
+
+// executeLoadSkill serves the internal load_skill tool: it pulls a skill's
+// instructions (or one of its reference files) from the registry. Errors are
+// returned as tool errors for the model to react to.
+func (a *AgentLoop) executeLoadSkill(ctx context.Context, tc ToolCall, req LoopRequest) (content string, isError bool, errorKind string) {
+	var args struct {
+		Skill string `json:"skill"`
+		File  string `json:"file,omitempty"`
+	}
+	if err := json.Unmarshal([]byte(tc.Function.Arguments), &args); err != nil {
+		return fmt.Sprintf("Invalid load_skill arguments: %v", err), true, "tool"
+	}
+	if args.Skill == "" {
+		return "load_skill requires a 'skill' argument", true, "tool"
+	}
+	loaded, err := req.LoadSkill(ctx, args.Skill, args.File)
+	if err != nil {
+		return fmt.Sprintf("load_skill failed: %v", err), true, "tool"
+	}
+	return loaded, false, ""
+}
+
+// loadSkillToolSpec builds the OpenAI tool definition for load_skill. The
+// description names the catalog so the model can match the task to a skill
+// without loading any body up front (progressive disclosure level 1).
+func loadSkillToolSpec(specs []SkillSpec) OpenAITool {
+	names := make([]string, 0, len(specs))
+	for _, s := range specs {
+		names = append(names, s.Name)
+	}
+	return OpenAITool{
+		Type: "function",
+		Function: OpenAIFunction{
+			Name:        loadSkillToolName,
+			Description: "Loads an agent skill's specialized instructions into the conversation. Call this before proceeding when the task matches one of the available skills. Available skills: " + strings.Join(names, ", "),
+			Parameters: map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"skill": map[string]interface{}{
+						"type":        "string",
+						"description": "Name of the skill to load, from the available skills list",
+					},
+					"file": map[string]interface{}{
+						"type":        "string",
+						"description": "Optional reference file inside the skill (e.g. references/logql.md); omit to load the skill's main instructions",
+					},
+				},
+				"required": []string{"skill"},
+			},
+		},
+	}
 }
 
 func approvalPolicyEnabled(policy string) bool {

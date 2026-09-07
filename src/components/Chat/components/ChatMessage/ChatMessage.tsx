@@ -1,7 +1,9 @@
 import React from 'react';
 import DOMPurify from 'dompurify';
 import { marked } from 'marked';
-import { Alert, Button, Icon, useTheme2 } from '@grafana/ui';
+import { css } from '@emotion/css';
+import { GrafanaTheme2 } from '@grafana/data';
+import { Alert, Button, Icon, useStyles2, useTheme2 } from '@grafana/ui';
 import { testIds } from '../../../testIds';
 import { ToolCallsSection } from '../ToolCallsSection/ToolCallsSection';
 import { GraphRenderer } from '../GraphRenderer/GraphRenderer';
@@ -211,6 +213,7 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
   onRetry,
 }) => {
   const theme = useTheme2();
+  const skillChipStyles = useStyles2(getSkillChipStyles);
   const showThinking = message.role === 'assistant' && isGenerating && isLastMessage && !message.content;
   const isUser = message.role === 'user';
 
@@ -241,6 +244,21 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
     <div className="flex w-full mb-6 animate-fadeIn" role="article" aria-label="Assistant message">
       <div className="w-full max-w-none" tabIndex={0}>
         <span className="sr-only">Assistant message</span>
+        {message.skills && message.skills.length > 0 && (
+          <div className="flex flex-wrap gap-2 mb-3" aria-label="Active skills">
+            {message.skills.map((skill) => (
+              <span
+                key={skill.name}
+                data-testid={testIds.chat.skillChip(skill.name)}
+                title={skill.description}
+                className={skillChipStyles}
+              >
+                <Icon name="layer-group" size="xs" />
+                {skill.name}
+              </span>
+            ))}
+          </div>
+        )}
         {message.toolCalls && message.toolCalls.length > 0 && (
           <div className="mb-4">
             <ToolCallsSection toolCalls={message.toolCalls} />
@@ -321,3 +339,16 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
     </div>
   );
 };
+
+const getSkillChipStyles = (theme: GrafanaTheme2) => css`
+  display: inline-flex;
+  align-items: center;
+  gap: ${theme.spacing(0.5)};
+  padding: ${theme.spacing(0.25)} ${theme.spacing(1)};
+  border-radius: ${theme.shape.radius.pill};
+  font-size: 12px;
+  font-weight: 500;
+  background-color: ${theme.colors.background.secondary};
+  border: 1px solid ${theme.colors.border.weak};
+  color: ${theme.colors.text.secondary};
+`;

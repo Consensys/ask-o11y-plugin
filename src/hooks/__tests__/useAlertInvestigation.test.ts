@@ -101,3 +101,55 @@ describe('useAlertInvestigation', () => {
     });
   });
 });
+
+describe('useAlertInvestigation skill param', () => {
+  it('returns a validated skill without entering investigation mode', () => {
+    const { result } = renderHook(() => useAlertInvestigation(), {
+      wrapper: createWrapper('?skill=analyzing-cloudwatch'),
+    });
+
+    expect(result.current.isInvestigationMode).toBe(false);
+    expect(result.current.initialSkill).toBe('analyzing-cloudwatch');
+    expect(result.current.initialMessage).toBeNull();
+    expect(result.current.error).toBeNull();
+  });
+
+  it('combines the skill param with the legacy investigation deep link', () => {
+    const { result } = renderHook(() => useAlertInvestigation(), {
+      wrapper: createWrapper('?type=investigation&alertName=HighErrorRate&skill=investigating-alerts'),
+    });
+
+    expect(result.current.isInvestigationMode).toBe(true);
+    expect(result.current.initialMessage).toBe('alertName:HighErrorRate');
+    expect(result.current.initialMessageType).toBe('investigation');
+    expect(result.current.initialSkill).toBe('investigating-alerts');
+  });
+
+  it('ignores an invalid skill name', () => {
+    const { result } = renderHook(() => useAlertInvestigation(), {
+      wrapper: createWrapper('?skill=Not_A_Valid_Skill'),
+    });
+
+    expect(result.current.initialSkill).toBeNull();
+    expect(result.current.isInvestigationMode).toBe(false);
+  });
+
+  it('ignores an over-long skill name', () => {
+    const longName = 'a'.repeat(65);
+    const { result } = renderHook(() => useAlertInvestigation(), {
+      wrapper: createWrapper(`?skill=${longName}`),
+    });
+
+    expect(result.current.initialSkill).toBeNull();
+  });
+
+  it('stays inactive for a skill param that is a valid pattern but unknown name', () => {
+    // Name-existence is validated by the backend against the registry.
+    const { result } = renderHook(() => useAlertInvestigation(), {
+      wrapper: createWrapper('?skill=some-unknown-skill'),
+    });
+
+    expect(result.current.initialSkill).toBe('some-unknown-skill');
+    expect(result.current.error).toBeNull();
+  });
+});
