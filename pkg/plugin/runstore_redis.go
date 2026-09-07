@@ -15,26 +15,44 @@ import (
 )
 
 type RedisRunStore struct {
-	client       *redis.Client
-	logger       log.Logger
-	mu           sync.RWMutex
-	broadcasters map[string]*RunBroadcaster
-	ctx          context.Context
+	client        *redis.Client
+	logger        log.Logger
+	mu            sync.RWMutex
+	subscriptions map[string]*runSubscription
+	ctx           context.Context
 }
 
-func runKey(runID string) string      { return fmt.Sprintf("run:%s", runID) }
-func eventsKey(runID string) string   { return fmt.Sprintf("run:%s:events", runID) }
-func sequenceKey(runID string) string { return fmt.Sprintf("run:%s:sequence", runID) }
+type runSubscription struct {
+	broadcaster *RunBroadcaster
+	pubsub      *redis.PubSub
+	cancel      context.CancelFunc
+	refs        int
+}
+
+type runStreamMessage struct {
+	Kind  string          `json:"kind"`
+	Event *agent.SSEEvent `json:"event,omitempty"`
+}
+
+const (
+	runStreamKindEvent    = "event"
+	runStreamKindFinished = "finished"
+)
+
+func runKey(runID string) string        { return fmt.Sprintf("run:%s", runID) }
+func eventsKey(runID string) string     { return fmt.Sprintf("run:%s:events", runID) }
+func sequenceKey(runID string) string   { return fmt.Sprintf("run:%s:sequence", runID) }
+func runChannelKey(runID string) string { return fmt.Sprintf("run:%s:channel", runID) }
 func runIndexKey(userID, orgID int64) string {
 	return fmt.Sprintf("runs:user:%d:org:%d", userID, orgID)
 }
 
 func NewRedisRunStore(ctx context.Context, client *redis.Client, logger log.Logger) *RedisRunStore {
 	return &RedisRunStore{
-		client:       client,
-		logger:       logger,
-		broadcasters: make(map[string]*RunBroadcaster),
-		ctx:          ctx,
+		client:        client,
+		logger:        logger,
+		subscriptions: make(map[string]*runSubscription),
+		ctx:           ctx,
 	}
 }
 
@@ -69,10 +87,6 @@ func (s *RedisRunStore) CreateRun(runID string, userID, orgID int64, sessionID .
 	if _, err := pipe.Exec(ctx); err != nil {
 		s.logger.Error("Failed to store run in Redis", "error", err, "runId", runID)
 	}
-
-	s.mu.Lock()
-	s.broadcasters[runID] = newRunBroadcaster()
-	s.mu.Unlock()
 
 	return run
 }
@@ -113,12 +127,7 @@ func (s *RedisRunStore) AppendEvent(runID string, event agent.SSEEvent) {
 	s.appendTraceEvent(runID, event)
 	s.touchRun(runID)
 
-	s.mu.RLock()
-	b := s.broadcasters[runID]
-	s.mu.RUnlock()
-	if b != nil {
-		b.Broadcast(event)
-	}
+	s.publish(runID, runStreamMessage{Kind: runStreamKindEvent, Event: &event})
 }
 
 func (s *RedisRunStore) FinishRun(runID string, status RunStatus, errMsg string) {
@@ -158,13 +167,7 @@ func (s *RedisRunStore) FinishRun(runID string, status RunStatus, errMsg string)
 		s.logger.Warn("Failed to persist finished run metadata", "error", err, "runId", runID)
 	}
 
-	s.mu.Lock()
-	b := s.broadcasters[runID]
-	if b != nil {
-		b.Close()
-		delete(s.broadcasters, runID)
-	}
-	s.mu.Unlock()
+	s.publish(runID, runStreamMessage{Kind: runStreamKindFinished})
 
 	s.logger.Info("Agent run finished", "runId", runID, "status", status)
 }
@@ -223,8 +226,8 @@ func (s *RedisRunStore) ListRuns(userID, orgID int64, limit int) ([]*AgentRun, e
 	if len(ids) > 0 {
 		runs := make([]*AgentRun, 0, len(ids))
 		for _, runID := range ids {
-			run, ok := s.loadRunFromRedis(ctx, runID)
-			if !ok {
+			run, err := s.loadRunFromRedis(ctx, runID)
+			if err != nil {
 				s.client.ZRem(ctx, runIndexKey(userID, orgID), runID)
 				continue
 			}
@@ -287,21 +290,20 @@ func (s *RedisRunStore) ListRuns(userID, orgID int64, limit int) ([]*AgentRun, e
 	return runs, nil
 }
 
-func (s *RedisRunStore) loadRunFromRedis(ctx context.Context, runID string) (*AgentRun, bool) {
+func (s *RedisRunStore) loadRunFromRedis(ctx context.Context, runID string) (*AgentRun, error) {
 	runJSON, err := s.client.Get(ctx, runKey(runID)).Result()
-	if err == redis.Nil {
-		return nil, false
-	}
 	if err != nil {
-		s.logger.Warn("Failed to load indexed run", "error", err, "runId", runID)
-		return nil, false
+		if err != redis.Nil {
+			s.logger.Warn("Failed to load indexed run", "error", err, "runId", runID)
+		}
+		return nil, err
 	}
 	var run AgentRun
 	if err := json.Unmarshal([]byte(runJSON), &run); err != nil {
 		s.logger.Warn("Failed to unmarshal indexed run", "error", err, "runId", runID)
-		return nil, false
+		return nil, err
 	}
-	return copyRun(&run), true
+	return copyRun(&run), nil
 }
 
 func (s *RedisRunStore) appendTraceEvent(runID string, event agent.SSEEvent) {
@@ -340,51 +342,181 @@ func (s *RedisRunStore) appendTraceEvent(runID string, event agent.SSEEvent) {
 	}
 }
 
-func (s *RedisRunStore) GetBroadcaster(runID string) *RunBroadcaster {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return s.broadcasters[runID]
-}
-
 func (s *RedisRunStore) SubscribeAndSnapshot(runID string) (*AgentRun, <-chan agent.SSEEvent, func(), error) {
-	s.mu.RLock()
-	b := s.broadcasters[runID]
-	s.mu.RUnlock()
+	sub, err := s.acquireSubscription(runID)
+	if err != nil {
+		s.logger.Warn("Failed to subscribe to run channel, serving snapshot only", "error", err, "runId", runID)
+	}
 
 	var ch <-chan agent.SSEEvent
 	var unsub func()
-	if b != nil {
-		ch, unsub = b.Subscribe()
+	if sub != nil {
+		ch, unsub = sub.broadcaster.Subscribe()
+	}
+
+	release := func() {
+		if unsub != nil {
+			unsub()
+		}
+		if sub != nil {
+			s.releaseSubscription(runID, sub)
+		}
 	}
 
 	run, err := s.GetRun(runID)
 	if err != nil {
-		if unsub != nil {
-			unsub()
-		}
+		release()
 		return nil, nil, nil, err
 	}
 
-	if run.Status != RunStatusRunning {
-		if unsub != nil {
-			unsub()
-		}
+	if run.Status != RunStatusRunning || ch == nil {
+		release()
 		return run, nil, nil, nil
 	}
 
-	return run, ch, unsub, nil
+	return run, ch, release, nil
 }
 
-func (s *RedisRunStore) CleanupOld() {
+func (s *RedisRunStore) acquireSubscription(runID string) (*runSubscription, error) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
+	if existing, ok := s.subscriptions[runID]; ok {
+		existing.refs++
+		s.mu.Unlock()
+		return existing, nil
+	}
+	s.mu.Unlock()
 
-	for runID, b := range s.broadcasters {
-		if b.IsClosed() {
-			delete(s.broadcasters, runID)
+	ctx, cancel := context.WithCancel(s.ctx)
+	pubsub := s.client.Subscribe(ctx, runChannelKey(runID))
+	confirmCtx, confirmCancel := redisContext(ctx, RedisOpTimeout)
+	_, err := pubsub.Receive(confirmCtx)
+	confirmCancel()
+	if err != nil {
+		cancel()
+		pubsub.Close()
+		return nil, fmt.Errorf("subscribe to run channel: %w", err)
+	}
+
+	s.mu.Lock()
+	if existing, ok := s.subscriptions[runID]; ok {
+		existing.refs++
+		s.mu.Unlock()
+		cancel()
+		pubsub.Close()
+		return existing, nil
+	}
+	sub := &runSubscription{
+		broadcaster: newRunBroadcaster(),
+		pubsub:      pubsub,
+		cancel:      cancel,
+		refs:        1,
+	}
+	s.subscriptions[runID] = sub
+	s.mu.Unlock()
+
+	go s.receiveRunEvents(ctx, runID, sub)
+	return sub, nil
+}
+
+func (s *RedisRunStore) receiveRunEvents(ctx context.Context, runID string, sub *runSubscription) {
+	defer s.retireSubscription(runID, sub)
+
+	messages := sub.pubsub.Channel()
+	statusCheck := time.NewTicker(RunStreamStatusCheckInterval)
+	defer statusCheck.Stop()
+
+	for {
+		select {
+		case msg, ok := <-messages:
+			if !ok {
+				return
+			}
+			var payload runStreamMessage
+			if err := json.Unmarshal([]byte(msg.Payload), &payload); err != nil {
+				s.logger.Warn("Failed to unmarshal run stream message", "error", err, "runId", runID)
+				continue
+			}
+			if payload.Kind == runStreamKindFinished {
+				return
+			}
+			if payload.Event != nil {
+				sub.broadcaster.Broadcast(*payload.Event)
+			}
+		case <-statusCheck.C:
+			if !s.runIsRunning(runID) {
+				return
+			}
+		case <-ctx.Done():
+			return
 		}
 	}
 }
+
+func (s *RedisRunStore) runIsRunning(runID string) bool {
+	ctx, cancel := redisContext(s.ctx, RedisOpTimeout)
+	defer cancel()
+
+	run, err := s.loadRunFromRedis(ctx, runID)
+	if err == redis.Nil {
+		return false
+	}
+	if err != nil {
+		return true
+	}
+	return run.Status == RunStatusRunning
+}
+
+func (s *RedisRunStore) releaseSubscription(runID string, sub *runSubscription) {
+	s.mu.Lock()
+	current, ok := s.subscriptions[runID]
+	if !ok || current != sub {
+		s.mu.Unlock()
+		return
+	}
+	sub.refs--
+	if sub.refs > 0 {
+		s.mu.Unlock()
+		return
+	}
+	delete(s.subscriptions, runID)
+	s.mu.Unlock()
+
+	s.closeSubscription(sub)
+}
+
+func (s *RedisRunStore) retireSubscription(runID string, sub *runSubscription) {
+	s.mu.Lock()
+	if current, ok := s.subscriptions[runID]; ok && current == sub {
+		delete(s.subscriptions, runID)
+	}
+	s.mu.Unlock()
+
+	s.closeSubscription(sub)
+}
+
+func (s *RedisRunStore) closeSubscription(sub *runSubscription) {
+	sub.cancel()
+	if err := sub.pubsub.Close(); err != nil {
+		s.logger.Debug("Failed to close run pub/sub", "error", err)
+	}
+	sub.broadcaster.Close()
+}
+
+func (s *RedisRunStore) publish(runID string, msg runStreamMessage) {
+	payload, err := json.Marshal(msg)
+	if err != nil {
+		s.logger.Error("Failed to marshal run stream message", "error", err, "runId", runID)
+		return
+	}
+
+	ctx, cancel := redisContext(s.ctx, RedisOpTimeout)
+	defer cancel()
+	if err := s.client.Publish(ctx, runChannelKey(runID), payload).Err(); err != nil {
+		s.logger.Warn("Failed to publish run stream message", "error", err, "runId", runID)
+	}
+}
+
+func (s *RedisRunStore) CleanupOld() {}
 
 func (s *RedisRunStore) touchRun(runID string) {
 	ctx, cancel := redisContext(s.ctx, RedisOpTimeout)

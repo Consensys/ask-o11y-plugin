@@ -1527,6 +1527,7 @@ func (p *Plugin) handleAgentRunEvents(w http.ResponseWriter, r *http.Request, ru
 		return
 	}
 
+	lastEmitted := int64(-1)
 	for _, event := range run.Events {
 		data, err := agent.MarshalSSE(event)
 		if err != nil {
@@ -1536,6 +1537,7 @@ func (p *Plugin) handleAgentRunEvents(w http.ResponseWriter, r *http.Request, ru
 		if _, err := w.Write(data); err != nil {
 			return
 		}
+		lastEmitted = event.Sequence
 	}
 	flusher.Flush()
 
@@ -1555,6 +1557,18 @@ func (p *Plugin) handleAgentRunEvents(w http.ResponseWriter, r *http.Request, ru
 			if !ok {
 				return
 			}
+			if event.Sequence <= lastEmitted {
+				continue
+			}
+			// Pub/sub is at-most-once, so a dropped message leaves a hole that a
+			// later delivered event (including the terminal one) would paper over.
+			// Close the stream instead: the client's reconnect replays the durable
+			// list, which is complete.
+			if lastEmitted >= 0 && event.Sequence > lastEmitted+1 {
+				p.logger.Warn("Gap in live run event sequence, closing stream so the client replays from storage",
+					"runId", runID, "expected", lastEmitted+1, "received", event.Sequence)
+				return
+			}
 			data, err := agent.MarshalSSE(event)
 			if err != nil {
 				p.logger.Error("Failed to marshal SSE event", "error", err, "runId", runID, "eventType", event.Type)
@@ -1562,6 +1576,7 @@ func (p *Plugin) handleAgentRunEvents(w http.ResponseWriter, r *http.Request, ru
 			}
 			w.Write(data)
 			flusher.Flush()
+			lastEmitted = event.Sequence
 		case <-keepalive.C:
 			w.Write([]byte(": keepalive\n\n"))
 			flusher.Flush()
