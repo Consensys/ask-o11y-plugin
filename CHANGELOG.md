@@ -5,6 +5,13 @@ All notable changes to the Ask O11y Grafana plugin will be documented in this fi
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.14](https://github.com/Consensys/ask-o11y-plugin/compare/v0.3.13...v0.3.14) (2026-09-08)
+
+
+### Bug Fixes
+
+* **mcp:** keep the sdk tracing middleware mid-chain via context enrichment ([#214](https://github.com/Consensys/ask-o11y-plugin/issues/214)) ([89b9a6a](https://github.com/Consensys/ask-o11y-plugin/commit/89b9a6afdce72e3e728ec13e4c6dbb2804ca915f))
+
 ## [0.3.13](https://github.com/Consensys/ask-o11y-plugin/compare/v0.3.12...v0.3.13) (2026-09-08)
 
 
