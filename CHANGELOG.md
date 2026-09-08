@@ -5,6 +5,13 @@ All notable changes to the Ask O11y Grafana plugin will be documented in this fi
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.12](https://github.com/Consensys/ask-o11y-plugin/compare/v0.3.11...v0.3.12) (2026-09-08)
+
+
+### Performance Improvements
+
+* **mcp:** configurable tool-call budget, inject current time, drop time & sequential-thinking tools ([#209](https://github.com/Consensys/ask-o11y-plugin/issues/209)) ([e61f8ac](https://github.com/Consensys/ask-o11y-plugin/commit/e61f8ac0933bf785f2fdf558c32f759a598007e7))
+
 ## [0.3.11](https://github.com/Consensys/ask-o11y-plugin/compare/v0.3.10...v0.3.11) (2026-09-07)
 
 
