@@ -52,17 +52,28 @@ var w3cPropagator = propagation.TraceContext{}
 
 func (t *tracePropagationTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	ctx := req.Context()
-	if sc, ok := callerSpanContextFromContext(ctx); ok {
+	switch sc, hasStash := callerSpanContextFromContext(ctx); {
+	case hasStash:
 		// Preferred path: the caller's span stashed across mergeUserCtx.
+		// Enrich the CONTEXT (not just the headers): the grafana-sdk tracing
+		// middleware deeper in this chain then starts its
+		// "HTTP Outgoing Request" span as a child of the caller span and
+		// propagates from it, keeping the middleware in the middle of
+		// asko11y -> mcp-grafana -> Grafana core instead of re-rooting.
 		ctx = trace.ContextWithRemoteSpanContext(ctx, sc)
-	} else if sc := trace.SpanContextFromContext(ctx); sc.IsValid() {
+	case trace.SpanContextFromContext(ctx).IsValid():
 		// Fallback: contexts that were never rebuilt by mergeUserCtx carry
 		// their span directly.
-		ctx = trace.ContextWithSpanContext(ctx, sc)
+		ctx = trace.ContextWithSpanContext(ctx, trace.SpanContextFromContext(ctx))
+	default:
+		// Nothing to propagate — pass the request through untouched so
+		// receivers keep rooting their own traces.
+		return t.base.RoundTrip(req)
 	}
-	// http.RoundTripper must not mutate the caller's request: clone with the
-	// (possibly span-enriched) context and inject into the copy.
+	// Clone: http.RoundTripper must not mutate the caller's request.
 	clone := req.Clone(ctx)
+	// Direct injection as a fallback for chains whose inner middleware does
+	// not propagate: an inner traceparent (if any) overwrites this one.
 	w3cPropagator.Inject(clone.Context(), propagation.HeaderCarrier(clone.Header))
 	return t.base.RoundTrip(clone)
 }

@@ -120,3 +120,42 @@ func TestTracePropagationTransport_MergedContextCallerSpan(t *testing.T) {
 		t.Fatalf("traceparent %q should reference the caller span %s", tpHeader, callerSpan.SpanContext().SpanID())
 	}
 }
+
+// TestTracePropagationTransport_EnrichesContextForInnerMiddleware asserts the
+// full-chain behavior: the transport hands the INNER middleware a context
+// whose active span is the caller's (as a remote parent), so the middleware's
+// own "HTTP Outgoing Request" span becomes a child of mcp_tool_call and the
+// chain grafana-frontend -> agent_run -> mcp_tool_call -> HTTP Outgoing ->
+// mcp-grafana stays in one trace instead of re-rooting at the middleware.
+func TestTracePropagationTransport_EnrichesContextForInnerMiddleware(t *testing.T) {
+	tp := sdktrace.NewTracerProvider()
+	defer func() { _ = tp.Shutdown(context.Background()) }()
+
+	callerCtx, callerSpan := tp.Tracer("test").Start(context.Background(), "mcp_tool_call")
+	defer callerSpan.End()
+
+	// Merged context: no live span, only the stash (mergeUserCtx result).
+	merged := WithCallerSpanContext(context.Background(), trace.SpanContextFromContext(callerCtx))
+
+	var innerCtx context.Context
+	base := roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		innerCtx = req.Context()
+		return &http.Response{StatusCode: 200, Header: http.Header{}, Body: http.NoBody}, nil
+	})
+
+	req := (&http.Request{Method: "POST", Header: http.Header{}}).WithContext(merged)
+	if _, err := (&tracePropagationTransport{base: base}).RoundTrip(req); err != nil {
+		t.Fatal(err)
+	}
+
+	inner := trace.SpanContextFromContext(innerCtx)
+	if !inner.IsValid() {
+		t.Fatal("inner middleware should receive a context with an active (remote caller) span")
+	}
+	if inner.TraceID() != callerSpan.SpanContext().TraceID() {
+		t.Fatalf("inner span trace %s should match the caller trace %s", inner.TraceID(), callerSpan.SpanContext().TraceID())
+	}
+	if inner.SpanID() != callerSpan.SpanContext().SpanID() {
+		t.Fatalf("inner span parent should be the caller span %s, got %s", callerSpan.SpanContext().SpanID(), inner.SpanID())
+	}
+}
