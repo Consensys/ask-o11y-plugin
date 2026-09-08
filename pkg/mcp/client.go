@@ -273,7 +273,7 @@ func (c *Client) baseTransport() http.RoundTripper {
 
 func (c *Client) sdkHTTPClientWithTransport(transport http.RoundTripper) *http.Client {
 	client := *c.httpClient
-	client.Transport = transport
+	client.Transport = &tracePropagationTransport{base: transport}
 	return &client
 }
 
@@ -716,8 +716,11 @@ func (c *Client) callMCPToolOnce(callerCtx context.Context, toolName string, arg
 
 	// The caller ctx contributes per-request values (Grafana user ID for
 	// OAuth token injection); the timeout stays rooted at the client ctx so
-	// the session outlives short-lived caller contexts.
-	ctx, cancel := context.WithTimeout(mergeUserCtx(c.ctx, callerCtx), c.toolCallTimeout())
+	// the session outlives short-lived caller contexts. mergeUserCtx copies
+	// only known values, dropping the caller's active span (mcp_tool_call) —
+	// re-attach it explicitly so trace propagation can parent the MCP
+	// server's span onto the caller's trace.
+	ctx, cancel := context.WithTimeout(withCallerSpan(mergeUserCtx(c.ctx, callerCtx), callerCtx), c.toolCallTimeout())
 	defer cancel()
 
 	result, err := session.CallTool(ctx, &mcpsdk.CallToolParams{
@@ -757,7 +760,7 @@ func (c *Client) callMCPToolOnce(callerCtx context.Context, toolName string, arg
 				return nil, fmt.Errorf("session not established after reconnection")
 			}
 
-			retryCtx, retryCancel := context.WithTimeout(mergeUserCtx(c.ctx, callerCtx), c.toolCallTimeout())
+			retryCtx, retryCancel := context.WithTimeout(withCallerSpan(mergeUserCtx(c.ctx, callerCtx), callerCtx), c.toolCallTimeout())
 			defer retryCancel()
 
 			result, err = session.CallTool(retryCtx, &mcpsdk.CallToolParams{
