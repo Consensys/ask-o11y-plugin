@@ -273,7 +273,7 @@ func (c *Client) baseTransport() http.RoundTripper {
 
 func (c *Client) sdkHTTPClientWithTransport(transport http.RoundTripper) *http.Client {
 	client := *c.httpClient
-	client.Transport = &tracePropagationTransport{base: transport}
+	client.Transport = transport
 	return &client
 }
 
