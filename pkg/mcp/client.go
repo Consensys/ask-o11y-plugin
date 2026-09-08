@@ -201,7 +201,7 @@ func (c *Client) connectMCP(callerCtx context.Context) error {
 	case "streamable-http", "http+streamable":
 		transport = &mcpsdk.StreamableClientTransport{
 			Endpoint:             c.config.URL,
-			HTTPClient:           httpClient,
+			HTTPClient:           c.transportHTTPClient(httpClient),
 			MaxRetries:           3,
 			DisableStandaloneSSE: true,
 		}
@@ -282,13 +282,30 @@ func (c *Client) sdkHTTPClientWithTransport(transport http.RoundTripper) *http.C
 // which would sever an SSE event stream after the timeout elapses — so for
 // SSE servers the copy gets no client-level timeout (dialing stays bounded by
 // the SDK dial timeout and connectDialTimeout).
+//
+// For streamable-http the copy's timeout is set to the server's tool-call
+// budget: the budget wraps the CallTool context, but http.Client.Timeout
+// would still abort the whole exchange at the shared client's 30s, so a
+// provisioned 90s budget never took effect without this. Clamping to the
+// budget (rather than zeroing it, as SSE does) keeps a hard bound on the
+// SDK initialize handshake too, which not every connect path deadlines.
 func (c *Client) transportHTTPClient(client *http.Client) *http.Client {
-	if c.config.Type != "sse" || client.Timeout == 0 {
-		return client
+	switch c.config.Type {
+	case "sse":
+		if client.Timeout == 0 {
+			return client
+		}
+		clone := *client
+		clone.Timeout = 0
+		return &clone
+	case "streamable-http", "http+streamable":
+		if budget := c.toolCallTimeout(); client.Timeout != budget {
+			clone := *client
+			clone.Timeout = budget
+			return &clone
+		}
 	}
-	clone := *client
-	clone.Timeout = 0
-	return &clone
+	return client
 }
 
 func (c *Client) httpClientWithHeaders() *http.Client {
@@ -388,7 +405,7 @@ func (c *Client) connectMCPWithOrgContext(callerCtx context.Context, orgID strin
 	case "streamable-http", "http+streamable":
 		transport = &mcpsdk.StreamableClientTransport{
 			Endpoint:             c.config.URL,
-			HTTPClient:           customHTTPClient,
+			HTTPClient:           c.transportHTTPClient(customHTTPClient),
 			MaxRetries:           3,
 			DisableStandaloneSSE: true,
 		}
