@@ -279,7 +279,8 @@ func BuildToolContext(orgName, userRole string) PromptContext {
 	// CurrentTime is captured at run start so the LLM can anchor relative time
 	// windows ("last 1h") without burning a tool round-trip on the time MCP
 	// server — prod traces (2026-09-03..07) showed 57 get_current_time calls
-	// per 4-day window, two of which hit the 30s MCP timeout.
+	// per 4-day window, two of which ran ~30s at the client's timeout
+	// ceiling.
 	now := time.Now().UTC()
 	return PromptContext{
 		OrgName:        orgName,
