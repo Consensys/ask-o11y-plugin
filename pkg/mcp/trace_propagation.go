@@ -1,10 +1,31 @@
 package mcp
 
 import (
+	"context"
 	"net/http"
 
 	"go.opentelemetry.io/otel/propagation"
+	"go.opentelemetry.io/otel/trace"
 )
+
+// callerSpanContextKey carries the caller's SpanContext across mergeUserCtx,
+// which rebuilds the tool-call context from the long-lived client context and
+// copies only the user identity — dropping the caller's active span. Without
+// this, the outgoing MCP request would have no span to propagate from.
+type callerSpanContextKey struct{}
+
+// WithCallerSpanContext attaches the caller's SpanContext to ctx so
+// tracePropagationTransport can inject it after the context merge.
+func WithCallerSpanContext(ctx context.Context, sc trace.SpanContext) context.Context {
+	return context.WithValue(ctx, callerSpanContextKey{}, sc)
+}
+
+// callerSpanContextFromContext returns the caller SpanContext stashed by
+// WithCallerSpanContext, if valid.
+func callerSpanContextFromContext(ctx context.Context) (trace.SpanContext, bool) {
+	sc, ok := ctx.Value(callerSpanContextKey{}).(trace.SpanContext)
+	return sc, ok && sc.IsValid()
+}
 
 // tracePropagationTransport injects W3C trace context (traceparent/tracestate)
 // from the request's span context into outgoing MCP requests.
@@ -30,6 +51,18 @@ type tracePropagationTransport struct {
 var w3cPropagator = propagation.TraceContext{}
 
 func (t *tracePropagationTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	w3cPropagator.Inject(req.Context(), propagation.HeaderCarrier(req.Header))
-	return t.base.RoundTrip(req)
+	ctx := req.Context()
+	if sc, ok := callerSpanContextFromContext(ctx); ok {
+		// Preferred path: the caller's span stashed across mergeUserCtx.
+		ctx = trace.ContextWithRemoteSpanContext(ctx, sc)
+	} else if sc := trace.SpanContextFromContext(ctx); sc.IsValid() {
+		// Fallback: contexts that were never rebuilt by mergeUserCtx carry
+		// their span directly.
+		ctx = trace.ContextWithSpanContext(ctx, sc)
+	}
+	// http.RoundTripper must not mutate the caller's request: clone with the
+	// (possibly span-enriched) context and inject into the copy.
+	clone := req.Clone(ctx)
+	w3cPropagator.Inject(clone.Context(), propagation.HeaderCarrier(clone.Header))
+	return t.base.RoundTrip(clone)
 }

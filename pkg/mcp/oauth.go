@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+
+	"go.opentelemetry.io/otel/trace"
 )
 
 // PerUserTokenProvider supplies the Authorization bearer value for a given
@@ -45,6 +47,17 @@ func mergeUserCtx(base, caller context.Context) context.Context {
 		return WithUserID(base, userID)
 	}
 	return base
+}
+
+// withCallerSpan re-attaches the caller's active span onto a context rebuilt
+// by mergeUserCtx, which copies only known values and would otherwise drop
+// it. Trace propagation then parents the MCP server's span onto the
+// caller's trace instead of rooting a disjoint one.
+func withCallerSpan(ctx, caller context.Context) context.Context {
+	if sc := trace.SpanContextFromContext(caller); sc.IsValid() {
+		return WithCallerSpanContext(ctx, sc)
+	}
+	return ctx
 }
 
 // userTokenRoundTripper wraps an http.RoundTripper for servers with an OAuth
