@@ -5,6 +5,7 @@ import (
 	"log"
 	"strings"
 	"text/template"
+	"time"
 
 	"consensys-asko11y-app/pkg/skills"
 )
@@ -56,6 +57,11 @@ type PromptContext struct {
 	// there are no Prometheus datasources, or the snapshot hasn't finished its
 	// background refresh yet (see metricNamespaceSnapshot).
 	MetricNamespaceSnapshot string
+
+	// CurrentTime is the wall-clock time the run started, rendered into the
+	// system prompt so the agent anchors relative time windows without calling
+	// the time MCP tool. Empty string renders no block (see BuildToolContext).
+	CurrentTime string
 
 	// ActiveSkills are the skills activated for this run (explicit selection,
 	// legacy type mapping, or trigger match). Their bodies are injected into
@@ -270,11 +276,18 @@ const GraphitiDiscoveryMessage = `Execute the full discovery plan step by step:
 6. Synthesize — your synthesis MUST list every business service by name (e.g. "checkout", "payment", "frontend"). Filter out monitoring infrastructure (prometheus, grafana, tempo, mimir, loki, alloy, alertmanager, otel-collector, node-exporter, pushgateway, kube-prometheus, ingress-nginx).`
 
 func BuildToolContext(orgName, userRole string) PromptContext {
+	// CurrentTime is captured at run start so the LLM can anchor relative time
+	// windows ("last 1h") without burning a tool round-trip on the time MCP
+	// server — prod traces (2026-09-03..07) showed 57 get_current_time calls
+	// per 4-day window, two of which ran ~30s at the client's timeout
+	// ceiling.
+	now := time.Now().UTC()
 	return PromptContext{
 		OrgName:        orgName,
 		UserRole:       userRole,
 		AvailableTools: []ToolInfo{},
 		DisabledTools:  []ToolInfo{},
 		FailedTools:    []ToolInfo{},
+		CurrentTime:    now.Format("15:04:05 MST on Monday, January 2, 2006") + " (RFC3339: " + now.Format(time.RFC3339) + ")",
 	}
 }

@@ -201,7 +201,7 @@ func (c *Client) connectMCP(callerCtx context.Context) error {
 	case "streamable-http", "http+streamable":
 		transport = &mcpsdk.StreamableClientTransport{
 			Endpoint:             c.config.URL,
-			HTTPClient:           httpClient,
+			HTTPClient:           c.transportHTTPClient(httpClient),
 			MaxRetries:           3,
 			DisableStandaloneSSE: true,
 		}
@@ -245,6 +245,21 @@ func (c *Client) forceReconnect() error {
 
 const connectDialTimeout = 10 * time.Second
 
+// defaultToolCallTimeout bounds a single MCP tool call when the server's
+// ServerConfig.TimeoutSeconds is unset. It matches the historical hard-coded
+// value so existing configs behave identically until they opt into a longer
+// budget.
+const defaultToolCallTimeout = 30 * time.Second
+
+// toolCallTimeout resolves the per-call budget: the server's configured
+// timeout when set, the package default otherwise.
+func (c *Client) toolCallTimeout() time.Duration {
+	if c.config.TimeoutSeconds > 0 {
+		return time.Duration(c.config.TimeoutSeconds) * time.Second
+	}
+	return defaultToolCallTimeout
+}
+
 // forceReconnectMinInterval is the dedupe window that prevents the health
 // monitor from thrashing a session that the on-call retry path just refreshed.
 const forceReconnectMinInterval = 5 * time.Second
@@ -267,13 +282,30 @@ func (c *Client) sdkHTTPClientWithTransport(transport http.RoundTripper) *http.C
 // which would sever an SSE event stream after the timeout elapses — so for
 // SSE servers the copy gets no client-level timeout (dialing stays bounded by
 // the SDK dial timeout and connectDialTimeout).
+//
+// For streamable-http the copy's timeout is set to the server's tool-call
+// budget: the budget wraps the CallTool context, but http.Client.Timeout
+// would still abort the whole exchange at the shared client's 30s, so a
+// provisioned 90s budget never took effect without this. Clamping to the
+// budget (rather than zeroing it, as SSE does) keeps a hard bound on the
+// SDK initialize handshake too, which not every connect path deadlines.
 func (c *Client) transportHTTPClient(client *http.Client) *http.Client {
-	if c.config.Type != "sse" || client.Timeout == 0 {
-		return client
+	switch c.config.Type {
+	case "sse":
+		if client.Timeout == 0 {
+			return client
+		}
+		clone := *client
+		clone.Timeout = 0
+		return &clone
+	case "streamable-http", "http+streamable":
+		if budget := c.toolCallTimeout(); client.Timeout != budget {
+			clone := *client
+			clone.Timeout = budget
+			return &clone
+		}
 	}
-	clone := *client
-	clone.Timeout = 0
-	return &clone
+	return client
 }
 
 func (c *Client) httpClientWithHeaders() *http.Client {
@@ -373,7 +405,7 @@ func (c *Client) connectMCPWithOrgContext(callerCtx context.Context, orgID strin
 	case "streamable-http", "http+streamable":
 		transport = &mcpsdk.StreamableClientTransport{
 			Endpoint:             c.config.URL,
-			HTTPClient:           customHTTPClient,
+			HTTPClient:           c.transportHTTPClient(customHTTPClient),
 			MaxRetries:           3,
 			DisableStandaloneSSE: true,
 		}
@@ -685,7 +717,7 @@ func (c *Client) callMCPToolOnce(callerCtx context.Context, toolName string, arg
 	// The caller ctx contributes per-request values (Grafana user ID for
 	// OAuth token injection); the timeout stays rooted at the client ctx so
 	// the session outlives short-lived caller contexts.
-	ctx, cancel := context.WithTimeout(mergeUserCtx(c.ctx, callerCtx), 30*time.Second)
+	ctx, cancel := context.WithTimeout(mergeUserCtx(c.ctx, callerCtx), c.toolCallTimeout())
 	defer cancel()
 
 	result, err := session.CallTool(ctx, &mcpsdk.CallToolParams{
@@ -725,7 +757,7 @@ func (c *Client) callMCPToolOnce(callerCtx context.Context, toolName string, arg
 				return nil, fmt.Errorf("session not established after reconnection")
 			}
 
-			retryCtx, retryCancel := context.WithTimeout(mergeUserCtx(c.ctx, callerCtx), 30*time.Second)
+			retryCtx, retryCancel := context.WithTimeout(mergeUserCtx(c.ctx, callerCtx), c.toolCallTimeout())
 			defer retryCancel()
 
 			result, err = session.CallTool(retryCtx, &mcpsdk.CallToolParams{

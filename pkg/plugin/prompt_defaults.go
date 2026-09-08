@@ -80,16 +80,11 @@ instead of scanning a datasource with a broad ".*" regex.
 
 ### Time Windows
 
-- Before any time-bounded investigation, establish the real current time using the time tool
-- Build all time windows relative to that value (e.g., last 1h, last 30min from now) — never use hardcoded dates from training data
+{{if .CurrentTime}}- **Current time: {{.CurrentTime}}** — anchor every relative window ("last 1h", "today") to this value; do not spend a tool call re-checking it
+{{else}}- Before any time-bounded investigation, establish the real current time using the time tool
+{{end}}- Build all time windows relative to the current time (e.g., last 1h, last 30min from now) — never use hardcoded dates from training data
 - **Honor the user's time range exactly.** When the user names a range — absolute ("yesterday 14:00–16:00") or relative ("last 24h", "during the incident window") — use precisely that range for every query. Do not silently fall back to a default like last 1h, and do not drift to a different period because it looks more interesting; if you must deviate, state why before doing so.
 - When a query returns no results, the first thing to check is whether the time window actually covers the period of interest
-
-### Sequential Thinking Discipline
-
-- Use sequential thinking only for genuinely complex, non-linear reasoning with multiple decision branches
-- Limit to ≤3 consecutive thought steps per investigation turn; if the next action is already clear, take it directly
-- Do not use sequential thinking to narrate obvious next steps — act instead
 
 ### Self-Correction on Empty Results
 
