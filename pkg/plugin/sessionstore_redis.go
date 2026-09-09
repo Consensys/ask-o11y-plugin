@@ -21,13 +21,12 @@ func sessionCurrentKey(userID, orgID int64) string {
 }
 
 // sessionStatsKey is a separate hash from the main session blob so
-// IncrementStats can HINCRBY atomically instead of racing with the
-// read-modify-write cycle every other session mutator uses on the blob.
+// IncrementStats can HINCRBY atomically without rewriting the session blob.
 func sessionStatsKey(id string) string { return fmt.Sprintf("session:%s:stats", id) }
 
 // redisSession is the on-wire format stored in Redis (includes owner fields).
 // Usage-stats fields live in a separate hash (sessionStatsKey) so they never
-// round-trip through this struct's read-modify-write cycle — see IncrementStats.
+// round-trip through session blob updates — see IncrementStats.
 type redisSession struct {
 	ID           string           `json:"id"`
 	Title        string           `json:"title"`
@@ -185,14 +184,54 @@ func (s *RedisSessionStore) getSessionRaw(sessionID string) (*redisSession, erro
 	return &rs, nil
 }
 
-func (s *RedisSessionStore) saveSession(session *ChatSession) error {
-	data, err := json.Marshal(toRedis(session))
-	if err != nil {
-		return fmt.Errorf("failed to marshal session: %w", err)
-	}
+// mutateSession applies a read-modify-write under Redis optimistic locking.
+// If another writer changes the session between GET and EXEC, WATCH makes the
+// transaction fail and the mutation is retried against the latest value.
+func (s *RedisSessionStore) mutateSession(sessionID string, userID, orgID int64, mutate func(*ChatSession)) error {
+	key := sessionKey(sessionID)
 	ctx, cancel := redisContext(s.ctx, RedisOpTimeout)
 	defer cancel()
-	return s.client.Set(ctx, sessionKey(session.ID), data, s.sessionTTL).Err()
+
+	for {
+		err := s.client.Watch(ctx, func(tx *redis.Tx) error {
+			data, err := tx.Get(ctx, key).Result()
+			if err == redis.Nil {
+				return fmt.Errorf("session not found")
+			}
+			if err != nil {
+				return fmt.Errorf("failed to get session: %w", err)
+			}
+
+			var rs redisSession
+			if err := json.Unmarshal([]byte(data), &rs); err != nil {
+				return fmt.Errorf("failed to unmarshal session: %w", err)
+			}
+			if rs.UserID != userID || rs.OrgID != orgID {
+				return fmt.Errorf("session not found")
+			}
+
+			session := fromRedis(&rs)
+			mutate(session)
+
+			updated, err := json.Marshal(toRedis(session))
+			if err != nil {
+				return fmt.Errorf("failed to marshal session: %w", err)
+			}
+
+			_, err = tx.TxPipelined(ctx, func(pipe redis.Pipeliner) error {
+				pipe.Set(ctx, key, updated, s.sessionTTL)
+				return nil
+			})
+			return err
+		}, key)
+		if err == redis.TxFailedErr {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			continue
+		}
+		return err
+	}
 }
 
 func (s *RedisSessionStore) GetSession(sessionID string, userID, orgID int64) (*ChatSession, error) {
@@ -294,48 +333,30 @@ func (s *RedisSessionStore) ListSessions(userID, orgID int64) ([]SessionMetadata
 }
 
 func (s *RedisSessionStore) UpdateSession(sessionID string, userID, orgID int64, update SessionUpdate) error {
-	rs, err := s.getSessionRaw(sessionID)
-	if err != nil {
-		return err
-	}
-	if rs.UserID != userID || rs.OrgID != orgID {
-		return fmt.Errorf("session not found")
-	}
-
-	session := fromRedis(rs)
-	if update.Messages != nil {
-		session.Messages = update.Messages
-		session.MessageCount = len(update.Messages)
-	}
-	if update.Title != nil {
-		session.Title = *update.Title
-	}
-	if update.Summary != nil {
-		session.Summary = *update.Summary
-	}
-	if update.Model != nil {
-		session.Model = *update.Model
-	}
-	session.UpdatedAt = time.Now()
-
-	return s.saveSession(session)
+	return s.mutateSession(sessionID, userID, orgID, func(session *ChatSession) {
+		if update.Messages != nil {
+			session.Messages = update.Messages
+			session.MessageCount = len(update.Messages)
+		}
+		if update.Title != nil {
+			session.Title = *update.Title
+		}
+		if update.Summary != nil {
+			session.Summary = *update.Summary
+		}
+		if update.Model != nil {
+			session.Model = *update.Model
+		}
+		session.UpdatedAt = time.Now()
+	})
 }
 
 func (s *RedisSessionStore) AppendMessages(sessionID string, userID, orgID int64, messages []SessionMessage) error {
-	rs, err := s.getSessionRaw(sessionID)
-	if err != nil {
-		return err
-	}
-	if rs.UserID != userID || rs.OrgID != orgID {
-		return fmt.Errorf("session not found")
-	}
-
-	session := fromRedis(rs)
-	session.Messages = append(session.Messages, messages...)
-	session.MessageCount = len(session.Messages)
-	session.UpdatedAt = time.Now()
-
-	return s.saveSession(session)
+	return s.mutateSession(sessionID, userID, orgID, func(session *ChatSession) {
+		session.Messages = append(session.Messages, messages...)
+		session.MessageCount = len(session.Messages)
+		session.UpdatedAt = time.Now()
+	})
 }
 
 func (s *RedisSessionStore) DeleteSession(sessionID string, userID, orgID int64) error {
@@ -429,39 +450,21 @@ func (s *RedisSessionStore) ClearCurrentSessionID(userID, orgID int64) error {
 }
 
 func (s *RedisSessionStore) SetActiveRunID(sessionID string, userID, orgID int64, runID string) error {
-	rs, err := s.getSessionRaw(sessionID)
-	if err != nil {
-		return err
-	}
-	if rs.UserID != userID || rs.OrgID != orgID {
-		return fmt.Errorf("session not found")
-	}
-
-	session := fromRedis(rs)
-	session.ActiveRunID = runID
-	session.UpdatedAt = time.Now()
-	return s.saveSession(session)
+	return s.mutateSession(sessionID, userID, orgID, func(session *ChatSession) {
+		session.ActiveRunID = runID
+		session.UpdatedAt = time.Now()
+	})
 }
 
 func (s *RedisSessionStore) ClearActiveRunID(sessionID string, userID, orgID int64) error {
-	rs, err := s.getSessionRaw(sessionID)
-	if err != nil {
-		return err
-	}
-	if rs.UserID != userID || rs.OrgID != orgID {
-		return fmt.Errorf("session not found")
-	}
-
-	session := fromRedis(rs)
-	session.ActiveRunID = ""
-	return s.saveSession(session)
+	return s.mutateSession(sessionID, userID, orgID, func(session *ChatSession) {
+		session.ActiveRunID = ""
+	})
 }
 
 // IncrementStats applies delta via HINCRBY on a hash separate from the main
-// session blob, so it can't race with the read-modify-write cycle every other
-// mutator (AppendMessages, SetActiveRunID, ...) uses — concurrent runs on the
-// same session (e.g. two tabs, or an automation retriggering a run) can't
-// silently drop a delta the way a read-modify-write on the blob would.
+// session blob. Concurrent runs on the same session can update their counters
+// independently without contending with session metadata or message writes.
 func (s *RedisSessionStore) IncrementStats(sessionID string, userID, orgID int64, delta SessionStatsDelta) error {
 	rs, err := s.getSessionRaw(sessionID)
 	if err != nil {
@@ -487,6 +490,6 @@ func (s *RedisSessionStore) IncrementStats(sessionID string, userID, orgID int64
 }
 
 func (s *RedisSessionStore) CleanupOld() {
-	// Sessions expire natively via the TTL set on every write (see
-	// saveSession) — no periodic sweep needed.
+	// Sessions expire natively via the TTL refreshed on every session write —
+	// no periodic sweep needed.
 }

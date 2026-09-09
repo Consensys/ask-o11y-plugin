@@ -2,11 +2,54 @@ package plugin
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"testing"
 
 	"github.com/grafana/grafana-plugin-sdk-go/backend/log"
+	"github.com/redis/go-redis/v9"
 )
+
+type redisGetBarrierHook struct {
+	key     string
+	mu      sync.Mutex
+	hits    int
+	release chan struct{}
+}
+
+func (h *redisGetBarrierHook) DialHook(next redis.DialHook) redis.DialHook { return next }
+
+func (h *redisGetBarrierHook) ProcessHook(next redis.ProcessHook) redis.ProcessHook {
+	return func(ctx context.Context, cmd redis.Cmder) error {
+		err := next(ctx, cmd)
+		if err != nil || cmd.Name() != "get" || len(cmd.Args()) < 2 || fmt.Sprint(cmd.Args()[1]) != h.key {
+			return err
+		}
+
+		h.mu.Lock()
+		if h.hits >= 2 {
+			h.mu.Unlock()
+			return nil
+		}
+		h.hits++
+		if h.hits == 2 {
+			close(h.release)
+		}
+		release := h.release
+		h.mu.Unlock()
+
+		select {
+		case <-release:
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+}
+
+func (h *redisGetBarrierHook) ProcessPipelineHook(next redis.ProcessPipelineHook) redis.ProcessPipelineHook {
+	return next
+}
 
 func TestRedisSessionStore_ModelRoundTrip(t *testing.T) {
 	client := createTestRedisClient(t)
@@ -37,6 +80,65 @@ func TestRedisSessionStore_ModelRoundTrip(t *testing.T) {
 	}
 	if len(sessions) != 1 || sessions[0].Model != "large" {
 		t.Fatalf("expected listed session model large, got %+v", sessions)
+	}
+}
+
+func TestRedisSessionStore_AppendMessages_ConcurrentNoLostUpdates(t *testing.T) {
+	client := createTestRedisClient(t)
+	defer client.Close()
+
+	store := NewRedisSessionStore(context.Background(), client, log.DefaultLogger, resolveTTLDays(0, DefaultSessionTTLDays))
+	session, err := store.CreateSession(1, 1, "test", []SessionMessage{{Role: "user", Content: "initial"}})
+	if err != nil {
+		t.Fatalf("CreateSession failed: %v", err)
+	}
+
+	// Hold the first two session GETs until both have read the same value. This
+	// makes the lost-update window deterministic instead of relying on timing.
+	client.AddHook(&redisGetBarrierHook{
+		key:     sessionKey(session.ID),
+		release: make(chan struct{}),
+	})
+
+	messages := []SessionMessage{
+		{Role: "assistant", Content: "from first writer"},
+		{Role: "assistant", Content: "from second writer"},
+	}
+
+	var wg sync.WaitGroup
+	errCh := make(chan error, len(messages))
+	for _, message := range messages {
+		message := message
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if err := store.AppendMessages(session.ID, 1, 1, []SessionMessage{message}); err != nil {
+				errCh <- err
+			}
+		}()
+	}
+	wg.Wait()
+	close(errCh)
+	for err := range errCh {
+		t.Fatalf("AppendMessages failed: %v", err)
+	}
+
+	got, err := store.GetSession(session.ID, 1, 1)
+	if err != nil {
+		t.Fatalf("GetSession failed: %v", err)
+	}
+	if got.MessageCount != 3 || len(got.Messages) != 3 {
+		t.Fatalf("lost concurrent append: got %d messages, want 3", len(got.Messages))
+	}
+
+	seen := map[string]bool{}
+	for _, message := range got.Messages {
+		seen[message.Content] = true
+	}
+	for _, message := range messages {
+		if !seen[message.Content] {
+			t.Fatalf("lost concurrent append: missing %q", message.Content)
+		}
 	}
 }
 
