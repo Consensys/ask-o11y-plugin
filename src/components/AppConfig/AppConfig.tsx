@@ -110,6 +110,12 @@ type State = {
   approvalPolicy: string;
   maxParallelToolCalls: number;
   agentEvalCaptureEnabled: boolean;
+  keepRecentToolResults: number;
+  maxToolResponseTokens: number;
+  aggressiveToolResponseTokens: number;
+  maxHighVolumeToolResponseTokens: number;
+  aggressiveHighVolumeToolResponseTokens: number;
+  toolCallSummarizationDisabled: boolean;
 };
 
 type ValidationErrors = {
@@ -131,6 +137,13 @@ const SERVICE_GRAPH_MAX_EDGES_LIMIT = 1000;
 const DEFAULT_SESSION_TTL_DAYS = 90;
 const DEFAULT_GRAPHITI_EPISODE_TTL_DAYS = 30;
 const TTL_DAYS_LIMIT = 3650;
+const DEFAULT_KEEP_RECENT_TOOL_RESULTS = 8;
+const DEFAULT_MAX_TOOL_RESPONSE_TOKENS = 8000;
+const DEFAULT_AGGRESSIVE_TOOL_RESPONSE_TOKENS = 2000;
+const DEFAULT_MAX_HIGH_VOLUME_TOOL_RESPONSE_TOKENS = 3000;
+const DEFAULT_AGGRESSIVE_HIGH_VOLUME_TOOL_RESPONSE_TOKENS = 800;
+const KEEP_RECENT_TOOL_RESULTS_LIMIT = 100;
+const TOOL_RESPONSE_TOKENS_LIMIT = 100000;
 const DEFAULT_TOPOLOGY_QUERY = 'service topology dependencies incidents upstream downstream';
 const SETTINGS_TAB_STORAGE_KEY = getPluginStorageKey('settings.activeTab');
 
@@ -289,6 +302,14 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
     approvalPolicy: jsonData?.approvalPolicy || 'approval-gated-writes',
     maxParallelToolCalls: jsonData?.maxParallelToolCalls || 4,
     agentEvalCaptureEnabled: jsonData?.agentEvalCaptureEnabled ?? false,
+    keepRecentToolResults: jsonData?.keepRecentToolResults || DEFAULT_KEEP_RECENT_TOOL_RESULTS,
+    maxToolResponseTokens: jsonData?.maxToolResponseTokens || DEFAULT_MAX_TOOL_RESPONSE_TOKENS,
+    aggressiveToolResponseTokens: jsonData?.aggressiveToolResponseTokens || DEFAULT_AGGRESSIVE_TOOL_RESPONSE_TOKENS,
+    maxHighVolumeToolResponseTokens:
+      jsonData?.maxHighVolumeToolResponseTokens || DEFAULT_MAX_HIGH_VOLUME_TOOL_RESPONSE_TOKENS,
+    aggressiveHighVolumeToolResponseTokens:
+      jsonData?.aggressiveHighVolumeToolResponseTokens || DEFAULT_AGGRESSIVE_HIGH_VOLUME_TOOL_RESPONSE_TOKENS,
+    toolCallSummarizationDisabled: jsonData?.toolCallSummarizationDisabled ?? false,
   });
   const [validationErrors, setValidationErrors] = useState<ValidationErrors>({
     mcpServers: {},
@@ -357,6 +378,17 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
     !state.maxTotalTokens || state.maxTotalTokens < MIN_TOTAL_TOKENS || state.maxTotalTokens > MAX_TOTAL_TOKENS
   );
   const isAgentRuntimeDisabled = state.maxParallelToolCalls < 1 || state.maxParallelToolCalls > 16;
+  const isContextManagementInvalid =
+    state.keepRecentToolResults < 1 ||
+    state.keepRecentToolResults > KEEP_RECENT_TOOL_RESULTS_LIMIT ||
+    state.maxToolResponseTokens < 1 ||
+    state.maxToolResponseTokens > TOOL_RESPONSE_TOKENS_LIMIT ||
+    state.aggressiveToolResponseTokens < 1 ||
+    state.aggressiveToolResponseTokens > TOOL_RESPONSE_TOKENS_LIMIT ||
+    state.maxHighVolumeToolResponseTokens < 1 ||
+    state.maxHighVolumeToolResponseTokens > TOOL_RESPONSE_TOKENS_LIMIT ||
+    state.aggressiveHighVolumeToolResponseTokens < 1 ||
+    state.aggressiveHighVolumeToolResponseTokens > TOOL_RESPONSE_TOKENS_LIMIT;
   const isServiceGraphSettingsDisabled =
     state.serviceGraphMaxNodes < 1 ||
     state.serviceGraphMaxNodes > SERVICE_GRAPH_MAX_NODES_LIMIT ||
@@ -408,7 +440,17 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
       'agent-runtime':
         state.approvalPolicy !== (savedJsonData.approvalPolicy || 'approval-gated-writes') ||
         state.maxParallelToolCalls !== (savedJsonData.maxParallelToolCalls || 4) ||
-        state.agentEvalCaptureEnabled !== (savedJsonData.agentEvalCaptureEnabled ?? false),
+        state.agentEvalCaptureEnabled !== (savedJsonData.agentEvalCaptureEnabled ?? false) ||
+        state.keepRecentToolResults !== (savedJsonData.keepRecentToolResults || DEFAULT_KEEP_RECENT_TOOL_RESULTS) ||
+        state.maxToolResponseTokens !== (savedJsonData.maxToolResponseTokens || DEFAULT_MAX_TOOL_RESPONSE_TOKENS) ||
+        state.aggressiveToolResponseTokens !==
+          (savedJsonData.aggressiveToolResponseTokens || DEFAULT_AGGRESSIVE_TOOL_RESPONSE_TOKENS) ||
+        state.maxHighVolumeToolResponseTokens !==
+          (savedJsonData.maxHighVolumeToolResponseTokens || DEFAULT_MAX_HIGH_VOLUME_TOOL_RESPONSE_TOKENS) ||
+        state.aggressiveHighVolumeToolResponseTokens !==
+          (savedJsonData.aggressiveHighVolumeToolResponseTokens ||
+            DEFAULT_AGGRESSIVE_HIGH_VOLUME_TOOL_RESPONSE_TOKENS) ||
+        state.toolCallSummarizationDisabled !== (savedJsonData.toolCallSummarizationDisabled ?? false),
       mcp: mcpDirty,
       'service-graph':
         state.graphitiScanInterval !== (savedJsonData.graphitiScanInterval || 'off') ||
@@ -417,8 +459,7 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
         state.graphitiAutoSaveSessionsDisabled !== (savedJsonData.graphitiAutoSaveSessionsDisabled ?? false) ||
         state.sessionTTLDays !== (savedJsonData.sessionTTLDays || DEFAULT_SESSION_TTL_DAYS) ||
         state.graphitiEpisodeTTLDays !== (savedJsonData.graphitiEpisodeTTLDays || DEFAULT_GRAPHITI_EPISODE_TTL_DAYS),
-      prompts:
-        state.defaultSystemPrompt !== getPromptValue(savedJsonData, promptDefaults, 'defaultSystemPrompt'),
+      prompts: state.defaultSystemPrompt !== getPromptValue(savedJsonData, promptDefaults, 'defaultSystemPrompt'),
       // Skills save immediately per action (like prompt editors), so the tab
       // itself never carries unsaved state.
       skills: false,
@@ -913,7 +954,7 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
   }
 
   function onSubmitAgentRuntimeSettings() {
-    if (isAgentRuntimeDisabled) {
+    if (isAgentRuntimeDisabled || isContextManagementInvalid) {
       return;
     }
 
@@ -925,6 +966,12 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
         approvalPolicy: state.approvalPolicy,
         maxParallelToolCalls: state.maxParallelToolCalls,
         agentEvalCaptureEnabled: state.agentEvalCaptureEnabled,
+        keepRecentToolResults: state.keepRecentToolResults,
+        maxToolResponseTokens: state.maxToolResponseTokens,
+        aggressiveToolResponseTokens: state.aggressiveToolResponseTokens,
+        maxHighVolumeToolResponseTokens: state.maxHighVolumeToolResponseTokens,
+        aggressiveHighVolumeToolResponseTokens: state.aggressiveHighVolumeToolResponseTokens,
+        toolCallSummarizationDisabled: state.toolCallSummarizationDisabled,
       },
     });
   }
@@ -1143,8 +1190,138 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
               />
             </Field>
 
+            <Field
+              label="Summarize evicted tool results"
+              description="When a tool result leaves the recent window it is normally condensed by a cheap LLM call so the agent keeps a summary of older evidence. Turn this off to replace evicted results with a truncated copy of the raw content instead (no extra LLM cost)."
+              className="mt-2"
+            >
+              <Switch
+                aria-label="Summarize evicted tool results"
+                value={!state.toolCallSummarizationDisabled}
+                onChange={(e) => setState({ ...state, toolCallSummarizationDisabled: !e.currentTarget.checked })}
+              />
+            </Field>
+
+            <Field
+              label="Keep recent tool results"
+              description={`How many of the most recent tool results stay in full; older ones are evicted to a short placeholder (default: ${DEFAULT_KEEP_RECENT_TOOL_RESULTS})`}
+              className="mt-2"
+              invalid={state.keepRecentToolResults < 1 || state.keepRecentToolResults > KEEP_RECENT_TOOL_RESULTS_LIMIT}
+              error={`Enter a value from 1 to ${KEEP_RECENT_TOOL_RESULTS_LIMIT}`}
+            >
+              <Input
+                width={20}
+                name="keepRecentToolResults"
+                type="number"
+                min={1}
+                max={KEEP_RECENT_TOOL_RESULTS_LIMIT}
+                value={state.keepRecentToolResults}
+                onChange={onChange}
+                invalid={
+                  state.keepRecentToolResults < 1 || state.keepRecentToolResults > KEEP_RECENT_TOOL_RESULTS_LIMIT
+                }
+              />
+            </Field>
+
+            <Field
+              label="Max tool result tokens"
+              description={`Per-result token cap applied to tool responses before they are cut off (default: ${DEFAULT_MAX_TOOL_RESPONSE_TOKENS})`}
+              className="mt-2"
+              invalid={state.maxToolResponseTokens < 1 || state.maxToolResponseTokens > TOOL_RESPONSE_TOKENS_LIMIT}
+              error={`Enter a value from 1 to ${TOOL_RESPONSE_TOKENS_LIMIT}`}
+            >
+              <Input
+                width={20}
+                name="maxToolResponseTokens"
+                type="number"
+                min={1}
+                max={TOOL_RESPONSE_TOKENS_LIMIT}
+                value={state.maxToolResponseTokens}
+                onChange={onChange}
+                invalid={state.maxToolResponseTokens < 1 || state.maxToolResponseTokens > TOOL_RESPONSE_TOKENS_LIMIT}
+              />
+            </Field>
+
+            <Field
+              label="Aggressive tool result tokens"
+              description={`Second-pass per-result cap applied when the context is still over budget after the first pass (default: ${DEFAULT_AGGRESSIVE_TOOL_RESPONSE_TOKENS})`}
+              className="mt-2"
+              invalid={
+                state.aggressiveToolResponseTokens < 1 ||
+                state.aggressiveToolResponseTokens > TOOL_RESPONSE_TOKENS_LIMIT
+              }
+              error={`Enter a value from 1 to ${TOOL_RESPONSE_TOKENS_LIMIT}`}
+            >
+              <Input
+                width={20}
+                name="aggressiveToolResponseTokens"
+                type="number"
+                min={1}
+                max={TOOL_RESPONSE_TOKENS_LIMIT}
+                value={state.aggressiveToolResponseTokens}
+                onChange={onChange}
+                invalid={
+                  state.aggressiveToolResponseTokens < 1 ||
+                  state.aggressiveToolResponseTokens > TOOL_RESPONSE_TOKENS_LIMIT
+                }
+              />
+            </Field>
+
+            <Field
+              label="Max high-volume tool result tokens"
+              description={`Per-result cap for raw-data query tools (logs, metrics, traces, profiles, dashboards) in the first pass (default: ${DEFAULT_MAX_HIGH_VOLUME_TOOL_RESPONSE_TOKENS})`}
+              className="mt-2"
+              invalid={
+                state.maxHighVolumeToolResponseTokens < 1 ||
+                state.maxHighVolumeToolResponseTokens > TOOL_RESPONSE_TOKENS_LIMIT
+              }
+              error={`Enter a value from 1 to ${TOOL_RESPONSE_TOKENS_LIMIT}`}
+            >
+              <Input
+                width={20}
+                name="maxHighVolumeToolResponseTokens"
+                type="number"
+                min={1}
+                max={TOOL_RESPONSE_TOKENS_LIMIT}
+                value={state.maxHighVolumeToolResponseTokens}
+                onChange={onChange}
+                invalid={
+                  state.maxHighVolumeToolResponseTokens < 1 ||
+                  state.maxHighVolumeToolResponseTokens > TOOL_RESPONSE_TOKENS_LIMIT
+                }
+              />
+            </Field>
+
+            <Field
+              label="Aggressive high-volume tool result tokens"
+              description={`Second-pass per-result cap for raw-data query tools (default: ${DEFAULT_AGGRESSIVE_HIGH_VOLUME_TOOL_RESPONSE_TOKENS})`}
+              className="mt-2"
+              invalid={
+                state.aggressiveHighVolumeToolResponseTokens < 1 ||
+                state.aggressiveHighVolumeToolResponseTokens > TOOL_RESPONSE_TOKENS_LIMIT
+              }
+              error={`Enter a value from 1 to ${TOOL_RESPONSE_TOKENS_LIMIT}`}
+            >
+              <Input
+                width={20}
+                name="aggressiveHighVolumeToolResponseTokens"
+                type="number"
+                min={1}
+                max={TOOL_RESPONSE_TOKENS_LIMIT}
+                value={state.aggressiveHighVolumeToolResponseTokens}
+                onChange={onChange}
+                invalid={
+                  state.aggressiveHighVolumeToolResponseTokens < 1 ||
+                  state.aggressiveHighVolumeToolResponseTokens > TOOL_RESPONSE_TOKENS_LIMIT
+                }
+              />
+            </Field>
+
             <div className="mt-3">
-              <Button onClick={onSubmitAgentRuntimeSettings} disabled={isAgentRuntimeDisabled}>
+              <Button
+                onClick={onSubmitAgentRuntimeSettings}
+                disabled={isAgentRuntimeDisabled || isContextManagementInvalid}
+              >
                 Save agent runtime
               </Button>
             </div>
@@ -1206,9 +1383,7 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
             >
               <Switch
                 value={state.useLocalGrafanaURL}
-                onChange={(event) =>
-                  setState((prev) => ({ ...prev, useLocalGrafanaURL: event.currentTarget.checked }))
-                }
+                onChange={(event) => setState((prev) => ({ ...prev, useLocalGrafanaURL: event.currentTarget.checked }))}
               />
             </Field>
 
@@ -1633,9 +1808,7 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
             >
               <Switch
                 value={!state.graphitiAutoSaveSessionsDisabled}
-                onChange={(e) =>
-                  setState({ ...state, graphitiAutoSaveSessionsDisabled: !e.currentTarget.checked })
-                }
+                onChange={(e) => setState({ ...state, graphitiAutoSaveSessionsDisabled: !e.currentTarget.checked })}
                 data-testid={testIds.appConfig.graphitiAutoSaveToggle}
               />
             </Field>

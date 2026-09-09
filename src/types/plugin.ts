@@ -52,6 +52,15 @@ export type AppPluginSettings = {
   maxTotalTokens?: number;
   recentMessageCount?: number;
 
+  /** Context-window management knobs (see agent.ContextLimits in pkg/agent). */
+  keepRecentToolResults?: number;
+  maxToolResponseTokens?: number;
+  aggressiveToolResponseTokens?: number;
+  maxHighVolumeToolResponseTokens?: number;
+  aggressiveHighVolumeToolResponseTokens?: number;
+  /** Disabled-flag so the unset default keeps LLM eviction summaries on. */
+  toolCallSummarizationDisabled?: boolean;
+
   kioskModeEnabled?: boolean;
   chatPanelPosition?: 'left' | 'right';
 

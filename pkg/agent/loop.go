@@ -76,6 +76,11 @@ type LoopRequest struct {
 	AllowModelFallback bool
 	ConversationType   string
 
+	// ContextLimits carries the admin-configurable context-window knobs (trim
+	// caps, eviction threshold, eviction summarization on/off). Zero value
+	// resolves to the historical defaults inside Run.
+	ContextLimits ContextLimits
+
 	// RunID/SessionID identify the run for the run_started SSE event (which
 	// carries the active-skill metadata for the UI). Empty RunID (internal
 	// Scout/discovery runs) suppresses the event.
@@ -126,6 +131,7 @@ func (a *AgentLoop) Run(ctx context.Context, req LoopRequest, eventCh chan<- SSE
 	if maxTokens <= 0 {
 		maxTokens = DefaultMaxTotalTokens
 	}
+	limits := req.ContextLimits.withDefaults()
 	completionBudget := completionTokenBudget(maxTokens)
 	promptBudget := maxTokens - completionBudget
 
@@ -195,7 +201,7 @@ func (a *AgentLoop) Run(ctx context.Context, req LoopRequest, eventCh chan<- SSE
 	// pendingSummaries holds eviction summaries kicked off in the background
 	// as soon as each tool result is appended (see the tool-call loop below),
 	// keyed by tool_call id. A result typically doesn't go stale for several
-	// iterations (keepRecentToolResults=8 tool calls later), so by the time
+	// iterations (DefaultKeepRecentToolResults=8 tool calls later), so by the time
 	// evictStaleToolResults actually needs the summary it has almost always
 	// already finished — turning what used to be a blocking "base" model call
 	// on the hot path into a wait that resolves instantly. Only ever read and
@@ -207,19 +213,24 @@ func (a *AgentLoop) Run(ctx context.Context, req LoopRequest, eventCh chan<- SSE
 			return
 		}
 
-		messages = evictStaleToolResults(messages, keepRecentToolResults, func(toolCallID, toolName, content string) string {
-			if future, ok := pendingSummaries[toolCallID]; ok {
-				delete(pendingSummaries, toolCallID)
-				return future.wait(ctx)
-			}
-			// No background future found (shouldn't normally happen since every
-			// non-error tool result starts one on append) — fall back to a
-			// synchronous summary so eviction still completes correctly.
-			return a.summarizeForEviction(ctx, req, usageByModel, &usageMu, toolName, content)
-		}, func(toolCallID string) bool {
-			return toolResultIsError[toolCallID]
-		})
-		messages = TrimMessagesToTokenLimit(messages, openAITools, promptBudget)
+	messages = evictStaleToolResults(messages, limits.KeepRecentToolResults, func(toolCallID, toolName, content string) string {
+		if limits.ToolCallSummarizationDisabled {
+			// Admin disabled eviction summaries: fall back to a plain
+			// truncation of the raw content, no LLM call.
+			return truncateWhitespace(content, evictionSummaryFallbackChars)
+		}
+		if future, ok := pendingSummaries[toolCallID]; ok {
+			delete(pendingSummaries, toolCallID)
+			return future.wait(ctx)
+		}
+		// No background future found (shouldn't normally happen since every
+		// non-error tool result starts one on append) — fall back to a
+		// synchronous summary so eviction still completes correctly.
+		return a.summarizeForEviction(ctx, req, usageByModel, &usageMu, toolName, content)
+	}, func(toolCallID string) bool {
+		return toolResultIsError[toolCallID]
+	})
+	messages = TrimMessagesToTokenLimit(messages, openAITools, promptBudget, limits)
 
 		a.logger.Debug("Agent loop iteration",
 			"iteration", iteration,
@@ -334,7 +345,7 @@ func (a *AgentLoop) Run(ctx context.Context, req LoopRequest, eventCh chan<- SSE
 				})
 			}
 			// Snapshot into a fresh map under the lock: background eviction-summary
-			// goroutines for tool results still within keepRecentToolResults (never
+			// goroutines for tool results still within DefaultKeepRecentToolResults (never
 			// evicted before the run ended) may still be writing to usageByModel
 			// after this point. DoneEvent crosses into another goroutine over
 			// eventCh, so handing out the live map risks a concurrent read/write
@@ -420,8 +431,9 @@ func (a *AgentLoop) Run(ctx context.Context, req LoopRequest, eventCh chan<- SSE
 
 			// Kick off this result's eviction summary now, in the background,
 			// instead of waiting until it's actually stale. Error results are
-			// never LLM-summarized (see evictStaleToolResults), so skip them.
-			if !isError {
+			// never LLM-summarized (see evictStaleToolResults), so skip them;
+			// likewise when the admin disabled eviction summaries.
+			if !isError && !limits.ToolCallSummarizationDisabled {
 				future := newToolResultSummaryFuture()
 				pendingSummaries[tc.ID] = future
 				toolName, toolResultContent := tc.Function.Name, toolContent
@@ -464,7 +476,7 @@ func (a *AgentLoop) Run(ctx context.Context, req LoopRequest, eventCh chan<- SSE
 // toolResultSummaryFuture carries the result of a summarizeForEviction call
 // started in the background as soon as a tool result is appended to history.
 // wait blocks until the goroutine resolves it (or ctx is cancelled) — in
-// steady state this is a no-op because keepRecentToolResults gives the
+// steady state this is a no-op because DefaultKeepRecentToolResults gives the
 // summary several iterations' worth of head start before it's actually needed.
 type toolResultSummaryFuture struct {
 	done   chan struct{}

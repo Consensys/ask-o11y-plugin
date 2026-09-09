@@ -842,3 +842,29 @@ func TestHandleSessionRouter_DispatchesStats(t *testing.T) {
 		t.Errorf("unexpected stats body: %+v", body)
 	}
 }
+
+func TestContextLimitsFromSettings(t *testing.T) {
+	settings := PluginSettings{
+		KeepRecentToolResults:                  3,
+		MaxToolResponseTokens:                  1000,
+		AggressiveToolResponseTokens:           200,
+		MaxHighVolumeToolResponseTokens:        400,
+		AggressiveHighVolumeToolResponseTokens: 100,
+		ToolCallSummarizationDisabled:          true,
+	}
+	limits := contextLimitsFromSettings(settings)
+	if limits.KeepRecentToolResults != 3 ||
+		limits.MaxToolResponseTokens != 1000 ||
+		limits.AggressiveToolResponseTokens != 200 ||
+		limits.MaxHighVolumeToolResponseTokens != 400 ||
+		limits.AggressiveHighVolumeToolResponseTokens != 100 ||
+		!limits.ToolCallSummarizationDisabled {
+		t.Fatalf("unexpected limits mapping: %+v", limits)
+	}
+
+	// Zero settings pass through untouched; the agent loop resolves defaults.
+	empty := contextLimitsFromSettings(PluginSettings{})
+	if empty != (agent.ContextLimits{}) {
+		t.Fatalf("expected zero-value passthrough, got %+v", empty)
+	}
+}

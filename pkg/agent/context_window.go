@@ -16,22 +16,56 @@ import (
 const DefaultMaxTotalTokens = 64_000
 const defaultRecentMessageCount = 15
 const systemMessageBuffer = 1000
-const maxToolResponseTokens = 8000
-const aggressiveToolResponseTokens = 2000
 
-// highVolumeToolResponseTokens and aggressiveHighVolumeToolResponseTokens cap
-// tool results from raw-data query tools (Loki/Prometheus/Tempo/Pyroscope/
-// dashboard JSON) tighter than other tools — these dominate context growth
-// and are usually redundant once the LLM has already summarized them once.
-const highVolumeToolResponseTokens = 3000
-const aggressiveHighVolumeToolResponseTokens = 800
+// Default per-tool-result trim caps for the two trim passes (normal, then
+// aggressive) and the high-volume variants applied to raw-data query tools
+// (Loki/Prometheus/Tempo/Pyroscope/dashboard JSON). Admin-configurable via
+// ContextLimits.
+const DefaultMaxToolResponseTokens = 8000
+const DefaultAggressiveToolResponseTokens = 2000
+const DefaultMaxHighVolumeToolResponseTokens = 3000
+const DefaultAggressiveHighVolumeToolResponseTokens = 800
 
-// keepRecentToolResults bounds how many of the most recent tool results stay
-// in full in the resent context; older ones are replaced by a short
+// DefaultKeepRecentToolResults bounds how many of the most recent tool results
+// stay in full in the resent context; older ones are replaced by a short
 // placeholder via evictStaleToolResults. This is the manual equivalent of
 // Anthropic's context-editing (clear_tool_uses) strategy, needed because the
 // OpenAI-compat LLM transport has no server-side caching or context editing.
-const keepRecentToolResults = 8
+// Admin-configurable via ContextLimits.KeepRecentToolResults.
+const DefaultKeepRecentToolResults = 8
+
+// ContextLimits holds the admin-configurable context-window management knobs:
+// per-tool-result trim caps, how many recent tool results stay raw before
+// eviction, and whether evicted results are LLM-summarized. The zero value is
+// valid — withDefaults resolves it to the historical hard-coded behavior, so
+// callers that don't care keep working unchanged.
+type ContextLimits struct {
+	MaxToolResponseTokens                  int
+	AggressiveToolResponseTokens           int
+	MaxHighVolumeToolResponseTokens        int
+	AggressiveHighVolumeToolResponseTokens int
+	KeepRecentToolResults                  int
+	ToolCallSummarizationDisabled          bool
+}
+
+func (l ContextLimits) withDefaults() ContextLimits {
+	if l.MaxToolResponseTokens <= 0 {
+		l.MaxToolResponseTokens = DefaultMaxToolResponseTokens
+	}
+	if l.AggressiveToolResponseTokens <= 0 {
+		l.AggressiveToolResponseTokens = DefaultAggressiveToolResponseTokens
+	}
+	if l.MaxHighVolumeToolResponseTokens <= 0 {
+		l.MaxHighVolumeToolResponseTokens = DefaultMaxHighVolumeToolResponseTokens
+	}
+	if l.AggressiveHighVolumeToolResponseTokens <= 0 {
+		l.AggressiveHighVolumeToolResponseTokens = DefaultAggressiveHighVolumeToolResponseTokens
+	}
+	if l.KeepRecentToolResults <= 0 {
+		l.KeepRecentToolResults = DefaultKeepRecentToolResults
+	}
+	return l
+}
 
 // TruncationMarker is the prefix used to detect an existing truncation notice
 // so repeated trims in the same run don't stack duplicates.
@@ -72,7 +106,7 @@ func isHighVolumeTool(toolName string) bool {
 // against an estimated-under-budget request, because the flat ratio let a
 // context dominated by tool-result JSON through without triggering the trim
 // pass early enough. Tool results are the dominant source of context growth
-// (see keepRecentToolResults), so undercounting them is what matters most.
+// (see DefaultKeepRecentToolResults), so undercounting them is what matters most.
 const proseCharsPerToken = 4.0
 const structuredContentCharsPerToken = 2.5
 
@@ -160,10 +194,14 @@ func sanitizeMessages(messages []Message) []Message {
 	return out
 }
 
-func TrimMessagesToTokenLimit(messages []Message, tools []OpenAITool, maxTokens int) []Message {
+// TrimMessagesToTokenLimit trims tool responses and drops old messages to fit
+// the token budget. limits resolves its zero value to the default trim caps,
+// so callers can pass ContextLimits{} for the historical behavior.
+func TrimMessagesToTokenLimit(messages []Message, tools []OpenAITool, maxTokens int, limits ContextLimits) []Message {
 	if maxTokens <= 0 {
 		maxTokens = DefaultMaxTotalTokens
 	}
+	limits = limits.withDefaults()
 
 	if estimateMessagesTokens(messages, tools) <= maxTokens {
 		return messages
@@ -171,12 +209,12 @@ func TrimMessagesToTokenLimit(messages []Message, tools []OpenAITool, maxTokens 
 
 	toolNames := toolNamesByCallID(messages)
 
-	trimmed := trimToolResponses(messages, maxToolResponseTokens, highVolumeToolResponseTokens, toolNames)
+	trimmed := trimToolResponses(messages, limits.MaxToolResponseTokens, limits.MaxHighVolumeToolResponseTokens, toolNames)
 	if estimateMessagesTokens(trimmed, tools) <= maxTokens {
 		return trimmed
 	}
 
-	trimmed = trimToolResponses(trimmed, aggressiveToolResponseTokens, aggressiveHighVolumeToolResponseTokens, toolNames)
+	trimmed = trimToolResponses(trimmed, limits.AggressiveToolResponseTokens, limits.AggressiveHighVolumeToolResponseTokens, toolNames)
 	if estimateMessagesTokens(trimmed, tools) <= maxTokens {
 		return trimmed
 	}
@@ -298,7 +336,7 @@ type toolResultSummarizer func(toolCallID, toolName, content string) string
 
 func evictStaleToolResults(messages []Message, keepRecent int, summarize toolResultSummarizer, isError func(toolCallID string) bool) []Message {
 	if keepRecent <= 0 {
-		keepRecent = keepRecentToolResults
+		keepRecent = DefaultKeepRecentToolResults
 	}
 
 	var toolIdx []int
