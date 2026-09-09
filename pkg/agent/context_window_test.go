@@ -61,7 +61,7 @@ func TestTrimMessagesToTokenLimit(t *testing.T) {
 	}
 
 	// Large limit — no trimming
-	result := TrimMessagesToTokenLimit(messages, nil, 100_000)
+	result := TrimMessagesToTokenLimit(messages, nil, 100_000, ContextLimits{})
 	if len(result) != 3 {
 		t.Fatalf("expected 3 messages (no trim), got %d", len(result))
 	}
@@ -76,7 +76,7 @@ func TestTrimMessagesToTokenLimit_DropsOldMessages(t *testing.T) {
 	}
 
 	// Very tight limit — should keep system + last message
-	result := TrimMessagesToTokenLimit(messages, nil, 2000)
+	result := TrimMessagesToTokenLimit(messages, nil, 2000, ContextLimits{})
 	if len(result) < 2 {
 		t.Fatalf("expected at least 2 messages (system+last), got %d", len(result))
 	}
@@ -96,8 +96,8 @@ func TestTrimMessagesToTokenLimit_TruncationNoticeIsIdempotent(t *testing.T) {
 		{Role: "user", Content: "recent"},
 	}
 
-	first := TrimMessagesToTokenLimit(messages, nil, 2000)
-	second := TrimMessagesToTokenLimit(first, nil, 2000)
+	first := TrimMessagesToTokenLimit(messages, nil, 2000, ContextLimits{})
+	second := TrimMessagesToTokenLimit(first, nil, 2000, ContextLimits{})
 
 	count := 0
 	for _, m := range second {
@@ -116,7 +116,7 @@ func TestTrimMessagesToTokenLimit_NoNoticeWhenNoDrop(t *testing.T) {
 		{Role: "user", Content: "hello"},
 		{Role: "assistant", Content: "world"},
 	}
-	result := TrimMessagesToTokenLimit(messages, nil, 100_000)
+	result := TrimMessagesToTokenLimit(messages, nil, 100_000, ContextLimits{})
 	if hasTruncationNotice(result) {
 		t.Fatalf("did not expect truncation notice when nothing was dropped, got %+v", result)
 	}
@@ -463,5 +463,81 @@ func TestEstimateTokens_StructuredContentGetsTighterRatio(t *testing.T) {
 	jsonTokensPerByte := float64(EstimateTokens(jsonish)) / float64(len(jsonish))
 	if jsonTokensPerByte <= proseTokensPerByte {
 		t.Fatalf("expected structured content to estimate more tokens per byte than prose: json=%.4f prose=%.4f", jsonTokensPerByte, proseTokensPerByte)
+	}
+}
+
+func TestContextLimitsWithDefaults(t *testing.T) {
+	resolved := ContextLimits{}.withDefaults()
+	if resolved.MaxToolResponseTokens != DefaultMaxToolResponseTokens ||
+		resolved.AggressiveToolResponseTokens != DefaultAggressiveToolResponseTokens ||
+		resolved.MaxHighVolumeToolResponseTokens != DefaultMaxHighVolumeToolResponseTokens ||
+		resolved.AggressiveHighVolumeToolResponseTokens != DefaultAggressiveHighVolumeToolResponseTokens ||
+		resolved.KeepRecentToolResults != DefaultKeepRecentToolResults {
+		t.Fatalf("expected zero value to resolve to defaults, got %+v", resolved)
+	}
+	if resolved.ToolCallSummarizationDisabled {
+		t.Error("summarization must stay enabled by default")
+	}
+
+	custom := ContextLimits{MaxToolResponseTokens: 500, KeepRecentToolResults: 3}.withDefaults()
+	if custom.MaxToolResponseTokens != 500 || custom.KeepRecentToolResults != 3 {
+		t.Errorf("expected configured values to be preserved, got %+v", custom)
+	}
+	if custom.AggressiveToolResponseTokens != DefaultAggressiveToolResponseTokens {
+		t.Errorf("expected unset fields to fall back to defaults, got %+v", custom)
+	}
+}
+
+func TestTrimMessagesToTokenLimit_CustomLimits(t *testing.T) {
+	messages := []Message{
+		{Role: "system", Content: "sys"},
+		toolCallMessage("", "1"),
+		toolResultMessage("1", strings.Repeat("x", 100000)),
+	}
+	custom := ContextLimits{MaxToolResponseTokens: 100, MaxHighVolumeToolResponseTokens: 100}.withDefaults()
+	result := TrimMessagesToTokenLimit(messages, nil, 20000, custom)
+	trimmed := result[len(result)-1]
+	if !strings.Contains(trimmed.Content, "[...truncated]") {
+		t.Fatal("expected tool result to be trimmed with custom low cap")
+	}
+	if len(trimmed.Content) > 500 {
+		t.Errorf("expected trim cap of 100 tokens (~400 chars), got %d chars", len(trimmed.Content))
+	}
+
+	withDefaults := TrimMessagesToTokenLimit(messages, nil, 20000, ContextLimits{})
+	if got := len(withDefaults[len(withDefaults)-1].Content); got <= 500 {
+		t.Errorf("expected default caps to keep the result larger, got %d chars", got)
+	}
+}
+
+// TestEvictStaleToolResults_TruncationFallbackSummarizer mirrors what the loop
+// uses when ToolCallSummarizationDisabled is set: stale results are replaced
+// with a plain truncation of the raw content instead of an LLM summary.
+func TestEvictStaleToolResults_TruncationFallbackSummarizer(t *testing.T) {
+	var messages []Message
+	for i := 1; i <= 3; i++ {
+		id := fmt.Sprintf("%d", i)
+		messages = append(messages, toolCallMessage("", id))
+		messages = append(messages, toolResultMessage(id, strings.Repeat("raw data ", 100)))
+	}
+
+	truncationSummarizer := func(toolCallID, toolName, content string) string {
+		return truncateWhitespace(content, evictionSummaryFallbackChars)
+	}
+	result := evictStaleToolResults(messages, 2, truncationSummarizer, nil)
+
+	evicted := result[1].Content
+	if !strings.HasPrefix(evicted, EvictedToolResultMarker) {
+		t.Fatalf("expected eviction marker, got %q", evicted)
+	}
+	if strings.Contains(evicted, "no summary available") {
+		t.Error("truncation fallback should never produce the empty-summary placeholder")
+	}
+	want := truncateWhitespace(strings.Repeat("raw data ", 100), evictionSummaryFallbackChars)
+	if !strings.Contains(evicted, want) {
+		t.Errorf("expected truncated raw content in placeholder, got %q", evicted)
+	}
+	if result[3].Content != messages[3].Content || result[5].Content != messages[5].Content {
+		t.Error("recent tool results must stay untouched")
 	}
 }

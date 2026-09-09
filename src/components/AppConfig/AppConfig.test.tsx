@@ -148,4 +148,42 @@ describe('Components/AppConfig', () => {
     expect(screen.getByTestId(testIds.appConfig.serviceGraphMaxEdges)).toBeInTheDocument();
     await waitFor(() => expect(screen.getByTestId(testIds.appConfig.serviceGraphSummary)).toBeInTheDocument());
   });
+
+  test('renders context management controls with defaults in the Agent Runtime tab', () => {
+    const { container } = render(<AppConfig {...props} />);
+
+    fireEvent.click(screen.getByText('Agent Runtime'));
+
+    expect(screen.getByRole('group', { name: /agent runtime/i })).toBeInTheDocument();
+    expect(screen.getByText('Summarize evicted tool results')).toBeInTheDocument();
+
+    const inputByName = (name: string) => container.querySelector(`input[name="${name}"]`) as HTMLInputElement;
+    expect(inputByName('keepRecentToolResults').value).toBe('8');
+    expect(inputByName('maxToolResponseTokens').value).toBe('8000');
+    expect(inputByName('aggressiveToolResponseTokens').value).toBe('2000');
+    expect(inputByName('maxHighVolumeToolResponseTokens').value).toBe('3000');
+    expect(inputByName('aggressiveHighVolumeToolResponseTokens').value).toBe('800');
+  });
+
+  test('marks the Agent Runtime tab dirty when a context management setting changes', () => {
+    const { container } = render(<AppConfig {...props} />);
+
+    fireEvent.click(screen.getByText('Agent Runtime'));
+    fireEvent.change(container.querySelector('input[name="keepRecentToolResults"]') as HTMLInputElement, {
+      target: { value: '12' },
+    });
+
+    expect(screen.getByTestId(testIds.appConfig.unsavedChangesNotice)).toHaveTextContent('Unsaved changes');
+    expect(screen.getByText('Agent Runtime *')).toBeInTheDocument();
+  });
+
+  test('marks the Agent Runtime tab dirty when the summarization switch is toggled', () => {
+    render(<AppConfig {...props} />);
+
+    fireEvent.click(screen.getByText('Agent Runtime'));
+    fireEvent.click(screen.getByLabelText('Summarize evicted tool results'));
+
+    expect(screen.getByTestId(testIds.appConfig.unsavedChangesNotice)).toHaveTextContent('Unsaved changes');
+    expect(screen.getByText('Agent Runtime *')).toBeInTheDocument();
+  });
 });

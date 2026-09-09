@@ -189,6 +189,7 @@ func (s *Scout) Scavenge() {
 		SystemPrompt:       GraphitiDiscoverySystemPrompt,
 		MaxTotalTokens:     s.settings.MaxTotalTokens,
 		RecentMessageCount: s.settings.RecentMessageCount,
+		ContextLimits:      contextLimitsFromSettings(s.settings),
 		MaxIterations:      GraphitiDiscoveryMaxIter,
 		Model:              agentModelLarge,
 		GrafanaURL:         grafanaURL,

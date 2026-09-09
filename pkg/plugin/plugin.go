@@ -130,6 +130,15 @@ type PluginSettings struct {
 	ApprovalPolicy          string `json:"approvalPolicy,omitempty"`
 	MaxParallelToolCalls    int    `json:"maxParallelToolCalls,omitempty"`
 	AgentEvalCaptureEnabled bool   `json:"agentEvalCaptureEnabled,omitempty"`
+
+	// Context-window management knobs, mapped onto agent.ContextLimits. Zero
+	// values resolve to the defaults inside the agent loop.
+	KeepRecentToolResults                  int  `json:"keepRecentToolResults,omitempty"`
+	MaxToolResponseTokens                  int  `json:"maxToolResponseTokens,omitempty"`
+	AggressiveToolResponseTokens           int  `json:"aggressiveToolResponseTokens,omitempty"`
+	MaxHighVolumeToolResponseTokens        int  `json:"maxHighVolumeToolResponseTokens,omitempty"`
+	AggressiveHighVolumeToolResponseTokens int  `json:"aggressiveHighVolumeToolResponseTokens,omitempty"`
+	ToolCallSummarizationDisabled          bool `json:"toolCallSummarizationDisabled,omitempty"`
 }
 
 const mcpServerHeaderPrefix = "mcpServerHeader."
@@ -177,6 +186,20 @@ func applyAgentRuntimeSettings(settings *PluginSettings) {
 		if len(settings.RiskOverrides) > 0 && len(settings.MCPServers[i].RiskOverrides) == 0 {
 			settings.MCPServers[i].RiskOverrides = settings.RiskOverrides
 		}
+	}
+}
+
+// contextLimitsFromSettings maps the admin-configurable context-window
+// settings onto agent.ContextLimits. Unset (zero) fields resolve to the
+// historical defaults inside the agent loop.
+func contextLimitsFromSettings(settings PluginSettings) agent.ContextLimits {
+	return agent.ContextLimits{
+		MaxToolResponseTokens:                  settings.MaxToolResponseTokens,
+		AggressiveToolResponseTokens:           settings.AggressiveToolResponseTokens,
+		MaxHighVolumeToolResponseTokens:        settings.MaxHighVolumeToolResponseTokens,
+		AggressiveHighVolumeToolResponseTokens: settings.AggressiveHighVolumeToolResponseTokens,
+		KeepRecentToolResults:                  settings.KeepRecentToolResults,
+		ToolCallSummarizationDisabled:          settings.ToolCallSummarizationDisabled,
 	}
 }
 
@@ -1083,6 +1106,7 @@ func (p *Plugin) handleAgentRun(w http.ResponseWriter, r *http.Request) {
 		SystemPrompt:         systemPrompt,
 		MaxTotalTokens:       p.settings.MaxTotalTokens,
 		RecentMessageCount:   p.settings.RecentMessageCount,
+		ContextLimits:        contextLimitsFromSettings(p.settings),
 		MaxIterations:        maxIterations,
 		Model:                effectiveRunModel,
 		AllowModelFallback:   (modelSource == "auto" || modelSource == "skill") && effectiveRunModel == "large",
@@ -2074,6 +2098,7 @@ func (p *Plugin) handleGraphitiDiscover(w http.ResponseWriter, r *http.Request) 
 		SystemPrompt:       GraphitiDiscoverySystemPrompt,
 		MaxTotalTokens:     p.settings.MaxTotalTokens,
 		RecentMessageCount: p.settings.RecentMessageCount,
+		ContextLimits:      contextLimitsFromSettings(p.settings),
 		MaxIterations:      GraphitiDiscoveryMaxIter,
 		Model:              agentModelLarge,
 		GrafanaURL:         grafanaURL,
