@@ -5,6 +5,13 @@ All notable changes to the Ask O11y Grafana plugin will be documented in this fi
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.15](https://github.com/Consensys/ask-o11y-plugin/compare/v0.3.14...v0.3.15) (2026-09-09)
+
+
+### Features
+
+* **config:** admin-configurable context-window management ([#216](https://github.com/Consensys/ask-o11y-plugin/issues/216)) ([0b52a34](https://github.com/Consensys/ask-o11y-plugin/commit/0b52a34bb4da2a3ab1154a4e2be6e78a95892098))
+
 ## [0.3.14](https://github.com/Consensys/ask-o11y-plugin/compare/v0.3.13...v0.3.14) (2026-09-08)
 
 
