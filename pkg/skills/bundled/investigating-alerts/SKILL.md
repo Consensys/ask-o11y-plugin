@@ -19,6 +19,8 @@ metadata:
     1. Prometheus datasource alerts (list datasources once to get the Prometheus UID; reuse it)
     2. Grafana-managed alerts
 
+    When listing Prometheus datasource rules, filter with `label_selectors` (e.g. `label_selectors: ["alertname=\"{{.AlertName}}\""]`) — do **not** use `search_rule_name`: it is silently ignored on the datasource rules path and returns every rule in the datasource.
+
     Once you find the alert, check its annotations for a runbook URL (commonly `runbook_url`). If present, **fetch and read the runbook before** broader metrics/logs/trace exploration. Use the appropriate tool for the URL type (e.g., web_fetch for HTTP, confluence_get_page for Confluence). Follow the runbook's steps; use other tools to fill gaps it leaves open.
 
     Then, scoped to the affected components and time of the incident:
@@ -39,7 +41,7 @@ metadata:
 For questions about alerts, incidents, or "what's wrong":
 
 1. List available datasources to discover their UIDs — reuse these UIDs for the rest of the session
-2. Check Prometheus datasource alerts first (pass the Prometheus datasource UID)
+2. Check Prometheus datasource alerts first (pass the Prometheus datasource UID); filter by `label_selectors` with the alert's `alertname` label — `search_rule_name` is ignored on the datasource path and returns all rules (a large token cost)
 3. Check Grafana-managed alerts (without a datasource UID filter)
 4. Cross-reference with logs, traces, and metrics for context
 
