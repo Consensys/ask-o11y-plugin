@@ -70,6 +70,17 @@ type RedisRateLimiter struct {
 	ctx    context.Context
 }
 
+// redisRateLimitScript atomically increments the counter and ensures the
+// rate-limit window is attached to the key. The PTTL check also repairs keys
+// left without an expiry by older versions if INCR succeeded but EXPIRE failed.
+const redisRateLimitScript = `
+local count = redis.call("INCR", KEYS[1])
+if count == 1 or redis.call("PTTL", KEYS[1]) < 0 then
+  redis.call("PEXPIRE", KEYS[1], ARGV[1])
+end
+return count
+`
+
 // NewRedisRateLimiter creates a new Redis-backed rate limiter
 func NewRedisRateLimiter(ctx context.Context, client *redis.Client, logger log.Logger) *RedisRateLimiter {
 	return &RedisRateLimiter{
@@ -85,20 +96,16 @@ func (r *RedisRateLimiter) CheckLimit(userID int64) bool {
 
 	ctx, cancel := context.WithTimeout(r.ctx, RedisOpTimeout)
 	defer cancel()
-	count, err := r.client.Incr(ctx, rateLimitKey).Result()
+	count, err := r.client.Eval(
+		ctx,
+		redisRateLimitScript,
+		[]string{rateLimitKey},
+		ShareRateLimitWindow.Milliseconds(),
+	).Int64()
 	if err != nil {
-		r.logger.Warn("Failed to increment rate limit counter", "error", err, "userId", userID)
+		r.logger.Warn("Failed to update rate limit counter", "error", err, "userId", userID)
 		// Allow on error to avoid blocking legitimate requests
 		return true
-	}
-
-	// Set TTL on first increment
-	if count == 1 {
-		ctx2, cancel2 := context.WithTimeout(r.ctx, RedisOpTimeout)
-		defer cancel2()
-		if err := r.client.Expire(ctx2, rateLimitKey, ShareRateLimitWindow).Err(); err != nil {
-			r.logger.Warn("Failed to set rate limit TTL", "error", err, "userId", userID)
-		}
 	}
 
 	// Check if limit exceeded
