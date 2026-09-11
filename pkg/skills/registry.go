@@ -3,7 +3,6 @@ package skills
 import (
 	"embed"
 	"fmt"
-	"io/fs"
 	"sort"
 	"strings"
 
@@ -341,7 +340,7 @@ func loadBundled(logger log.Logger) ([]*Skill, map[string]map[string]string) {
 	var skills []*Skill
 	refs := map[string]map[string]string{}
 
-	roots, err := fs.ReadDir(bundledFS, "bundled")
+	roots, err := bundledFS.ReadDir("bundled")
 	if err != nil {
 		logger.Error("Failed to read bundled skills", "error", err)
 		return skills, refs
@@ -355,7 +354,7 @@ func loadBundled(logger log.Logger) ([]*Skill, map[string]map[string]string) {
 	sort.Strings(names)
 
 	for _, name := range names {
-		content, err := fs.ReadFile(bundledFS, "bundled/"+name+"/SKILL.md")
+		content, err := bundledFS.ReadFile("bundled/" + name + "/SKILL.md")
 		if err != nil {
 			logger.Error("Bundled skill missing SKILL.md", "skill", name, "error", err)
 			continue
@@ -372,13 +371,13 @@ func loadBundled(logger log.Logger) ([]*Skill, map[string]map[string]string) {
 		skills = append(skills, s)
 
 		refDir := "bundled/" + name + "/references"
-		if entries, err := fs.ReadDir(bundledFS, refDir); err == nil {
+		if entries, err := bundledFS.ReadDir(refDir); err == nil {
 			skillRefs := map[string]string{}
 			for _, entry := range entries {
 				if entry.IsDir() {
 					continue
 				}
-				data, err := fs.ReadFile(bundledFS, refDir+"/"+entry.Name())
+				data, err := bundledFS.ReadFile(refDir + "/" + entry.Name())
 				if err != nil {
 					logger.Error("Failed to read bundled skill reference", "skill", name, "file", entry.Name(), "error", err)
 					continue
