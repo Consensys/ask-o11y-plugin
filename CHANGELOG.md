@@ -5,6 +5,15 @@ All notable changes to the Ask O11y Grafana plugin will be documented in this fi
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.16](https://github.com/Consensys/ask-o11y-plugin/compare/v0.3.15...v0.3.16) (2026-09-11)
+
+
+### Bug Fixes
+
+* make Redis rate-limit TTL atomic ([#217](https://github.com/Consensys/ask-o11y-plugin/issues/217)) ([517a48c](https://github.com/Consensys/ask-o11y-plugin/commit/517a48ccf1374f44d7636d472bf18aa0d063f383))
+* preserve concurrent Redis session writes ([#218](https://github.com/Consensys/ask-o11y-plugin/issues/218)) ([6330f3f](https://github.com/Consensys/ask-o11y-plugin/commit/6330f3f1401be1c0f843a7816f83b5cb7ead069f))
+* **skills:** use embed.FS methods instead of io/fs package calls ([#220](https://github.com/Consensys/ask-o11y-plugin/issues/220)) ([be34f87](https://github.com/Consensys/ask-o11y-plugin/commit/be34f8707a53db3d8e9d81c27ca433d9fb6ec46d))
+
 ## [0.3.15](https://github.com/Consensys/ask-o11y-plugin/compare/v0.3.14...v0.3.15) (2026-09-09)
 
 
