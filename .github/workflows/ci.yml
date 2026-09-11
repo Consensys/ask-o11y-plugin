@@ -30,6 +30,12 @@ jobs:
               - 'go.mod'
               - 'go.sum'
               - 'tsconfig.json'
+              # Changes to the build/validation tooling must run the build too,
+              # otherwise e.g. an edit to ci.yml or the validator config would
+              # fast-pass and never be exercised.
+              - '.github/workflows/**'
+              - '.github/actions/**'
+              - '.github/plugin-validator.config.yaml'
 
   build:
     name: Build, lint and unit tests
@@ -113,23 +119,37 @@ jobs:
           PLUGIN_ID: ${{ steps.metadata.outputs.plugin-id }}
           PLUGIN_ARCHIVE: ${{ steps.metadata.outputs.archive }}
 
-      # The plugin-validator's "code-rules-*" analyzers shell out to `semgrep`
-      # and silently no-op when it is missing (they return no diagnostics, not
-      # an error). Without this the file-system / env / syscall code rules never
-      # run in CI even though the catalog review runs them on the published zip.
-      - name: Setup Python for semgrep
-        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
-        with:
-          python-version: '3.13'
-
-      - name: Install semgrep
-        run: python3 -m pip install "setuptools<81" "semgrep==1.84.1"
+      # Run the validator from the official image, not `npx`. The npx wrapper
+      # only downloads the Go binary; the security analyzers (code-rules/semgrep,
+      # go-sec/gosec, govulncheck, virusscan/clamav) shell out to external tools
+      # and silently report NOTHING when those are absent. The Docker image
+      # bundles all of them, matching the environment the catalog review uses.
+      # Bump the image tag to track plugin-validator releases.
+      #
+      # Validate a clean, tracked-only source export (git archive) rather than
+      # the whole workspace: this drops node_modules/.git so clamav/gosec/semgrep
+      # scan only plugin source (minutes vs. ~18), and mirrors the clean checkout
+      # the catalog reviews.
+      - name: Export clean source for validation
+        run: |
+          mkdir -p "$VALIDATOR_SRC"
+          git archive --format=tar HEAD | tar -x -C "$VALIDATOR_SRC"
+        env:
+          VALIDATOR_SRC: ${{ runner.temp }}/validator-src
 
       - name: Validate plugin
         run: |
-          npx -y @grafana/plugin-validator@latest -config .github/plugin-validator.config.yaml -sourceCodeUri file://./ $PLUGIN_ARCHIVE
+          docker run --rm \
+            -v "$VALIDATOR_SRC:/source" \
+            -w /source \
+            -v "$PWD/$PLUGIN_ARCHIVE:/archive.zip" \
+            grafana/plugin-validator-cli:v0.49.1 \
+            -config /source/.github/plugin-validator.config.yaml \
+            -sourceCodeUri file:///source \
+            /archive.zip
         env:
           PLUGIN_ARCHIVE: ${{ steps.metadata.outputs.archive }}
+          VALIDATOR_SRC: ${{ runner.temp }}/validator-src
 
   # Fast pass for release-please PRs (no code changes)
   skip-build:
