@@ -30,6 +30,12 @@ jobs:
               - 'go.mod'
               - 'go.sum'
               - 'tsconfig.json'
+              # Changes to the build/validation tooling must run the build too,
+              # otherwise e.g. an edit to ci.yml or the validator config would
+              # fast-pass and never be exercised.
+              - '.github/workflows/**'
+              - '.github/actions/**'
+              - '.github/plugin-validator.config.yaml'
 
   build:
     name: Build, lint and unit tests
@@ -119,10 +125,22 @@ jobs:
       # and silently report NOTHING when those are absent. The Docker image
       # bundles all of them, matching the environment the catalog review uses.
       # Bump the image tag to track plugin-validator releases.
+      #
+      # Validate a clean, tracked-only source export (git archive) rather than
+      # the whole workspace: this drops node_modules/.git so clamav/gosec/semgrep
+      # scan only plugin source (minutes vs. ~18), and mirrors the clean checkout
+      # the catalog reviews.
+      - name: Export clean source for validation
+        run: |
+          mkdir -p "$VALIDATOR_SRC"
+          git archive --format=tar HEAD | tar -x -C "$VALIDATOR_SRC"
+        env:
+          VALIDATOR_SRC: ${{ runner.temp }}/validator-src
+
       - name: Validate plugin
         run: |
           docker run --rm \
-            -v "$PWD:/source" \
+            -v "$VALIDATOR_SRC:/source" \
             -w /source \
             -v "$PWD/$PLUGIN_ARCHIVE:/archive.zip" \
             grafana/plugin-validator-cli:v0.49.1 \
@@ -131,6 +149,7 @@ jobs:
             /archive.zip
         env:
           PLUGIN_ARCHIVE: ${{ steps.metadata.outputs.archive }}
+          VALIDATOR_SRC: ${{ runner.temp }}/validator-src
 
   # Fast pass for release-please PRs (no code changes)
   skip-build:
