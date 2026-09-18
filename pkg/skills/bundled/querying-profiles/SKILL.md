@@ -13,16 +13,17 @@ metadata:
 
 ## Profile query workflow
 
-1. **Discover profile types** — List available profile types with `list_pyroscope_profile_types` to confirm what this instance collects (CPU, memory, goroutines, mutex, block).
-2. **Discover labels and values** — Use label discovery tools to enumerate label names (`service_name`, `env`, `namespace`, ...) and verify concrete values exist before filtering.
-3. **Run the profile query** — Call `query_pyroscope` with:
-   - `profile_type` — confirmed in step 1
+1. **Identify the datasource UID** — every Pyroscope tool requires `data_source_uid` (the plugin's configured Pyroscope datasource).
+2. **Discover profile types** — List available profile types with `list_pyroscope_profile_types` to confirm what this instance collects (CPU, memory, goroutines, mutex, block).
+3. **Discover labels and values** — Use label discovery tools to enumerate label names (`service_name`, `env`, `namespace`, ...) and verify concrete values exist before filtering.
+4. **Run the profile query** — Call `query_pyroscope` with:
+   - `profile_type` — confirmed in step 2
    - `matchers` — label selectors, e.g. `{service_name="payments", env="prod"}` (comma-separated `key="value"` pairs inside braces)
-   - `query_type` — `flamegraph` for a tree, `profile` for aggregated data
-   - `format` — `tree` for readability when narrating; `line` when comparing
-   - `group_by` — aggregate by label (e.g. `service_name`) when comparing services
-4. **Read the flame graph** — flat (self) vs cumulative interpretation below.
-5. **Compare windows** — for regressions, diff the same profile type before/after a deploy or peak vs baseline; deltas localize the offending function.
+   - `query_type` — `profile` (flamegraph data), `metrics` (time-series of the same profile), or `both` (default; one call, complete analysis)
+   - `format` — `table` (default) for the per-function flat/cumulative table, or `dot` for a Graphviz call graph
+   - `group_by` — labels to group the `metrics` series by (e.g. `service_name`)
+5. **Read the flame graph** — flat (self) vs cumulative interpretation below.
+6. **Compare windows** — for regressions, diff the same profile type before/after a deploy or peak vs baseline; deltas localize the offending function.
 
 ## Profile types and symptoms
 
