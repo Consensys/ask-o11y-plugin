@@ -1,25 +1,30 @@
 ---
 name: investigating-alerts
+license: Apache-2.0
 description: >-
   Investigates firing alerts and incidents and drives root cause analysis
   across metrics, logs, and traces, prioritizing the alert's runbook. Use
   when the user mentions alerts, incidents, firing notifications, outages,
-  or asks to find the root cause of a problem.
+  or asks to find the root cause of a problem — even when they say
+  "something is down", "why did we get paged", or "perform root cause
+  analysis".
 metadata:
   model: large
   max-iterations: "60"
   triggers: '\[FIRING[:\s]|alert investigation:|perform root cause analysis'
-  version: "1.0"
+  version: "1.1"
   user-prompt: |
     Investigate the alert "{{.AlertName}}" and perform root cause analysis.
 
     **Efficiency:** Treat this alert name and any labels on its rule or firing instance as the primary scope. Prefer **targeted** metrics and logs for the affected service or namespace over unfocused cluster-wide listing. Combine related queries where one PromQL or LogQL answers several checks.
 
-    **Your first step:** Find this alert by checking both:
+    **Your first step:** Check your system prompt for an **Alert Context** block. If present, it was prefetched from the actual alert rule — treat its metric names, label matchers, and datasource UIDs as authoritative: fetch the runbook from its annotations (if any), then go straight to querying. Do not re-find the rule via alerting tools and do not list metric names unless you need a metric absent from that block.
+
+    If (and only if) the Alert Context block is absent, find the alert by checking both:
     1. Prometheus datasource alerts (list datasources once to get the Prometheus UID; reuse it)
     2. Grafana-managed alerts
 
-    When listing Prometheus datasource rules, filter with `label_selectors` (e.g. `label_selectors: ["alertname=\"{{.AlertName}}\""]`) — do **not** use `search_rule_name`: it is silently ignored on the datasource rules path and returns every rule in the datasource.
+    When listing Prometheus datasource rules, filter with `label_selectors` (e.g. `label_selectors: ["alertname=\"{{.AlertName}}\""]`). Note `label_selectors` matches rule *labels* — datasource-managed rules usually have no `alertname` label (the rule name is the alertname), so a zero result there is expected; fall back to scanning rule titles. On mcp-grafana >= 1.4.0, `search_rule_name` is also safe to use for datasource rules.
 
     Once you find the alert, check its annotations for a runbook URL (commonly `runbook_url`). If present, **fetch and read the runbook before** broader metrics/logs/trace exploration. Use the appropriate tool for the URL type (e.g., web_fetch for HTTP, confluence_get_page for Confluence). Follow the runbook's steps; use other tools to fill gaps it leaves open.
 
@@ -40,10 +45,11 @@ metadata:
 
 For questions about alerts, incidents, or "what's wrong":
 
-1. List available datasources to discover their UIDs — reuse these UIDs for the rest of the session
-2. Check Prometheus datasource alerts first (pass the Prometheus datasource UID); filter by `label_selectors` with the alert's `alertname` label — `search_rule_name` is ignored on the datasource path and returns all rules (a large token cost)
-3. Check Grafana-managed alerts (without a datasource UID filter)
-4. Cross-reference with logs, traces, and metrics for context
+1. If an **Alert Context** block was prefetched into the system prompt, skip rule discovery entirely and start from its metrics/matchers/runbook
+2. Otherwise, list available datasources to discover their UIDs — reuse these UIDs for the rest of the session
+3. Check Prometheus datasource alerts first (pass the Prometheus datasource UID); filter by rule title or label selectors — on mcp-grafana < 1.4.0 `search_rule_name` is ignored on the datasource path and returns all rules (a large token cost)
+4. Check Grafana-managed alerts (without a datasource UID filter)
+5. Cross-reference with logs, traces, and metrics for context
 
 **Why Prometheus first?** Most alerting rules live in Prometheus datasources, not Grafana-managed alerts.
 
@@ -53,6 +59,10 @@ For questions about alerts, incidents, or "what's wrong":
 2. **Find correlations** — Look for timing patterns across data sources
 3. **Narrow down** — Use specific label filters once you identify the affected component
 4. **Verify** — Confirm the root cause with targeted queries before proposing solutions
+
+## Alert rule anatomy (for interpreting what fired)
+
+When the investigation needs the rule definition itself (why it fired, why it stayed silent, why it doubled), reason from the rule structure: the query's label matchers scope the blast radius, `for` sets how long the condition held, and `noDataState`/`execErrState` decide what a broken query does. See [references/alerting.md](references/alerting.md) for rule YAML examples for all three rule types, multi-window burn-rate patterns, and the "not firing / firing too much" debugging checklist.
 
 ## Investigation discipline (this request)
 

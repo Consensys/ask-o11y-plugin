@@ -2,10 +2,12 @@
 name: rendering-visualizations
 description: >-
   Renders PromQL, LogQL, and TraceQL results as interactive graphs, gauges,
-  tables, and log or trace panels directly in the chat. Use when composing
-  answers whose queries benefit from a visualization.
+  tables, and log or trace panels directly in the chat, with the right
+  visualization type for the data shape. Use when composing answers whose
+  queries benefit from a visualization — even when the user just asks to
+  "show", "graph", or "chart" something.
 metadata:
-  version: "1.0"
+  version: "1.1"
 ---
 
 ## Rendering PromQL queries as graphs
@@ -25,15 +27,15 @@ sum by (service) (rate(http_requests_total{status=~"5.."}[5m]))
   / sum by (service) (rate(http_requests_total[5m]))
 ```
 
-**Choosing the visualization type (`viz` attribute):**
-- `timeseries` (default) — Rate queries, trends, historical data
-- `gauge` — Current percentages or values with min/max context (CPU %, memory utilization)
-- `stat` — Single aggregate values, counts, uptime
-- `table` — Multiple label values, detailed breakdowns
-- `piechart` — Distribution and proportions
-- `barchart` — Category comparisons, rankings
-- `heatmap` — Density patterns, histogram buckets over time
-- `histogram` — Value distributions
+**Choosing the visualization type (`viz` attribute) — match the data shape:**
+- `timeseries` (default) — any metric over time, rates, trends
+- `gauge` — current value against min/max context (CPU %, memory utilization)
+- `stat` — single aggregate values, counts, uptime
+- `table` — multi-column rows, detailed label breakdowns
+- `piechart` — parts of a whole, proportions
+- `barchart` — category comparisons, rankings
+- `heatmap` — distribution over time, histogram buckets
+- `histogram` — value distribution in a single window
 
 ## Rendering LogQL queries as log panels
 

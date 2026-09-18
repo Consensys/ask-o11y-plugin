@@ -4,9 +4,10 @@ description: >-
   Queries AWS CloudWatch metrics through Grafana CloudWatch datasources —
   discovering namespaces, metrics, dimensions, and running metric queries.
   Use when the user asks about AWS resources such as EC2, ECS, RDS, Lambda,
-  or Container Insights, or mentions CloudWatch or AWS.
+  or Container Insights, or mentions CloudWatch, AWS, or a specific AWS
+  region.
 metadata:
-  version: "1.0"
+  version: "1.1"
 ---
 
 ## CloudWatch query workflow

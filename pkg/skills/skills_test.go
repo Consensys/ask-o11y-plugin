@@ -107,9 +107,18 @@ func TestBundledSkillsAllParse(t *testing.T) {
 		"analyzing-traces",
 		"building-dashboards",
 		"investigating-alerts",
+		"optimizing-metrics-cost",
 		"querying-profiles",
 		"rendering-visualizations",
+		"writing-k6-tests",
 		"writing-promql-and-logql",
+	}
+	expectedRefs := map[string]int{
+		"writing-promql-and-logql": 2,
+		"analyzing-traces":         1,
+		"querying-profiles":        1,
+		"investigating-alerts":     1,
+		"building-dashboards":      1,
 	}
 	if len(bundled) != len(expected) {
 		t.Fatalf("expected %d bundled skills, got %d: %+v", len(expected), len(bundled), bundled)
@@ -129,17 +138,27 @@ func TestBundledSkillsAllParse(t *testing.T) {
 			t.Errorf("missing bundled skill %q", name)
 		}
 	}
-	if len(refs["writing-promql-and-logql"]) != 2 {
-		t.Errorf("expected 2 reference files for writing-promql-and-logql, got %v", refs["writing-promql-and-logql"])
+	for name, count := range expectedRefs {
+		if got := len(refs[name]); got != count {
+			t.Errorf("expected %d reference files for %s, got %d: %v", count, name, got, refs[name])
+		}
+	}
+	for _, s := range bundled {
+		if len(s.Description) > 1024 {
+			t.Errorf("skill %s description is %d chars (max 1024)", s.Name, len(s.Description))
+		}
+		if s.Version == "" {
+			t.Errorf("skill %s has no version metadata", s.Name)
+		}
 	}
 }
 
 func TestRegistry_CustomAndOverrideAndDisable(t *testing.T) {
 	disabled := false
 	settings := Settings{Entries: map[string]Entry{
-		"my-custom-skill": {Content: "---\nname: my-custom-skill\ndescription: Does custom things.\n---\nBody"},
+		"my-custom-skill":      {Content: "---\nname: my-custom-skill\ndescription: Does custom things.\n---\nBody"},
 		"investigating-alerts": {Content: "---\nname: investigating-alerts\ndescription: Overridden.\nmetadata:\n  model: base\n---\nOverridden body"},
-		"analyzing-traces": {Enabled: &disabled},
+		"analyzing-traces":     {Enabled: &disabled},
 	}}
 
 	r := NewRegistry(settings, log.DefaultLogger)
@@ -154,9 +173,11 @@ func TestRegistry_CustomAndOverrideAndDisable(t *testing.T) {
 	if !s.Customized || s.Source != SourceBundled || s.Model != "base" || s.Body != "Overridden body" {
 		t.Fatalf("override not applied: %+v", s)
 	}
-	if refs := s.References; len(refs) != 0 {
-		// investigating-alerts has no references; the override must not lose any.
-		t.Fatalf("expected no references for investigating-alerts, got %v", refs)
+	if refs := s.References; len(refs) != 1 {
+		// investigating-alerts ships references/alerting.md; the override must keep it.
+		t.Fatalf("expected override to preserve bundled references, got %v", refs)
+	} else if _, ok := refs["references/alerting.md"]; !ok {
+		t.Fatalf("override lost references/alerting.md: %v", refs)
 	}
 	if _, ok := r.Get("analyzing-traces"); ok {
 		t.Fatal("pure disable entry must remove the bundled skill")
@@ -176,7 +197,7 @@ func TestRegistry_CustomAndOverrideAndDisable(t *testing.T) {
 
 func TestRegistry_InvalidEntriesSurfaceInInfos(t *testing.T) {
 	r := NewRegistry(Settings{Entries: map[string]Entry{
-		"broken": {Content: "not a skill"},
+		"broken":     {Content: "not a skill"},
 		"mismatched": {Content: "---\nname: other-name\ndescription: d\n---\nbody"},
 	}}, log.DefaultLogger)
 
@@ -257,6 +278,15 @@ func TestResolve_ExplicitTypeAndTrigger(t *testing.T) {
 		t.Fatal("trigger activation must not wrap the user message")
 	}
 
+	// Cardinality/cost phrasing activates the metrics-cost skill in plain chat.
+	act, err = Resolve(r, "why did our active series and metrics bill explode? too many series since the deploy", nil, "chat")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !HasActive(act, "optimizing-metrics-cost") {
+		t.Fatal("cardinality phrasing must trigger optimizing-metrics-cost")
+	}
+
 	// Picker selection: explicit, no user-prompt wrapping.
 	act, err = Resolve(r, "help me", []string{"querying-profiles"}, "chat")
 	if err != nil {
@@ -295,7 +325,7 @@ func TestRegistry_HasEntryAndBundledUserPrompt(t *testing.T) {
 	disabled := false
 	enabled := true
 	r := NewRegistry(Settings{Entries: map[string]Entry{
-		"investigating-alerts": {Enabled: &disabled},
+		"investigating-alerts":  {Enabled: &disabled},
 		"analyzing-performance": {Content: "---\nname: analyzing-performance\ndescription: d\nmetadata:\n  user-prompt: |\n    Custom {{.Target}}\n---\nbody", Enabled: &enabled},
 	}}, log.DefaultLogger)
 

@@ -5,6 +5,18 @@ All notable changes to the Ask O11y Grafana plugin will be documented in this fi
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+* **skills:** new bundled skills `optimizing-metrics-cost` (cardinality/cost triage, label strategy, Adaptive Metrics guidance) and `writing-k6-tests` (k6 load-test scripts and Synthetic Monitoring check authoring)
+* reference material for bundled skills: TraceQL, profile types, alerting anatomy, dashboard JSON
+* `pkg/skills/bundled/NOTICE.md` crediting grafana/skills (Apache-2.0) for adapted content
+
+### Changed
+
+* **skills:** reworked all 8 bundled skills using [grafana/skills](https://github.com/grafana/skills) as reference — expanded PromQL/LogQL reference libraries, TraceQL and profile-interpretation guidance, alert-rule anatomy and "not firing" checklist, dashboard JSON/panel-selection guidance; descriptions rewritten as trigger phrases
+
 ## [0.3.16](https://github.com/Consensys/ask-o11y-plugin/compare/v0.3.15...v0.3.16) (2026-09-11)
 
 
