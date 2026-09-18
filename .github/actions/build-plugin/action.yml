@@ -5,6 +5,13 @@
 # composite action and pin that nested ref to a SHA. Re-sync from upstream when
 # bumping; keep all nested `uses:` pinned to SHAs.
 #
+# The nested package-plugin action is vendored too (.github/actions/package-plugin):
+# upstream runs `npx -y @grafana/plugin-validator@latest` there unconditionally,
+# which is unpinned and fails branch/PR builds once the plugin version equals the
+# latest one published on grafana.com. Plugin validation happens in ci.yml and
+# release.yml with the pinned grafana/plugin-validator-cli Docker image and
+# .github/plugin-validator.config.yaml instead.
+#
 # Local modifications (preserve when re-syncing from upstream):
 #   - Added `create_release` input (default "true"); the "Create Github release"
 #     step is gated on it so branch builds can skip release creation.
@@ -75,7 +82,7 @@ runs:
   steps:
     - name: Package plugin
       id: "package-plugin"
-      uses: grafana/plugin-actions/package-plugin@2ecc2ba7168309f04010b5b637530b877d67e4ff
+      uses: ./.github/actions/package-plugin
       with:
         policy_token: ${{ inputs.policy_token }}
         sign_root_urls: ${{ inputs.sign_root_urls }}
