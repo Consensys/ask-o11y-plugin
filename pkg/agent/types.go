@@ -35,12 +35,12 @@ type OpenAIFunction struct {
 }
 
 type ChatCompletionRequest struct {
-	Model         string         `json:"model,omitempty"`
-	Messages      []Message      `json:"messages"`
-	Tools         []OpenAITool   `json:"tools,omitempty"`
-	Stream        bool           `json:"stream,omitempty"`
-	StreamOptions *StreamOptions `json:"stream_options,omitempty"`
-	MaxTokens     int            `json:"max_tokens,omitempty"`
+	Model               string         `json:"model,omitempty"`
+	Messages            []Message      `json:"messages"`
+	Tools               []OpenAITool   `json:"tools,omitempty"`
+	Stream              bool           `json:"stream,omitempty"`
+	StreamOptions       *StreamOptions `json:"stream_options,omitempty"`
+	MaxCompletionTokens int            `json:"max_completion_tokens,omitempty"`
 }
 
 // StreamOptions.IncludeUsage requests a final usage-bearing chunk on an

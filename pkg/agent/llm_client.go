@@ -36,16 +36,16 @@ const (
 var errIncompleteStream = errors.New("LLM stream ended before completion (no finish_reason)")
 
 type LLMHTTPError struct {
-	StatusCode   int
-	Status       string
-	RequestID    string
-	TraceID      string
-	Model        string
-	MessageCount int
-	ToolCount    int
-	MaxTokens    int
-	RequestBytes int
-	Retryable    bool
+	StatusCode          int
+	Status              string
+	RequestID           string
+	TraceID             string
+	Model               string
+	MessageCount        int
+	ToolCount           int
+	MaxCompletionTokens int
+	RequestBytes        int
+	Retryable           bool
 }
 
 func (e *LLMHTTPError) Error() string {
@@ -151,7 +151,7 @@ func (c *LLMClient) ChatCompletion(ctx context.Context, req ChatCompletionReques
 		attribute.String("llm.model", req.Model),
 		attribute.Int("llm.message_count", len(req.Messages)),
 		attribute.Int("llm.tool_count", len(req.Tools)),
-		attribute.Int("llm.max_tokens", req.MaxTokens),
+		attribute.Int("llm.max_completion_tokens", req.MaxCompletionTokens),
 		attribute.Int("llm.request_bytes", len(body)),
 	)
 
@@ -165,7 +165,7 @@ func (c *LLMClient) ChatCompletion(ctx context.Context, req ChatCompletionReques
 			"url", httpReq.URL.String(),
 			"messageCount", len(req.Messages),
 			"toolCount", len(req.Tools),
-			"maxTokens", req.MaxTokens,
+			"maxCompletionTokens", req.MaxCompletionTokens,
 			"requestBytes", len(body),
 			"model", req.Model,
 			"attempt", attempt,
@@ -202,7 +202,7 @@ func (c *LLMClient) ChatCompletion(ctx context.Context, req ChatCompletionReques
 				"model", llmErr.Model,
 				"messageCount", llmErr.MessageCount,
 				"toolCount", llmErr.ToolCount,
-				"maxTokens", llmErr.MaxTokens,
+				"maxCompletionTokens", llmErr.MaxCompletionTokens,
 				"requestBytes", llmErr.RequestBytes,
 				"attempt", attempt)
 			if llmErr.Retryable && attempt < maxLLMAttempts {
@@ -244,16 +244,16 @@ func (c *LLMClient) ChatCompletion(ctx context.Context, req ChatCompletionReques
 func (c *LLMClient) buildHTTPError(resp *http.Response, req ChatCompletionRequest, requestBytes int) *LLMHTTPError {
 	requestID, traceID := llmDiagnosticHeaders(resp.Header)
 	return &LLMHTTPError{
-		StatusCode:   resp.StatusCode,
-		Status:       resp.Status,
-		RequestID:    requestID,
-		TraceID:      traceID,
-		Model:        req.Model,
-		MessageCount: len(req.Messages),
-		ToolCount:    len(req.Tools),
-		MaxTokens:    req.MaxTokens,
-		RequestBytes: requestBytes,
-		Retryable:    isRetryableLLMStatus(resp.StatusCode),
+		StatusCode:          resp.StatusCode,
+		Status:              resp.Status,
+		RequestID:           requestID,
+		TraceID:             traceID,
+		Model:               req.Model,
+		MessageCount:        len(req.Messages),
+		ToolCount:           len(req.Tools),
+		MaxCompletionTokens: req.MaxCompletionTokens,
+		RequestBytes:        requestBytes,
+		Retryable:           isRetryableLLMStatus(resp.StatusCode),
 	}
 }
 
