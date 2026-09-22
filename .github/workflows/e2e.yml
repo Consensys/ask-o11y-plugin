@@ -90,7 +90,8 @@ jobs:
   e2e-tests:
     name: E2E Tests with Coverage
     needs: [check-changes, build]
-    if: needs.check-changes.outputs.code == 'true' || github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    # Skip on fork PRs: secrets (LLM_API_KEY) are unavailable there, so LLM-backed tests always fail
+    if: (needs.check-changes.outputs.code == 'true' || github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.event.pull_request.head.repo.fork != true
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
@@ -210,7 +211,7 @@ jobs:
   skip-e2e:
     name: E2E Tests with Coverage
     needs: check-changes
-    if: needs.check-changes.outputs.code == 'false' && github.event_name == 'pull_request'
+    if: github.event_name == 'pull_request' && (needs.check-changes.outputs.code == 'false' || github.event.pull_request.head.repo.fork == true)
     runs-on: ubuntu-latest
     steps:
-      - run: echo "No code changes detected, skipping E2E tests (release-please PR)"
+      - run: echo "Skipping E2E tests (no code changes, or fork PR without access to required secrets)"
