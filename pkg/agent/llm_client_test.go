@@ -114,6 +114,36 @@ func TestLLMClient_ChatCompletion_UsesRequestedModel(t *testing.T) {
 	}
 }
 
+func TestLLMClient_ChatCompletion_UsesMaxCompletionTokens(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var raw map[string]interface{}
+		if err := json.NewDecoder(r.Body).Decode(&raw); err != nil {
+			t.Fatalf("failed to decode request: %v", err)
+		}
+		if got := raw["max_completion_tokens"]; got != float64(2048) {
+			t.Errorf("max_completion_tokens = %v, want 2048", got)
+		}
+		if _, ok := raw["max_tokens"]; ok {
+			t.Errorf("legacy max_tokens field should be omitted")
+		}
+
+		writeSSEChunks(w,
+			`{"id":"test-id","choices":[{"index":0,"delta":{"content":"ok"},"finish_reason":null}]}`,
+			`{"id":"test-id","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`,
+		)
+	}))
+	defer server.Close()
+
+	client := NewLLMClient(log.DefaultLogger, &http.Client{Timeout: llmTimeout})
+	_, err := client.ChatCompletion(context.Background(), ChatCompletionRequest{
+		Messages:            []Message{{Role: "user", Content: "hi"}},
+		MaxCompletionTokens: 2048,
+	}, server.URL, "token", "1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestLLMClient_ChatCompletion_FallbackToToken(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Cookie") != "" {
@@ -337,7 +367,7 @@ func TestLLMClient_ChatCompletion_HTTPErrorIncludesSafeDiagnostics(t *testing.T)
 		Model:     "large",
 		Messages:  []Message{{Role: "user", Content: "hi"}},
 		Tools:     []OpenAITool{{Type: "function", Function: OpenAIFunction{Name: "query"}}},
-		MaxTokens: 2048,
+		MaxCompletionTokens: 2048,
 	}, server.URL, "token", "1")
 
 	var llmErr *LLMHTTPError

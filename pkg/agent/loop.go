@@ -258,7 +258,7 @@ func (a *AgentLoop) Run(ctx context.Context, req LoopRequest, eventCh chan<- SSE
 			Model:     req.Model,
 			Messages:  callMessages,
 			Tools:     openAITools,
-			MaxTokens: completionBudget,
+			MaxCompletionTokens: completionBudget,
 		}
 		resp, effectiveModel, err := a.chatCompletionWithFallback(ctx, llmReq, req)
 		if err != nil {
@@ -528,7 +528,7 @@ func (a *AgentLoop) summarizeForEviction(ctx context.Context, req LoopRequest, u
 			{Role: "system", Content: evictionSummarySystemPrompt},
 			{Role: "user", Content: fmt.Sprintf("Tool: %s\n\nResult:\n%s", toolName, trimmed)},
 		},
-		MaxTokens: evictionSummaryMaxTokens,
+		MaxCompletionTokens: evictionSummaryMaxTokens,
 	}, req.GrafanaURL, req.AuthToken, req.OrgID)
 	if err != nil {
 		a.logger.Warn("Tool result eviction summary failed, falling back to truncation", "error", err, "tool", toolName)
