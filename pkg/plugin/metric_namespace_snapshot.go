@@ -12,9 +12,11 @@ import (
 
 const (
 	// msCacheTTL bounds staleness of the per-org metric-namespace snapshot.
-	// Metric catalogs change far less often than the fetch is expensive, so
-	// this is much longer than dsCacheTTL.
-	msCacheTTL = 15 * time.Minute
+	// Metric catalogs change far less often than the fetch is expensive, and a
+	// Sep 2026 census showed the snapshot does not measurably reduce
+	// list_prometheus_metric_names call counts — so err toward fewer background
+	// refreshes, not fresher prefixes.
+	msCacheTTL = time.Hour
 
 	// msFetchTimeout bounds a single list_prometheus_metric_names call in the
 	// background refresh. Production traces (2026-09-01) showed this tool

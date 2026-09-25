@@ -67,6 +67,12 @@ instead of scanning a datasource with a broad ".*" regex.
 
 {{.MetricNamespaceSnapshot}}
 {{end}}
+{{if .AlertRuleSnapshot}}
+
+## Alert Context (prefetched from the alert rule — authoritative)
+
+{{.AlertRuleSnapshot}}
+{{end}}
 
 ---
 

@@ -58,6 +58,14 @@ type PromptContext struct {
 	// background refresh yet (see metricNamespaceSnapshot).
 	MetricNamespaceSnapshot string
 
+	// AlertRuleSnapshot is the prefetched alert-rule context for alert
+	// investigations: the matched rule's identity, expressions, exact metric
+	// names, and label matchers (see alert_rule_snapshot.go). Supersedes the
+	// metric-namespace hint when present, because a Sep 2026 census showed
+	// textual hints do not change agent behavior — only exact values do.
+	// Empty string renders no block (fail-open: prefetch missed or timed out).
+	AlertRuleSnapshot string
+
 	// CurrentTime is the wall-clock time the run started, rendered into the
 	// system prompt so the agent anchors relative time windows without calling
 	// the time MCP tool. Empty string renders no block (see BuildToolContext).
