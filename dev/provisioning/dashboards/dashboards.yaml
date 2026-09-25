@@ -1,0 +1,9 @@
+apiVersion: 1
+
+providers:
+  - name: asko11y
+    folder: Ask O11y
+    type: file
+    allowUiUpdates: true
+    options:
+      path: /var/lib/grafana/dashboards/asko11y

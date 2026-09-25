@@ -55,6 +55,7 @@ ci/
 .env.local
 .env.development
 .env.production
+.env.prod
 
 
 # Grafana plugin

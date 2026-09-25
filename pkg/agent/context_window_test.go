@@ -541,3 +541,21 @@ func TestEvictStaleToolResults_TruncationFallbackSummarizer(t *testing.T) {
 		t.Error("recent tool results must stay untouched")
 	}
 }
+
+func TestCapToolResultAtIngestion(t *testing.T) {
+	small := "ok"
+	if got := capToolResultAtIngestion(small, 100); got != small {
+		t.Fatalf("small result changed: %q", got)
+	}
+	big := "{\"data\":[" + strings.Repeat("{\"metric\":{\"a\":\"b\"},\"value\":[1,\"2\"]},", 5000) + "]}"
+	got := capToolResultAtIngestion(big, 1000)
+	if len(got) >= len(big) {
+		t.Fatalf("big result not capped: %d", len(got))
+	}
+	if !strings.Contains(got, "[NOTICE: result truncated") {
+		t.Fatalf("missing notice: %q", got[len(got)-200:])
+	}
+	if EstimateTokens(got[:strings.Index(got, "\n[NOTICE")]) > 1000 {
+		t.Fatalf("capped body still over budget")
+	}
+}

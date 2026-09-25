@@ -432,3 +432,28 @@ func TestApplyLegacyPromptOverrides_SkillsTabEntryWins(t *testing.T) {
 		t.Fatalf("legacy field must still apply when the skill is unmanaged, got: %.60s", s.UserPrompt)
 	}
 }
+
+func TestBuildSystemPrompt_AlertRuleLookupMissedSlot(t *testing.T) {
+	r, err := NewPromptRegistry(PluginSettings{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	blank, err := r.BuildSystemPrompt(BuildToolContext("Org1", "Admin"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(blank, "Alert Rule Lookup (already done)") {
+		t.Fatal("miss note must not render without a completed lookup")
+	}
+
+	ctx := BuildToolContext("Org1", "Admin")
+	ctx.AlertRuleLookupMissed = true
+	ctx.AlertRuleLookupName = "primitives-api-rps"
+	out, err := r.BuildSystemPrompt(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "Alert Rule Lookup (already done)") || !strings.Contains(out, `"primitives-api-rps"`) {
+		t.Fatalf("expected miss note naming the alert, got:\n%s", out)
+	}
+}

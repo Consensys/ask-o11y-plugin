@@ -162,3 +162,9 @@ func TestDerivedConfidence(t *testing.T) {
 		t.Errorf("no hypotheses must fall back to medium, got %q", got)
 	}
 }
+
+func TestEvidenceIDHeader(t *testing.T) {
+	if got := evidenceIDHeader(evidenceIDFor(3)); got != "[evidence id: e3]\n" {
+		t.Fatalf("got %q", got)
+	}
+}
