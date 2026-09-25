@@ -378,6 +378,8 @@ func (a *AgentLoop) Run(ctx context.Context, req LoopRequest, eventCh chan<- SSE
 		msg.Content = ""
 		messages = append(messages, msg)
 
+		// Set up the batch: count every call and announce it before any
+		// execution starts, so the UI sees everything the model asked for.
 		for _, tc := range msg.ToolCalls {
 			if ctx.Err() != nil {
 				return
@@ -392,15 +394,49 @@ func (a *AgentLoop) Run(ctx context.Context, req LoopRequest, eventCh chan<- SSE
 					Arguments: tc.Function.Arguments,
 				},
 			})
-
-			var toolContent string
-		var isError bool
-		var errorKind string
-		if tc.Function.Name == loadSkillToolName && req.LoadSkill != nil {
-			toolContent, isError, errorKind = a.executeLoadSkill(ctx, tc, req)
-		} else {
-			toolContent, isError, errorKind = a.executeToolWithApproval(ctx, eventCh, tc, req)
 		}
+
+		// Execute the batch. Results land in results[i]; everything that
+		// touches shared run state (transport-failure map, history, pending
+		// summaries, ordered SSE events) happens below on the loop goroutine.
+		results := make([]toolExecResult, len(msg.ToolCalls))
+		if a.batchParallelizable(msg.ToolCalls, req) {
+			maxParallel := req.MaxParallelToolCalls
+			if maxParallel <= 0 {
+				maxParallel = defaultMaxParallelToolCalls
+			}
+			if maxParallel > len(msg.ToolCalls) {
+				maxParallel = len(msg.ToolCalls)
+			}
+			var wg sync.WaitGroup
+			sem := make(chan struct{}, maxParallel)
+			for i, tc := range msg.ToolCalls {
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
+					sem <- struct{}{}
+					defer func() { <-sem }()
+					content, isError, errorKind := a.executeToolWithApproval(ctx, eventCh, tc, req)
+					results[i] = toolExecResult{content: content, isError: isError, errorKind: errorKind}
+				}()
+			}
+			wg.Wait()
+		} else {
+			for i, tc := range msg.ToolCalls {
+				if ctx.Err() != nil {
+					return
+				}
+				content, isError, errorKind := a.executeToolCall(ctx, eventCh, tc, req)
+				results[i] = toolExecResult{content: content, isError: isError, errorKind: errorKind}
+			}
+		}
+
+		// Finish the batch in the original call order: the assistant message
+		// lists ToolCalls in a fixed order and each tool result must line up
+		// with its call id, so results are appended in that order regardless
+		// of how (or how fast) they finished executing.
+		for i, tc := range msg.ToolCalls {
+			toolContent, isError, errorKind := results[i].content, results[i].isError, results[i].errorKind
 
 			a.send(ctx, eventCh, SSEEvent{
 				Type: "tool_call_result",
@@ -451,21 +487,20 @@ func (a *AgentLoop) Run(ctx context.Context, req LoopRequest, eventCh chan<- SSE
 					},
 				})
 			}
-		if !isError && tc.Function.Name != loadSkillToolName {
-			a.send(ctx, eventCh, SSEEvent{
-				Type: "evidence",
-				Data: EvidenceEvent{
-					ID:       tc.ID,
-					Title:    evidenceTitle(tc.Function.Name),
-					Summary:  summarizeToolEvidence(toolContent),
-					Source:   "mcp",
-					ToolName: tc.Function.Name,
-					Query:    extractEvidenceQuery(tc.Function.Arguments),
-				},
-			})
+			if !isError && tc.Function.Name != loadSkillToolName {
+				a.send(ctx, eventCh, SSEEvent{
+					Type: "evidence",
+					Data: EvidenceEvent{
+						ID:       tc.ID,
+						Title:    evidenceTitle(tc.Function.Name),
+						Summary:  summarizeToolEvidence(toolContent),
+						Source:   "mcp",
+						ToolName: tc.Function.Name,
+						Query:    extractEvidenceQuery(tc.Function.Arguments),
+					},
+				})
+			}
 		}
-		}
-
 	}
 	a.send(ctx, eventCh, SSEEvent{
 		Type: "error",
@@ -630,6 +665,56 @@ func completionTokenBudget(maxTotalTokens int) int {
 		budget = defaultMaxCompletionTokens
 	}
 	return budget
+}
+
+// defaultMaxParallelToolCalls bounds concurrent tool execution when the model
+// emits several calls in one turn. LoopRequest.MaxParallelToolCalls (set from
+// plugin settings) overrides this; it is a floor for misconfigured zero values.
+const defaultMaxParallelToolCalls = 4
+
+// toolExecResult carries one tool call's outcome from the goroutine that
+// executed it back to the loop goroutine, which owns all shared run state and
+// event ordering.
+type toolExecResult struct {
+	content   string
+	isError   bool
+	errorKind string
+}
+
+// batchParallelizable reports whether a batch of tool calls can run
+// concurrently. Only plain MCP calls qualify: load_skill mutates loop-owned
+// skill state, and any call that might raise an approval prompt must stay
+// sequential so the user never faces two live approvals at once. If any call
+// is unqualified, the whole batch falls back to sequential execution.
+func (a *AgentLoop) batchParallelizable(calls []ToolCall, req LoopRequest) bool {
+	if len(calls) < 2 {
+		return false
+	}
+	for _, tc := range calls {
+		if tc.Function.Name == loadSkillToolName {
+			return false
+		}
+		tool, found := a.mcpProxy.FindToolByName(tc.Function.Name)
+		if !found {
+			return false
+		}
+		if approvalPolicyEnabled(req.ApprovalPolicy) {
+			if risk := mcp.ClassifyToolRisk(tool, req.MCPServers); risk.RequiresApproval {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// executeToolCall dispatches one tool call to its executor: the internal
+// load_skill tool goes to the skill registry, everything else through the
+// approval gate.
+func (a *AgentLoop) executeToolCall(ctx context.Context, eventCh chan<- SSEEvent, tc ToolCall, req LoopRequest) (content string, isError bool, errorKind string) {
+	if tc.Function.Name == loadSkillToolName && req.LoadSkill != nil {
+		return a.executeLoadSkill(ctx, tc, req)
+	}
+	return a.executeToolWithApproval(ctx, eventCh, tc, req)
 }
 
 func (a *AgentLoop) executeTool(ctx context.Context, tc ToolCall, req LoopRequest) (content string, isError bool, errorKind string) {

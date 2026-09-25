@@ -11,8 +11,10 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/grafana/grafana-plugin-sdk-go/backend/log"
+	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"consensys-asko11y-app/pkg/mcp"
 )
@@ -93,6 +95,18 @@ func setupTestLoop(t *testing.T, llmResponses []ChatCompletionResponse) (*AgentL
 
 	var callIdx atomic.Int32
 	llmServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Background eviction-summary calls (model "base") must not consume
+		// the main response sequence — stub them.
+		var parsed ChatCompletionRequest
+		if body, err := io.ReadAll(r.Body); err == nil {
+			if json.Unmarshal(body, &parsed) == nil && parsed.Model == "base" {
+				respondAsStream(w, ChatCompletionResponse{
+					ID:      "summary",
+					Choices: []Choice{{Message: Message{Role: "assistant", Content: "summary"}, FinishReason: "stop"}},
+				})
+				return
+			}
+		}
 		idx := int(callIdx.Add(1)) - 1
 		if idx >= len(llmResponses) {
 			t.Errorf("unexpected LLM call #%d (only %d responses configured)", idx+1, len(llmResponses))
@@ -1382,4 +1396,420 @@ func TestAgentLoop_CustomKeepRecentToolResults(t *testing.T) {
 	if fullCount > keepRecent {
 		t.Errorf("expected at most %d full tool results with custom ContextLimits, got %d", keepRecent, fullCount)
 	}
+}
+
+// --- Parallel tool execution tests ---
+
+// setupFakeMCP registers a fake MCP server (backed by the official go-sdk)
+// on the loop's proxy under server ID "fake". Tool names exposed to the loop
+// are prefixed "fake_".
+func setupFakeMCP(t *testing.T, loop *AgentLoop, register func(srv *mcpsdk.Server)) {
+	t.Helper()
+	srv := mcpsdk.NewServer(&mcpsdk.Implementation{Name: "fake", Version: "1.0.0"}, nil)
+	register(srv)
+	ts := httptest.NewServer(mcpsdk.NewStreamableHTTPHandler(func(*http.Request) *mcpsdk.Server { return srv }, nil))
+	t.Cleanup(ts.Close)
+	if err := loop.mcpProxy.UpdateConfig([]mcp.ServerConfig{{
+		ID: "fake", Name: "fake", URL: ts.URL, Type: "streamable-http", Enabled: true,
+	}}); err != nil {
+		t.Fatalf("UpdateConfig: %v", err)
+	}
+}
+
+func sdkToolResult(text string, isError bool) *mcpsdk.CallToolResult {
+	return &mcpsdk.CallToolResult{
+		IsError: isError,
+		Content: []mcpsdk.Content{&mcpsdk.TextContent{Text: text}},
+	}
+}
+
+// barrier is a simultaneous-presence barrier: proceed closes only when
+// `party` handlers are waiting at the same time. A waiter that times out or
+// is canceled leaves the party again, so serialized execution never lets a
+// later call inherit an earlier call's arrival.
+type barrier struct {
+	mu      sync.Mutex
+	party   int
+	waiting int
+	closed  bool
+	proceed chan struct{}
+}
+
+func (b *barrier) arrive(giveUp time.Duration, ctx context.Context) bool {
+	b.mu.Lock()
+	b.waiting++
+	if b.waiting >= b.party && !b.closed {
+		b.closed = true
+		close(b.proceed)
+	}
+	ch := b.proceed
+	b.mu.Unlock()
+
+	leave := func() {
+		b.mu.Lock()
+		b.waiting--
+		b.mu.Unlock()
+	}
+	select {
+	case <-ch:
+		return true
+	case <-time.After(giveUp):
+		leave()
+		return false
+	case <-ctx.Done():
+		leave()
+		return false
+	}
+}
+
+// barrierToolHandler returns a handler that only completes once `party`
+// concurrent invocations have all arrived. A call that waits longer than
+// giveUp returns an error result, so a serial executor (or a concurrency
+// level below the party size) fails the batch.
+func barrierToolHandler(party int, giveUp time.Duration) mcpsdk.ToolHandler {
+	b := &barrier{party: party, proceed: make(chan struct{})}
+	return func(ctx context.Context, req *mcpsdk.CallToolRequest) (*mcpsdk.CallToolResult, error) {
+		if b.arrive(giveUp, ctx) {
+			return sdkToolResult("barrier passed", false), nil
+		}
+		return sdkToolResult("barrier timeout", true), nil
+	}
+}
+
+func toolCallBatchResponse(id string, calls []ToolCall) ChatCompletionResponse {
+	return ChatCompletionResponse{
+		ID: id,
+		Choices: []Choice{{
+			Message:      Message{Role: "assistant", ToolCalls: calls},
+			FinishReason: "tool_calls",
+		}},
+	}
+}
+
+func textOnlyResponse(id, content string) ChatCompletionResponse {
+	return ChatCompletionResponse{
+		ID: id,
+		Choices: []Choice{{
+			Message:      Message{Role: "assistant", Content: content},
+			FinishReason: "stop",
+		}},
+	}
+}
+
+func toolCall(id, name, args string) ToolCall {
+	return ToolCall{ID: id, Type: "function", Function: FunctionCall{Name: name, Arguments: args}}
+}
+
+func boolPtrApproval() *bool { return &[]bool{true}[0] }
+
+// TestAgentLoop_ParallelToolCallsRunConcurrently proves that a batch of
+// read-only tool calls actually executes concurrently: each handler blocks
+// until all three have arrived, which can only happen if the loop runs them
+// in parallel. Sequential execution leaves every call at the timeout.
+func TestAgentLoop_ParallelToolCallsRunConcurrently(t *testing.T) {
+	handler := barrierToolHandler(3, 5*time.Second)
+
+	loop, serverURL, cleanup := setupTestLoop(t, []ChatCompletionResponse{
+		toolCallBatchResponse("1", []ToolCall{
+			toolCall("tc_1", "fake_barrier", `{"i":1}`),
+			toolCall("tc_2", "fake_barrier", `{"i":2}`),
+			toolCall("tc_3", "fake_barrier", `{"i":3}`),
+		}),
+		textOnlyResponse("2", "all barriers passed"),
+	})
+	defer cleanup()
+	setupFakeMCP(t, loop, func(srv *mcpsdk.Server) {
+		srv.AddTool(&mcpsdk.Tool{Name: "barrier", InputSchema: map[string]any{"type": "object"}}, handler)
+	})
+
+	eventCh := make(chan SSEEvent, 32)
+	req := LoopRequest{
+		Messages:   []Message{{Role: "user", Content: "run the batch"}},
+		GrafanaURL: serverURL,
+		AuthToken:  "test-token",
+		UserRole:   "Admin",
+	}
+
+	go loop.Run(context.Background(), req, eventCh)
+	events := collectEvents(eventCh)
+
+	results := toolResultEvents(t, events)
+	if len(results) != 3 {
+		t.Fatalf("expected 3 tool_call_result events, got %d", len(results))
+	}
+	for i, r := range results {
+		if r.IsError {
+			t.Errorf("result[%d] (%s) errored: %s — batch did not run concurrently", i, r.ID, r.Content)
+		}
+	}
+}
+
+// TestAgentLoop_ParallelToolCallsPreserveOrder proves results are surfaced in
+// the original call order regardless of completion order: the call scheduled
+// to finish last (n=1) must still produce the first tool_call_result event.
+func TestAgentLoop_ParallelToolCallsPreserveOrder(t *testing.T) {
+	loop, serverURL, cleanup := setupTestLoop(t, []ChatCompletionResponse{
+		toolCallBatchResponse("1", []ToolCall{
+			toolCall("tc_1", "fake_echo", `{"n":1}`),
+			toolCall("tc_2", "fake_echo", `{"n":2}`),
+			toolCall("tc_3", "fake_echo", `{"n":3}`),
+		}),
+		textOnlyResponse("2", "order checked"),
+	})
+	defer cleanup()
+	setupFakeMCP(t, loop, func(srv *mcpsdk.Server) {
+		srv.AddTool(&mcpsdk.Tool{Name: "echo", InputSchema: map[string]any{"type": "object"}}, func(ctx context.Context, req *mcpsdk.CallToolRequest) (*mcpsdk.CallToolResult, error) {
+			var args struct {
+				N int `json:"n"`
+			}
+			if err := json.Unmarshal(req.Params.Arguments, &args); err != nil {
+				return sdkToolResult("bad args", true), nil
+			}
+			time.Sleep(time.Duration(300-100*(args.N-1)) * time.Millisecond)
+			return sdkToolResult(fmt.Sprintf("result-%d", args.N), false), nil
+		})
+	})
+
+	eventCh := make(chan SSEEvent, 32)
+	req := LoopRequest{
+		Messages:   []Message{{Role: "user", Content: "echo in order"}},
+		GrafanaURL: serverURL,
+		AuthToken:  "test-token",
+		UserRole:   "Admin",
+	}
+
+	go loop.Run(context.Background(), req, eventCh)
+	events := collectEvents(eventCh)
+
+	results := toolResultEvents(t, events)
+	want := []struct{ id, content string }{
+		{"tc_1", "result-1"},
+		{"tc_2", "result-2"},
+		{"tc_3", "result-3"},
+	}
+	if len(results) != len(want) {
+		t.Fatalf("expected %d tool_call_result events, got %d", len(want), len(results))
+	}
+	for i, w := range want {
+		if results[i].ID != w.id || results[i].Content != w.content {
+			t.Errorf("result[%d] = (%s, %q), want (%s, %q)", i, results[i].ID, results[i].Content, w.id, w.content)
+		}
+	}
+}
+
+// TestAgentLoop_ApprovalGatedBatchStaysSequential proves a batch containing
+// an approval-gated tool falls back to sequential execution: the read-only
+// barrier call runs to completion before the gated call is even attempted,
+// and the gated call errors with approval_required (no registrar configured).
+func TestAgentLoop_ApprovalGatedBatchStaysSequential(t *testing.T) {
+	// Party of 2 but only one barrier call exists: the call can only complete
+	// if it holds the executor alone while the gated call waits.
+	handler := barrierToolHandler(2, 1*time.Second)
+
+	loop, serverURL, cleanup := setupTestLoop(t, []ChatCompletionResponse{
+		toolCallBatchResponse("1", []ToolCall{
+			toolCall("tc_1", "fake_barrier", `{}`),
+			toolCall("tc_2", "fake_blast", `{}`),
+		}),
+		textOnlyResponse("2", "handled"),
+	})
+	defer cleanup()
+
+	mcpSrv := mcpsdk.NewServer(&mcpsdk.Implementation{Name: "fake", Version: "1.0.0"}, nil)
+	mcpSrv.AddTool(&mcpsdk.Tool{Name: "barrier", InputSchema: map[string]any{"type": "object"}}, handler)
+	// blast is a real registered tool so the proxy can resolve it; its handler
+	// must never run — the approval gate intercepts before execution.
+	mcpSrv.AddTool(&mcpsdk.Tool{Name: "blast", InputSchema: map[string]any{"type": "object"}}, func(ctx context.Context, req *mcpsdk.CallToolRequest) (*mcpsdk.CallToolResult, error) {
+		return sdkToolResult("blast ran — approval gate bypassed", false), nil
+	})
+	mcpTS := httptest.NewServer(mcpsdk.NewStreamableHTTPHandler(func(*http.Request) *mcpsdk.Server { return mcpSrv }, nil))
+	defer mcpTS.Close()
+
+	riskCfg := mcp.ServerConfig{
+		ID: "fake", Name: "fake", URL: mcpTS.URL, Type: "streamable-http", Enabled: true,
+		RiskOverrides: map[string]mcp.ToolRiskOverride{
+			"fake_blast": {RequiresApproval: boolPtrApproval(), Reason: "test write tool"},
+		},
+	}
+	if err := loop.mcpProxy.UpdateConfig([]mcp.ServerConfig{riskCfg}); err != nil {
+		t.Fatalf("UpdateConfig: %v", err)
+	}
+
+	eventCh := make(chan SSEEvent, 32)
+	req := LoopRequest{
+		Messages:       []Message{{Role: "user", Content: "mixed batch"}},
+		GrafanaURL:     serverURL,
+		AuthToken:      "test-token",
+		UserRole:       "Admin",
+		ApprovalPolicy: "always",
+		MCPServers:     []mcp.ServerConfig{riskCfg},
+	}
+
+	go loop.Run(context.Background(), req, eventCh)
+	events := collectEvents(eventCh)
+
+	results := toolResultEvents(t, events)
+	if len(results) != 2 {
+		t.Fatalf("expected 2 tool_call_result events, got %d", len(results))
+	}
+	if results[0].ID != "tc_1" || !results[0].IsError || !strings.Contains(results[0].Content, "barrier timeout") {
+		t.Errorf("barrier result = (%s, isError=%v, %q), want timed-out barrier", results[0].ID, results[0].IsError, results[0].Content)
+	}
+	if results[1].ID != "tc_2" || results[1].ErrorKind != "approval_required" {
+		t.Errorf("blast result = (%s, isError=%v, errorKind=%q), want approval_required", results[1].ID, results[1].IsError, results[1].ErrorKind)
+	}
+}
+
+// TestAgentLoop_MaxParallelOneSerializes proves MaxParallelToolCalls=1 caps
+// concurrency: two barrier calls with a party of 2 can never both arrive, so
+// both must time out.
+func TestAgentLoop_MaxParallelOneSerializes(t *testing.T) {
+	handler := barrierToolHandler(2, 1*time.Second)
+
+	loop, serverURL, cleanup := setupTestLoop(t, []ChatCompletionResponse{
+		toolCallBatchResponse("1", []ToolCall{
+			toolCall("tc_1", "fake_barrier", `{"i":1}`),
+			toolCall("tc_2", "fake_barrier", `{"i":2}`),
+		}),
+		textOnlyResponse("2", "serialized"),
+	})
+	defer cleanup()
+	setupFakeMCP(t, loop, func(srv *mcpsdk.Server) {
+		srv.AddTool(&mcpsdk.Tool{Name: "barrier", InputSchema: map[string]any{"type": "object"}}, handler)
+	})
+
+	eventCh := make(chan SSEEvent, 32)
+	one := 1
+	req := LoopRequest{
+		Messages:             []Message{{Role: "user", Content: "serial batch"}},
+		GrafanaURL:           serverURL,
+		AuthToken:            "test-token",
+		UserRole:             "Admin",
+		MaxParallelToolCalls: one,
+	}
+
+	go loop.Run(context.Background(), req, eventCh)
+	events := collectEvents(eventCh)
+
+	results := toolResultEvents(t, events)
+	if len(results) != 2 {
+		t.Fatalf("expected 2 tool_call_result events, got %d", len(results))
+	}
+	for i, r := range results {
+		if !r.IsError || !strings.Contains(r.Content, "barrier timeout") {
+			t.Errorf("result[%d] = (isError=%v, %q), want barrier timeout (calls overlapped)", i, r.IsError, r.Content)
+		}
+	}
+}
+
+// TestBatchParallelizable unit-tests the parallel-execution gate: only
+// multi-call batches of known, non-approval-gated, non-load_skill tools
+// qualify.
+func TestBatchParallelizable(t *testing.T) {
+	llmClient := NewLLMClient(log.DefaultLogger, &http.Client{Timeout: llmTimeout})
+	loop := NewAgentLoop(llmClient, mcp.NewProxy(context.Background(), log.DefaultLogger), log.DefaultLogger)
+
+	barrierHandler := barrierToolHandler(2, 50*time.Millisecond)
+	srv := mcpsdk.NewServer(&mcpsdk.Implementation{Name: "fake", Version: "1.0.0"}, nil)
+	srv.AddTool(&mcpsdk.Tool{Name: "barrier", InputSchema: map[string]any{"type": "object"}}, barrierHandler)
+	srv.AddTool(&mcpsdk.Tool{Name: "blast", InputSchema: map[string]any{"type": "object"}}, func(ctx context.Context, req *mcpsdk.CallToolRequest) (*mcpsdk.CallToolResult, error) {
+		return sdkToolResult("blast ran — approval gate bypassed", false), nil
+	})
+	ts := httptest.NewServer(mcpsdk.NewStreamableHTTPHandler(func(*http.Request) *mcpsdk.Server { return srv }, nil))
+	defer ts.Close()
+	riskCfg := mcp.ServerConfig{
+		ID: "fake", Name: "fake", URL: ts.URL, Type: "streamable-http", Enabled: true,
+		RiskOverrides: map[string]mcp.ToolRiskOverride{
+			"fake_blast": {RequiresApproval: boolPtrApproval(), Reason: "test write tool"},
+		},
+	}
+	if err := loop.mcpProxy.UpdateConfig([]mcp.ServerConfig{riskCfg}); err != nil {
+		t.Fatalf("UpdateConfig: %v", err)
+	}
+	// FindToolByName reads the per-client tool cache, which only
+	// ListToolsWithContext populates — warm it the way a real run does.
+	if _, err := loop.mcpProxy.ListToolsWithContext(context.Background()); err != nil {
+		t.Fatalf("ListToolsWithContext: %v", err)
+	}
+
+	approvalAlways := LoopRequest{ApprovalPolicy: "always", MCPServers: []mcp.ServerConfig{riskCfg}}
+	noPolicy := LoopRequest{MCPServers: []mcp.ServerConfig{riskCfg}}
+
+	cases := []struct {
+		name  string
+		calls []ToolCall
+		req   LoopRequest
+		want  bool
+	}{
+		{
+			name:  "single call never parallel",
+			calls: []ToolCall{toolCall("tc_1", "fake_barrier", "{}")},
+			req:   approvalAlways,
+			want:  false,
+		},
+		{
+			name: "load_skill blocks the batch",
+			calls: []ToolCall{
+				toolCall("tc_1", "fake_barrier", "{}"),
+				toolCall("tc_2", "load_skill", `{"skill":"x"}`),
+			},
+			req:  approvalAlways,
+			want: false,
+		},
+		{
+			name: "unknown tool blocks the batch",
+			calls: []ToolCall{
+				toolCall("tc_1", "fake_barrier", "{}"),
+				toolCall("tc_2", "fake_missing", "{}"),
+			},
+			req:  approvalAlways,
+			want: false,
+		},
+		{
+			name: "approval-gated tool blocks the batch",
+			calls: []ToolCall{
+				toolCall("tc_1", "fake_barrier", "{}"),
+				toolCall("tc_2", "fake_blast", "{}"),
+			},
+			req:  approvalAlways,
+			want: false,
+		},
+		{
+			name: "plain read-only batch is parallelizable",
+			calls: []ToolCall{
+				toolCall("tc_1", "fake_barrier", "{}"),
+				toolCall("tc_2", "fake_barrier", "{}"),
+			},
+			req:  approvalAlways,
+			want: true,
+		},
+		{
+			name: "no approval policy accepts any known batch",
+			calls: []ToolCall{
+				toolCall("tc_1", "fake_barrier", "{}"),
+				toolCall("tc_2", "fake_blast", "{}"),
+			},
+			req:  noPolicy,
+			want: true,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := loop.batchParallelizable(tc.calls, tc.req); got != tc.want {
+				t.Errorf("batchParallelizable = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// toolResultEvents extracts the tool_call_result payloads from an event list.
+func toolResultEvents(t *testing.T, events []SSEEvent) []ToolCallResultEvent {
+	t.Helper()
+	var results []ToolCallResultEvent
+	for _, e := range events {
+		if e.Type == "tool_call_result" {
+			results = append(results, e.Data.(ToolCallResultEvent))
+		}
+	}
+	return results
 }
