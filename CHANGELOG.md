@@ -5,6 +5,13 @@ All notable changes to the Ask O11y Grafana plugin will be documented in this fi
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.19](https://github.com/Consensys/ask-o11y-plugin/compare/v0.3.18...v0.3.19) (2026-09-25)
+
+
+### Features
+
+* **backend:** rca reasoning guards for accuracy and speed ([#228](https://github.com/Consensys/ask-o11y-plugin/issues/228)) ([047725b](https://github.com/Consensys/ask-o11y-plugin/commit/047725bc4586d2697e69748e82806f9052d12d7b))
+
 ## [0.3.18](https://github.com/Consensys/ask-o11y-plugin/compare/v0.3.17...v0.3.18) (2026-09-22)
 
 
