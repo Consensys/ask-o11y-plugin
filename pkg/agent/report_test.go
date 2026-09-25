@@ -163,14 +163,8 @@ func TestDerivedConfidence(t *testing.T) {
 	}
 }
 
-func TestShortEvidenceID(t *testing.T) {
-	if got := shortEvidenceID("call_42661__thought__EusLCugLAWkUfRP4"); got != "call_42661" {
-		t.Fatalf("got %q", got)
-	}
-	if got := shortEvidenceID("call_abc"); got != "call_abc" {
-		t.Fatalf("got %q", got)
-	}
-	if got := evidenceIDHeader("call_1__thought__xyz"); got != "[evidence id: call_1]\n" {
+func TestEvidenceIDHeader(t *testing.T) {
+	if got := evidenceIDHeader(evidenceIDFor(3)); got != "[evidence id: e3]\n" {
 		t.Fatalf("got %q", got)
 	}
 }

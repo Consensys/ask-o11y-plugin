@@ -158,21 +158,22 @@ func repairNudgeText(warnings []string) string {
 	return fmt.Sprintf(repairNudgeTemplate, " "+strings.Join(warnings, " "))
 }
 
-// evidenceIDHeader prefixes successful tool results so the model can cite
-// the exact call id in the rca-report evidenceIds.
-func evidenceIDHeader(id string) string {
-	return "[evidence id: " + shortEvidenceID(id) + "]\n"
+// evidenceIDHeader prefixes successful tool results with a short,
+// provider-independent citation id (e1, e2, ...). Raw tool-call ids vary by
+// provider (some embed kilobytes of opaque signature data), so models cite
+// them unreliably; a run-local sequence is short and uniform for every model.
+func evidenceIDHeader(evidenceID string) string {
+	return "[evidence id: " + evidenceID + "]\n"
 }
 
-// thoughtSignatureSep separates a Gemini tool-call id from its opaque
-// thought signature (e.g. "call_42661__thought__EusL..."), which can be
-// kilobytes long. Models cite only the short prefix.
-const thoughtSignatureSep = "__thought__"
-
-// shortEvidenceID returns the citable part of a tool-call id.
-func shortEvidenceID(id string) string {
-	if i := strings.Index(id, thoughtSignatureSep); i > 0 {
-		return id[:i]
-	}
-	return id
+// evidenceIDFor returns the citation id for the n-th successful tool result.
+func evidenceIDFor(n int) string {
+	return fmt.Sprintf("e%d", n)
 }
+
+// emptyFinalNudge is injected when the model ends a turn with no tool calls
+// and no visible text.
+const emptyFinalNudge = "Your previous reply was empty. Do not call more tools. Write your final answer now as visible text, based only on the tool results above (include the rca-report block if the task requires one)."
+
+// emptyFinalFallback is shown when the model still produced no text.
+const emptyFinalFallback = "The model finished without producing a written answer. The tool results above are the evidence gathered; retry the request or switch model."

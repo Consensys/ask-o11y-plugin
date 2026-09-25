@@ -7,6 +7,8 @@
 #   npm run dev:stack -- investigate "<message>" [type]
 #                                      start an agent run, wait, print metrics
 #   npm run dev:stack -- run <runId>   print metrics for an existing run
+#   npm run dev:stack -- model <litellm-model>
+#                                      switch base+large model (recreates grafana)
 #   npm run dev:stack -- check         verify datasources reach prod
 #   npm run dev:stack -- logs|ps|down
 #
@@ -150,6 +152,16 @@ case "${1:-help}" in
     compose restart grafana
     ;;
   frontend) build_frontend ;;
+  model)
+    # Switch the LiteLLM model for base+large; recreates grafana so
+    # provisioning re-applies grafana-llm-app settings.
+    shift
+    export LLM_MODEL_BASE="${1:?usage: model <litellm-model>}" LLM_MODEL_LARGE="$1"
+    compose up -d --no-deps --force-recreate grafana
+    for _ in $(seq 1 30); do curl -sf "$GRAFANA/api/health" >/dev/null 2>&1 \
+      && curl -sf -u admin:admin "$GRAFANA/api/plugins/consensys-asko11y-app/settings" >/dev/null 2>&1 && break; sleep 2; done
+    echo "model: $1"
+    ;;
   investigate)
     shift
     cmd_investigate "$@"

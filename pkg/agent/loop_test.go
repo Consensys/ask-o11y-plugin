@@ -2250,7 +2250,7 @@ func TestAgentLoop_RCAReportRepairKeepsProseAndAcceptsToolName(t *testing.T) {
 	defer mu.Unlock()
 	foundHeader := false
 	for _, body := range requestBodies {
-		if strings.Contains(string(body), "[evidence id: tc_1]") {
+		if strings.Contains(string(body), "[evidence id: e1]") {
 			foundHeader = true
 		}
 	}
@@ -2342,5 +2342,60 @@ func TestAgentLoop_TruncatedFinalAnswerRetriedWithLargerBudget(t *testing.T) {
 	defer mu.Unlock()
 	if len(budgets) != 2 || budgets[1] != finalAnswerCompletionTokens || budgets[0] >= budgets[1] {
 		t.Fatalf("expected retry with boosted budget, got %v", budgets)
+	}
+}
+
+func TestAgentLoop_EmptyFinalAnswerNudgedOnceThenFallback(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		responses []ChatCompletionResponse
+		want      string
+		wantCalls int32
+	}{
+		{"recovers", []ChatCompletionResponse{textOnlyResponse("1", ""), textOnlyResponse("2", "### Verdict\nBenign.")}, "### Verdict\nBenign.", 2},
+		{"fallback", []ChatCompletionResponse{textOnlyResponse("1", ""), textOnlyResponse("2", "")}, emptyFinalFallback, 2},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var callIdx atomic.Int32
+			var sawNudge atomic.Bool
+			llm := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				body, _ := io.ReadAll(r.Body)
+				if strings.Contains(string(body), "previous reply was empty") {
+					sawNudge.Store(true)
+				}
+				idx := int(callIdx.Add(1)) - 1
+				if idx >= len(tc.responses) {
+					idx = len(tc.responses) - 1
+				}
+				respondAsStream(w, tc.responses[idx])
+			}))
+			defer llm.Close()
+
+			loop := NewAgentLoop(NewLLMClient(log.DefaultLogger, &http.Client{Timeout: llmTimeout}),
+				mcp.NewProxy(context.Background(), log.DefaultLogger), log.DefaultLogger)
+			eventCh := make(chan SSEEvent, 32)
+			go loop.Run(context.Background(), LoopRequest{
+				Messages:   []Message{{Role: "user", Content: "investigate"}},
+				GrafanaURL: llm.URL,
+				AuthToken:  "test-token",
+				UserRole:   "Admin",
+			}, eventCh)
+			var contents []string
+			finalReports := 0
+			for _, e := range collectEvents(eventCh) {
+				switch e.Type {
+				case "content":
+					contents = append(contents, e.Data.(ContentEvent).Content)
+				case "final_report":
+					finalReports++
+				}
+			}
+			if len(contents) != 1 || contents[0] != tc.want || finalReports != 1 {
+				t.Fatalf("contents=%q finalReports=%d", contents, finalReports)
+			}
+			if callIdx.Load() != tc.wantCalls || !sawNudge.Load() {
+				t.Fatalf("calls=%d sawNudge=%v", callIdx.Load(), sawNudge.Load())
+			}
+		})
 	}
 }

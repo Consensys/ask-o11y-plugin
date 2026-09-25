@@ -226,9 +226,9 @@ func (a *AgentLoop) Run(ctx context.Context, req LoopRequest, eventCh chan<- SSE
 	// result. Models frequently cite the tool name instead of the call id
 	// (observed in production), which is still a grounded claim.
 	successfulToolNames := make(map[string]bool)
-	// successfulShortIDs holds shortEvidenceID(call id) for successful calls,
-	// the form shown in the evidence header and cited by the model.
-	successfulShortIDs := make(map[string]bool)
+	// evidenceIDs holds the run-local citation ids (e1, e2, ...) shown in the
+	// evidence header of successful tool results.
+	evidenceIDs := make(map[string]bool)
 
 	// evidenceOK grounds final-report evidence claims: an id counts when it
 	// belongs to a tool call that executed and did not error, or names a
@@ -238,7 +238,7 @@ func (a *AgentLoop) Run(ctx context.Context, req LoopRequest, eventCh chan<- SSE
 		if isError, known := toolResultIsError[id]; known {
 			return !isError
 		}
-		if successfulShortIDs[id] {
+		if evidenceIDs[id] {
 			return true
 		}
 		return successfulToolNames[id]
@@ -250,6 +250,7 @@ func (a *AgentLoop) Run(ctx context.Context, req LoopRequest, eventCh chan<- SSE
 	// A final answer truncated by the completion budget is re-requested once
 	// with finalAnswerCompletionTokens instead of being shown half-written.
 	truncatedFinalRetried := false
+	emptyFinalRetried := false
 	boostCompletion := false
 
 	// pendingSummaries holds eviction summaries kicked off in the background
@@ -409,7 +410,24 @@ func (a *AgentLoop) Run(ctx context.Context, req LoopRequest, eventCh chan<- SSE
 			continue
 		}
 
+		// Some models (reasoning-heavy ones in particular) occasionally end a
+		// turn with neither tool calls nor visible text. Ask once, explicitly,
+		// for the written answer instead of ending the run with nothing.
+		if len(msg.ToolCalls) == 0 && strings.TrimSpace(msg.Content) == "" &&
+			!emptyFinalRetried && iteration+1 < maxIter {
+			emptyFinalRetried = true
+			boostCompletion = true
+			a.logger.Warn("Model returned an empty final answer; requesting the written answer",
+				"finishReason", resp.Choices[0].FinishReason,
+				"iteration", iteration)
+			pendingRepairNudge = emptyFinalNudge
+			continue
+		}
+
 		if len(msg.ToolCalls) == 0 {
+			if strings.TrimSpace(msg.Content) == "" {
+				msg.Content = emptyFinalFallback
+			}
 			if msg.Content != "" {
 				// Structured final report: parse the fenced rca-report block
 				// (when the model emitted one), validate it against run
@@ -606,9 +624,10 @@ func (a *AgentLoop) Run(ctx context.Context, req LoopRequest, eventCh chan<- SSE
 			}
 			if !isError {
 				// Expose the call id so final-report evidenceIds can cite it.
-				llmContent = evidenceIDHeader(tc.ID) + llmContent
+				evID := evidenceIDFor(len(evidenceIDs) + 1)
+				evidenceIDs[evID] = true
+				llmContent = evidenceIDHeader(evID) + llmContent
 				successfulToolNames[tc.Function.Name] = true
-				successfulShortIDs[shortEvidenceID(tc.ID)] = true
 			}
 			messages = append(messages, Message{
 				Role:       "tool",

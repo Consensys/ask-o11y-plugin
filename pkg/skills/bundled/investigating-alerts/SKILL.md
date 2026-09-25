@@ -75,11 +75,11 @@ End the final response with a machine-readable summary in a fenced `rca-report` 
 
 ````
 ```rca-report
-{"hypotheses":[{"rank":1,"component":"payment","faultType":"high error rate","confidence":"high","evidenceIds":["call_abc123","call_def456"],"propagationPath":["frontend","checkout","payment"],"firstSeen":"2026-09-25T10:05:00Z"}],"gaps":["trace data older than 1h is not retained"]}
+{"hypotheses":[{"rank":1,"component":"payment","faultType":"high error rate","confidence":"high","evidenceIds":["e3","e7"],"propagationPath":["frontend","checkout","payment"],"firstSeen":"2026-09-25T10:05:00Z"}],"gaps":["trace data older than 1h is not retained"]}
 ```
 ````
 
-- `hypotheses`: ranked candidates, best first (1–3). `component` is a service/dependency name; `faultType` a short failure description; `confidence` is `low`, `medium`, or `high`; `evidenceIds` are the ids from the `[evidence id: ...]` header of the successful tool results the claim rests on (never tool names or alert/rule UIDs); `propagationPath` is the ordered component chain (omit if unknown); `firstSeen` is the earliest symptom time for that component (RFC3339, omit if unknown).
+- `hypotheses`: ranked candidates, best first (1–3). `component` is a service/dependency name; `faultType` a short failure description; `confidence` is `low`, `medium`, or `high`; `evidenceIds` are the ids from the `[evidence id: ...]` header of the successful tool results the claim rests on (e.g. `e3`) (never tool names or alert/rule UIDs); `propagationPath` is the ordered component chain (omit if unknown); `firstSeen` is the earliest symptom time for that component (RFC3339, omit if unknown).
 - `gaps`: what the investigation could not establish (missing retention, denied tools, empty windows).
 
 ## Alert rule anatomy (for interpreting what fired)
