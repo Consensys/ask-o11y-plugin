@@ -1947,3 +1947,224 @@ func TestAgentLoop_StallGuardNudgesThenForcesFinal(t *testing.T) {
 		t.Errorf("final event = (%s, %+v), want max-iterations error clamped to 6", last.Type, last.Data)
 	}
 }
+
+const rcaFinalContent = "Verdict: payment errors.\n\n```rca-report\n{\"hypotheses\":[{\"rank\":1,\"component\":\"payment\",\"faultType\":\"high error rate\",\"confidence\":\"high\",\"evidenceIds\":[\"tc_1\"],\"propagationPath\":[\"frontend\",\"checkout\",\"payment\"],\"firstSeen\":\"2026-09-25T10:05:00Z\"}],\"gaps\":[\"no trace data\"]}\n```"
+
+const rcaTopology = "checkout -> payment (rps 12.34, err 10.0%)\nfrontend -> checkout (rps 30.00)\n"
+
+// TestAgentLoop_RCAReportParsedValidatedAndStripped proves the structured
+// final report: the fenced rca-report block feeds Hypotheses/Validation on
+// the final_report event and is stripped from the user-visible content.
+func TestAgentLoop_RCAReportParsedValidatedAndStripped(t *testing.T) {
+	loop, serverURL, cleanup := setupTestLoop(t, []ChatCompletionResponse{
+		toolCallBatchResponse("1", []ToolCall{toolCall("tc_1", "fake_echo", `{"n":1}`)}),
+		textOnlyResponse("2", rcaFinalContent),
+	})
+	defer cleanup()
+	setupFakeMCP(t, loop, func(srv *mcpsdk.Server) {
+		srv.AddTool(&mcpsdk.Tool{Name: "echo", InputSchema: map[string]any{"type": "object"}}, func(ctx context.Context, req *mcpsdk.CallToolRequest) (*mcpsdk.CallToolResult, error) {
+			return sdkToolResult("one", false), nil
+		})
+	})
+
+	eventCh := make(chan SSEEvent, 32)
+	req := LoopRequest{
+		Messages:        []Message{{Role: "user", Content: "investigate"}},
+		GrafanaURL:      serverURL,
+		AuthToken:       "test-token",
+		UserRole:        "Admin",
+		ServiceTopology: rcaTopology,
+	}
+
+	go loop.Run(context.Background(), req, eventCh)
+	events := collectEvents(eventCh)
+
+	var final *FinalReportEvent
+	var content string
+	for _, e := range events {
+		switch e.Type {
+		case "final_report":
+			f := e.Data.(FinalReportEvent)
+			final = &f
+		case "content":
+			content = e.Data.(ContentEvent).Content
+		}
+	}
+	if final == nil {
+		t.Fatal("no final_report event")
+	}
+	if len(final.Hypotheses) != 1 || final.Hypotheses[0].Component != "payment" {
+		t.Errorf("hypotheses = %+v, want the payment hypothesis", final.Hypotheses)
+	}
+	if final.Confidence != "high" {
+		t.Errorf("confidence = %q, want high (from the rank-1 hypothesis)", final.Confidence)
+	}
+	if final.Validation == nil || !final.Validation.ok() {
+		t.Errorf("validation = %+v, want all checks passing", final.Validation)
+	}
+	if !strings.Contains(final.Summary, "payment errors") {
+		t.Errorf("summary = %q, want prose (not the JSON block)", final.Summary)
+	}
+	if strings.Contains(content, "rca-report") {
+		t.Errorf("user-visible content still contains the block: %q", content)
+	}
+}
+
+// TestAgentLoop_RCAReportRepairTurn proves the one repair iteration: a final
+// answer whose rca-report cites bogus evidence gets a system nudge and the
+// loop continues; the repaired answer's validation records Repaired.
+func TestAgentLoop_RCAReportRepairTurn(t *testing.T) {
+	bogus := strings.Replace(rcaFinalContent, `"evidenceIds":["tc_1"]`, `"evidenceIds":["tc_bogus"]`, 1)
+	bogus = strings.Replace(bogus, `["frontend","checkout","payment"]`, `["frontend","moon"]`, 1)
+
+	var requestBodies [][]byte
+	var mu sync.Mutex
+	loop, serverURL, cleanup := setupTestLoop(t, []ChatCompletionResponse{
+		toolCallBatchResponse("1", []ToolCall{toolCall("tc_1", "fake_echo", `{"n":1}`)}),
+		textOnlyResponse("2", bogus),
+		textOnlyResponse("3", rcaFinalContent),
+	})
+	defer cleanup()
+	// Wrap the LLM server to capture request bodies for the nudge assertion.
+	loop.llmClient = recordingClient(t, &mu, &requestBodies, serverURL)
+	setupFakeMCP(t, loop, func(srv *mcpsdk.Server) {
+		srv.AddTool(&mcpsdk.Tool{Name: "echo", InputSchema: map[string]any{"type": "object"}}, func(ctx context.Context, req *mcpsdk.CallToolRequest) (*mcpsdk.CallToolResult, error) {
+			return sdkToolResult("one", false), nil
+		})
+	})
+
+	eventCh := make(chan SSEEvent, 32)
+	req := LoopRequest{
+		Messages:        []Message{{Role: "user", Content: "investigate"}},
+		GrafanaURL:      serverURL,
+		AuthToken:       "test-token",
+		UserRole:        "Admin",
+		ServiceTopology: rcaTopology,
+	}
+
+	go loop.Run(context.Background(), req, eventCh)
+	events := collectEvents(eventCh)
+
+	var final *FinalReportEvent
+	for _, e := range events {
+		if e.Type == "final_report" {
+			f := e.Data.(FinalReportEvent)
+			final = &f
+		}
+	}
+	if final == nil {
+		t.Fatal("no final_report event")
+	}
+	if final.Validation == nil || !final.Validation.Repaired {
+		t.Errorf("validation = %+v, want Repaired=true after the repair turn", final.Validation)
+	}
+	if !final.Validation.ok() {
+		t.Errorf("validation = %+v, want passing after repair", final.Validation)
+	}
+
+	// The repair nudge reached the model as a one-shot system message on the
+	// last MAIN model request. Background eviction-summary calls (model
+	// "base") also cross the transport; skip them.
+	mu.Lock()
+	defer mu.Unlock()
+	var lastMainReq ChatCompletionRequest
+	foundMain := false
+	for _, body := range requestBodies {
+		var parsed ChatCompletionRequest
+		if err := json.Unmarshal(body, &parsed); err != nil {
+			t.Fatalf("unmarshal request: %v", err)
+		}
+		if parsed.Model == "base" {
+			continue
+		}
+		lastMainReq = parsed
+		foundMain = true
+	}
+	if !foundMain {
+		t.Fatalf("no main-model LLM requests captured, got %d bodies", len(requestBodies))
+	}
+	foundNudge := false
+	for _, m := range lastMainReq.Messages {
+		if m.Role == "system" && strings.Contains(m.Content, "failed validation") {
+			foundNudge = true
+		}
+	}
+	if !foundNudge {
+		t.Errorf("repair nudge missing from the final LLM request: %+v", lastMainReq.Messages)
+	}
+}
+
+// TestAgentLoop_RCAReportNoBudgetNoRepair proves the repair turn respects
+// the iteration budget: with only one iteration left, the invalid report is
+// emitted as-is with its warnings surfaced in Gaps.
+func TestAgentLoop_RCAReportNoBudgetNoRepair(t *testing.T) {
+	bogus := strings.Replace(rcaFinalContent, `"evidenceIds":["tc_1"]`, `"evidenceIds":["tc_bogus"]`, 1)
+	loop, serverURL, cleanup := setupTestLoop(t, []ChatCompletionResponse{
+		toolCallBatchResponse("1", []ToolCall{toolCall("tc_1", "fake_echo", `{"n":1}`)}),
+		textOnlyResponse("2", bogus),
+	})
+	defer cleanup()
+	setupFakeMCP(t, loop, func(srv *mcpsdk.Server) {
+		srv.AddTool(&mcpsdk.Tool{Name: "echo", InputSchema: map[string]any{"type": "object"}}, func(ctx context.Context, req *mcpsdk.CallToolRequest) (*mcpsdk.CallToolResult, error) {
+			return sdkToolResult("one", false), nil
+		})
+	})
+
+	eventCh := make(chan SSEEvent, 32)
+	req := LoopRequest{
+		Messages:      []Message{{Role: "user", Content: "investigate"}},
+		GrafanaURL:    serverURL,
+		AuthToken:     "test-token",
+		UserRole:      "Admin",
+		MaxIterations: 2, // iter0: tool call; iter1: final — no budget for repair
+	}
+
+	go loop.Run(context.Background(), req, eventCh)
+	events := collectEvents(eventCh)
+
+	var final *FinalReportEvent
+	for _, e := range events {
+		if e.Type == "final_report" {
+			f := e.Data.(FinalReportEvent)
+			final = &f
+		}
+	}
+	if final == nil {
+		t.Fatal("no final_report event")
+	}
+	if final.Validation == nil || final.Validation.ok() {
+		t.Errorf("validation = %+v, want failed checks", final.Validation)
+	}
+	if len(final.Gaps) == 0 {
+		t.Error("expected validation warnings surfaced as gaps")
+	}
+}
+
+// recordingClient wraps the LLM client with a transport that captures every
+// request body before forwarding it to the real URL.
+func recordingClient(t *testing.T, mu *sync.Mutex, bodies *[][]byte, serverURL string) *LLMClient {
+	t.Helper()
+	transport := recordingTransport{t: t, mu: mu, bodies: bodies, base: serverURL}
+	return NewLLMClient(log.DefaultLogger, &http.Client{Timeout: llmTimeout, Transport: transport})
+}
+
+type recordingTransport struct {
+	t      *testing.T
+	mu     *sync.Mutex
+	bodies *[][]byte
+	base   string
+}
+
+func (rt recordingTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	if req.URL.String() == rt.base+"/api/plugins/grafana-llm-app/resources/openai/v1/chat/completions" && req.Body != nil {
+		body, err := io.ReadAll(req.Body)
+		if err != nil {
+			return nil, err
+		}
+		req.Body = io.NopCloser(strings.NewReader(string(body)))
+		rt.mu.Lock()
+		*rt.bodies = append(*rt.bodies, body)
+		rt.mu.Unlock()
+	}
+	return http.DefaultTransport.RoundTrip(req)
+}

@@ -133,6 +133,12 @@ func finalReportCompletenessScore(report *agent.FinalReportEvent) int {
 	if len(report.NextSteps) > 0 {
 		score += 10
 	}
+	if len(report.Hypotheses) > 0 {
+		score += 10
+	}
+	if report.Validation != nil && report.Validation.EvidenceGrounded && report.Validation.TopologyConsistent && report.Validation.TemporalOK {
+		score += 5
+	}
 	return clampScore(score)
 }
 

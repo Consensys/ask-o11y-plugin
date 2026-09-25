@@ -1153,6 +1153,7 @@ func (p *Plugin) handleAgentRun(w http.ResponseWriter, r *http.Request) {
 		MCPServers:           p.settingsForFilter(),
 		ApprovalPolicy:       p.settings.ApprovalPolicy,
 		MaxParallelToolCalls: p.settings.MaxParallelToolCalls,
+		ServiceTopology:      toolCtx.ServiceTopology,
 		RegisterApproval:     p.approvalRegistrar(runID),
 		CheckApprovalGrant:   p.approvalGrantChecker(sessionID),
 	}

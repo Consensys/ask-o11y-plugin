@@ -122,13 +122,37 @@ type ApprovalResolvedEvent struct {
 	ResolvedAt string `json:"resolvedAt,omitempty"`
 }
 
+type FinalReportHypothesis struct {
+	Rank            int      `json:"rank"`
+	Component       string   `json:"component"`
+	FaultType       string   `json:"faultType"`
+	Confidence      string   `json:"confidence,omitempty"`
+	EvidenceIDs     []string `json:"evidenceIds,omitempty"`
+	PropagationPath []string `json:"propagationPath,omitempty"`
+	FirstSeen       string   `json:"firstSeen,omitempty"`
+}
+
+// FinalReportValidation records the outcome of the structured-report checks
+// (see report.go): evidence IDs grounded in non-error tool calls, firstSeen
+// timestamps parseable, and propagation paths consistent with the prefetched
+// service topology. Warnings name each failed check.
+type FinalReportValidation struct {
+	EvidenceGrounded   bool     `json:"evidenceGrounded"`
+	TemporalOK         bool     `json:"temporalOk"`
+	TopologyConsistent bool     `json:"topologyConsistent"`
+	Warnings           []string `json:"warnings,omitempty"`
+	Repaired           bool     `json:"repaired,omitempty"`
+}
+
 type FinalReportEvent struct {
-	Verdict     string   `json:"verdict,omitempty"`
-	Confidence  string   `json:"confidence,omitempty"`
-	Summary     string   `json:"summary"`
-	EvidenceIDs []string `json:"evidenceIds,omitempty"`
-	Gaps        []string `json:"gaps,omitempty"`
-	NextSteps   []string `json:"nextSteps,omitempty"`
+	Verdict     string                  `json:"verdict,omitempty"`
+	Confidence  string                  `json:"confidence,omitempty"`
+	Summary     string                  `json:"summary"`
+	EvidenceIDs []string                `json:"evidenceIds,omitempty"`
+	Gaps        []string                `json:"gaps,omitempty"`
+	NextSteps   []string                `json:"nextSteps,omitempty"`
+	Hypotheses  []FinalReportHypothesis `json:"hypotheses,omitempty"`
+	Validation  *FinalReportValidation  `json:"validation,omitempty"`
 }
 
 // MCPUnavailableEvent is emitted at most once per run when enough distinct

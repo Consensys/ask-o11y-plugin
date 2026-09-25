@@ -6,6 +6,7 @@ import { GrafanaTheme2 } from '@grafana/data';
 import { Alert, Button, Icon, useStyles2, useTheme2 } from '@grafana/ui';
 import { testIds } from '../../../testIds';
 import { ToolCallsSection } from '../ToolCallsSection/ToolCallsSection';
+import { FinalReportCard } from '../FinalReportCard/FinalReportCard';
 import { GraphRenderer } from '../GraphRenderer/GraphRenderer';
 import { LogsRenderer } from '../LogsRenderer/LogsRenderer';
 import { TracesRenderer } from '../TracesRenderer/TracesRenderer';
@@ -266,6 +267,8 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
         )}
 
         <AgentTraceSummary message={message} onResolveApproval={onResolveApproval} />
+
+        {message.finalReport && <FinalReportCard report={message.finalReport} />}
 
         {showThinking && (
           <div className="flex items-center gap-3 px-4 py-3 rounded-lg animate-pulse bg-surface text-secondary">

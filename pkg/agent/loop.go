@@ -116,6 +116,11 @@ type LoopRequest struct {
 
 	ApprovalPolicy       string
 	MaxParallelToolCalls int
+	// ServiceTopology is the rendered Service Topology snapshot (see
+	// pkg/plugin/topology_snapshot.go); its edges validate the final report's
+	// propagation paths. Empty disables that check.
+	ServiceTopology string
+
 	RegisterApproval     ApprovalRegistrar
 	CheckApprovalGrant   ApprovalGrantChecker
 }
@@ -190,6 +195,12 @@ func (a *AgentLoop) Run(ctx context.Context, req LoopRequest, eventCh chan<- SSE
 	stallNudges := 0
 	forcedFinal := false
 
+	// Structured final report state: the service topology parsed to edges
+	// (nil when none was prefetched), and whether the repair turn is spent.
+	topologyEdges := parseTopologyEdges(req.ServiceTopology)
+	repairUsed := false
+	pendingRepairNudge := ""
+
 	// Run-level usage/tool-call totals, surfaced on the "done" event so the
 	// caller can persist per-session stats (tokens, turns, tool calls).
 	// usageMu guards it: eviction summaries now run in background goroutines
@@ -205,6 +216,13 @@ func (a *AgentLoop) Run(ctx context.Context, req LoopRequest, eventCh chan<- SSE
 	// anti-hallucination directive on transport failures) that must never be
 	// paraphrased.
 	toolResultIsError := make(map[string]bool)
+
+	// evidenceOK grounds final-report evidence claims: an id counts when it
+	// belongs to a tool call that executed and did not error.
+	evidenceOK := func(id string) bool {
+		isError, known := toolResultIsError[id]
+		return known && !isError
+	}
 
 	// pendingSummaries holds eviction summaries kicked off in the background
 	// as soon as each tool result is appended (see the tool-call loop below),
@@ -261,6 +279,10 @@ func (a *AgentLoop) Run(ctx context.Context, req LoopRequest, eventCh chan<- SSE
 		if pendingStallNudge != "" {
 			oneShot = append(oneShot, Message{Role: "system", Content: pendingStallNudge})
 			pendingStallNudge = ""
+		}
+		if pendingRepairNudge != "" {
+			oneShot = append(oneShot, Message{Role: "system", Content: pendingRepairNudge})
+			pendingRepairNudge = ""
 		}
 		if len(oneShot) > 0 {
 			callMessages = append(append([]Message{}, messages...), oneShot...)
@@ -343,17 +365,47 @@ func (a *AgentLoop) Run(ctx context.Context, req LoopRequest, eventCh chan<- SSE
 
 		if len(msg.ToolCalls) == 0 {
 			if msg.Content != "" {
+				// Structured final report: parse the fenced rca-report block
+				// (when the model emitted one), validate it against run
+				// reality, and strip it from what the user sees.
+				display := msg.Content
+				report := FinalReportEvent{
+					Verdict:    finalReportVerdict(req.ConversationType),
+					Confidence: "medium",
+					Summary:    summarizeFinalContent(msg.Content),
+				}
+				if parsed, cleaned, hasBlock := extractRCAReport(msg.Content); hasBlock {
+					display = cleaned
+					report.Summary = summarizeFinalContent(cleaned)
+					report.Hypotheses = parsed.Hypotheses
+					report.Gaps = append(report.Gaps, parsed.Gaps...)
+					report.Confidence = derivedConfidence(parsed)
+					validation := validateRCAReport(parsed, evidenceOK, topologyEdges)
+
+					// One repair turn: an invalid report with budget left
+					// gets the warnings injected as a one-shot system
+					// message and the loop continues instead of ending.
+					if !validation.ok() && !repairUsed && iteration+1 < maxIter {
+						repairUsed = true
+						messages = append(messages, msg)
+						pendingRepairNudge = repairNudgeText(validation.Warnings)
+						continue
+					}
+					validation.Repaired = repairUsed
+					if !validation.ok() {
+						// Surface the unresolved warnings as gaps so the user
+						// sees why confidence is not higher.
+						report.Gaps = append(report.Gaps, validation.Warnings...)
+					}
+					report.Validation = validation
+				}
 				a.send(ctx, eventCh, SSEEvent{
 					Type: "final_report",
-					Data: FinalReportEvent{
-						Verdict:    finalReportVerdict(req.ConversationType),
-						Confidence: "medium",
-						Summary:    summarizeFinalContent(msg.Content),
-					},
+					Data: report,
 				})
 				a.send(ctx, eventCh, SSEEvent{
 					Type: "content",
-					Data: ContentEvent{Content: msg.Content},
+					Data: ContentEvent{Content: display},
 				})
 			}
 			// Snapshot into a fresh map under the lock: background eviction-summary
