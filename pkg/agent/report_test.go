@@ -50,6 +50,43 @@ func TestExtractRCAReport_LastBlockWins(t *testing.T) {
 	}
 }
 
+// The final answer can hit the completion budget before the closing fence
+// (observed in production on mmcx: the block was cut mid-"firstSeen"). The
+// partial JSON must never reach the user, and the missing hypotheses must
+// still fire the no-hypotheses validation warning.
+func TestExtractRCAReport_UnterminatedTruncatedJSON(t *testing.T) {
+	content := "Verdict: upstream RPC latency.\n\n```rca-report\n{\"hypotheses\":[{\"rank\":1,\"component\":\"HyperEVM RPC Provider\",\"faultType\":\"block delivery latency\",\"confidence\":\"high\",\"evidenceIds\":[\"call_1\"],\"firstSeen\":\"2026-09-25T15:04:53"
+	report, cleaned, hasBlock := extractRCAReport(content)
+	if !hasBlock {
+		t.Fatal("unterminated block must still be detected (and trigger repair warnings)")
+	}
+	if strings.Contains(cleaned, "rca-report") || strings.Contains(cleaned, "firstSeen") {
+		t.Errorf("truncated block not stripped: %q", cleaned)
+	}
+	if !strings.HasPrefix(cleaned, "Verdict: upstream RPC latency.") {
+		t.Errorf("cleaned content lost the prose: %q", cleaned)
+	}
+	if len(report.Hypotheses) != 0 {
+		t.Errorf("truncated JSON must not yield hypotheses, got %+v", report.Hypotheses)
+	}
+}
+
+// Same truncation, but the JSON happened to complete — only the closing
+// fence is missing. The report must still parse.
+func TestExtractRCAReport_UnterminatedValidJSON(t *testing.T) {
+	content := "Answer\n\n```rca-report\n{\"hypotheses\":[{\"rank\":1,\"component\":\"db\",\"faultType\":\"failover\"}],\"gaps\":[]}"
+	report, cleaned, hasBlock := extractRCAReport(content)
+	if !hasBlock {
+		t.Fatal("unterminated block must be detected")
+	}
+	if len(report.Hypotheses) != 1 || report.Hypotheses[0].Component != "db" {
+		t.Errorf("expected parsed hypotheses, got %+v", report.Hypotheses)
+	}
+	if strings.Contains(cleaned, "rca-report") {
+		t.Errorf("block not stripped: %q", cleaned)
+	}
+}
+
 func TestParseTopologyEdges(t *testing.T) {
 	rendered := "Directed dependencies, most traffic first:\ncheckout -> payment (rps 12.34, err 10.0%)\ncheckout -> db (rps 30.00)\n\nTreat these edges as authoritative..."
 	edges := parseTopologyEdges(rendered)
