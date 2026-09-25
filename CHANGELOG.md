@@ -5,6 +5,14 @@ All notable changes to the Ask O11y Grafana plugin will be documented in this fi
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.21](https://github.com/Consensys/ask-o11y-plugin/compare/v0.3.20...v0.3.21) (2026-09-25)
+
+
+### Bug Fixes
+
+* **backend:** ground rca evidence ids, keep repair prose, find service graph datasource ([#231](https://github.com/Consensys/ask-o11y-plugin/issues/231)) ([8ef914e](https://github.com/Consensys/ask-o11y-plugin/commit/8ef914e81ee8617357a997ef4b215ed4cdaa1d22))
+* **backend:** model-agnostic requests, fewer turns, local dev stack ([#233](https://github.com/Consensys/ask-o11y-plugin/issues/233)) ([039ebeb](https://github.com/Consensys/ask-o11y-plugin/commit/039ebebdd38107d3ca4a1854b93abc9f1ec719d3))
+
 ## [0.3.20](https://github.com/Consensys/ask-o11y-plugin/compare/v0.3.19...v0.3.20) (2026-09-25)
 
 
