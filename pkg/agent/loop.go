@@ -116,6 +116,11 @@ type LoopRequest struct {
 
 	ApprovalPolicy       string
 	MaxParallelToolCalls int
+	// ServiceTopology is the rendered Service Topology snapshot (see
+	// pkg/plugin/topology_snapshot.go); its edges validate the final report's
+	// propagation paths. Empty disables that check.
+	ServiceTopology string
+
 	RegisterApproval     ApprovalRegistrar
 	CheckApprovalGrant   ApprovalGrantChecker
 }
@@ -182,6 +187,20 @@ func (a *AgentLoop) Run(ctx context.Context, req LoopRequest, eventCh chan<- SSE
 	truncationRetries := 0
 	pendingTruncationNudge := false
 
+	// Repetition/stall guard state (see stall.go): pendingStallNudge is the
+	// one-shot system message queued by the previous batch; stallNudges and
+	// forcedFinal surface on the done event for run traces and session stats.
+	stall := newStallDetector()
+	pendingStallNudge := ""
+	stallNudges := 0
+	forcedFinal := false
+
+	// Structured final report state: the service topology parsed to edges
+	// (nil when none was prefetched), and whether the repair turn is spent.
+	topologyEdges := parseTopologyEdges(req.ServiceTopology)
+	repairUsed := false
+	pendingRepairNudge := ""
+
 	// Run-level usage/tool-call totals, surfaced on the "done" event so the
 	// caller can persist per-session stats (tokens, turns, tool calls).
 	// usageMu guards it: eviction summaries now run in background goroutines
@@ -197,6 +216,13 @@ func (a *AgentLoop) Run(ctx context.Context, req LoopRequest, eventCh chan<- SSE
 	// anti-hallucination directive on transport failures) that must never be
 	// paraphrased.
 	toolResultIsError := make(map[string]bool)
+
+	// evidenceOK grounds final-report evidence claims: an id counts when it
+	// belongs to a tool call that executed and did not error.
+	evidenceOK := func(id string) bool {
+		isError, known := toolResultIsError[id]
+		return known && !isError
+	}
 
 	// pendingSummaries holds eviction summaries kicked off in the background
 	// as soon as each tool result is appended (see the tool-call loop below),
@@ -249,6 +275,14 @@ func (a *AgentLoop) Run(ctx context.Context, req LoopRequest, eventCh chan<- SSE
 		if pendingTruncationNudge {
 			oneShot = append(oneShot, Message{Role: "system", Content: truncatedToolCallNudge})
 			pendingTruncationNudge = false
+		}
+		if pendingStallNudge != "" {
+			oneShot = append(oneShot, Message{Role: "system", Content: pendingStallNudge})
+			pendingStallNudge = ""
+		}
+		if pendingRepairNudge != "" {
+			oneShot = append(oneShot, Message{Role: "system", Content: pendingRepairNudge})
+			pendingRepairNudge = ""
 		}
 		if len(oneShot) > 0 {
 			callMessages = append(append([]Message{}, messages...), oneShot...)
@@ -331,17 +365,47 @@ func (a *AgentLoop) Run(ctx context.Context, req LoopRequest, eventCh chan<- SSE
 
 		if len(msg.ToolCalls) == 0 {
 			if msg.Content != "" {
+				// Structured final report: parse the fenced rca-report block
+				// (when the model emitted one), validate it against run
+				// reality, and strip it from what the user sees.
+				display := msg.Content
+				report := FinalReportEvent{
+					Verdict:    finalReportVerdict(req.ConversationType),
+					Confidence: "medium",
+					Summary:    summarizeFinalContent(msg.Content),
+				}
+				if parsed, cleaned, hasBlock := extractRCAReport(msg.Content); hasBlock {
+					display = cleaned
+					report.Summary = summarizeFinalContent(cleaned)
+					report.Hypotheses = parsed.Hypotheses
+					report.Gaps = append(report.Gaps, parsed.Gaps...)
+					report.Confidence = derivedConfidence(parsed)
+					validation := validateRCAReport(parsed, evidenceOK, topologyEdges)
+
+					// One repair turn: an invalid report with budget left
+					// gets the warnings injected as a one-shot system
+					// message and the loop continues instead of ending.
+					if !validation.ok() && !repairUsed && iteration+1 < maxIter {
+						repairUsed = true
+						messages = append(messages, msg)
+						pendingRepairNudge = repairNudgeText(validation.Warnings)
+						continue
+					}
+					validation.Repaired = repairUsed
+					if !validation.ok() {
+						// Surface the unresolved warnings as gaps so the user
+						// sees why confidence is not higher.
+						report.Gaps = append(report.Gaps, validation.Warnings...)
+					}
+					report.Validation = validation
+				}
 				a.send(ctx, eventCh, SSEEvent{
 					Type: "final_report",
-					Data: FinalReportEvent{
-						Verdict:    finalReportVerdict(req.ConversationType),
-						Confidence: "medium",
-						Summary:    summarizeFinalContent(msg.Content),
-					},
+					Data: report,
 				})
 				a.send(ctx, eventCh, SSEEvent{
 					Type: "content",
-					Data: ContentEvent{Content: msg.Content},
+					Data: ContentEvent{Content: display},
 				})
 			}
 			// Snapshot into a fresh map under the lock: background eviction-summary
@@ -370,6 +434,8 @@ func (a *AgentLoop) Run(ctx context.Context, req LoopRequest, eventCh chan<- SSE
 					TotalTokens:      totalTokens,
 					ToolCallCount:    toolCallCount,
 					UsageByModel:     usageSnapshot,
+					StallNudges:      stallNudges,
+					ForcedFinal:      forcedFinal,
 				},
 			})
 			return
@@ -378,11 +444,29 @@ func (a *AgentLoop) Run(ctx context.Context, req LoopRequest, eventCh chan<- SSE
 		msg.Content = ""
 		messages = append(messages, msg)
 
-		for _, tc := range msg.ToolCalls {
+		// Set up the batch: count every call and announce it before any
+		// execution starts, so the UI sees everything the model asked for.
+		// The repetition guard runs here too: an exact duplicate of an
+		// earlier successful call skips execution entirely (the finish phase
+		// replays the cached result with a directive), and near-duplicates
+		// feed the stall detector that nudges the model off repeated queries.
+		sigs := make([]string, len(msg.ToolCalls))
+		cachedHits := make([]stallCacheHit, len(msg.ToolCalls))
+		skipped := make([]bool, len(msg.ToolCalls))
+		for i, tc := range msg.ToolCalls {
 			if ctx.Err() != nil {
 				return
 			}
 			toolCallCount++
+			sigs[i] = canonicalToolSignature(tc.Function.Name, tc.Function.Arguments)
+			if hit, exact := stall.checkExact(sigs[i]); exact {
+				cachedHits[i] = hit
+				skipped[i] = true
+				stall.noteRepetition()
+			} else {
+				// observe counts near-duplicates itself; do not double-count.
+				stall.observe(tc.Function.Name, sigs[i])
+			}
 
 			a.send(ctx, eventCh, SSEEvent{
 				Type: "tool_call_start",
@@ -392,15 +476,63 @@ func (a *AgentLoop) Run(ctx context.Context, req LoopRequest, eventCh chan<- SSE
 					Arguments: tc.Function.Arguments,
 				},
 			})
-
-			var toolContent string
-		var isError bool
-		var errorKind string
-		if tc.Function.Name == loadSkillToolName && req.LoadSkill != nil {
-			toolContent, isError, errorKind = a.executeLoadSkill(ctx, tc, req)
-		} else {
-			toolContent, isError, errorKind = a.executeToolWithApproval(ctx, eventCh, tc, req)
 		}
+
+		// Execute the batch. Results land in results[i]; everything that
+		// touches shared run state (transport-failure map, history, pending
+		// summaries, ordered SSE events) happens below on the loop goroutine.
+		results := make([]toolExecResult, len(msg.ToolCalls))
+		if a.batchParallelizable(msg.ToolCalls, req) {
+			maxParallel := req.MaxParallelToolCalls
+			if maxParallel <= 0 {
+				maxParallel = defaultMaxParallelToolCalls
+			}
+			if maxParallel > len(msg.ToolCalls) {
+				maxParallel = len(msg.ToolCalls)
+			}
+			var wg sync.WaitGroup
+			sem := make(chan struct{}, maxParallel)
+			for i, tc := range msg.ToolCalls {
+				if skipped[i] {
+					continue
+				}
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
+					sem <- struct{}{}
+					defer func() { <-sem }()
+					content, isError, errorKind := a.executeToolWithApproval(ctx, eventCh, tc, req)
+					results[i] = toolExecResult{content: content, isError: isError, errorKind: errorKind}
+				}()
+			}
+			wg.Wait()
+		} else {
+			for i, tc := range msg.ToolCalls {
+				if ctx.Err() != nil {
+					return
+				}
+				if skipped[i] {
+					continue
+				}
+				content, isError, errorKind := a.executeToolCall(ctx, eventCh, tc, req)
+				results[i] = toolExecResult{content: content, isError: isError, errorKind: errorKind}
+			}
+		}
+
+		// Finish the batch in the original call order: the assistant message
+		// lists ToolCalls in a fixed order and each tool result must line up
+		// with its call id, so results are appended in that order regardless
+		// of how (or how fast) they finished executing.
+		for i, tc := range msg.ToolCalls {
+			toolContent, isError, errorKind := results[i].content, results[i].isError, results[i].errorKind
+			if skipped[i] {
+				// Replay the cached earlier result with a directive so the
+				// model sees the repeat for what it is. No execution happened,
+				// so there is no error kind and nothing new to summarize.
+				isError = false
+				errorKind = ""
+				toolContent = duplicateCallContent(cachedHits[i])
+			}
 
 			a.send(ctx, eventCh, SSEEvent{
 				Type: "tool_call_result",
@@ -432,8 +564,9 @@ func (a *AgentLoop) Run(ctx context.Context, req LoopRequest, eventCh chan<- SSE
 			// Kick off this result's eviction summary now, in the background,
 			// instead of waiting until it's actually stale. Error results are
 			// never LLM-summarized (see evictStaleToolResults), so skip them;
-			// likewise when the admin disabled eviction summaries.
-			if !isError && !limits.ToolCallSummarizationDisabled {
+			// likewise replayed duplicates (the original result is already in
+			// history) and runs where the admin disabled eviction summaries.
+			if !isError && !skipped[i] && !limits.ToolCallSummarizationDisabled {
 				future := newToolResultSummaryFuture()
 				pendingSummaries[tc.ID] = future
 				toolName, toolResultContent := tc.Function.Name, toolContent
@@ -451,21 +584,54 @@ func (a *AgentLoop) Run(ctx context.Context, req LoopRequest, eventCh chan<- SSE
 					},
 				})
 			}
-		if !isError && tc.Function.Name != loadSkillToolName {
+			// Evidence events carry real tool outputs to the UI; replayed
+			// duplicates add nothing new and would inflate the evidence list.
+			if !isError && !skipped[i] && tc.Function.Name != loadSkillToolName {
+				a.send(ctx, eventCh, SSEEvent{
+					Type: "evidence",
+					Data: EvidenceEvent{
+						ID:       tc.ID,
+						Title:    evidenceTitle(tc.Function.Name),
+						Summary:  summarizeToolEvidence(toolContent),
+						Source:   "mcp",
+						ToolName: tc.Function.Name,
+						Query:    extractEvidenceQuery(tc.Function.Arguments),
+					},
+				})
+			}
+		}
+
+		// Stall accounting: an iteration made progress iff at least one
+		// freshly executed call returned a non-error, non-empty result.
+		// Consecutive no-progress iterations trigger a nudge, then a forced
+		// final answer with a shortened remaining budget (see stall.go).
+		madeProgress := false
+		for i := range msg.ToolCalls {
+			if skipped[i] || results[i].isError || results[i].content == "" {
+				continue
+			}
+			madeProgress = true
+			stall.rememberSuccess(sigs[i], iteration, results[i].content)
+		}
+		stall.recordBatchProgress(madeProgress)
+		if kind, nudge, forced := stall.pendingNudge(); nudge != "" {
+			pendingStallNudge = nudge
+			stallNudges++
+			if forced {
+				forcedFinal = true
+				if iteration+2 < maxIter {
+					maxIter = iteration + 2
+				}
+			}
 			a.send(ctx, eventCh, SSEEvent{
-				Type: "evidence",
-				Data: EvidenceEvent{
-					ID:       tc.ID,
-					Title:    evidenceTitle(tc.Function.Name),
-					Summary:  summarizeToolEvidence(toolContent),
-					Source:   "mcp",
-					ToolName: tc.Function.Name,
-					Query:    extractEvidenceQuery(tc.Function.Arguments),
+				Type: "stall",
+				Data: StallEvent{
+					Kind:      kind,
+					Iteration: iteration,
+					Message:   nudge,
 				},
 			})
 		}
-		}
-
 	}
 	a.send(ctx, eventCh, SSEEvent{
 		Type: "error",
@@ -630,6 +796,56 @@ func completionTokenBudget(maxTotalTokens int) int {
 		budget = defaultMaxCompletionTokens
 	}
 	return budget
+}
+
+// defaultMaxParallelToolCalls bounds concurrent tool execution when the model
+// emits several calls in one turn. LoopRequest.MaxParallelToolCalls (set from
+// plugin settings) overrides this; it is a floor for misconfigured zero values.
+const defaultMaxParallelToolCalls = 4
+
+// toolExecResult carries one tool call's outcome from the goroutine that
+// executed it back to the loop goroutine, which owns all shared run state and
+// event ordering.
+type toolExecResult struct {
+	content   string
+	isError   bool
+	errorKind string
+}
+
+// batchParallelizable reports whether a batch of tool calls can run
+// concurrently. Only plain MCP calls qualify: load_skill mutates loop-owned
+// skill state, and any call that might raise an approval prompt must stay
+// sequential so the user never faces two live approvals at once. If any call
+// is unqualified, the whole batch falls back to sequential execution.
+func (a *AgentLoop) batchParallelizable(calls []ToolCall, req LoopRequest) bool {
+	if len(calls) < 2 {
+		return false
+	}
+	for _, tc := range calls {
+		if tc.Function.Name == loadSkillToolName {
+			return false
+		}
+		tool, found := a.mcpProxy.FindToolByName(tc.Function.Name)
+		if !found {
+			return false
+		}
+		if approvalPolicyEnabled(req.ApprovalPolicy) {
+			if risk := mcp.ClassifyToolRisk(tool, req.MCPServers); risk.RequiresApproval {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// executeToolCall dispatches one tool call to its executor: the internal
+// load_skill tool goes to the skill registry, everything else through the
+// approval gate.
+func (a *AgentLoop) executeToolCall(ctx context.Context, eventCh chan<- SSEEvent, tc ToolCall, req LoopRequest) (content string, isError bool, errorKind string) {
+	if tc.Function.Name == loadSkillToolName && req.LoadSkill != nil {
+		return a.executeLoadSkill(ctx, tc, req)
+	}
+	return a.executeToolWithApproval(ctx, eventCh, tc, req)
 }
 
 func (a *AgentLoop) executeTool(ctx context.Context, tc ToolCall, req LoopRequest) (content string, isError bool, errorKind string) {

@@ -94,6 +94,26 @@ export interface ApprovalResolvedEvent {
   resolvedAt?: string;
 }
 
+/** One ranked hypothesis in a structured RCA final report. */
+export interface FinalReportHypothesis {
+  rank?: number;
+  component?: string;
+  faultType?: string;
+  confidence?: string;
+  evidenceIds?: string[];
+  propagationPath?: string[];
+  firstSeen?: string;
+}
+
+/** Outcome of the backend's report validators (evidence grounding, temporal order, topology consistency). */
+export interface FinalReportValidation {
+  evidenceGrounded: boolean;
+  temporalOk: boolean;
+  topologyConsistent: boolean;
+  warnings?: string[];
+  repaired?: boolean;
+}
+
 export interface FinalReportEvent {
   verdict?: string;
   confidence?: string;
@@ -101,6 +121,8 @@ export interface FinalReportEvent {
   evidenceIds?: string[];
   gaps?: string[];
   nextSteps?: string[];
+  hypotheses?: FinalReportHypothesis[];
+  validation?: FinalReportValidation;
 }
 
 export type SSEEvent =

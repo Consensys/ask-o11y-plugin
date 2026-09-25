@@ -57,6 +57,28 @@ export interface AgentFinalReport {
   evidenceIds?: string[];
   gaps?: string[];
   nextSteps?: string[];
+  /** Ranked RCA hypotheses parsed from the rca-report block (alert investigations only). */
+  hypotheses?: AgentFinalReportHypothesis[];
+  /** Outcome of the backend's report validators; absent for plain chat runs. */
+  validation?: AgentFinalReportValidation;
+}
+
+export interface AgentFinalReportHypothesis {
+  rank?: number;
+  component?: string;
+  faultType?: string;
+  confidence?: string;
+  evidenceIds?: string[];
+  propagationPath?: string[];
+  firstSeen?: string;
+}
+
+export interface AgentFinalReportValidation {
+  evidenceGrounded: boolean;
+  temporalOk: boolean;
+  topologyConsistent: boolean;
+  warnings?: string[];
+  repaired?: boolean;
 }
 
 /** Reference to a Grafana page (dashboard or explore) */

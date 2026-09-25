@@ -243,6 +243,14 @@ type Plugin struct {
 	msCache    map[string]dsCacheEntry
 	msCacheMu  sync.Mutex
 	msInFlight map[string]bool
+	// arCache memoises per-org alert-rule snapshots (see alert_rule_snapshot.go);
+	// includes short-TTL negative entries for alerts that matched no rule.
+	arCache   map[string]dsCacheEntry
+	arCacheMu sync.Mutex
+	// topoCache memoises per-org service-topology snapshots
+	// (see topology_snapshot.go).
+	topoCache   map[string]dsCacheEntry
+	topoCacheMu sync.Mutex
 }
 
 func NewPlugin(ctx context.Context, settings backend.AppInstanceSettings) (instancemgmt.Instance, error) {
@@ -956,11 +964,27 @@ func (p *Plugin) handleAgentRun(w http.ResponseWriter, r *http.Request) {
 	toolCtx.ActiveSkills = activation.Skills
 	toolCtx.SkillsCatalog = p.skillRegistry.Catalog(activeSkillNames...)
 	toolCtx.UserPromptSkill = activation.UserPromptSkill
-	if skills.HasActive(activation, skills.TypeSkillNames["investigation"]) {
+	if toolCtx.IsAlertInvestigation {
+		// Prefetch the alert rule synchronously (small fail-open budget): the
+		// block carries the rule's exact expressions, metrics, and matchers,
+		// letting the agent skip rule discovery and metric listing entirely.
+		if alertName := extractAlertNameForSnapshot(req.Message); alertName != "" {
+			toolCtx.AlertRuleSnapshot = p.alertRuleSnapshot(alertName, orgID, req.OrgName, req.ScopeOrgID)
+		}
+	}
+	if toolCtx.AlertRuleSnapshot == "" && skills.HasActive(activation, skills.TypeSkillNames["investigation"]) {
 		// Only fetched for alert investigations: the underlying fetch is a
 		// (cached, backgrounded) scan of each Prometheus datasource's metric
-		// catalog, not worth the overhead for plain chat.
+		// catalog, not worth the overhead for plain chat. Skipped when the
+		// alert-rule snapshot already provides exact metrics.
 		toolCtx.MetricNamespaceSnapshot = p.metricNamespaceSnapshot(orgID, req.OrgName, req.ScopeOrgID)
+	}
+	if toolCtx.IsAlertInvestigation {
+		// Prefetch the service topology (fail-open, cached per org): scoped
+		// to the alert's service when the rule names one. RCA accuracy work
+		// (arXiv 2601.22208) shows models derive propagation paths poorly
+		// without a dependency map, and raw trace exploration distracts.
+		toolCtx.ServiceTopology = p.topologySnapshot(toolCtx.AlertRuleSnapshot, orgID, req.OrgName, req.ScopeOrgID)
 	}
 
 	systemPrompt, err := p.promptRegistry.BuildSystemPrompt(toolCtx)
@@ -1129,6 +1153,7 @@ func (p *Plugin) handleAgentRun(w http.ResponseWriter, r *http.Request) {
 		MCPServers:           p.settingsForFilter(),
 		ApprovalPolicy:       p.settings.ApprovalPolicy,
 		MaxParallelToolCalls: p.settings.MaxParallelToolCalls,
+		ServiceTopology:      toolCtx.ServiceTopology,
 		RegisterApproval:     p.approvalRegistrar(runID),
 		CheckApprovalGrant:   p.approvalGrantChecker(sessionID),
 	}

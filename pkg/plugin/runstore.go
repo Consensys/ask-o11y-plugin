@@ -38,6 +38,7 @@ type AgentRunTrace struct {
 	Evidence    []agent.EvidenceEvent   `json:"evidence,omitempty"`
 	Approvals   []RunApproval           `json:"approvals,omitempty"`
 	FinalReport *agent.FinalReportEvent `json:"finalReport,omitempty"`
+	Stalls      []agent.StallEvent      `json:"stalls,omitempty"`
 }
 
 type RunApproval struct {
@@ -314,6 +315,10 @@ func applyTraceEvent(run *AgentRun, event agent.SSEEvent) {
 		if data, ok := decodeEventData[agent.FinalReportEvent](event.Data); ok {
 			report := data
 			run.Trace.FinalReport = &report
+		}
+	case "stall":
+		if data, ok := decodeEventData[agent.StallEvent](event.Data); ok {
+			run.Trace.Stalls = append(run.Trace.Stalls, data)
 		}
 	}
 }

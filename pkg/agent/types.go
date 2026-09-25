@@ -122,13 +122,37 @@ type ApprovalResolvedEvent struct {
 	ResolvedAt string `json:"resolvedAt,omitempty"`
 }
 
+type FinalReportHypothesis struct {
+	Rank            int      `json:"rank"`
+	Component       string   `json:"component"`
+	FaultType       string   `json:"faultType"`
+	Confidence      string   `json:"confidence,omitempty"`
+	EvidenceIDs     []string `json:"evidenceIds,omitempty"`
+	PropagationPath []string `json:"propagationPath,omitempty"`
+	FirstSeen       string   `json:"firstSeen,omitempty"`
+}
+
+// FinalReportValidation records the outcome of the structured-report checks
+// (see report.go): evidence IDs grounded in non-error tool calls, firstSeen
+// timestamps parseable, and propagation paths consistent with the prefetched
+// service topology. Warnings name each failed check.
+type FinalReportValidation struct {
+	EvidenceGrounded   bool     `json:"evidenceGrounded"`
+	TemporalOK         bool     `json:"temporalOk"`
+	TopologyConsistent bool     `json:"topologyConsistent"`
+	Warnings           []string `json:"warnings,omitempty"`
+	Repaired           bool     `json:"repaired,omitempty"`
+}
+
 type FinalReportEvent struct {
-	Verdict     string   `json:"verdict,omitempty"`
-	Confidence  string   `json:"confidence,omitempty"`
-	Summary     string   `json:"summary"`
-	EvidenceIDs []string `json:"evidenceIds,omitempty"`
-	Gaps        []string `json:"gaps,omitempty"`
-	NextSteps   []string `json:"nextSteps,omitempty"`
+	Verdict     string                  `json:"verdict,omitempty"`
+	Confidence  string                  `json:"confidence,omitempty"`
+	Summary     string                  `json:"summary"`
+	EvidenceIDs []string                `json:"evidenceIds,omitempty"`
+	Gaps        []string                `json:"gaps,omitempty"`
+	NextSteps   []string                `json:"nextSteps,omitempty"`
+	Hypotheses  []FinalReportHypothesis `json:"hypotheses,omitempty"`
+	Validation  *FinalReportValidation  `json:"validation,omitempty"`
 }
 
 // MCPUnavailableEvent is emitted at most once per run when enough distinct
@@ -153,6 +177,19 @@ type DoneEvent struct {
 	TotalTokens      int64                  `json:"totalTokens"`
 	ToolCallCount    int                    `json:"toolCallCount"`
 	UsageByModel     map[string]ModelUsage `json:"usageByModel,omitempty"`
+	StallNudges      int                    `json:"stallNudges,omitempty"`
+	ForcedFinal      bool                   `json:"forcedFinal,omitempty"`
+}
+
+// StallEvent is emitted when the repetition/stall guard intervenes: the
+// model repeated earlier calls (kind "repetition"), made no progress for
+// several iterations (kind "stalled"), or was forced to conclude (kind
+// "forced_final"). The message is the same one-shot system directive the
+// model received.
+type StallEvent struct {
+	Kind      string `json:"kind"`
+	Iteration int    `json:"iteration"`
+	Message   string `json:"message,omitempty"`
 }
 
 type ErrorEvent struct {
