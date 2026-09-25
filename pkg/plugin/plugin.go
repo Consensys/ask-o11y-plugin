@@ -247,6 +247,10 @@ type Plugin struct {
 	// includes short-TTL negative entries for alerts that matched no rule.
 	arCache   map[string]dsCacheEntry
 	arCacheMu sync.Mutex
+	// topoCache memoises per-org service-topology snapshots
+	// (see topology_snapshot.go).
+	topoCache   map[string]dsCacheEntry
+	topoCacheMu sync.Mutex
 }
 
 func NewPlugin(ctx context.Context, settings backend.AppInstanceSettings) (instancemgmt.Instance, error) {
@@ -974,6 +978,13 @@ func (p *Plugin) handleAgentRun(w http.ResponseWriter, r *http.Request) {
 		// catalog, not worth the overhead for plain chat. Skipped when the
 		// alert-rule snapshot already provides exact metrics.
 		toolCtx.MetricNamespaceSnapshot = p.metricNamespaceSnapshot(orgID, req.OrgName, req.ScopeOrgID)
+	}
+	if toolCtx.IsAlertInvestigation {
+		// Prefetch the service topology (fail-open, cached per org): scoped
+		// to the alert's service when the rule names one. RCA accuracy work
+		// (arXiv 2601.22208) shows models derive propagation paths poorly
+		// without a dependency map, and raw trace exploration distracts.
+		toolCtx.ServiceTopology = p.topologySnapshot(toolCtx.AlertRuleSnapshot, orgID, req.OrgName, req.ScopeOrgID)
 	}
 
 	systemPrompt, err := p.promptRegistry.BuildSystemPrompt(toolCtx)

@@ -66,6 +66,12 @@ type PromptContext struct {
 	// Empty string renders no block (fail-open: prefetch missed or timed out).
 	AlertRuleSnapshot string
 
+	// ServiceTopology is the prefetched service dependency list for RCA runs
+	// (see topology_snapshot.go): live Tempo service-graph edges when
+	// queryable, Graphiti facts as fallback. Empty string renders no block
+	// (fail-open).
+	ServiceTopology string
+
 	// CurrentTime is the wall-clock time the run started, rendered into the
 	// system prompt so the agent anchors relative time windows without calling
 	// the time MCP tool. Empty string renders no block (see BuildToolContext).

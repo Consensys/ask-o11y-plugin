@@ -73,6 +73,12 @@ instead of scanning a datasource with a broad ".*" regex.
 
 {{.AlertRuleSnapshot}}
 {{end}}
+{{if .ServiceTopology}}
+
+## Service Topology (prefetched — authoritative for propagation paths)
+
+{{.ServiceTopology}}
+{{end}}
 
 ---
 
