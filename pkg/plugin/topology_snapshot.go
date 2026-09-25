@@ -231,9 +231,11 @@ func extractServiceLabelFromSnapshot(alertSnapshot string) string {
 
 // topologySnapshot returns the prefetched topology block for an RCA run:
 // the live Tempo service graph when queryable, Graphiti facts otherwise.
-// Cached per org; empty string renders no prompt block.
+// Cached per org and per scoped service label (the fetch narrows the graph
+// to the alert's service, so a different alert must not reuse it); empty
+// string renders no prompt block.
 func (p *Plugin) topologySnapshot(alertSnapshot, orgID, orgName, scopeOrgID string) string {
-	cacheKey := orgID
+	cacheKey := orgID + "\x00" + extractServiceLabelFromSnapshot(alertSnapshot)
 	if snap, ok := p.lookupTopologyCache(cacheKey); ok {
 		return snap
 	}

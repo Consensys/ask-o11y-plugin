@@ -1183,6 +1183,7 @@ func TestAgentLoop_EvictsStaleToolResultsAcrossIterations(t *testing.T) {
 	var mu sync.Mutex
 	var requestBodies [][]byte
 	var mainCallCount int
+	var lastMainBody []byte
 
 	llmServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
@@ -1207,6 +1208,10 @@ func TestAgentLoop_EvictsStaleToolResultsAcrossIterations(t *testing.T) {
 		mu.Lock()
 		mainCallCount++
 		call := mainCallCount
+		// Background eviction summaries can still be in flight after the
+		// run ends; the final-request assertions below must read the last
+		// MAIN request, not whichever summary landed last.
+		lastMainBody = body
 		mu.Unlock()
 
 		if call > iterations {
@@ -1272,10 +1277,13 @@ func TestAgentLoop_EvictsStaleToolResultsAcrossIterations(t *testing.T) {
 		t.Fatalf("expected at least %d LLM requests, got %d", iterations+1, len(requestBodies))
 	}
 
-	// The final request (after the last tool call) should carry evicted
+	// The final MAIN request (after the last tool call) should carry evicted
 	// placeholders for the oldest tool results, since more tool calls than
 	// DefaultKeepRecentToolResults have accumulated in this run's history.
-	last := requestBodies[len(requestBodies)-1]
+	last := lastMainBody
+	if last == nil {
+		t.Fatal("no main LLM request was recorded")
+	}
 	var lastReq ChatCompletionRequest
 	if err := json.Unmarshal(last, &lastReq); err != nil {
 		t.Fatalf("failed to unmarshal final LLM request: %v", err)
@@ -1311,6 +1319,7 @@ func TestAgentLoop_CustomKeepRecentToolResults(t *testing.T) {
 	var mu sync.Mutex
 	var requestBodies [][]byte
 	var mainCallCount int
+	var lastMainBody []byte
 
 	llmServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var parsed ChatCompletionRequest
@@ -1330,6 +1339,13 @@ func TestAgentLoop_CustomKeepRecentToolResults(t *testing.T) {
 			})
 			return
 		}
+
+		mu.Lock()
+		// Background eviction summaries can still be in flight after the
+		// run ends; the final-request assertion below must read the last
+		// MAIN request, not whichever summary landed last.
+		lastMainBody = body
+		mu.Unlock()
 
 		if call > iterations {
 			respondAsStream(w, ChatCompletionResponse{
@@ -1394,9 +1410,12 @@ func TestAgentLoop_CustomKeepRecentToolResults(t *testing.T) {
 		t.Fatalf("expected at least %d main LLM calls, got %d", iterations+1, mainCallCount)
 	}
 
-	// The final request must honor the custom threshold: at most keepRecent
-	// full tool results, the rest evicted to placeholders.
-	last := requestBodies[len(requestBodies)-1]
+	// The final MAIN request must honor the custom threshold: at most
+	// keepRecent full tool results, the rest evicted to placeholders.
+	last := lastMainBody
+	if last == nil {
+		t.Fatal("no main LLM request was recorded")
+	}
 	var lastReq ChatCompletionRequest
 	if err := json.Unmarshal(last, &lastReq); err != nil {
 		t.Fatalf("failed to unmarshal final LLM request: %v", err)

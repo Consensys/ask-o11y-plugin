@@ -262,6 +262,37 @@ func TestAlertRuleSnapshot_FailOpenWithoutProxy(t *testing.T) {
 	}
 }
 
+func TestWriteStringMap_PrioritySurvivesCap(t *testing.T) {
+	// More entries than max: the cap must evict from the non-priority tail,
+	// never the pinned priority keys (runbook_url, summary).
+	m := map[string]string{
+		"alpha": "1", "beta": "2", "gamma": "3", "delta": "4", "epsilon": "5",
+		"runbook_url": "https://rb", "summary": "s",
+	}
+	var b strings.Builder
+	writeStringMap(&b, "Annotations", m, 3, "runbook_url", "summary")
+	out := b.String()
+	if !strings.Contains(out, `runbook_url="https://rb"`) {
+		t.Errorf("cap evicted the priority runbook_url key: %s", out)
+	}
+	if !strings.Contains(out, `summary="s"`) {
+		t.Errorf("cap evicted the priority summary key: %s", out)
+	}
+	if got := strings.Count(out, `="`); got != 3 {
+		t.Errorf("expected exactly max=3 pairs, got %d: %s", got, out)
+	}
+	if strings.Contains(out, "epsilon") || strings.Contains(out, "delta") {
+		t.Errorf("expected tail keys to be evicted first: %s", out)
+	}
+
+	// Under the cap, priority keys render first, then the rest sorted.
+	b.Reset()
+	writeStringMap(&b, "Annotations", map[string]string{"zeta": "z", "runbook_url": "https://rb"}, 10, "runbook_url")
+	if out = b.String(); !strings.Contains(out, `runbook_url="https://rb", zeta="z"`) {
+		t.Errorf("expected priority key first then sorted rest, got: %s", out)
+	}
+}
+
 func TestParseDatasourceRef(t *testing.T) {
 	if got := parseDatasourceRef([]byte(`"prom-uid"`)); got != "prom-uid" {
 		t.Errorf("string ref: got %q", got)

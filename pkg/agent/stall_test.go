@@ -143,3 +143,31 @@ func TestStallDetector_ExactDupCountsTowardRepetitionNudge(t *testing.T) {
 		t.Errorf("expected repetition nudge after %d exact dups, got kind=%s", nearDupNudgeThreshold, kind)
 	}
 }
+
+// TestStallDetector_NearDupCountedOncePerEvent pins the loop's calling
+// convention: observe() already counts a near-duplicate, and the caller must
+// not call noteRepetition() again for the same event — otherwise the nudge
+// fires at half the configured threshold.
+func TestStallDetector_NearDupCountedOncePerEvent(t *testing.T) {
+	d := newStallDetector()
+	base := canonicalToolSignature("fake_echo", `{"query":"rate(errors[5m])"}`)
+
+	// First query: observed (fresh, not a near-dup) and cached on success.
+	d.observe("fake_echo", base)
+	d.rememberSuccess(base, 0, "one")
+
+	// One exact dup replay: 1 repetition event, no nudge.
+	d.checkExact(base)
+	d.noteRepetition()
+	// One near-dup re-query: 2 events, no nudge.
+	d.observe("fake_echo", canonicalToolSignature("fake_echo", `{"query":"rate(errors[10m])"}`))
+	if kind, _, _ := d.pendingNudge(); kind != "" {
+		t.Fatalf("nudge fired after 2 events, want %d: kind=%s", nearDupNudgeThreshold, kind)
+	}
+
+	// Third repetition event: the nudge fires exactly here.
+	d.observe("fake_echo", canonicalToolSignature("fake_echo", `{"query":"rate(errors[5m]) by (job)"}`))
+	if kind, _, forced := d.pendingNudge(); kind != StallKindRepetition || forced {
+		t.Fatalf("expected repetition nudge on event %d, got kind=%s forced=%v", nearDupNudgeThreshold, kind, forced)
+	}
+}

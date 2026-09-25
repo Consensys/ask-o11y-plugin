@@ -589,15 +589,22 @@ func writeStringMap(b *strings.Builder, title string, m map[string]string, max i
 			taken[p] = true
 		}
 	}
+	rest := make([]string, 0, len(m))
 	for k := range m {
 		if !taken[k] {
-			keys = append(keys, k)
+			rest = append(rest, k)
 		}
 	}
-	sortStrings(keys)
-	if len(keys) > max {
-		keys = keys[:max]
+	sortStrings(rest)
+	// Pin priority keys ahead of the cap so the max can never evict e.g.
+	// runbook_url when the map holds more entries than max.
+	if room := max - len(keys); room < len(rest) {
+		if room < 0 {
+			room = 0
+		}
+		rest = rest[:room]
 	}
+	keys = append(keys, rest...)
 	pairs := make([]string, 0, len(keys))
 	for _, k := range keys {
 		pairs = append(pairs, fmt.Sprintf(`%s="%s"`, k, truncateChars(m[k], arMaxAnnotChars)))

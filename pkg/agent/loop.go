@@ -463,8 +463,9 @@ func (a *AgentLoop) Run(ctx context.Context, req LoopRequest, eventCh chan<- SSE
 				cachedHits[i] = hit
 				skipped[i] = true
 				stall.noteRepetition()
-			} else if stall.observe(tc.Function.Name, sigs[i]) {
-				stall.noteRepetition()
+			} else {
+				// observe counts near-duplicates itself; do not double-count.
+				stall.observe(tc.Function.Name, sigs[i])
 			}
 
 			a.send(ctx, eventCh, SSEEvent{

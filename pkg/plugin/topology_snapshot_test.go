@@ -266,8 +266,50 @@ func TestTopologySnapshot_CacheMissStored(t *testing.T) {
 	if got := p.topologySnapshot("", "1", "Org1", ""); got != "" {
 		t.Errorf("expected empty snapshot, got %q", got)
 	}
-	if _, ok := p.lookupTopologyCache("1"); !ok {
+	if _, ok := p.lookupTopologyCache("1\x00"); !ok {
 		t.Error("expected the miss to be cached with the short miss TTL")
+	}
+}
+
+// TestTopologySnapshot_CacheKeyIncludesService proves a second alert for a
+// different service in the same org does not reuse the first alert's scoped
+// neighborhood: the cache key includes the scoped service label.
+func TestTopologySnapshot_CacheKeyIncludesService(t *testing.T) {
+	var queryCalls atomic.Int32
+	totalBody := `{"data":[
+		{"metric":{"client":"checkout","server":"payment"},"value":[1758800000,"12.34"]},
+		{"metric":{"client":"checkout","server":"db"},"value":[1758800000,"30"]}
+	]}`
+	failedBody := `{"data":[]}`
+
+	server := newTopologySnapshotServer(t, &queryCalls, totalBody, failedBody, nil)
+	defer server.Close()
+
+	proxy := mcp.NewProxy(context.Background(), log.DefaultLogger)
+	if err := proxy.EnsureServer(mcp.ServerConfig{
+		ID: "mcp-grafana", Name: "Grafana", URL: server.URL, Type: "standard", Enabled: true,
+	}); err != nil {
+		t.Fatalf("failed to configure proxy: %v", err)
+	}
+	defer proxy.Close()
+	p := &Plugin{logger: log.DefaultLogger, mcpProxy: proxy}
+
+	checkout := p.topologySnapshot(`- Labels: service="checkout"`, "1", "Org1", "")
+	if !strings.Contains(checkout, "checkout -> db") {
+		t.Fatalf("expected checkout-scoped snapshot, got:\n%s", checkout)
+	}
+
+	// Same org, different service: a cache hit here would leak checkout's
+	// neighborhood into payment's prompt.
+	payment := p.topologySnapshot(`- Labels: service="payment"`, "1", "Org1", "")
+	if got := queryCalls.Load(); got != 4 { // total+failed re-fetched for the new scope
+		t.Errorf("scoped snapshot was served from the wrong cache entry: %d extra queries", got-2)
+	}
+	if strings.Contains(payment, "checkout -> db") {
+		t.Errorf("payment-scoped snapshot leaked checkout's edges:\n%s", payment)
+	}
+	if !strings.Contains(payment, "checkout -> payment") {
+		t.Errorf("expected payment as the 1-hop server edge, got:\n%s", payment)
 	}
 }
 
