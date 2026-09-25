@@ -622,6 +622,9 @@ func (a *AgentLoop) Run(ctx context.Context, req LoopRequest, eventCh chan<- SSE
 				llmContent = fmt.Sprintf("[SYSTEM: MCP transport failure for tool '%s' after retries. Result is UNAVAILABLE — do not fabricate output. Either retry this tool once, or tell the user the data is currently unavailable.]", tc.Function.Name)
 				transportFailedTools[tc.Function.Name] = struct{}{}
 			}
+			// Cap each result at ingestion: an oversized result would otherwise ride
+			// along in every subsequent prompt until the whole window overflows.
+			llmContent = capToolResultAtIngestion(llmContent, limits.MaxToolResponseTokens)
 			if !isError {
 				// Expose the call id so final-report evidenceIds can cite it.
 				evID := evidenceIDFor(len(evidenceIDs) + 1)

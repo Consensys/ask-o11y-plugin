@@ -386,3 +386,24 @@ func evictStaleToolResults(messages []Message, keepRecent int, summarize toolRes
 	}
 	return out
 }
+
+// ingestionTruncationNotice tells the model a result was cut on arrival and
+// how to get a smaller one, instead of re-running the same oversized query.
+const ingestionTruncationNotice = "\n[NOTICE: result truncated to %d of %d chars. Narrow the query (label filters, topk, aggregation, shorter range or larger step) instead of re-running it.]"
+
+// capToolResultAtIngestion bounds a single tool result to maxTokens using the
+// same chars-per-token ratio EstimateTokens applies.
+func capToolResultAtIngestion(content string, maxTokens int) string {
+	if maxTokens <= 0 || EstimateTokens(content) <= maxTokens {
+		return content
+	}
+	charsPerToken := proseCharsPerToken
+	if looksStructured(content) {
+		charsPerToken = structuredContentCharsPerToken
+	}
+	maxChars := int(float64(maxTokens) * charsPerToken)
+	if maxChars >= len(content) {
+		return content
+	}
+	return content[:maxChars] + fmt.Sprintf(ingestionTruncationNotice, maxChars, len(content))
+}
