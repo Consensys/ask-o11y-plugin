@@ -5,6 +5,13 @@ All notable changes to the Ask O11y Grafana plugin will be documented in this fi
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.22](https://github.com/Consensys/ask-o11y-plugin/compare/v0.3.21...v0.3.22) (2026-09-25)
+
+
+### Bug Fixes
+
+* **backend:** keep evidence ids on evicted tool results ([#234](https://github.com/Consensys/ask-o11y-plugin/issues/234)) ([843e9ba](https://github.com/Consensys/ask-o11y-plugin/commit/843e9bac53ef84da85d977ce3c80a2464a2bfac4))
+
 ## [0.3.21](https://github.com/Consensys/ask-o11y-plugin/compare/v0.3.20...v0.3.21) (2026-09-25)
 
 
