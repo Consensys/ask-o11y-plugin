@@ -39,10 +39,25 @@ type rcaReport struct {
 // display. hasBlock is true when a fenced block was present, even if the
 // JSON inside was invalid — an invalid block must still trigger validation
 // warnings rather than silently passing.
+//
+// An unterminated block (the answer hit the completion budget before the
+// closing fence, observed in production) is treated as a block too: the
+// partial JSON is never shown to the user, and the missing hypotheses still
+// trip the no-hypotheses warning so the repair turn can re-emit it.
 func extractRCAReport(content string) (rcaReport, string, bool) {
 	matches := rcaReportBlockRe.FindAllStringSubmatch(content, -1)
 	if len(matches) == 0 {
-		return rcaReport{}, content, false
+		idx := strings.LastIndex(content, rcaReportFence)
+		if idx < 0 {
+			return rcaReport{}, content, false
+		}
+		cut := strings.TrimSpace(content[:idx])
+		var report rcaReport
+		body := strings.TrimSpace(content[idx+len(rcaReportFence):])
+		if err := json.Unmarshal([]byte(body), &report); err != nil {
+			return rcaReport{}, cut, true
+		}
+		return report, cut, true
 	}
 	last := matches[len(matches)-1]
 
