@@ -559,3 +559,21 @@ func TestCapToolResultAtIngestion(t *testing.T) {
 		t.Fatalf("capped body still over budget")
 	}
 }
+
+func TestEvictStaleToolResults_KeepsEvidenceIDHeader(t *testing.T) {
+	msgs := []Message{
+		{Role: "assistant", ToolCalls: []ToolCall{{ID: "c1", Function: FunctionCall{Name: "q"}}, {ID: "c2", Function: FunctionCall{Name: "q"}}}},
+		{Role: "tool", ToolCallID: "c1", Content: evidenceIDHeader("e1") + "big result"},
+		{Role: "tool", ToolCallID: "c2", Content: evidenceIDHeader("e2") + "recent result"},
+	}
+	out := evictStaleToolResults(msgs, 1, func(_, _, _ string) string { return "sum" }, nil)
+	if !strings.HasPrefix(out[1].Content, EvictedToolResultMarker) {
+		t.Fatalf("expected eviction, got %q", out[1].Content)
+	}
+	if !strings.Contains(out[1].Content, "[evidence id: e1]") {
+		t.Fatalf("evicted placeholder lost evidence id header: %q", out[1].Content)
+	}
+	if evidenceHeaderSuffix("no header") != "" {
+		t.Fatal("unexpected suffix for content without header")
+	}
+}

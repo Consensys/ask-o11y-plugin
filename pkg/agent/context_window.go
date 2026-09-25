@@ -378,13 +378,25 @@ func evictStaleToolResults(messages []Message, keepRecent int, summarize toolRes
 			summary = "no summary available"
 		}
 
+		// Keep the run-local "[evidence id: eN]" citation header: the final
+		// rca-report must still be able to cite evidence that was evicted.
 		out[i] = Message{
 			Role:       m.Role,
 			ToolCallID: m.ToolCallID,
-			Content:    fmt.Sprintf("%s Tool: %s. Summary: %s Re-call the tool if you need the full data again.]", EvictedToolResultMarker, name, summary),
+			Content:    fmt.Sprintf("%s Tool: %s. Summary: %s Re-call the tool if you need the full data again.]%s", EvictedToolResultMarker, name, summary, evidenceHeaderSuffix(m.Content)),
 		}
 	}
 	return out
+}
+
+// evidenceHeaderSuffix returns "\n[evidence id: eN]" when content starts with
+// an evidence id header, so evicted placeholders stay citable.
+func evidenceHeaderSuffix(content string) string {
+	if !strings.HasPrefix(content, evidenceIDHeaderPrefix) {
+		return ""
+	}
+	line, _, _ := strings.Cut(content, "\n")
+	return "\n" + strings.TrimSpace(line)
 }
 
 // ingestionTruncationNotice tells the model a result was cut on arrival and

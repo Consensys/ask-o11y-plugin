@@ -71,7 +71,7 @@ For questions about alerts, incidents, or "what's wrong":
 
 ### Final report block
 
-End the final response with a machine-readable summary in a fenced `rca-report` block:
+End the final response with a machine-readable summary in a fenced `rca-report` block. **Always emit it — never omit it.** Every successful tool result (including evicted/summarized ones) carries an `[evidence id: eN]` header; cite those. If a claim has no citable evidence, lower its confidence and list the missing proof in `gaps` instead of dropping the block:
 
 ````
 ```rca-report
