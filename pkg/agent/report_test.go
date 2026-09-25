@@ -162,3 +162,15 @@ func TestDerivedConfidence(t *testing.T) {
 		t.Errorf("no hypotheses must fall back to medium, got %q", got)
 	}
 }
+
+func TestShortEvidenceID(t *testing.T) {
+	if got := shortEvidenceID("call_42661__thought__EusLCugLAWkUfRP4"); got != "call_42661" {
+		t.Fatalf("got %q", got)
+	}
+	if got := shortEvidenceID("call_abc"); got != "call_abc" {
+		t.Fatalf("got %q", got)
+	}
+	if got := evidenceIDHeader("call_1__thought__xyz"); got != "[evidence id: call_1]\n" {
+		t.Fatalf("got %q", got)
+	}
+}

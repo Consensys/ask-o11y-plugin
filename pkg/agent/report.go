@@ -161,5 +161,18 @@ func repairNudgeText(warnings []string) string {
 // evidenceIDHeader prefixes successful tool results so the model can cite
 // the exact call id in the rca-report evidenceIds.
 func evidenceIDHeader(id string) string {
-	return "[evidence id: " + id + "]\n"
+	return "[evidence id: " + shortEvidenceID(id) + "]\n"
+}
+
+// thoughtSignatureSep separates a Gemini tool-call id from its opaque
+// thought signature (e.g. "call_42661__thought__EusL..."), which can be
+// kilobytes long. Models cite only the short prefix.
+const thoughtSignatureSep = "__thought__"
+
+// shortEvidenceID returns the citable part of a tool-call id.
+func shortEvidenceID(id string) string {
+	if i := strings.Index(id, thoughtSignatureSep); i > 0 {
+		return id[:i]
+	}
+	return id
 }

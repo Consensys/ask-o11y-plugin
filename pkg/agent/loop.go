@@ -22,6 +22,12 @@ const defaultMaxIterations = 25
 const defaultMaxCompletionTokens = 4096
 const minCompletionTokens = 512
 
+// finalAnswerCompletionTokens is the completion budget used to re-request a
+// final answer that was cut off (finish_reason=length). Reasoning models spend
+// part of the regular budget on hidden thinking tokens, so a long final
+// report with its rca-report block can exhaust 4096 tokens mid-sentence.
+const finalAnswerCompletionTokens = 16384
+
 // nearLimitWarning is injected as a one-shot system message on the second-to-last
 // iteration to steer the LLM toward a honest final answer instead of fabricating
 // around missing data when the loop is about to abort at maxIter.
@@ -220,6 +226,9 @@ func (a *AgentLoop) Run(ctx context.Context, req LoopRequest, eventCh chan<- SSE
 	// result. Models frequently cite the tool name instead of the call id
 	// (observed in production), which is still a grounded claim.
 	successfulToolNames := make(map[string]bool)
+	// successfulShortIDs holds shortEvidenceID(call id) for successful calls,
+	// the form shown in the evidence header and cited by the model.
+	successfulShortIDs := make(map[string]bool)
 
 	// evidenceOK grounds final-report evidence claims: an id counts when it
 	// belongs to a tool call that executed and did not error, or names a
@@ -229,12 +238,19 @@ func (a *AgentLoop) Run(ctx context.Context, req LoopRequest, eventCh chan<- SSE
 		if isError, known := toolResultIsError[id]; known {
 			return !isError
 		}
+		if successfulShortIDs[id] {
+			return true
+		}
 		return successfulToolNames[id]
 	}
 	// lastFinalProse keeps the prose of a final answer sent back for repair,
 	// so a repaired answer that only re-emits the rca-report block still
 	// shows the user the original explanation.
 	lastFinalProse := ""
+	// A final answer truncated by the completion budget is re-requested once
+	// with finalAnswerCompletionTokens instead of being shown half-written.
+	truncatedFinalRetried := false
+	boostCompletion := false
 
 	// pendingSummaries holds eviction summaries kicked off in the background
 	// as soon as each tool result is appended (see the tool-call loop below),
@@ -299,12 +315,18 @@ func (a *AgentLoop) Run(ctx context.Context, req LoopRequest, eventCh chan<- SSE
 		if len(oneShot) > 0 {
 			callMessages = append(append([]Message{}, messages...), oneShot...)
 		}
+		callMessages = ensureNonAssistantTail(callMessages)
 
+		callBudget := completionBudget
+		if boostCompletion && callBudget < finalAnswerCompletionTokens {
+			callBudget = finalAnswerCompletionTokens
+		}
+		boostCompletion = false
 		llmReq := ChatCompletionRequest{
-			Model:     req.Model,
-			Messages:  callMessages,
-			Tools:     openAITools,
-			MaxCompletionTokens: completionBudget,
+			Model:               req.Model,
+			Messages:            callMessages,
+			Tools:               openAITools,
+			MaxCompletionTokens: callBudget,
 		}
 		resp, effectiveModel, err := a.chatCompletionWithFallback(ctx, llmReq, req)
 		if err != nil {
@@ -373,6 +395,18 @@ func (a *AgentLoop) Run(ctx context.Context, req LoopRequest, eventCh chan<- SSE
 				pendingTruncationNudge = true
 				continue
 			}
+		}
+
+		if len(msg.ToolCalls) == 0 && resp.Choices[0].FinishReason == "length" &&
+			!truncatedFinalRetried && iteration+1 < maxIter {
+			truncatedFinalRetried = true
+			boostCompletion = true
+			a.logger.Warn("Final answer truncated by completion budget; retrying with a larger budget",
+				"completionBudget", callBudget,
+				"retryBudget", finalAnswerCompletionTokens,
+				"contentChars", len(msg.Content),
+				"iteration", iteration)
+			continue
 		}
 
 		if len(msg.ToolCalls) == 0 {
@@ -574,6 +608,7 @@ func (a *AgentLoop) Run(ctx context.Context, req LoopRequest, eventCh chan<- SSE
 				// Expose the call id so final-report evidenceIds can cite it.
 				llmContent = evidenceIDHeader(tc.ID) + llmContent
 				successfulToolNames[tc.Function.Name] = true
+				successfulShortIDs[shortEvidenceID(tc.ID)] = true
 			}
 			messages = append(messages, Message{
 				Role:       "tool",
@@ -1159,4 +1194,35 @@ func (a *AgentLoop) send(ctx context.Context, ch chan<- SSEEvent, event SSEEvent
 	case ch <- event:
 	case <-ctx.Done():
 	}
+}
+
+// continueUserTurn is appended when a request would otherwise end on an
+// assistant turn with no steering message to follow it.
+const continueUserTurn = "Continue."
+
+// ensureNonAssistantTail guarantees the request does not end on an assistant
+// turn once system messages are set aside. Providers such as Gemini (through
+// LiteLLM) lift every system message into system_instruction and then reject
+// the request with 400 "Requests ending with a model turn are not supported".
+// That happens when a one-shot nudge (repair, stall, near-limit) follows an
+// assistant message: trailing system messages are re-sent as a user turn, or a
+// minimal user turn is appended when there is none. The input is not mutated.
+func ensureNonAssistantTail(msgs []Message) []Message {
+	last := len(msgs) - 1
+	for last >= 0 && msgs[last].Role == "system" {
+		last--
+	}
+	if last < 0 || msgs[last].Role != "assistant" {
+		return msgs
+	}
+	out := make([]Message, 0, len(msgs)+1)
+	out = append(out, msgs[:last+1]...)
+	if last == len(msgs)-1 {
+		return append(out, Message{Role: "user", Content: continueUserTurn})
+	}
+	for _, m := range msgs[last+1:] {
+		m.Role = "user"
+		out = append(out, m)
+	}
+	return out
 }

@@ -2104,9 +2104,12 @@ func TestAgentLoop_RCAReportRepairTurn(t *testing.T) {
 	}
 	foundNudge := false
 	for _, m := range lastMainReq.Messages {
-		if m.Role == "system" && strings.Contains(m.Content, "failed validation") {
+		if m.Role == "user" && strings.Contains(m.Content, "failed validation") {
 			foundNudge = true
 		}
+	}
+	if last := lastMainReq.Messages[len(lastMainReq.Messages)-1]; last.Role == "assistant" {
+		t.Errorf("repair request must not end on an assistant turn")
 	}
 	if !foundNudge {
 		t.Errorf("repair nudge missing from the final LLM request: %+v", lastMainReq.Messages)
@@ -2253,5 +2256,91 @@ func TestAgentLoop_RCAReportRepairKeepsProseAndAcceptsToolName(t *testing.T) {
 	}
 	if !foundHeader {
 		t.Error("evidence id header missing from tool results sent to the model")
+	}
+}
+
+func TestEnsureNonAssistantTail(t *testing.T) {
+	sys := Message{Role: "system", Content: "base"}
+	user := Message{Role: "user", Content: "q"}
+	asst := Message{Role: "assistant", Content: "a"}
+	tool := Message{Role: "tool", Content: "r", ToolCallID: "c1"}
+	nudge := Message{Role: "system", Content: "fix report"}
+
+	t.Run("tool tail unchanged", func(t *testing.T) {
+		in := []Message{sys, user, tool, nudge}
+		if got := ensureNonAssistantTail(in); len(got) != 4 || got[3].Role != "system" {
+			t.Fatalf("unexpected rewrite: %+v", got)
+		}
+	})
+	t.Run("assistant then nudge becomes user", func(t *testing.T) {
+		in := []Message{sys, user, asst, nudge}
+		got := ensureNonAssistantTail(in)
+		if len(got) != 4 || got[3].Role != "user" || got[3].Content != "fix report" {
+			t.Fatalf("got %+v", got)
+		}
+		if in[3].Role != "system" {
+			t.Fatal("input mutated")
+		}
+		if got[0].Role != "system" {
+			t.Fatal("leading system prompt must stay system")
+		}
+	})
+	t.Run("bare assistant tail gets continue", func(t *testing.T) {
+		got := ensureNonAssistantTail([]Message{sys, user, asst})
+		if len(got) != 4 || got[3].Role != "user" || got[3].Content != continueUserTurn {
+			t.Fatalf("got %+v", got)
+		}
+	})
+}
+
+// A final answer cut off by the completion budget (finish_reason=length) is
+// re-requested once with a larger budget instead of being shown half-written.
+func TestAgentLoop_TruncatedFinalAnswerRetriedWithLargerBudget(t *testing.T) {
+	truncated := textOnlyResponse("1", "### Verdict\nBenign: the threshold is sta")
+	truncated.Choices[0].FinishReason = "length"
+
+	var mu sync.Mutex
+	var budgets []int
+	var callIdx atomic.Int32
+	responses := []ChatCompletionResponse{truncated, textOnlyResponse("2", "### Verdict\nBenign: the threshold is stale.")}
+	llm := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var parsed ChatCompletionRequest
+		body, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(body, &parsed)
+		mu.Lock()
+		budgets = append(budgets, parsed.MaxCompletionTokens)
+		mu.Unlock()
+		idx := int(callIdx.Add(1)) - 1
+		if idx >= len(responses) {
+			idx = len(responses) - 1
+		}
+		respondAsStream(w, responses[idx])
+	}))
+	defer llm.Close()
+
+	llmClient := NewLLMClient(log.DefaultLogger, &http.Client{Timeout: llmTimeout})
+	loop := NewAgentLoop(llmClient, mcp.NewProxy(context.Background(), log.DefaultLogger), log.DefaultLogger)
+	eventCh := make(chan SSEEvent, 32)
+	go loop.Run(context.Background(), LoopRequest{
+		Messages:   []Message{{Role: "user", Content: "investigate"}},
+		GrafanaURL: llm.URL,
+		AuthToken:  "test-token",
+		UserRole:   "Admin",
+	}, eventCh)
+	events := collectEvents(eventCh)
+
+	var contents []string
+	for _, e := range events {
+		if e.Type == "content" {
+			contents = append(contents, e.Data.(ContentEvent).Content)
+		}
+	}
+	if len(contents) != 1 || !strings.HasSuffix(contents[0], "stale.") {
+		t.Fatalf("expected only the complete retried answer, got %q", contents)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(budgets) != 2 || budgets[1] != finalAnswerCompletionTokens || budgets[0] >= budgets[1] {
+		t.Fatalf("expected retry with boosted budget, got %v", budgets)
 	}
 }
