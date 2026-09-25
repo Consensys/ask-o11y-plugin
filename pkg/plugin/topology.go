@@ -107,6 +107,12 @@ var topologyNoiseNames = map[string]struct{}{
 	"service":   {},
 	"to":        {},
 	"via":       {},
+	// English function words that loose free-text edge regexes capture as
+	// node names ("bridge-orders -> the" seen in production).
+	"a": {}, "an": {}, "and": {}, "as": {}, "at": {}, "be": {}, "by": {},
+	"in": {}, "it": {}, "its": {}, "of": {}, "on": {}, "or": {}, "that": {},
+	"the": {}, "their": {}, "these": {}, "this": {}, "those": {}, "which": {},
+	"with": {},
 }
 
 func parseGraphitiTopology(body string) AgentTopologyResponse {

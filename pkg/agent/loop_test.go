@@ -2187,3 +2187,71 @@ func (rt recordingTransport) RoundTrip(req *http.Request) (*http.Response, error
 	}
 	return http.DefaultTransport.RoundTrip(req)
 }
+
+// A repaired answer that only re-emits the rca-report block keeps the prose
+// of the first answer (production run showed an empty content event), and a
+// tool name cited as evidence is accepted as grounded.
+func TestAgentLoop_RCAReportRepairKeepsProseAndAcceptsToolName(t *testing.T) {
+	bogus := strings.Replace(rcaFinalContent, `"evidenceIds":["tc_1"]`, `"evidenceIds":["tc_bogus"]`, 1)
+	blockOnly := strings.Replace(rcaFinalContent, "Verdict: payment errors.\n\n", "", 1)
+	blockOnly = strings.Replace(blockOnly, `"evidenceIds":["tc_1"]`, `"evidenceIds":["fake_echo"]`, 1)
+
+	var requestBodies [][]byte
+	var mu sync.Mutex
+	loop, serverURL, cleanup := setupTestLoop(t, []ChatCompletionResponse{
+		toolCallBatchResponse("1", []ToolCall{toolCall("tc_1", "fake_echo", `{"n":1}`)}),
+		textOnlyResponse("2", bogus),
+		textOnlyResponse("3", blockOnly),
+	})
+	defer cleanup()
+	loop.llmClient = recordingClient(t, &mu, &requestBodies, serverURL)
+	setupFakeMCP(t, loop, func(srv *mcpsdk.Server) {
+		srv.AddTool(&mcpsdk.Tool{Name: "echo", InputSchema: map[string]any{"type": "object"}}, func(ctx context.Context, req *mcpsdk.CallToolRequest) (*mcpsdk.CallToolResult, error) {
+			return sdkToolResult("one", false), nil
+		})
+	})
+
+	eventCh := make(chan SSEEvent, 32)
+	go loop.Run(context.Background(), LoopRequest{
+		Messages:        []Message{{Role: "user", Content: "investigate"}},
+		GrafanaURL:      serverURL,
+		AuthToken:       "test-token",
+		UserRole:        "Admin",
+		ServiceTopology: rcaTopology,
+	}, eventCh)
+	events := collectEvents(eventCh)
+
+	var final *FinalReportEvent
+	content := ""
+	for _, e := range events {
+		switch e.Type {
+		case "final_report":
+			f := e.Data.(FinalReportEvent)
+			final = &f
+		case "content":
+			content = e.Data.(ContentEvent).Content
+		}
+	}
+	if final == nil || final.Validation == nil {
+		t.Fatalf("final report = %+v", final)
+	}
+	if !final.Validation.Repaired || !final.Validation.EvidenceGrounded {
+		t.Errorf("validation = %+v, want repaired and evidence grounded via tool name", final.Validation)
+	}
+	if content != "Verdict: payment errors." {
+		t.Errorf("content = %q, want the first answer's prose", content)
+	}
+
+	// Successful tool results carry the evidence id header for the model.
+	mu.Lock()
+	defer mu.Unlock()
+	foundHeader := false
+	for _, body := range requestBodies {
+		if strings.Contains(string(body), "[evidence id: tc_1]") {
+			foundHeader = true
+		}
+	}
+	if !foundHeader {
+		t.Error("evidence id header missing from tool results sent to the model")
+	}
+}
