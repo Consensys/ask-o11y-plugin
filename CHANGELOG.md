@@ -5,6 +5,13 @@ All notable changes to the Ask O11y Grafana plugin will be documented in this fi
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.20](https://github.com/Consensys/ask-o11y-plugin/compare/v0.3.19...v0.3.20) (2026-09-25)
+
+
+### Bug Fixes
+
+* **agent:** strip truncated rca-report blocks from final answers ([#229](https://github.com/Consensys/ask-o11y-plugin/issues/229)) ([621b387](https://github.com/Consensys/ask-o11y-plugin/commit/621b387d163f4f80928bab33a40377bc62fb1d10))
+
 ## [0.3.19](https://github.com/Consensys/ask-o11y-plugin/compare/v0.3.18...v0.3.19) (2026-09-25)
 
 
