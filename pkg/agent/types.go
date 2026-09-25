@@ -153,6 +153,19 @@ type DoneEvent struct {
 	TotalTokens      int64                  `json:"totalTokens"`
 	ToolCallCount    int                    `json:"toolCallCount"`
 	UsageByModel     map[string]ModelUsage `json:"usageByModel,omitempty"`
+	StallNudges      int                    `json:"stallNudges,omitempty"`
+	ForcedFinal      bool                   `json:"forcedFinal,omitempty"`
+}
+
+// StallEvent is emitted when the repetition/stall guard intervenes: the
+// model repeated earlier calls (kind "repetition"), made no progress for
+// several iterations (kind "stalled"), or was forced to conclude (kind
+// "forced_final"). The message is the same one-shot system directive the
+// model received.
+type StallEvent struct {
+	Kind      string `json:"kind"`
+	Iteration int    `json:"iteration"`
+	Message   string `json:"message,omitempty"`
 }
 
 type ErrorEvent struct {

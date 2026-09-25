@@ -182,6 +182,14 @@ func (a *AgentLoop) Run(ctx context.Context, req LoopRequest, eventCh chan<- SSE
 	truncationRetries := 0
 	pendingTruncationNudge := false
 
+	// Repetition/stall guard state (see stall.go): pendingStallNudge is the
+	// one-shot system message queued by the previous batch; stallNudges and
+	// forcedFinal surface on the done event for run traces and session stats.
+	stall := newStallDetector()
+	pendingStallNudge := ""
+	stallNudges := 0
+	forcedFinal := false
+
 	// Run-level usage/tool-call totals, surfaced on the "done" event so the
 	// caller can persist per-session stats (tokens, turns, tool calls).
 	// usageMu guards it: eviction summaries now run in background goroutines
@@ -249,6 +257,10 @@ func (a *AgentLoop) Run(ctx context.Context, req LoopRequest, eventCh chan<- SSE
 		if pendingTruncationNudge {
 			oneShot = append(oneShot, Message{Role: "system", Content: truncatedToolCallNudge})
 			pendingTruncationNudge = false
+		}
+		if pendingStallNudge != "" {
+			oneShot = append(oneShot, Message{Role: "system", Content: pendingStallNudge})
+			pendingStallNudge = ""
 		}
 		if len(oneShot) > 0 {
 			callMessages = append(append([]Message{}, messages...), oneShot...)
@@ -370,6 +382,8 @@ func (a *AgentLoop) Run(ctx context.Context, req LoopRequest, eventCh chan<- SSE
 					TotalTokens:      totalTokens,
 					ToolCallCount:    toolCallCount,
 					UsageByModel:     usageSnapshot,
+					StallNudges:      stallNudges,
+					ForcedFinal:      forcedFinal,
 				},
 			})
 			return
@@ -380,11 +394,26 @@ func (a *AgentLoop) Run(ctx context.Context, req LoopRequest, eventCh chan<- SSE
 
 		// Set up the batch: count every call and announce it before any
 		// execution starts, so the UI sees everything the model asked for.
-		for _, tc := range msg.ToolCalls {
+		// The repetition guard runs here too: an exact duplicate of an
+		// earlier successful call skips execution entirely (the finish phase
+		// replays the cached result with a directive), and near-duplicates
+		// feed the stall detector that nudges the model off repeated queries.
+		sigs := make([]string, len(msg.ToolCalls))
+		cachedHits := make([]stallCacheHit, len(msg.ToolCalls))
+		skipped := make([]bool, len(msg.ToolCalls))
+		for i, tc := range msg.ToolCalls {
 			if ctx.Err() != nil {
 				return
 			}
 			toolCallCount++
+			sigs[i] = canonicalToolSignature(tc.Function.Name, tc.Function.Arguments)
+			if hit, exact := stall.checkExact(sigs[i]); exact {
+				cachedHits[i] = hit
+				skipped[i] = true
+				stall.noteRepetition()
+			} else if stall.observe(tc.Function.Name, sigs[i]) {
+				stall.noteRepetition()
+			}
 
 			a.send(ctx, eventCh, SSEEvent{
 				Type: "tool_call_start",
@@ -411,6 +440,9 @@ func (a *AgentLoop) Run(ctx context.Context, req LoopRequest, eventCh chan<- SSE
 			var wg sync.WaitGroup
 			sem := make(chan struct{}, maxParallel)
 			for i, tc := range msg.ToolCalls {
+				if skipped[i] {
+					continue
+				}
 				wg.Add(1)
 				go func() {
 					defer wg.Done()
@@ -426,6 +458,9 @@ func (a *AgentLoop) Run(ctx context.Context, req LoopRequest, eventCh chan<- SSE
 				if ctx.Err() != nil {
 					return
 				}
+				if skipped[i] {
+					continue
+				}
 				content, isError, errorKind := a.executeToolCall(ctx, eventCh, tc, req)
 				results[i] = toolExecResult{content: content, isError: isError, errorKind: errorKind}
 			}
@@ -437,6 +472,14 @@ func (a *AgentLoop) Run(ctx context.Context, req LoopRequest, eventCh chan<- SSE
 		// of how (or how fast) they finished executing.
 		for i, tc := range msg.ToolCalls {
 			toolContent, isError, errorKind := results[i].content, results[i].isError, results[i].errorKind
+			if skipped[i] {
+				// Replay the cached earlier result with a directive so the
+				// model sees the repeat for what it is. No execution happened,
+				// so there is no error kind and nothing new to summarize.
+				isError = false
+				errorKind = ""
+				toolContent = duplicateCallContent(cachedHits[i])
+			}
 
 			a.send(ctx, eventCh, SSEEvent{
 				Type: "tool_call_result",
@@ -468,8 +511,9 @@ func (a *AgentLoop) Run(ctx context.Context, req LoopRequest, eventCh chan<- SSE
 			// Kick off this result's eviction summary now, in the background,
 			// instead of waiting until it's actually stale. Error results are
 			// never LLM-summarized (see evictStaleToolResults), so skip them;
-			// likewise when the admin disabled eviction summaries.
-			if !isError && !limits.ToolCallSummarizationDisabled {
+			// likewise replayed duplicates (the original result is already in
+			// history) and runs where the admin disabled eviction summaries.
+			if !isError && !skipped[i] && !limits.ToolCallSummarizationDisabled {
 				future := newToolResultSummaryFuture()
 				pendingSummaries[tc.ID] = future
 				toolName, toolResultContent := tc.Function.Name, toolContent
@@ -487,7 +531,9 @@ func (a *AgentLoop) Run(ctx context.Context, req LoopRequest, eventCh chan<- SSE
 					},
 				})
 			}
-			if !isError && tc.Function.Name != loadSkillToolName {
+			// Evidence events carry real tool outputs to the UI; replayed
+			// duplicates add nothing new and would inflate the evidence list.
+			if !isError && !skipped[i] && tc.Function.Name != loadSkillToolName {
 				a.send(ctx, eventCh, SSEEvent{
 					Type: "evidence",
 					Data: EvidenceEvent{
@@ -500,6 +546,38 @@ func (a *AgentLoop) Run(ctx context.Context, req LoopRequest, eventCh chan<- SSE
 					},
 				})
 			}
+		}
+
+		// Stall accounting: an iteration made progress iff at least one
+		// freshly executed call returned a non-error, non-empty result.
+		// Consecutive no-progress iterations trigger a nudge, then a forced
+		// final answer with a shortened remaining budget (see stall.go).
+		madeProgress := false
+		for i := range msg.ToolCalls {
+			if skipped[i] || results[i].isError || results[i].content == "" {
+				continue
+			}
+			madeProgress = true
+			stall.rememberSuccess(sigs[i], iteration, results[i].content)
+		}
+		stall.recordBatchProgress(madeProgress)
+		if kind, nudge, forced := stall.pendingNudge(); nudge != "" {
+			pendingStallNudge = nudge
+			stallNudges++
+			if forced {
+				forcedFinal = true
+				if iteration+2 < maxIter {
+					maxIter = iteration + 2
+				}
+			}
+			a.send(ctx, eventCh, SSEEvent{
+				Type: "stall",
+				Data: StallEvent{
+					Kind:      kind,
+					Iteration: iteration,
+					Message:   nudge,
+				},
+			})
 		}
 	}
 	a.send(ctx, eventCh, SSEEvent{

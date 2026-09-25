@@ -1225,8 +1225,12 @@ func TestAgentLoop_EvictsStaleToolResultsAcrossIterations(t *testing.T) {
 						ID:   fmt.Sprintf("tc_%d", call),
 						Type: "function",
 						Function: FunctionCall{
-							Name:      "query_loki_logs",
-							Arguments: "{}",
+							Name: "fake_loki",
+							// Distinct args per iteration: the repetition
+							// guard replays byte-identical repeats instead
+							// of executing them, and this test needs a fresh
+							// tool result every iteration to exercise eviction.
+							Arguments: fmt.Sprintf(`{"i":%d}`, call),
 						},
 					}},
 				},
@@ -1239,6 +1243,14 @@ func TestAgentLoop_EvictsStaleToolResultsAcrossIterations(t *testing.T) {
 	llmClient := NewLLMClient(log.DefaultLogger, &http.Client{Timeout: llmTimeout})
 	mcpProxy := mcp.NewProxy(context.Background(), log.DefaultLogger)
 	loop := NewAgentLoop(llmClient, mcpProxy, log.DefaultLogger)
+
+	// Successful tool executions: the stall guard clamps runs whose every
+	// call errors, and this test needs a full run of distinct tool results.
+	setupFakeMCP(t, loop, func(srv *mcpsdk.Server) {
+		srv.AddTool(&mcpsdk.Tool{Name: "loki", InputSchema: map[string]any{"type": "object"}}, func(ctx context.Context, req *mcpsdk.CallToolRequest) (*mcpsdk.CallToolResult, error) {
+			return sdkToolResult("log lines", false), nil
+		})
+	})
 
 	eventCh := make(chan SSEEvent, 256)
 	req := LoopRequest{
@@ -1335,8 +1347,11 @@ func TestAgentLoop_CustomKeepRecentToolResults(t *testing.T) {
 						ID:   fmt.Sprintf("tc_%d", call),
 						Type: "function",
 						Function: FunctionCall{
-							Name:      "query_loki_logs",
-							Arguments: "{}",
+							Name: "fake_loki",
+							// Distinct args per iteration so the repetition
+							// guard executes every call — this test needs a
+							// fresh tool result per iteration for eviction.
+							Arguments: fmt.Sprintf(`{"i":%d}`, call),
 						},
 					}},
 				},
@@ -1349,6 +1364,14 @@ func TestAgentLoop_CustomKeepRecentToolResults(t *testing.T) {
 	llmClient := NewLLMClient(log.DefaultLogger, &http.Client{Timeout: llmTimeout})
 	mcpProxy := mcp.NewProxy(context.Background(), log.DefaultLogger)
 	loop := NewAgentLoop(llmClient, mcpProxy, log.DefaultLogger)
+
+	// Successful tool executions: the stall guard clamps runs whose every
+	// call errors, and this test needs a full run of distinct tool results.
+	setupFakeMCP(t, loop, func(srv *mcpsdk.Server) {
+		srv.AddTool(&mcpsdk.Tool{Name: "loki", InputSchema: map[string]any{"type": "object"}}, func(ctx context.Context, req *mcpsdk.CallToolRequest) (*mcpsdk.CallToolResult, error) {
+			return sdkToolResult("log lines", false), nil
+		})
+	})
 
 	eventCh := make(chan SSEEvent, 256)
 	req := LoopRequest{
@@ -1812,4 +1835,115 @@ func toolResultEvents(t *testing.T, events []SSEEvent) []ToolCallResultEvent {
 		}
 	}
 	return results
+}
+
+// TestAgentLoop_ExactDuplicateCallReplaysCache proves the repetition guard:
+// a byte-identical repeat of an earlier successful call is answered from the
+// run's cache (no second MCP execution) with a directive telling the model
+// it is a repeat.
+func TestAgentLoop_ExactDuplicateCallReplaysCache(t *testing.T) {
+	var mcpCalls atomic.Int32
+	loop, serverURL, cleanup := setupTestLoop(t, []ChatCompletionResponse{
+		toolCallBatchResponse("1", []ToolCall{
+			toolCall("tc_1", "fake_echo", `{"n":1}`),
+		}),
+		toolCallBatchResponse("2", []ToolCall{
+			toolCall("tc_2", "fake_echo", `{ "n" : 1 }`), // same call, different formatting and id
+		}),
+		textOnlyResponse("3", "done investigating"),
+	})
+	defer cleanup()
+	setupFakeMCP(t, loop, func(srv *mcpsdk.Server) {
+		srv.AddTool(&mcpsdk.Tool{Name: "echo", InputSchema: map[string]any{"type": "object"}}, func(ctx context.Context, req *mcpsdk.CallToolRequest) (*mcpsdk.CallToolResult, error) {
+			mcpCalls.Add(1)
+			return sdkToolResult("one", false), nil
+		})
+	})
+
+	eventCh := make(chan SSEEvent, 32)
+	req := LoopRequest{
+		Messages:   []Message{{Role: "user", Content: "echo twice"}},
+		GrafanaURL: serverURL,
+		AuthToken:  "test-token",
+		UserRole:   "Admin",
+	}
+
+	go loop.Run(context.Background(), req, eventCh)
+	events := collectEvents(eventCh)
+
+	if got := mcpCalls.Load(); got != 1 {
+		t.Errorf("MCP handler executed %d times, want 1 (duplicate must be replayed)", got)
+	}
+	results := toolResultEvents(t, events)
+	if len(results) != 2 {
+		t.Fatalf("expected 2 tool_call_result events, got %d", len(results))
+	}
+	if results[1].ID != "tc_2" || results[1].IsError || !strings.Contains(results[1].Content, "identical call already executed at iteration 0") {
+		t.Errorf("replayed result = (%s, isError=%v, %q), want cached content with duplicate directive", results[1].ID, results[1].IsError, results[1].Content)
+	}
+	for _, e := range events {
+		if e.Type == "stall" {
+			t.Errorf("single duplicate must not trigger the repetition nudge, got %+v", e.Data)
+		}
+	}
+}
+
+// TestAgentLoop_StallGuardNudgesThenForcesFinal proves the stalled-progress
+// escalation: after stalledIterationThreshold consecutive no-progress
+// iterations the model gets a stalled nudge; when it keeps failing, a second
+// nudge forces a final answer by shortening the remaining budget.
+func TestAgentLoop_StallGuardNudgesThenForcesFinal(t *testing.T) {
+	// Identical arguments every time: failures are never cached, so these
+	// are exact-signature repeats that only feed the no-progress streak —
+	// a pure stalled-progress scenario, no repetition nudge.
+	const args = `{"q":"boom"}`
+	loop, serverURL, cleanup := setupTestLoop(t, []ChatCompletionResponse{
+		toolCallBatchResponse("1", []ToolCall{toolCall("tc_1", "fake_fail", args)}),
+		toolCallBatchResponse("2", []ToolCall{toolCall("tc_2", "fake_fail", args)}),
+		toolCallBatchResponse("3", []ToolCall{toolCall("tc_3", "fake_fail", args)}),
+		toolCallBatchResponse("4", []ToolCall{toolCall("tc_4", "fake_fail", args)}),
+		toolCallBatchResponse("5", []ToolCall{toolCall("tc_5", "fake_fail", args)}),
+		toolCallBatchResponse("6", []ToolCall{toolCall("tc_6", "fake_fail", args)}),
+	})
+	defer cleanup()
+	setupFakeMCP(t, loop, func(srv *mcpsdk.Server) {
+		srv.AddTool(&mcpsdk.Tool{Name: "fail", InputSchema: map[string]any{"type": "object"}}, func(ctx context.Context, req *mcpsdk.CallToolRequest) (*mcpsdk.CallToolResult, error) {
+			return sdkToolResult("boom", true), nil
+		})
+	})
+
+	eventCh := make(chan SSEEvent, 64)
+	req := LoopRequest{
+		Messages:      []Message{{Role: "user", Content: "keep failing"}},
+		GrafanaURL:    serverURL,
+		AuthToken:     "test-token",
+		UserRole:      "Admin",
+		MaxIterations: 50,
+	}
+
+	go loop.Run(context.Background(), req, eventCh)
+	events := collectEvents(eventCh)
+
+	var kinds []string
+	for _, e := range events {
+		if e.Type == "stall" {
+			kinds = append(kinds, e.Data.(StallEvent).Kind)
+		}
+	}
+	wantKinds := []string{StallKindStalled, StallKindForcedFinal}
+	if len(kinds) != len(wantKinds) {
+		t.Fatalf("stall event kinds = %v, want %v", kinds, wantKinds)
+	}
+	for i := range wantKinds {
+		if kinds[i] != wantKinds[i] {
+			t.Errorf("stall event[%d] kind = %s, want %s", i, kinds[i], wantKinds[i])
+		}
+	}
+
+	// The forced-final nudge must have clamped the budget: the run aborts at
+	// iteration 6 (the clamp point), not the configured 50.
+	last := events[len(events)-1]
+	if last.Type != "error" || !strings.Contains(last.Data.(ErrorEvent).Message, "maximum iterations (6)") {
+		t.Errorf("final event = (%s, %+v), want max-iterations error clamped to 6", last.Type, last.Data)
+	}
 }
