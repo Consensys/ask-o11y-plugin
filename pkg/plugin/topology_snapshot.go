@@ -46,6 +46,10 @@ const (
 	// graphitiFallbackMaxFacts bounds the Graphiti facts search when the
 	// service-graph metrics are unavailable.
 	graphitiFallbackMaxFacts = 60
+
+	// topoMaxDatasources bounds how many Prometheus datasources are probed
+	// for service-graph metrics within topoBudget.
+	topoMaxDatasources = 5
 )
 
 // The Tempo metrics-generator emits service-graph edges as client/server
@@ -269,30 +273,40 @@ func (p *Plugin) fetchTopologySnapshot(alertSnapshot, orgID, orgName, scopeOrgID
 	return p.fetchGraphitiTopology(ctx, orgID, orgName, scopeOrgID)
 }
 
-// fetchServiceGraphEdges resolves the Prometheus datasource and runs the two
-// service-graph instant queries.
+// fetchServiceGraphEdges probes the org's Prometheus datasources (bounded by
+// topoMaxDatasources) and returns the service-graph edges of the first one
+// that has them. Tenants often have several Prometheus datasources and only
+// one receives the Tempo metrics-generator output, so picking the first or
+// default datasource misses the graph.
 func (p *Plugin) fetchServiceGraphEdges(ctx context.Context, orgID, orgName, scopeOrgID string) []serviceGraphEdge {
 	queryTool, ok := p.findQueryPrometheusTool()
 	if !ok {
 		return nil
 	}
-	uid := p.findPrometheusDatasourceUID(ctx, orgID, orgName, scopeOrgID)
-
-	totalResult, err := p.callToolStandalone(ctx, queryTool, serviceGraphQueryArgs(topoTotalQuery, uid), orgID, orgName, scopeOrgID)
-	if err != nil || totalResult == nil || totalResult.IsError || len(totalResult.Content) == 0 {
-		p.logger.Warn("topologySnapshot: service graph query failed", "error", err)
-		return nil
+	uids := p.findPrometheusDatasourceUIDs(ctx, orgID, orgName, scopeOrgID)
+	if len(uids) == 0 {
+		uids = []string{""} // let the MCP server use its default datasource
 	}
-	edges := parseServiceGraphSamples(totalResult.Content[0].Text)
-	if len(edges) == 0 {
-		return nil
+	for _, uid := range uids {
+		if ctx.Err() != nil {
+			return nil
+		}
+		totalResult, err := p.callToolStandalone(ctx, queryTool, serviceGraphQueryArgs(topoTotalQuery, uid), orgID, orgName, scopeOrgID)
+		if err != nil || totalResult == nil || totalResult.IsError || len(totalResult.Content) == 0 {
+			p.logger.Warn("topologySnapshot: service graph query failed", "datasource", uid, "error", err)
+			continue
+		}
+		edges := parseServiceGraphSamples(totalResult.Content[0].Text)
+		if len(edges) == 0 {
+			continue
+		}
+		failedResult, err := p.callToolStandalone(ctx, queryTool, serviceGraphQueryArgs(topoFailedQuery, uid), orgID, orgName, scopeOrgID)
+		if err == nil && failedResult != nil && !failedResult.IsError && len(failedResult.Content) > 0 {
+			mergeServiceGraphFailures(edges, parseServiceGraphSamples(failedResult.Content[0].Text))
+		}
+		return edges
 	}
-
-	failedResult, err := p.callToolStandalone(ctx, queryTool, serviceGraphQueryArgs(topoFailedQuery, uid), orgID, orgName, scopeOrgID)
-	if err == nil && failedResult != nil && !failedResult.IsError && len(failedResult.Content) > 0 {
-		mergeServiceGraphFailures(edges, parseServiceGraphSamples(failedResult.Content[0].Text))
-	}
-	return edges
+	return nil
 }
 
 // fetchGraphitiTopology renders the Graphiti fallback when the service graph
@@ -341,24 +355,27 @@ func (p *Plugin) findQueryPrometheusTool() (string, bool) {
 	return "", false
 }
 
-// findPrometheusDatasourceUID picks the Prometheus datasource for the service
-// graph queries via the standard list tool. Empty string lets the MCP server
-// use its default datasource.
-func (p *Plugin) findPrometheusDatasourceUID(ctx context.Context, orgID, orgName, scopeOrgID string) string {
+// findPrometheusDatasourceUIDs lists the org's Prometheus datasources via the
+// standard list tool, capped at topoMaxDatasources.
+func (p *Plugin) findPrometheusDatasourceUIDs(ctx context.Context, orgID, orgName, scopeOrgID string) []string {
 	dsTool, ok := p.findDatasourceListTool()
 	if !ok {
-		return ""
+		return nil
 	}
 	result, err := p.callToolStandalone(ctx, dsTool, map[string]interface{}{}, orgID, orgName, scopeOrgID)
 	if err != nil || result == nil || result.IsError || len(result.Content) == 0 {
-		return ""
+		return nil
 	}
+	var uids []string
 	for _, row := range parseDatasourceRows(result.Content[0].Text) {
-		if strings.Contains(strings.ToLower(row.dsType), "prometheus") {
-			return row.uid
+		if strings.Contains(strings.ToLower(row.dsType), "prometheus") && row.uid != "" {
+			uids = append(uids, row.uid)
+			if len(uids) == topoMaxDatasources {
+				break
+			}
 		}
 	}
-	return ""
+	return uids
 }
 
 func (p *Plugin) lookupTopologyCache(key string) (string, bool) {

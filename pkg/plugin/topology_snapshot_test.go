@@ -348,3 +348,61 @@ func TestTopologySnapshot_GraphitiFallback(t *testing.T) {
 		t.Errorf("expected graphiti edges rendered, got:\n%s", snapshot)
 	}
 }
+
+// Tenants often have several Prometheus datasources and only one carries the
+// service-graph series (mmcx: default "Prometheus" empty, central-metrics
+// populated). The snapshot must probe past empty datasources.
+func TestTopologySnapshot_ProbesMultiplePrometheusDatasources(t *testing.T) {
+	var queried []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/mcp/list-tools":
+			_ = json.NewEncoder(w).Encode(struct {
+				Tools []mcp.Tool `json:"tools"`
+			}{Tools: []mcp.Tool{
+				{Name: "list_datasources", InputSchema: map[string]interface{}{}},
+				{Name: "query_prometheus", InputSchema: map[string]interface{}{}},
+			}})
+		case "/mcp/call-tool":
+			var req mcp.MCPRequest
+			_ = json.NewDecoder(r.Body).Decode(&req)
+			var params mcp.CallToolParams
+			_ = json.Unmarshal(req.Params, &params)
+			body := `{"data":[]}`
+			switch params.Name {
+			case "list_datasources":
+				body = `[{"uid":"empty","name":"Prometheus","type":"prometheus"},{"uid":"loki1","name":"Loki","type":"loki"},{"uid":"central","name":"central-metrics","type":"prometheus"}]`
+			case "query_prometheus":
+				uid, _ := params.Arguments["datasourceUid"].(string)
+				expr, _ := params.Arguments["expr"].(string)
+				if !strings.Contains(expr, "failed_total") {
+					queried = append(queried, uid)
+				}
+				if uid == "central" && !strings.Contains(expr, "failed_total") {
+					body = `{"data":[{"metric":{"client":"api","server":"db"},"value":[1758800000,"5"]}]}`
+				}
+			}
+			_ = json.NewEncoder(w).Encode(mcp.CallToolResult{
+				Content: []mcp.ContentBlock{{Type: "text", Text: body}},
+			})
+		}
+	}))
+	defer server.Close()
+
+	proxy := mcp.NewProxy(context.Background(), log.DefaultLogger)
+	if err := proxy.EnsureServer(mcp.ServerConfig{
+		ID: "mcp-grafana", Name: "Grafana", URL: server.URL, Type: "standard", Enabled: true,
+	}); err != nil {
+		t.Fatalf("failed to configure proxy: %v", err)
+	}
+	defer proxy.Close()
+	p := &Plugin{logger: log.DefaultLogger, mcpProxy: proxy}
+
+	snapshot := p.topologySnapshot("", "1", "Org1", "")
+	if !strings.Contains(snapshot, "api -> db (rps 5.00)") {
+		t.Errorf("expected edge from the second Prometheus datasource, got:\n%s", snapshot)
+	}
+	if strings.Join(queried, ",") != "empty,central" {
+		t.Errorf("queried datasources = %v, want [empty central] (loki skipped)", queried)
+	}
+}

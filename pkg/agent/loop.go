@@ -216,13 +216,25 @@ func (a *AgentLoop) Run(ctx context.Context, req LoopRequest, eventCh chan<- SSE
 	// anti-hallucination directive on transport failures) that must never be
 	// paraphrased.
 	toolResultIsError := make(map[string]bool)
+	// successfulToolNames records tool names with at least one non-error
+	// result. Models frequently cite the tool name instead of the call id
+	// (observed in production), which is still a grounded claim.
+	successfulToolNames := make(map[string]bool)
 
 	// evidenceOK grounds final-report evidence claims: an id counts when it
-	// belongs to a tool call that executed and did not error.
+	// belongs to a tool call that executed and did not error, or names a
+	// tool that returned at least one successful result.
 	evidenceOK := func(id string) bool {
-		isError, known := toolResultIsError[id]
-		return known && !isError
+		id = strings.TrimSpace(id)
+		if isError, known := toolResultIsError[id]; known {
+			return !isError
+		}
+		return successfulToolNames[id]
 	}
+	// lastFinalProse keeps the prose of a final answer sent back for repair,
+	// so a repaired answer that only re-emits the rca-report block still
+	// shows the user the original explanation.
+	lastFinalProse := ""
 
 	// pendingSummaries holds eviction summaries kicked off in the background
 	// as soon as each tool result is appended (see the tool-call loop below),
@@ -375,6 +387,9 @@ func (a *AgentLoop) Run(ctx context.Context, req LoopRequest, eventCh chan<- SSE
 					Summary:    summarizeFinalContent(msg.Content),
 				}
 				if parsed, cleaned, hasBlock := extractRCAReport(msg.Content); hasBlock {
+					if strings.TrimSpace(cleaned) == "" && lastFinalProse != "" {
+						cleaned = lastFinalProse
+					}
 					display = cleaned
 					report.Summary = summarizeFinalContent(cleaned)
 					report.Hypotheses = parsed.Hypotheses
@@ -387,6 +402,7 @@ func (a *AgentLoop) Run(ctx context.Context, req LoopRequest, eventCh chan<- SSE
 					// message and the loop continues instead of ending.
 					if !validation.ok() && !repairUsed && iteration+1 < maxIter {
 						repairUsed = true
+						lastFinalProse = cleaned
 						messages = append(messages, msg)
 						pendingRepairNudge = repairNudgeText(validation.Warnings)
 						continue
@@ -553,6 +569,11 @@ func (a *AgentLoop) Run(ctx context.Context, req LoopRequest, eventCh chan<- SSE
 			if errorKind == "transport" {
 				llmContent = fmt.Sprintf("[SYSTEM: MCP transport failure for tool '%s' after retries. Result is UNAVAILABLE — do not fabricate output. Either retry this tool once, or tell the user the data is currently unavailable.]", tc.Function.Name)
 				transportFailedTools[tc.Function.Name] = struct{}{}
+			}
+			if !isError {
+				// Expose the call id so final-report evidenceIds can cite it.
+				llmContent = evidenceIDHeader(tc.ID) + llmContent
+				successfulToolNames[tc.Function.Name] = true
 			}
 			messages = append(messages, Message{
 				Role:       "tool",

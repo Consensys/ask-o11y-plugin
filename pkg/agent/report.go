@@ -19,7 +19,7 @@ import (
 const rcaReportFence = "```rca-report"
 
 // repairNudgeTemplate is the one-shot system message for the repair turn.
-const repairNudgeTemplate = "[SYSTEM: The rca-report block in your final answer failed validation: %s Re-emit the corrected fenced rca-report block (same format) addressing each warning, or omit the block. Do not change your verdict unless a warning justifies it.]"
+const repairNudgeTemplate = "[SYSTEM: The rca-report block in your final answer failed validation: %s Re-emit your complete final answer (the prose explanation plus the corrected fenced rca-report block) addressing each warning. evidenceIds must be the values shown in the \"[evidence id: ...]\" header of successful tool results. Do not change your verdict unless a warning justifies it.]"
 
 // rcaReportBlockRe matches the fenced rca-report block and captures its body.
 var rcaReportBlockRe = regexp.MustCompile("(?s)```rca-report\\s*\n(.*?)\n?```")
@@ -156,4 +156,10 @@ func derivedConfidence(report rcaReport) string {
 
 func repairNudgeText(warnings []string) string {
 	return fmt.Sprintf(repairNudgeTemplate, " "+strings.Join(warnings, " "))
+}
+
+// evidenceIDHeader prefixes successful tool results so the model can cite
+// the exact call id in the rca-report evidenceIds.
+func evidenceIDHeader(id string) string {
+	return "[evidence id: " + id + "]\n"
 }
