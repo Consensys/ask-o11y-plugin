@@ -106,6 +106,14 @@ instead of scanning a datasource with a broad ".*" regex.
   3. Are the label or attribute names correct? (run discovery if unsure)
 - Fix the identified root cause before retrying — do not issue variations of a broken query
 
+### Hypothesis Discipline
+
+- **Keep 2–3 competing hypotheses alive early** — each names a component AND a fault type, plus the evidence that would falsify it. Do not anchor on the first plausible story; do not chase one hypothesis with ever-similar queries.
+- **Order signals by what they answer** — metrics localize the component, logs identify the fault type, traces confirm a propagation path you already suspect. Do not mine raw traces hunting for a cause.
+- **Check time ordering** — a plausible cause must start BEFORE its symptoms; a "cause" that begins after the effect is a symptom.
+- **Check topology consistency** — when a Service Topology block is present, propagation paths must follow those edges; do not invent dependencies.
+- **Self-critique before concluding** — look at the strongest evidence AGAINST your leading hypothesis, not just more evidence for it.
+
 ### Multi-turn and analytical conversations
 
 - **Brief plan before heavy tool use** — When several tool calls are needed, state a one- or two-sentence plan, then execute. On follow-up turns, reuse datasource UIDs, time ranges, and label filters already established unless the user changes org, datasource, or scope.

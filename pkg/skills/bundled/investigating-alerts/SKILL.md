@@ -12,7 +12,7 @@ metadata:
   model: large
   max-iterations: "60"
   triggers: '\[FIRING[:\s]|alert investigation:|perform root cause analysis'
-  version: "1.1"
+  version: "1.2"
   user-prompt: |
     Investigate the alert "{{.AlertName}}" and perform root cause analysis.
 
@@ -36,7 +36,7 @@ metadata:
 
     **Conclude when:** You have a defensible primary hypothesis, supporting evidence, and remediation or escalation steps (aligned with the runbook if one was used).
 
-    **Final response:** Start with a brief **verdict**, then evidence, then remediation and one or two verification steps.
+    **Final response:** Start with a brief **verdict**, then evidence, then remediation and one or two verification steps. End with the fenced `rca-report` block described in the skill body.
 
     Use the available MCP tools for real data and actionable conclusions.
 ---
@@ -55,10 +55,32 @@ For questions about alerts, incidents, or "what's wrong":
 
 ## Root cause analysis workflow
 
-1. **Gather evidence** — Query alerts, logs, traces, and metrics in parallel
-2. **Find correlations** — Look for timing patterns across data sources
-3. **Narrow down** — Use specific label filters once you identify the affected component
-4. **Verify** — Confirm the root cause with targeted queries before proposing solutions
+1. **Triage** — Before deep queries, rank candidates using cheap signals: which alert fired **first**, which fires **most often** or carries the **highest volume**, and which signals (metrics + logs + traces) agree on the same component. Multi-modal agreement beats any single loud signal.
+2. **Localize with metrics** — Metrics answer *which component and which resource*: use the alert's exact metrics and label matchers first (the Alert Context block when present)
+3. **Identify fault type with logs** — Logs answer *what kind of failure* (OOM, connection refused, 5xx spike, backpressure): search error logs for the component metrics implicated
+4. **Confirm the path with traces** — Traces answer *how the failure propagates*: use them only to confirm a specific propagation path you already suspect; do not mine raw traces hunting for a cause
+5. **Narrow down** — Use specific label filters once you identify the affected component
+6. **Verify** — Confirm the root cause with targeted queries before proposing solutions
+
+### Hypothesis discipline
+
+- **Keep 2–3 competing hypotheses alive early.** Each names a component AND a fault type, plus the one piece of evidence that would falsify it. Do not anchor on the first plausible story (the most common RCA failure mode) and do not chase a single hypothesis with ever-similar queries.
+- **Check time ordering** — A plausible cause must start BEFORE its symptoms. Compare first-seen times across metrics and logs; a "cause" that starts after the effect is a symptom, not a cause.
+- **Check topology consistency** — When the system prompt includes a **Service Topology** block, a propagation path must follow those edges. Do not invent dependencies that are not listed.
+- **Self-critique before concluding** — Before the final answer, ask: what is the strongest piece of evidence AGAINST my leading hypothesis, and did I look at it? If you have not, spend one query on it instead of a fourth confirming query.
+
+### Final report block
+
+End the final response with a machine-readable summary in a fenced `rca-report` block:
+
+````
+```rca-report
+{"hypotheses":[{"rank":1,"component":"payment","faultType":"high error rate","confidence":"high","evidenceIds":["tc_12","tc_14"],"propagationPath":["frontend","checkout","payment"],"firstSeen":"2026-09-25T10:05:00Z"}],"gaps":["trace data older than 1h is not retained"]}
+```
+````
+
+- `hypotheses`: ranked candidates, best first (1–3). `component` is a service/dependency name; `faultType` a short failure description; `confidence` is `low`, `medium`, or `high`; `evidenceIds` are the tool_call ids the claim rests on; `propagationPath` is the ordered component chain (omit if unknown); `firstSeen` is the earliest symptom time for that component (RFC3339, omit if unknown).
+- `gaps`: what the investigation could not establish (missing retention, denied tools, empty windows).
 
 ## Alert rule anatomy (for interpreting what fired)
 
@@ -72,4 +94,4 @@ This turn is an alert investigation. Prioritize **precision and fewer high-value
 - **Anchor on the alert** — Use the alert name, labels (namespace, cluster, service, job, severity), and any text in the notification to choose **narrow** filters. Do not run cluster-wide label enumeration when the alert already identifies a scope.
 - **Tight parallel batches** — Parallel tool calls should share the same incident time window and suspected blast radius (e.g., alert row + metrics for the labeled job + logs for that service). Avoid parallel calls that scatter across unrelated systems without a hypothesis.
 - **Sufficiency** — When metrics or logs support a likely root cause and you can name a single verification step, conclude. Do not continue investigating every datasource for completeness.
-- **Final answer shape** — Lead with a **short verdict** (most likely cause), then evidence (queries, samples), then remediation and follow-up checks.
+- **Final answer shape** — Lead with a **short verdict** (most likely cause), then evidence (queries, samples), then remediation and follow-up checks, then the `rca-report` block.
