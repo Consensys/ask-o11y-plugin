@@ -1,0 +1,123 @@
+# Fast local dev loop: local plugin code against prod-like data.
+#
+# Drive it through scripts/dev.sh (`npm run dev:stack -- <cmd>`), which builds the
+# linux backend into dist/, picks a CA bundle, loads .env / .env.prod and runs
+# `docker compose -f docker-compose.dev.yaml`.
+#
+# What you get:
+#   - grafana (local build of this plugin, mounted from dist/)
+#   - mcp-grafana 1.4.0 (same image/flags as prod), talking to local grafana
+#   - redis (session + run-trace persistence, like prod)
+#   - tempo (local) receiving grafana + asko11y plugin OTel traces
+#   - datasources proxied to a prod Grafana org (metrics / logs / traces) when
+#     PROD_GRAFANA_URL + credentials are set — see dev/README.md
+#
+# The CI e2e stack is docker-compose.yaml; this file does not change it.
+services:
+  grafana:
+    extends:
+      file: .config/docker-compose-base.yaml
+      service: grafana
+    container_name: asko11y-dev-grafana
+    build:
+      args:
+        grafana_image: ${GRAFANA_IMAGE:-grafana}
+        grafana_version: ${GRAFANA_VERSION:-13.0.1}
+        anonymous_auth_enabled: 'true'
+    ports: !override
+      - 3000:3000/tcp
+    volumes: !override
+      - ./dist:/var/lib/grafana/plugins/consensys-asko11y-app
+      - ./dev/provisioning:/etc/grafana/provisioning
+      - ./provisioning/dashboards:/var/lib/grafana/dashboards/asko11y:ro
+      # Outbound TLS (litellm, prod Grafana) behind a corporate MITM proxy needs
+      # the proxy CA; scripts/dev.sh points this at a bundle that includes it.
+      - ${DEV_CA_BUNDLE:-/etc/ssl/cert.pem}:/etc/ssl/certs/ca-certificates.crt:ro
+    environment:
+      GF_INSTALL_PLUGINS: 'grafana-llm-app'
+      # Basic auth: mcp-grafana and scripts/dev.sh authenticate as admin/admin.
+      GF_AUTH_BASIC_ENABLED: 'true'
+      GF_AUTH_ANONYMOUS_ENABLED: 'true'
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_SECURITY_ALLOW_EMBEDDING: 'true'
+      GF_FEATURE_TOGGLES_ENABLE: 'externalServiceAccounts'
+      GF_AUTH_MANAGED_SERVICE_ACCOUNTS_ENABLED: 'true'
+      GF_LOG_LEVEL: info
+      GF_LOG_FILTERS: plugin.consensys-asko11y-app:debug
+      # Self-observability: grafana + the plugin (agent_run / llm_call /
+      # mcp_tool_call spans) export to the local tempo.
+      GF_TRACING_OPENTELEMETRY_OTLP_ADDRESS: tempo:4317
+      GF_TRACING_OPENTELEMETRY_OTLP_PROPAGATION: w3c
+      GF_TRACING_OPENTELEMETRY_SAMPLER_TYPE: const
+      GF_TRACING_OPENTELEMETRY_SAMPLER_PARAM: '1'
+      GF_PLUGIN_CONSENSYS_ASKO11Y_APP_TRACING: 'true'
+      # LLM (grafana-llm-app, provider "custom" = OpenAI-compatible, like prod)
+      LITELLM_URL: ${LITELLM_URL:-https://litellm.consensys.info}
+      LITELLM_KEY: ${LITELLM_KEY:-}
+      LLM_MODEL_BASE: ${LLM_MODEL_BASE:-gemini/gemini-3.8-flash}
+      LLM_MODEL_LARGE: ${LLM_MODEL_LARGE:-gemini/gemini-3.8-flash}
+      # Prod-proxied datasources
+      PROD_GRAFANA_URL: ${PROD_GRAFANA_URL:-http://prod-grafana-not-configured.invalid}
+      PROD_GRAFANA_USER: ${PROD_GRAFANA_USER:-}
+      PROD_GRAFANA_PASSWORD: ${PROD_GRAFANA_PASSWORD:-}
+      PROD_ORG_ID: ${PROD_ORG_ID:-24}
+      PROD_METRICS_UID: ${PROD_METRICS_UID:-central-metrics}
+      PROD_LOKI_UID: ${PROD_LOKI_UID:-sS52nlJVz}
+      PROD_TEMPO_UID: ${PROD_TEMPO_UID:-central-tempo}
+    depends_on:
+      redis:
+        condition: service_healthy
+      tempo:
+        condition: service_started
+    healthcheck:
+      test: ['CMD-SHELL', 'wget -qO- http://localhost:3000/api/health >/dev/null 2>&1']
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+  mcp-grafana:
+    image: grafana/mcp-grafana:${MCP_GRAFANA_VERSION:-1.4.0}
+    container_name: asko11y-dev-mcp-grafana
+    ports:
+      - 127.0.0.1:8001:8000/tcp
+    environment:
+      GRAFANA_URL: http://grafana:3000
+      GRAFANA_USERNAME: admin
+      GRAFANA_PASSWORD: admin
+    # Same toolset + host allowlist as prod (w3f-observability mcp-grafana.yaml).
+    command:
+      - -t
+      - streamable-http
+      - --address
+      - 0.0.0.0:8000
+      - --log-level
+      - info
+      - --enabled-tools
+      - datasource,prometheus,loki,pyroscope,alerting,dashboard,navigation,folder,write
+      - --allowed-hosts
+      - mcp-grafana:8000,localhost:8001,127.0.0.1:8001
+    depends_on:
+      grafana:
+        condition: service_healthy
+
+  redis:
+    image: redis:7-alpine
+    container_name: asko11y-dev-redis
+    ports:
+      - 127.0.0.1:6379:6379/tcp
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  tempo:
+    image: grafana/tempo:${TEMPO_VERSION:-2.10.4}
+    container_name: asko11y-dev-tempo
+    command: ['-config.file=/etc/tempo.yaml']
+    volumes:
+      - ./provisioning/tempo.yaml:/etc/tempo.yaml:ro
+    ports:
+      - 127.0.0.1:3200:3200/tcp

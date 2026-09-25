@@ -1,0 +1,76 @@
+# Local dev datasources (docker-compose.dev.yaml).
+#
+# prod-* datasources go through a prod Grafana's datasource proxy
+# (${PROD_GRAFANA_URL}/api/datasources/proxy/uid/<uid>), authenticated with
+# basic auth and pinned to one org with X-Grafana-Org-Id. The agent then
+# investigates real metrics/logs/traces while running local plugin code.
+#
+# local-tempo holds this Grafana's own traces (agent_run, llm_call,
+# mcp_tool_call spans), which you can use to profile a local investigation.
+apiVersion: 1
+
+datasources:
+  - name: prod-metrics
+    uid: prod-metrics
+    type: prometheus
+    access: proxy
+    url: ${PROD_GRAFANA_URL}/api/datasources/proxy/uid/${PROD_METRICS_UID}
+    isDefault: true
+    basicAuth: true
+    basicAuthUser: ${PROD_GRAFANA_USER}
+    jsonData:
+      httpMethod: POST
+      timeInterval: 30s
+      httpHeaderName1: X-Grafana-Org-Id
+    secureJsonData:
+      basicAuthPassword: ${PROD_GRAFANA_PASSWORD}
+      httpHeaderValue1: '${PROD_ORG_ID}'
+    editable: true
+
+  - name: prod-logs
+    uid: prod-logs
+    type: loki
+    access: proxy
+    url: ${PROD_GRAFANA_URL}/api/datasources/proxy/uid/${PROD_LOKI_UID}
+    basicAuth: true
+    basicAuthUser: ${PROD_GRAFANA_USER}
+    jsonData:
+      maxLines: 1000
+      httpHeaderName1: X-Grafana-Org-Id
+    secureJsonData:
+      basicAuthPassword: ${PROD_GRAFANA_PASSWORD}
+      httpHeaderValue1: '${PROD_ORG_ID}'
+    editable: true
+
+  - name: prod-traces
+    uid: prod-traces
+    type: tempo
+    access: proxy
+    url: ${PROD_GRAFANA_URL}/api/datasources/proxy/uid/${PROD_TEMPO_UID}
+    basicAuth: true
+    basicAuthUser: ${PROD_GRAFANA_USER}
+    jsonData:
+      httpHeaderName1: X-Grafana-Org-Id
+      tracesToLogsV2:
+        datasourceUid: prod-logs
+        spanStartTimeShift: -5m
+        spanEndTimeShift: 5m
+        filterByTraceID: true
+      serviceMap:
+        datasourceUid: prod-metrics
+      nodeGraph:
+        enabled: true
+    secureJsonData:
+      basicAuthPassword: ${PROD_GRAFANA_PASSWORD}
+      httpHeaderValue1: '${PROD_ORG_ID}'
+    editable: true
+
+  - name: local-tempo
+    uid: local-tempo
+    type: tempo
+    access: proxy
+    url: http://tempo:3200
+    jsonData:
+      nodeGraph:
+        enabled: true
+    editable: true

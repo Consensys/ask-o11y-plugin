@@ -1,0 +1,38 @@
+# Local dev plugin config (docker-compose.dev.yaml), mirroring prod:
+# grafana-llm-app goes through LiteLLM and asko11y uses the same jsonData
+# shape as prod. Numbers are literals because provisioning env interpolation
+# produces strings, and the plugin decodes these fields as ints.
+apiVersion: 1
+
+apps:
+  - type: grafana-llm-app
+    org_id: 1
+    jsonData:
+      provider: custom
+      openAI:
+        disabled: false
+        url: ${LITELLM_URL}
+        organizationId: org-ECmgMkdgooabgzWzUT5Lw4Yt
+      models:
+        default: large
+        mapping:
+          base: ${LLM_MODEL_BASE}
+          large: ${LLM_MODEL_LARGE}
+    secureJsonData:
+      openAIKey: ${LITELLM_KEY}
+
+  - type: consensys-asko11y-app
+    org_id: 1
+    jsonData:
+      approvalPolicy: disabled
+      maxTotalTokens: 180000
+      keepRecentToolResults: 12
+      mcpServers:
+        - id: grafana
+          name: grafana
+          url: http://mcp-grafana:8000/mcp
+          type: streamable-http
+          enabled: true
+          timeoutSeconds: 90
+    secureJsonData:
+      redisURL: redis://redis:6379/0
