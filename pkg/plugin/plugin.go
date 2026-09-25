@@ -969,7 +969,10 @@ func (p *Plugin) handleAgentRun(w http.ResponseWriter, r *http.Request) {
 		// block carries the rule's exact expressions, metrics, and matchers,
 		// letting the agent skip rule discovery and metric listing entirely.
 		if alertName := extractAlertNameForSnapshot(req.Message); alertName != "" {
-			toolCtx.AlertRuleSnapshot = p.alertRuleSnapshot(alertName, orgID, req.OrgName, req.ScopeOrgID)
+			toolCtx.AlertRuleSnapshot, toolCtx.AlertRuleLookupMissed = p.alertRuleSnapshot(alertName, orgID, req.OrgName, req.ScopeOrgID)
+			if toolCtx.AlertRuleLookupMissed {
+				toolCtx.AlertRuleLookupName = alertName
+			}
 		}
 	}
 	if toolCtx.AlertRuleSnapshot == "" && skills.HasActive(activation, skills.TypeSkillNames["investigation"]) {

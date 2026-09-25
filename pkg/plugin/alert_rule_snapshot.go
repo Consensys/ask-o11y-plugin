@@ -183,31 +183,48 @@ var (
 	firingTitleRe = regexp.MustCompile(`(?i)\[FIRING:\d+\]\s*([A-Za-z0-9_.\-/]+)$`)
 )
 
+// arMissSentinel marks a cached lookup that completed and found no rule, as
+// opposed to "" (lookup failed or timed out), so the miss note is only shown
+// when the search genuinely ran.
+const arMissSentinel = "\x00rule-not-found"
+
 // alertRuleSnapshot renders the prefetched alert-rule context block, or ""
-// when the prefetch found nothing usable (fail open).
-func (p *Plugin) alertRuleSnapshot(alertName, orgID, orgName, scopeOrgID string) string {
+// when the prefetch found nothing usable (fail open). missed reports that the
+// lookup completed over the managed rules and found no matching rule, so the
+// prompt can tell the agent not to repeat the search.
+func (p *Plugin) alertRuleSnapshot(alertName, orgID, orgName, scopeOrgID string) (snapshot string, missed bool) {
 	cacheKey := orgID + "\x00" + alertName
 	if snap, ok := p.lookupAlertRuleCache(cacheKey); ok {
-		return snap
+		if snap == arMissSentinel {
+			return "", true
+		}
+		return snap, false
 	}
 
-	snapshot := p.fetchAlertRuleSnapshot(alertName, orgID, orgName, scopeOrgID)
+	snapshot, searched := p.fetchAlertRuleSnapshot(alertName, orgID, orgName, scopeOrgID)
+	missed = snapshot == "" && searched
 
-	ttl := arCacheTTL
+	cached, ttl := snapshot, arCacheTTL
 	if snapshot == "" {
 		ttl = arMissTTL
+		if missed {
+			cached = arMissSentinel
+		}
 	}
-	p.storeAlertRuleCache(cacheKey, snapshot, ttl)
-	return snapshot
+	p.storeAlertRuleCache(cacheKey, cached, ttl)
+	return snapshot, missed
 }
 
-func (p *Plugin) fetchAlertRuleSnapshot(alertName, orgID, orgName, scopeOrgID string) string {
+// fetchAlertRuleSnapshot returns the rendered snapshot and whether the
+// Grafana-managed rule list was actually searched (tool present and call
+// succeeded), which distinguishes "no such rule" from "lookup failed".
+func (p *Plugin) fetchAlertRuleSnapshot(alertName, orgID, orgName, scopeOrgID string) (string, bool) {
 	if p.mcpProxy == nil {
-		return ""
+		return "", false
 	}
 	rulesTool, ok := p.findAlertingRulesTool()
 	if !ok {
-		return ""
+		return "", false
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), arBudget)
 	defer cancel()
@@ -215,8 +232,8 @@ func (p *Plugin) fetchAlertRuleSnapshot(alertName, orgID, orgName, scopeOrgID st
 	var matched []alertRuleData
 
 	// Grafana-managed rules: one list over all folders, filtered by title here.
-	managed, ok := p.listManagedAlertRules(ctx, rulesTool, alertName, orgID, orgName, scopeOrgID)
-	if !ok {
+	managed, searched := p.listManagedAlertRules(ctx, rulesTool, alertName, orgID, orgName, scopeOrgID)
+	if !searched {
 		managed = nil // tool failed or budget blown — fall through to datasource path
 	}
 	matched = append(matched, managed...)
@@ -224,10 +241,12 @@ func (p *Plugin) fetchAlertRuleSnapshot(alertName, orgID, orgName, scopeOrgID st
 	// Datasource-managed (ruler) rules: one list per Prometheus/Loki datasource.
 	if ctx.Err() == nil {
 		matched = append(matched, p.listDatasourceAlertRules(ctx, rulesTool, alertName, orgID, orgName, scopeOrgID)...)
+	} else {
+		searched = false // ruler scan skipped: cannot claim the rule is absent
 	}
 
 	if len(matched) == 0 {
-		return ""
+		return "", searched
 	}
 	if len(matched) > arMaxRules {
 		matched = matched[:arMaxRules]
@@ -237,7 +256,7 @@ func (p *Plugin) fetchAlertRuleSnapshot(alertName, orgID, orgName, scopeOrgID st
 	// while budget remains.
 	p.hydrateManagedQueries(ctx, rulesTool, matched, orgID, orgName, scopeOrgID)
 
-	return renderAlertRuleSnapshot(alertName, matched)
+	return renderAlertRuleSnapshot(alertName, matched), true
 }
 
 // alertRuleTitleMatches reports whether a rule title corresponds to an

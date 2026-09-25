@@ -257,8 +257,8 @@ func TestAlertRuleSnapshotCache(t *testing.T) {
 
 func TestAlertRuleSnapshot_FailOpenWithoutProxy(t *testing.T) {
 	p := &Plugin{}
-	if got := p.alertRuleSnapshot("whatever", "1", "org", ""); got != "" {
-		t.Errorf("nil mcpProxy must fail open to empty snapshot, got %q", got)
+	if got, missed := p.alertRuleSnapshot("whatever", "1", "org", ""); got != "" || missed {
+		t.Errorf("nil mcpProxy must fail open to empty snapshot without a miss, got %q missed=%v", got, missed)
 	}
 }
 
@@ -302,5 +302,17 @@ func TestParseDatasourceRef(t *testing.T) {
 	}
 	if got := parseDatasourceRef([]byte("null")); got != "" {
 		t.Errorf("null ref: got %q", got)
+	}
+}
+
+func TestAlertRuleSnapshot_CachedMissReportsMissed(t *testing.T) {
+	p := &Plugin{}
+	p.storeAlertRuleCache("1\x00Gone", arMissSentinel, arMissTTL)
+	if got, missed := p.alertRuleSnapshot("Gone", "1", "org", ""); got != "" || !missed {
+		t.Fatalf("cached miss sentinel must return empty snapshot + missed, got %q missed=%v", got, missed)
+	}
+	p.storeAlertRuleCache("1\x00Flaky", "", arMissTTL)
+	if got, missed := p.alertRuleSnapshot("Flaky", "1", "org", ""); got != "" || missed {
+		t.Fatalf("cached failed lookup must not claim a miss, got %q missed=%v", got, missed)
 	}
 }

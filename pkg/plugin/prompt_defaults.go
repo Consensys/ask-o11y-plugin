@@ -73,6 +73,15 @@ instead of scanning a datasource with a broad ".*" regex.
 
 {{.AlertRuleSnapshot}}
 {{end}}
+{{if .AlertRuleLookupMissed}}
+
+## Alert Rule Lookup (already done)
+
+No alert rule titled "{{.AlertRuleLookupName}}" exists in Grafana-managed rules
+or datasource rulers — it was searched before this run started. Do NOT call
+alerting tools to search for it again; work from the alert labels,
+annotations, and description in the message.
+{{end}}
 {{if .ServiceTopology}}
 
 ## Service Topology (prefetched — authoritative for propagation paths)

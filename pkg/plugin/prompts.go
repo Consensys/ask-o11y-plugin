@@ -66,6 +66,13 @@ type PromptContext struct {
 	// Empty string renders no block (fail-open: prefetch missed or timed out).
 	AlertRuleSnapshot string
 
+	// AlertRuleLookupMissed is set when the alert-rule prefetch searched the
+	// Grafana-managed and datasource rulers and found no rule named
+	// AlertRuleLookupName. Renders a short note so the agent does not spend
+	// its first turns re-listing alert rules (observed: 4-6 calls per run).
+	AlertRuleLookupMissed bool
+	AlertRuleLookupName   string
+
 	// ServiceTopology is the prefetched service dependency list for RCA runs
 	// (see topology_snapshot.go): live Tempo service-graph edges when
 	// queryable, Graphiti facts as fallback. Empty string renders no block
