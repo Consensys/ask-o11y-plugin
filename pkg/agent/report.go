@@ -158,12 +158,14 @@ func repairNudgeText(warnings []string) string {
 	return fmt.Sprintf(repairNudgeTemplate, " "+strings.Join(warnings, " "))
 }
 
+const evidenceIDHeaderPrefix = "[evidence id: "
+
 // evidenceIDHeader prefixes successful tool results with a short,
 // provider-independent citation id (e1, e2, ...). Raw tool-call ids vary by
 // provider (some embed kilobytes of opaque signature data), so models cite
 // them unreliably; a run-local sequence is short and uniform for every model.
 func evidenceIDHeader(evidenceID string) string {
-	return "[evidence id: " + evidenceID + "]\n"
+	return evidenceIDHeaderPrefix + evidenceID + "]\n"
 }
 
 // evidenceIDFor returns the citation id for the n-th successful tool result.
