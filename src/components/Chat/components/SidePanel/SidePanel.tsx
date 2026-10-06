@@ -140,12 +140,18 @@ export const SidePanel: React.FC<SidePanelProps> = ({
 
       {/* Iframe content */}
       <div className="flex-1 min-h-0">
-        <iframe
-          src={iframeSrc}
-          title={activeRef.title || `Grafana ${activeRef.type}`}
-          className="w-full h-full border-0"
-          style={{ backgroundColor: theme.colors.background.canvas }}
-        />
+        {iframeSrc ? (
+          <iframe
+            src={iframeSrc}
+            title={activeRef.title || `Grafana ${activeRef.type}`}
+            className="w-full h-full border-0"
+            style={{ backgroundColor: theme.colors.background.canvas }}
+          />
+        ) : (
+          <div className="flex items-center justify-center h-full text-secondary text-sm px-4 text-center">
+            This page link is not a valid Grafana dashboard or Explore URL and cannot be previewed.
+          </div>
+        )}
       </div>
     </div>
   );

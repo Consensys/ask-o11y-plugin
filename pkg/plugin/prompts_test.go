@@ -390,7 +390,7 @@ func TestHandleSkills_HiddenSkillsOnlyForAdminContentListing(t *testing.T) {
 
 	// Admin content listing includes it for management.
 	req = httptest.NewRequest(http.MethodGet, "/api/skills?include=content", nil)
-	req.Header.Set("X-Grafana-User-Role", "Admin")
+	req = withTestIdentity(req, 1, "user-admin", "Admin")
 	rec = httptest.NewRecorder()
 	p.handleSkills(rec, req)
 	if names := decodeNames(rec); !names["internal-hidden-skill"] {
@@ -399,7 +399,7 @@ func TestHandleSkills_HiddenSkillsOnlyForAdminContentListing(t *testing.T) {
 
 	// Non-admin content request is rejected.
 	req = httptest.NewRequest(http.MethodGet, "/api/skills?include=content", nil)
-	req.Header.Set("X-Grafana-User-Role", "Viewer")
+	req = withTestIdentity(req, 1, "user-viewer", "Viewer")
 	rec = httptest.NewRecorder()
 	p.handleSkills(rec, req)
 	if rec.Code != http.StatusForbidden {
