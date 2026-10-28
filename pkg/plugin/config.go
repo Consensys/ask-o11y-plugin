@@ -18,6 +18,19 @@ const (
 )
 
 const (
+	// AgentRunRateLimitPerHour caps expensive LLM agent runs per user.
+	AgentRunRateLimitPerHour = 30
+	// AgentToolCallRateLimitPerHour caps direct MCP tool invocations per user.
+	AgentToolCallRateLimitPerHour = 120
+	AgentRateLimitWindow          = 1 * time.Hour
+
+	// GraphitiIngestMaxBodyBytes caps a single knowledge-graph ingest payload.
+	GraphitiIngestMaxBodyBytes = 1 << 20
+	// GraphitiIngestMaxMessages caps messages per ingest request.
+	GraphitiIngestMaxMessages = 500
+)
+
+const (
 	RedisOpTimeout         = 3 * time.Second
 	RedisBulkOpTimeout     = 10 * time.Second
 	RedisConnectionTimeout = 5 * time.Second

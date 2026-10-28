@@ -214,6 +214,10 @@ type Plugin struct {
 	sessionStore   SessionStoreInterface
 	redisClient    *redis.Client
 	usingRedis     bool
+	// agentRateLimiter throttles expensive LLM agent runs and knowledge-graph
+	// writes; toolCallRateLimiter throttles direct MCP tool invocations.
+	agentRateLimiter    RateLimiter
+	toolCallRateLimiter RateLimiter
 	approvalBroker ApprovalBroker
 	approvalGrants ApprovalGrantStore
 	useBuiltInMCP  bool
@@ -315,6 +319,7 @@ func NewPlugin(ctx context.Context, settings backend.AppInstanceSettings) (insta
 
 	var shareStore ShareStoreInterface
 	var redisClient *redis.Client
+	var agentRateLimiter, toolCallRateLimiter RateLimiter
 	usingRedis := false
 
 	redisClient, redisErr := createRedisClient(logger, settings.DecryptedSecureJSONData["redisURL"])
@@ -325,6 +330,10 @@ func NewPlugin(ctx context.Context, settings backend.AppInstanceSettings) (insta
 		if pingErr == nil {
 			rateLimiter := NewRedisRateLimiter(pluginCtx, redisClient, logger)
 			shareStore = NewRedisShareStore(pluginCtx, redisClient, logger, rateLimiter)
+			agentRateLimiter = NewScopedRedisRateLimiter(pluginCtx, redisClient, logger,
+				"ratelimit:agent", AgentRunRateLimitPerHour, AgentRateLimitWindow)
+			toolCallRateLimiter = NewScopedRedisRateLimiter(pluginCtx, redisClient, logger,
+				"ratelimit:toolcall", AgentToolCallRateLimitPerHour, AgentRateLimitWindow)
 			usingRedis = true
 			logger.Info("Using Redis for session sharing")
 		} else {
@@ -343,6 +352,8 @@ func NewPlugin(ctx context.Context, settings backend.AppInstanceSettings) (insta
 	if !usingRedis {
 		rateLimiter := NewInMemoryRateLimiter(logger)
 		shareStore = NewShareStore(logger, rateLimiter)
+		agentRateLimiter = NewScopedInMemoryRateLimiter(logger, AgentRunRateLimitPerHour, AgentRateLimitWindow)
+		toolCallRateLimiter = NewScopedInMemoryRateLimiter(logger, AgentToolCallRateLimitPerHour, AgentRateLimitWindow)
 		runStore = NewRunStore(logger)
 		sessionStore = NewSessionStore(logger, sessionTTL)
 		logger.Info("Using in-memory storage (not suitable for multi-replica deployments)")
@@ -441,6 +452,9 @@ func NewPlugin(ctx context.Context, settings backend.AppInstanceSettings) (insta
 		sessionStore:   sessionStore,
 		redisClient:    redisClient,
 		usingRedis:     usingRedis,
+
+		agentRateLimiter:    agentRateLimiter,
+		toolCallRateLimiter: toolCallRateLimiter,
 		approvalBroker: approvalBroker,
 		approvalGrants: approvalGrants,
 		useBuiltInMCP:  pluginSettings.UseBuiltInMCP,
@@ -560,7 +574,9 @@ func (p *Plugin) CheckHealth(ctx context.Context, req *backend.CheckHealthReques
 func (p *Plugin) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/health", p.handleHealth)
 	mux.HandleFunc("/openapi.json", p.handleOpenAPISpec)
-	mux.HandleFunc("/mcp", p.handleMCP)
+	// NOTE: the raw JSON-RPC "/mcp" route was removed. It bypassed role checks,
+	// per-user tool selection, Graphiti org scoping and the approval gate, so any
+	// authenticated user could invoke any MCP tool. Use /api/mcp/call-tool instead.
 	mux.HandleFunc("/api/mcp/tools", p.handleMCPTools)
 	mux.HandleFunc("/api/mcp/call-tool", p.handleMCPCallTool)
 	mux.HandleFunc("/api/mcp/servers", p.handleMCPServers)
@@ -673,18 +689,9 @@ func getUserRole(r *http.Request) string {
 		}
 	}
 
-	roleHeaders := []string{
-		"X-Grafana-User-Role",
-		"X-Grafana-Org-Role",
-		"X-Grafana-Role",
-	}
-
-	for _, header := range roleHeaders {
-		if role := r.Header.Get(header); role != "" {
-			return role
-		}
-	}
-
+	// Do not fall back to X-Grafana-*-Role headers: they are client-controllable
+	// and trusting them lets a caller self-assign "Admin". Default to the least
+	// privileged role when Grafana did not populate the user context.
 	return "Viewer"
 }
 
@@ -712,31 +719,6 @@ func (p *Plugin) handleOpenAPISpec(w http.ResponseWriter, r *http.Request) {
 
 	specBytes := openapi.GetSpecBytes()
 	w.Write(specBytes)
-}
-
-func (p *Plugin) handleMCP(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	body, err := io.ReadAll(r.Body)
-	if err != nil {
-		http.Error(w, "Failed to read request body", http.StatusBadRequest)
-		return
-	}
-
-	p.logger.Debug("Handling MCP JSON-RPC request", "bodyLength", len(body))
-
-	response, err := p.mcpProxy.HandleMCPRequest(body)
-	if err != nil {
-		p.logger.Error("Failed to handle MCP request", "error", err)
-		http.Error(w, "Internal error", http.StatusInternalServerError)
-		return
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	w.Write(response)
 }
 
 func (p *Plugin) handleMCPTools(w http.ResponseWriter, r *http.Request) {
@@ -773,6 +755,13 @@ func (p *Plugin) handleMCPCallTool(w http.ResponseWriter, r *http.Request) {
 	}
 
 	userRole := getUserRole(r)
+	userID := getUserID(r)
+
+	if p.toolCallRateLimiter != nil && !p.toolCallRateLimiter.CheckLimit(userID) {
+		p.logger.Warn("Tool call rate limit exceeded", "userID", userID)
+		http.Error(w, "Rate limit exceeded, please try again later", http.StatusTooManyRequests)
+		return
+	}
 
 	var req struct {
 		Name       string                 `json:"name"`
@@ -812,10 +801,10 @@ func (p *Plugin) handleMCPCallTool(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	orgID := r.Header.Get("X-Grafana-Org-Id")
-	if orgID == "" {
-		orgID = "1"
-	}
+	// Server-populated plugin context only: the client-controllable
+	// X-Grafana-Org-Id header would let a caller scope tool calls (incl.
+	// Graphiti group_id) to another org.
+	orgID := strconv.FormatInt(getOrgID(r), 10)
 	mcp.EnsureScopedGraphitiArgs(tool, req.Arguments, orgID)
 
 	p.logger.Debug("Tool call context", "orgID", orgID, "orgName", req.OrgName, "scopeOrgId", req.ScopeOrgId, "tool", req.Name)
@@ -887,9 +876,12 @@ func (p *Plugin) handleAgentRun(w http.ResponseWriter, r *http.Request) {
 	userRole := getUserRole(r)
 	userID := getUserID(r)
 	userLogin := getUserLogin(r)
-	orgID := r.Header.Get("X-Grafana-Org-Id")
-	if orgID == "" {
-		orgID = "1"
+	orgID := strconv.FormatInt(getOrgID(r), 10)
+
+	if p.agentRateLimiter != nil && !p.agentRateLimiter.CheckLimit(userID) {
+		p.logger.Warn("Agent run rate limit exceeded", "userID", userID, "login", userLogin)
+		http.Error(w, "Rate limit exceeded, please try again later", http.StatusTooManyRequests)
+		return
 	}
 
 	var req agent.RunRequest
@@ -2025,10 +2017,8 @@ func getUserID(r *http.Request) int64 {
 		return int64(h.Sum64() & 0x7FFFFFFFFFFFFFFF)
 	}
 
-	if id, err := strconv.ParseInt(r.Header.Get("X-Grafana-User-Id"), 10, 64); err == nil {
-		return id
-	}
-
+	// No X-Grafana-User-Id header fallback: the value is client-controllable
+	// and would allow forging another user's identity.
 	return 0
 }
 
@@ -2080,6 +2070,18 @@ func (p *Plugin) handleGraphitiStatus(w http.ResponseWriter, r *http.Request) {
 func (p *Plugin) handleGraphitiDiscover(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	// A discovery run launches an expensive LLM agent loop (with approvals off)
+	// and writes into the org-scoped knowledge graph, so restrict it to
+	// privileged roles and rate-limit it.
+	role := getUserRole(r)
+	if role != "Admin" && role != "Editor" {
+		http.Error(w, "Access denied", http.StatusForbidden)
+		return
+	}
+	if p.agentRateLimiter != nil && !p.agentRateLimiter.CheckLimit(getUserID(r)) {
+		http.Error(w, "Rate limit exceeded, please try again later", http.StatusTooManyRequests)
 		return
 	}
 	if !p.isGraphitiAvailable() {
@@ -2225,10 +2227,24 @@ func (p *Plugin) handleGraphitiIngestSession(w http.ResponseWriter, r *http.Requ
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	// Ingested content lands in the org-scoped knowledge graph and is injected
+	// into every user's system prompt, so this is a cross-user prompt-injection
+	// surface: restrict it to privileged roles and cap the payload.
+	role := getUserRole(r)
+	if role != "Admin" && role != "Editor" {
+		http.Error(w, "Access denied", http.StatusForbidden)
+		return
+	}
+	if p.agentRateLimiter != nil && !p.agentRateLimiter.CheckLimit(getUserID(r)) {
+		http.Error(w, "Rate limit exceeded, please try again later", http.StatusTooManyRequests)
+		return
+	}
 	if !p.isGraphitiAvailable() {
 		http.Error(w, "Knowledge graph not available", http.StatusServiceUnavailable)
 		return
 	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, GraphitiIngestMaxBodyBytes)
 
 	var req ingestSessionRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -2237,6 +2253,10 @@ func (p *Plugin) handleGraphitiIngestSession(w http.ResponseWriter, r *http.Requ
 	}
 	if len(req.Messages) == 0 {
 		http.Error(w, "No messages provided", http.StatusBadRequest)
+		return
+	}
+	if len(req.Messages) > GraphitiIngestMaxMessages {
+		http.Error(w, "Too many messages in a single ingest request", http.StatusBadRequest)
 		return
 	}
 
@@ -2293,8 +2313,12 @@ func defaultEvalLimit(limit int) int {
 }
 
 func getOrgID(r *http.Request) int64 {
-	if id, err := strconv.ParseInt(r.Header.Get("X-Grafana-Org-Id"), 10, 64); err == nil && id > 0 {
-		return id
+	// Trust only the server-populated plugin context. The X-Grafana-Org-Id
+	// header is client-controllable (the frontend itself sends it), so using it
+	// for org scoping would allow cross-org access.
+	pluginContext := httpadapter.PluginConfigFromContext(r.Context())
+	if pluginContext.OrgID > 0 {
+		return pluginContext.OrgID
 	}
 	return 1
 }

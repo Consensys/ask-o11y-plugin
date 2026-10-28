@@ -43,7 +43,7 @@ func TestScoreAgentRunRewardsEvidenceAndFinalReport(t *testing.T) {
 func TestHandleAgentEvalsReturnsRecentRunScores(t *testing.T) {
 	p := newAgentRunTestPlugin(t)
 	p.settings.AgentEvalCaptureEnabled = true
-	p.runStore.CreateRun("run-1", 7, 2)
+	p.runStore.CreateRun("run-1", testUserID("user-7"), 2)
 	p.runStore.AppendEvent("run-1", agent.SSEEvent{Type: "evidence", Data: agent.EvidenceEvent{
 		ID:      "e1",
 		Title:   "Prometheus",
@@ -55,8 +55,7 @@ func TestHandleAgentEvalsReturnsRecentRunScores(t *testing.T) {
 	p.runStore.FinishRun("run-1", RunStatusCompleted, "")
 
 	req := httptest.NewRequest(http.MethodGet, "/api/agent/evals", nil)
-	req.Header.Set("X-Grafana-Org-Id", "2")
-	req.Header.Set("X-Grafana-User-Id", "7")
+	req = withTestIdentity(req, 2, "user-7", "")
 	rec := httptest.NewRecorder()
 
 	p.handleAgentEvals(rec, req)
@@ -84,9 +83,7 @@ func TestHandleAgentEvalRunRequiresEditorOrAdmin(t *testing.T) {
 	p.settings.AgentEvalCaptureEnabled = true
 
 	req := httptest.NewRequest(http.MethodPost, "/api/agent/evals/run", strings.NewReader(`{}`))
-	req.Header.Set("X-Grafana-Org-Id", "2")
-	req.Header.Set("X-Grafana-User-Id", "7")
-	req.Header.Set("X-Grafana-User-Role", "Viewer")
+	req = withTestIdentity(req, 2, "user-7", "Viewer")
 	rec := httptest.NewRecorder()
 
 	p.handleAgentEvalRun(rec, req)

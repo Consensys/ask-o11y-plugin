@@ -40,7 +40,7 @@ func TestHandleAgentRunEvents_SkipsEventsAlreadyReplayed(t *testing.T) {
 		snapshot: &AgentRun{
 			RunID:  "run-1",
 			Status: RunStatusRunning,
-			UserID: 7,
+			UserID: testUserID("user-7"),
 			OrgID:  1,
 			Events: []agent.SSEEvent{contentEvent(0, "first"), contentEvent(1, "second")},
 		},
@@ -66,7 +66,7 @@ func TestHandleAgentRunEvents_ForwardsNewEvents(t *testing.T) {
 		snapshot: &AgentRun{
 			RunID:  "run-2",
 			Status: RunStatusRunning,
-			UserID: 7,
+			UserID: testUserID("user-7"),
 			OrgID:  1,
 			Events: []agent.SSEEvent{contentEvent(0, "replayed")},
 		},
@@ -90,8 +90,7 @@ func runEventsHandler(t *testing.T, store RunStoreInterface, runID string) strin
 
 	p := &Plugin{runStore: store, logger: log.DefaultLogger}
 	req := httptest.NewRequest(http.MethodGet, "/events", nil)
-	req.Header.Set("X-Grafana-User-Id", "7")
-	req.Header.Set("X-Grafana-Org-Id", "1")
+	req = withTestIdentity(req, 1, "user-7", "")
 	recorder := httptest.NewRecorder()
 
 	done := make(chan struct{})
@@ -118,7 +117,7 @@ func TestHandleAgentRunEvents_StopsAtLiveSequenceGap(t *testing.T) {
 		snapshot: &AgentRun{
 			RunID:  "run-gap",
 			Status: RunStatusRunning,
-			UserID: 7,
+			UserID: testUserID("user-7"),
 			OrgID:  1,
 			Events: []agent.SSEEvent{contentEvent(0, "first")},
 		},

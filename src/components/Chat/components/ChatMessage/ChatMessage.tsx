@@ -44,7 +44,14 @@ function MarkdownContent({ content }: MarkdownContentProps): React.ReactElement 
       gfm: true,
     }) as string;
 
-    return DOMPurify.sanitize(rendered);
+    // The content is LLM/agent output influenced by untrusted datasource data,
+    // so on top of DOMPurify's script/event filtering explicitly forbid
+    // embedded-content tags (default profile would keep <iframe> etc.) to
+    // block external-content phishing/UI-redress inside the chat panel.
+    return DOMPurify.sanitize(rendered, {
+      FORBID_TAGS: ['iframe', 'object', 'embed', 'form', 'base', 'link', 'meta'],
+      FORBID_ATTR: ['srcdoc'],
+    });
   }, [content]);
 
   return <div dangerouslySetInnerHTML={{ __html: html }} />;

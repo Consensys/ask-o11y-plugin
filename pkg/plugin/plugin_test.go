@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"hash/fnv"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -51,9 +52,7 @@ func newAgentRunRequest(t *testing.T, grafanaURL, targetURL, body string) *http.
 	t.Helper()
 
 	req := httptest.NewRequest(http.MethodPost, targetURL, strings.NewReader(body))
-	req.Header.Set("X-Grafana-Org-Id", "2")
-	req.Header.Set("X-Grafana-User-Id", "7")
-	req.Header.Set("X-Grafana-User-Role", "Admin")
+	req = withTestIdentity(req, 2, "user-7", "Admin")
 	cfg := backend.NewGrafanaCfg(map[string]string{
 		"GF_APP_URL":                  grafanaURL,
 		"GF_PLUGIN_APP_CLIENT_SECRET": "test-token",
@@ -61,12 +60,28 @@ func newAgentRunRequest(t *testing.T, grafanaURL, targetURL, body string) *http.
 	return req.WithContext(backend.WithGrafanaConfig(req.Context(), cfg))
 }
 
+// withTestIdentity injects a server-side plugin context (org, user, role) the
+// way Grafana populates it for real plugin resource calls. It replaces the
+// X-Grafana-* identity headers, which the backend no longer trusts.
+func withTestIdentity(req *http.Request, orgID int64, login, role string) *http.Request {
+	return req.WithContext(backend.WithPluginContext(req.Context(), backend.PluginContext{
+		OrgID: orgID,
+		User:  &backend.User{Login: login, Role: role},
+	}))
+}
+
+// testUserID mirrors getUserID so tests can pre-populate stores for the user
+// that withTestIdentity injects.
+func testUserID(login string) int64 {
+	h := fnv.New64a()
+	h.Write([]byte(login))
+	return int64(h.Sum64() & 0x7FFFFFFFFFFFFFFF)
+}
+
 func TestHandleAgentTopologyAcceptsLimitQueryParamsWithoutGraphiti(t *testing.T) {
 	plugin := newAgentRunTestPlugin(t)
 	req := httptest.NewRequest(http.MethodGet, "/api/agent/topology?maxNodes=2&maxEdges=1", nil)
-	req.Header.Set("X-Grafana-Org-Id", "2")
-	req.Header.Set("X-Grafana-User-Id", "7")
-	req.Header.Set("X-Grafana-User-Role", "Admin")
+	req = withTestIdentity(req, 2, "user-7", "Admin")
 	rec := httptest.NewRecorder()
 
 	plugin.handleAgentTopology(rec, req)
@@ -122,12 +137,10 @@ func receiveAgentRunLLMRequest(t *testing.T, ch <-chan agent.ChatCompletionReque
 
 func TestHandleAgentApprovalRequiresEditorOrAdmin(t *testing.T) {
 	p := newAgentRunTestPlugin(t)
-	p.runStore.CreateRun("run-1", 7, 2, "session-1")
+	p.runStore.CreateRun("run-1", testUserID("user-7"), 2, "session-1")
 
 	req := httptest.NewRequest(http.MethodPost, "/api/agent/runs/run-1/approvals/tc_1", strings.NewReader(`{"decision":"approved"}`))
-	req.Header.Set("X-Grafana-Org-Id", "2")
-	req.Header.Set("X-Grafana-User-Id", "7")
-	req.Header.Set("X-Grafana-User-Role", "Viewer")
+	req = withTestIdentity(req, 2, "user-7", "Viewer")
 	rec := httptest.NewRecorder()
 
 	p.handleAgentApproval(rec, req, "run-1", "tc_1")
@@ -143,12 +156,10 @@ func TestHandleAgentApprovalDeliversDecision(t *testing.T) {
 	if err != nil {
 		t.Fatalf("register approval failed: %v", err)
 	}
-	p.runStore.CreateRun("run-1", 7, 2, "session-1")
+	p.runStore.CreateRun("run-1", testUserID("user-7"), 2, "session-1")
 
 	req := httptest.NewRequest(http.MethodPost, "/api/agent/runs/run-1/approvals/tc_1", strings.NewReader(`{"decision":"approved"}`))
-	req.Header.Set("X-Grafana-Org-Id", "2")
-	req.Header.Set("X-Grafana-User-Id", "7")
-	req.Header.Set("X-Grafana-User-Role", "Editor")
+	req = withTestIdentity(req, 2, "user-7", "Editor")
 	rec := httptest.NewRecorder()
 
 	p.handleAgentApproval(rec, req, "run-1", "tc_1")
@@ -173,7 +184,7 @@ func TestHandleAgentApprovalApproveAlwaysPersistsToolGrant(t *testing.T) {
 	if err != nil {
 		t.Fatalf("register approval failed: %v", err)
 	}
-	p.runStore.CreateRun("run-1", 7, 2, "session-1")
+	p.runStore.CreateRun("run-1", testUserID("user-7"), 2, "session-1")
 	p.runStore.AppendEvent("run-1", agent.SSEEvent{Type: "approval_request", Data: agent.ApprovalRequestEvent{
 		ApprovalID: "tc_1",
 		ToolCallID: "tc_1",
@@ -183,9 +194,7 @@ func TestHandleAgentApprovalApproveAlwaysPersistsToolGrant(t *testing.T) {
 	}})
 
 	req := httptest.NewRequest(http.MethodPost, "/api/agent/runs/run-1/approvals/tc_1", strings.NewReader(`{"decision":"approved","approvalScope":"always"}`))
-	req.Header.Set("X-Grafana-Org-Id", "2")
-	req.Header.Set("X-Grafana-User-Id", "7")
-	req.Header.Set("X-Grafana-User-Role", "Editor")
+	req = withTestIdentity(req, 2, "user-7", "Editor")
 	rec := httptest.NewRecorder()
 
 	p.handleAgentApproval(rec, req, "run-1", "tc_1")
@@ -217,13 +226,11 @@ func TestHandleAgentApprovalIsIdempotentForDuplicateDecision(t *testing.T) {
 	if _, err := p.approvalBroker.Register(context.Background(), "run-1", agent.ApprovalRequestEvent{ApprovalID: "tc_1"}); err != nil {
 		t.Fatalf("register approval failed: %v", err)
 	}
-	p.runStore.CreateRun("run-1", 7, 2)
+	p.runStore.CreateRun("run-1", testUserID("user-7"), 2)
 
 	for i := 0; i < 2; i++ {
 		req := httptest.NewRequest(http.MethodPost, "/api/agent/runs/run-1/approvals/tc_1", strings.NewReader(`{"decision":"approved"}`))
-		req.Header.Set("X-Grafana-Org-Id", "2")
-		req.Header.Set("X-Grafana-User-Id", "7")
-		req.Header.Set("X-Grafana-User-Role", "Editor")
+		req = withTestIdentity(req, 2, "user-7", "Editor")
 		rec := httptest.NewRecorder()
 
 		p.handleAgentApproval(rec, req, "run-1", "tc_1")
@@ -239,18 +246,14 @@ func TestHandleAgentApprovalRejectsConflictingDuplicateDecision(t *testing.T) {
 	if _, err := p.approvalBroker.Register(context.Background(), "run-1", agent.ApprovalRequestEvent{ApprovalID: "tc_1"}); err != nil {
 		t.Fatalf("register approval failed: %v", err)
 	}
-	p.runStore.CreateRun("run-1", 7, 2)
+	p.runStore.CreateRun("run-1", testUserID("user-7"), 2)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/agent/runs/run-1/approvals/tc_1", strings.NewReader(`{"decision":"approved"}`))
-	req.Header.Set("X-Grafana-Org-Id", "2")
-	req.Header.Set("X-Grafana-User-Id", "7")
-	req.Header.Set("X-Grafana-User-Role", "Editor")
+	req = withTestIdentity(req, 2, "user-7", "Editor")
 	p.handleAgentApproval(httptest.NewRecorder(), req, "run-1", "tc_1")
 
 	conflictReq := httptest.NewRequest(http.MethodPost, "/api/agent/runs/run-1/approvals/tc_1", strings.NewReader(`{"decision":"rejected"}`))
-	conflictReq.Header.Set("X-Grafana-Org-Id", "2")
-	conflictReq.Header.Set("X-Grafana-User-Id", "7")
-	conflictReq.Header.Set("X-Grafana-User-Role", "Editor")
+	conflictReq = withTestIdentity(conflictReq, 2, "user-7", "Editor")
 	rec := httptest.NewRecorder()
 
 	p.handleAgentApproval(rec, conflictReq, "run-1", "tc_1")
@@ -265,12 +268,10 @@ func TestHandleAgentApprovalRejectsConflictingDuplicateDecision(t *testing.T) {
 
 func TestHandleAgentApprovalUnknownPendingStillConflicts(t *testing.T) {
 	p := newAgentRunTestPlugin(t)
-	p.runStore.CreateRun("run-1", 7, 2)
+	p.runStore.CreateRun("run-1", testUserID("user-7"), 2)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/agent/runs/run-1/approvals/tc_1", strings.NewReader(`{"decision":"approved"}`))
-	req.Header.Set("X-Grafana-Org-Id", "2")
-	req.Header.Set("X-Grafana-User-Id", "7")
-	req.Header.Set("X-Grafana-User-Role", "Editor")
+	req = withTestIdentity(req, 2, "user-7", "Editor")
 	rec := httptest.NewRecorder()
 
 	p.handleAgentApproval(rec, req, "run-1", "tc_1")
@@ -424,7 +425,7 @@ func TestHandleAgentRunPersistsNewSessionModel(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 		t.Fatalf("failed to decode response: %v", err)
 	}
-	session, err := p.sessionStore.GetSession(body.SessionID, 7, 2)
+	session, err := p.sessionStore.GetSession(body.SessionID, testUserID("user-7"), 2)
 	if err != nil {
 		t.Fatalf("GetSession failed: %v", err)
 	}
@@ -460,7 +461,7 @@ func TestHandleAgentRunAutoSelectsBaseWhenModelOmitted(t *testing.T) {
 	if body.Model != "base" || body.ModelSource != "auto" {
 		t.Fatalf("unexpected model response: %+v", body)
 	}
-	session, err := p.sessionStore.GetSession(body.SessionID, 7, 2)
+	session, err := p.sessionStore.GetSession(body.SessionID, testUserID("user-7"), 2)
 	if err != nil {
 		t.Fatalf("GetSession failed: %v", err)
 	}
@@ -495,12 +496,12 @@ func TestHandleAgentRunUsesStoredSessionModelWhenQueryOmitted(t *testing.T) {
 	defer llmServer.Close()
 
 	p := newAgentRunTestPlugin(t)
-	session, err := p.sessionStore.CreateSession(7, 2, "existing", []SessionMessage{{Role: "user", Content: "previous"}})
+	session, err := p.sessionStore.CreateSession(testUserID("user-7"), 2, "existing", []SessionMessage{{Role: "user", Content: "previous"}})
 	if err != nil {
 		t.Fatalf("CreateSession failed: %v", err)
 	}
 	model := "large"
-	if err := p.sessionStore.UpdateSession(session.ID, 7, 2, SessionUpdate{Model: &model}); err != nil {
+	if err := p.sessionStore.UpdateSession(session.ID, testUserID("user-7"), 2, SessionUpdate{Model: &model}); err != nil {
 		t.Fatalf("UpdateSession failed: %v", err)
 	}
 
@@ -519,12 +520,12 @@ func TestHandleAgentRunUsesStoredSessionModelWhenQueryOmitted(t *testing.T) {
 
 func TestHandleAgentRunRejectsConflictingSessionModel(t *testing.T) {
 	p := newAgentRunTestPlugin(t)
-	session, err := p.sessionStore.CreateSession(7, 2, "existing", []SessionMessage{{Role: "user", Content: "previous"}})
+	session, err := p.sessionStore.CreateSession(testUserID("user-7"), 2, "existing", []SessionMessage{{Role: "user", Content: "previous"}})
 	if err != nil {
 		t.Fatalf("CreateSession failed: %v", err)
 	}
 	model := "base"
-	if err := p.sessionStore.UpdateSession(session.ID, 7, 2, SessionUpdate{Model: &model}); err != nil {
+	if err := p.sessionStore.UpdateSession(session.ID, testUserID("user-7"), 2, SessionUpdate{Model: &model}); err != nil {
 		t.Fatalf("UpdateSession failed: %v", err)
 	}
 
@@ -684,11 +685,11 @@ func TestHandlePromptDefaults(t *testing.T) {
 
 func TestConsumeAgentEvents_IncrementsSessionStats(t *testing.T) {
 	p := newAgentRunTestPlugin(t)
-	session, err := p.sessionStore.CreateSession(7, 2, "", nil)
+	session, err := p.sessionStore.CreateSession(testUserID("user-7"), 2, "", nil)
 	if err != nil {
 		t.Fatalf("CreateSession failed: %v", err)
 	}
-	p.runStore.CreateRun("run-1", 7, 2, session.ID)
+	p.runStore.CreateRun("run-1", testUserID("user-7"), 2, session.ID)
 
 	eventCh := make(chan agent.SSEEvent, 4)
 	eventCh <- agent.SSEEvent{Type: "content", Data: agent.ContentEvent{Content: "hi"}}
@@ -704,9 +705,9 @@ func TestConsumeAgentEvents_IncrementsSessionStats(t *testing.T) {
 	}
 	close(eventCh)
 
-	p.consumeAgentEvents("run-1", session.ID, 7, "admin", 2, "Org2", "base", eventCh)
+	p.consumeAgentEvents("run-1", session.ID, testUserID("user-7"), "admin", 2, "Org2", "base", eventCh)
 
-	got, err := p.sessionStore.GetSession(session.ID, 7, 2)
+	got, err := p.sessionStore.GetSession(session.ID, testUserID("user-7"), 2)
 	if err != nil {
 		t.Fatalf("GetSession failed: %v", err)
 	}
@@ -720,19 +721,19 @@ func TestConsumeAgentEvents_IncrementsSessionStats(t *testing.T) {
 
 func TestConsumeAgentEvents_DoesNotIncrementStatsOnError(t *testing.T) {
 	p := newAgentRunTestPlugin(t)
-	session, err := p.sessionStore.CreateSession(7, 2, "", nil)
+	session, err := p.sessionStore.CreateSession(testUserID("user-7"), 2, "", nil)
 	if err != nil {
 		t.Fatalf("CreateSession failed: %v", err)
 	}
-	p.runStore.CreateRun("run-1", 7, 2, session.ID)
+	p.runStore.CreateRun("run-1", testUserID("user-7"), 2, session.ID)
 
 	eventCh := make(chan agent.SSEEvent, 2)
 	eventCh <- agent.SSEEvent{Type: "error", Data: agent.ErrorEvent{Message: "boom"}}
 	close(eventCh)
 
-	p.consumeAgentEvents("run-1", session.ID, 7, "admin", 2, "Org2", "base", eventCh)
+	p.consumeAgentEvents("run-1", session.ID, testUserID("user-7"), "admin", 2, "Org2", "base", eventCh)
 
-	got, err := p.sessionStore.GetSession(session.ID, 7, 2)
+	got, err := p.sessionStore.GetSession(session.ID, testUserID("user-7"), 2)
 	if err != nil {
 		t.Fatalf("GetSession failed: %v", err)
 	}
@@ -743,7 +744,7 @@ func TestConsumeAgentEvents_DoesNotIncrementStatsOnError(t *testing.T) {
 
 func TestHandleGetSessionStats_ReturnsAccumulatedStats(t *testing.T) {
 	p := newAgentRunTestPlugin(t)
-	session, err := p.sessionStore.CreateSession(7, 2, "", []SessionMessage{{Role: "user", Content: "hi"}})
+	session, err := p.sessionStore.CreateSession(testUserID("user-7"), 2, "", []SessionMessage{{Role: "user", Content: "hi"}})
 	if err != nil {
 		t.Fatalf("CreateSession failed: %v", err)
 	}
@@ -751,13 +752,12 @@ func TestHandleGetSessionStats_ReturnsAccumulatedStats(t *testing.T) {
 		RunCount: 1, TotalIterations: 3, ToolCallCount: 2,
 		PromptTokens: 100, CompletionTokens: 20, TotalTokens: 120,
 	}
-	if err := p.sessionStore.IncrementStats(session.ID, 7, 2, delta); err != nil {
+	if err := p.sessionStore.IncrementStats(session.ID, testUserID("user-7"), 2, delta); err != nil {
 		t.Fatalf("IncrementStats failed: %v", err)
 	}
 
 	req := httptest.NewRequest(http.MethodGet, "/api/sessions/"+session.ID+"/stats", nil)
-	req.Header.Set("X-Grafana-Org-Id", "2")
-	req.Header.Set("X-Grafana-User-Id", "7")
+	req = withTestIdentity(req, 2, "user-7", "")
 	rec := httptest.NewRecorder()
 
 	p.handleGetSessionStats(rec, req, session.ID)
@@ -784,8 +784,7 @@ func TestHandleGetSessionStats_NotFoundForMissingSession(t *testing.T) {
 	p := newAgentRunTestPlugin(t)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/sessions/does-not-exist/stats", nil)
-	req.Header.Set("X-Grafana-Org-Id", "2")
-	req.Header.Set("X-Grafana-User-Id", "7")
+	req = withTestIdentity(req, 2, "user-7", "")
 	rec := httptest.NewRecorder()
 
 	p.handleGetSessionStats(rec, req, "does-not-exist")
@@ -797,14 +796,13 @@ func TestHandleGetSessionStats_NotFoundForMissingSession(t *testing.T) {
 
 func TestHandleGetSessionStats_NotFoundForWrongOwner(t *testing.T) {
 	p := newAgentRunTestPlugin(t)
-	session, err := p.sessionStore.CreateSession(7, 2, "", []SessionMessage{{Role: "user", Content: "hi"}})
+	session, err := p.sessionStore.CreateSession(testUserID("user-7"), 2, "", []SessionMessage{{Role: "user", Content: "hi"}})
 	if err != nil {
 		t.Fatalf("CreateSession failed: %v", err)
 	}
 
 	req := httptest.NewRequest(http.MethodGet, "/api/sessions/"+session.ID+"/stats", nil)
-	req.Header.Set("X-Grafana-Org-Id", "2")
-	req.Header.Set("X-Grafana-User-Id", "999") // different user
+	req = withTestIdentity(req, 2, "user-999", "")
 	rec := httptest.NewRecorder()
 
 	p.handleGetSessionStats(rec, req, session.ID)
@@ -816,17 +814,16 @@ func TestHandleGetSessionStats_NotFoundForWrongOwner(t *testing.T) {
 
 func TestHandleSessionRouter_DispatchesStats(t *testing.T) {
 	p := newAgentRunTestPlugin(t)
-	session, err := p.sessionStore.CreateSession(7, 2, "", []SessionMessage{{Role: "user", Content: "hi"}})
+	session, err := p.sessionStore.CreateSession(testUserID("user-7"), 2, "", []SessionMessage{{Role: "user", Content: "hi"}})
 	if err != nil {
 		t.Fatalf("CreateSession failed: %v", err)
 	}
-	if err := p.sessionStore.IncrementStats(session.ID, 7, 2, SessionStatsDelta{RunCount: 1}); err != nil {
+	if err := p.sessionStore.IncrementStats(session.ID, testUserID("user-7"), 2, SessionStatsDelta{RunCount: 1}); err != nil {
 		t.Fatalf("IncrementStats failed: %v", err)
 	}
 
 	req := httptest.NewRequest(http.MethodGet, "/api/sessions/"+session.ID+"/stats", nil)
-	req.Header.Set("X-Grafana-Org-Id", "2")
-	req.Header.Set("X-Grafana-User-Id", "7")
+	req = withTestIdentity(req, 2, "user-7", "")
 	rec := httptest.NewRecorder()
 
 	p.handleSessionRouter(rec, req)
