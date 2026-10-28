@@ -49,7 +49,7 @@ inputs:
   go-version:
     description: "Version of go"
     required: false
-    default: "1.26.5"
+    default: "1.26.10"
   node-version:
     description: "Version of node"
     required: false

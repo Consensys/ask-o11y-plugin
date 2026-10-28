@@ -9,3 +9,10 @@ global:
 analyzers:
   version:
     enabled: false
+  # The validator bundles a govulncheck built with Go 1.24.2. It refuses to
+  # analyze a module that requires Go 1.26.10 ("this validator supports Go
+  # 1.24.2"), which would fail every run. CI runs govulncheck directly on the
+  # pinned Go 1.26.10 toolchain instead (see the govulncheck step in ci.yml and
+  # release.yml), which covers the same rule with a supported toolchain.
+  govulncheck:
+    enabled: false

@@ -28,7 +28,7 @@ jobs:
         id: build
         with:
           node-version: '22'
-          go-version: '1.26.6'
+          go-version: '1.26.10'
           attestation: true # Enable build provenance attestation
           # Plugin signing enabled with Grafana Access Policy token
           # (For more info see https://grafana.com/developers/plugin-tools/publish-a-plugin/sign-a-plugin#generate-an-access-policy-token)
@@ -37,6 +37,13 @@ jobs:
       # Release-time validation with the pinned validator image and the repo's
       # config (the version check is fine here: a release tag's version is
       # always newer than the latest published one).
+      #
+      # The validator's bundled govulncheck is built with Go 1.24.2 and refuses
+      # to analyze a module that requires Go 1.26.10, so that analyzer is
+      # disabled in the config and run here on the build's Go toolchain.
+      - name: govulncheck
+        run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+
       - name: Export clean source for validation
         run: |
           mkdir -p "$VALIDATOR_SRC"
@@ -50,7 +57,7 @@ jobs:
             -v "$VALIDATOR_SRC:/source" \
             -w /source \
             -v "$PWD/$PLUGIN_ARCHIVE:/archive.zip" \
-            grafana/plugin-validator-cli:v0.49.1 \
+            grafana/plugin-validator-cli:v0.51.3 \
             -config /source/.github/plugin-validator.config.yaml \
             -sourceCodeUri file:///source \
             /archive.zip

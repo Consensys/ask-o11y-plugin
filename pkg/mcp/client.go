@@ -3,11 +3,12 @@ package mcp
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
-	mathrand "math/rand"
+	"math/big"
 	"net/http"
 	"strings"
 	"sync"
@@ -609,21 +610,24 @@ var retrySchedule = []time.Duration{
 	700 * time.Millisecond,
 }
 
-// retryRand seeds jitter; dedicated to retries so we don't perturb the
-// default rand source used elsewhere.
-var retryRand = mathrand.New(mathrand.NewSource(time.Now().UnixNano())) // #nosec G404 -- retry backoff jitter timing, not security-sensitive
-var retryRandMu sync.Mutex
-
 // jitteredDuration applies symmetric jitter of ±fraction around base.
 // e.g. jitteredDuration(100ms, 0.30) returns a value in [70ms, 130ms].
+//
+// The jitter is drawn from crypto/rand. math/rand is a weak generator (gosec
+// G404) and a single non-deterministic draw is cheap: the retry schedule runs
+// at most three times per tool call.
 func jitteredDuration(base time.Duration, fraction float64) time.Duration {
 	if fraction <= 0 {
 		return base
 	}
-	retryRandMu.Lock()
-	defer retryRandMu.Unlock()
-	delta := (retryRand.Float64()*2 - 1) * fraction
-	return time.Duration(float64(base) * (1 + delta))
+	const max = int64(1) << 62
+	n, err := rand.Int(rand.Reader, big.NewInt(max))
+	if err != nil {
+		return base
+	}
+	// Map [0, max) onto [-1, 1).
+	unit := float64(n.Int64())/float64(max)*2 - 1
+	return time.Duration(float64(base) * (1 + unit*fraction))
 }
 
 // callToolOncer is the inner function signature used for retry. Declared as a
