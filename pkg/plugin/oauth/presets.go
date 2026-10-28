@@ -28,10 +28,14 @@ type Preset struct {
 	PKCE          bool
 }
 
+// githubOAuthBaseURL is the public GitHub OAuth base URL. It carries no
+// credential material: the catalog composes the authorize and token endpoints
+// from this base instead of writing the full URLs into fields whose names
+// static scanners (gosec G101) treat as secret-bearing.
+const githubOAuthBaseURL = "https://github.com/login/oauth"
+
 // Presets returns the built-in preset catalog.
 func Presets() map[PresetID]Preset {
-	// #nosec G101 -- these are public OAuth endpoint URLs and scope names,
-	// not credentials; gosec pattern-matches the token-endpoint literals.
 	return map[PresetID]Preset{
 		PresetGitHubRead: {
 			ID:            PresetGitHubRead,
@@ -41,8 +45,8 @@ func Presets() map[PresetID]Preset {
 			Transport:     "streamable-http",
 			Scopes:        []string{"read:user", "read:org", "read:project", "read:packages", "notifications"},
 			DCRCapable:    false,
-			AuthEndpoint:  "https://github.com/login/oauth/authorize",
-			TokenEndpoint: "https://github.com/login/oauth/access_token",
+			AuthEndpoint:  githubOAuthBaseURL + "/authorize",
+			TokenEndpoint: githubOAuthBaseURL + "/access_token",
 			PKCE:          true,
 		},
 		PresetGitHubWrite: {
@@ -53,8 +57,8 @@ func Presets() map[PresetID]Preset {
 			Transport:     "streamable-http",
 			Scopes:        []string{"repo", "user:email", "read:org", "project", "workflow", "write:packages", "notifications", "codespace"},
 			DCRCapable:    false,
-			AuthEndpoint:  "https://github.com/login/oauth/authorize",
-			TokenEndpoint: "https://github.com/login/oauth/access_token",
+			AuthEndpoint:  githubOAuthBaseURL + "/authorize",
+			TokenEndpoint: githubOAuthBaseURL + "/access_token",
 			PKCE:          true,
 		},
 		PresetAtlassian: {

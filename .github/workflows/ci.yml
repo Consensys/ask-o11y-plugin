@@ -61,7 +61,7 @@ jobs:
       - name: Setup Go environment
         uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
-          go-version: '1.26.6'
+          go-version: '1.26.10'
 
       - name: Install Mage
         run: go install github.com/magefile/mage@latest
@@ -94,6 +94,13 @@ jobs:
         with:
           version: latest
           args: test
+
+      # The validator's bundled govulncheck is built with Go 1.24.2 and refuses
+      # to analyze a module that requires Go 1.26.10, so that analyzer is
+      # disabled in .github/plugin-validator.config.yaml and run here on the
+      # pinned toolchain instead. This covers the catalog's govulncheck rules.
+      - name: govulncheck
+        run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
 
       - name: Get plugin metadata
         id: metadata
@@ -143,7 +150,7 @@ jobs:
             -v "$VALIDATOR_SRC:/source" \
             -w /source \
             -v "$PWD/$PLUGIN_ARCHIVE:/archive.zip" \
-            grafana/plugin-validator-cli:v0.49.1 \
+            grafana/plugin-validator-cli:v0.51.3 \
             -config /source/.github/plugin-validator.config.yaml \
             -sourceCodeUri file:///source \
             /archive.zip
