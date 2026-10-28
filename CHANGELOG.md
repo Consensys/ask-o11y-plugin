@@ -5,6 +5,14 @@ All notable changes to the Ask O11y Grafana plugin will be documented in this fi
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.23](https://github.com/Consensys/ask-o11y-plugin/compare/v0.3.22...v0.3.23) (2026-10-28)
+
+
+### Bug Fixes
+
+* **deps:** clear catalog review findings for 0.3.23 ([#239](https://github.com/Consensys/ask-o11y-plugin/issues/239)) ([58d9d0f](https://github.com/Consensys/ask-o11y-plugin/commit/58d9d0fa1c472f4b21e6ac7f39023917160e95df))
+* **security:** harden authz, rate limits and XSS defenses ([#237](https://github.com/Consensys/ask-o11y-plugin/issues/237)) ([a72f386](https://github.com/Consensys/ask-o11y-plugin/commit/a72f386e5763439c4ad1dfea48c7e0cd1b4f723e))
+
 ## [0.3.22](https://github.com/Consensys/ask-o11y-plugin/compare/v0.3.21...v0.3.22) (2026-09-25)
 
 
