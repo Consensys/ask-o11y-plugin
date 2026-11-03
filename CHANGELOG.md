@@ -5,6 +5,19 @@ All notable changes to the Ask O11y Grafana plugin will be documented in this fi
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.24](https://github.com/Consensys/ask-o11y-plugin/compare/v0.3.23...v0.3.24) (2026-11-03)
+
+
+### Features
+
+* **backend:** discover MCP tools on demand to cut prompt size ([#244](https://github.com/Consensys/ask-o11y-plugin/issues/244)) ([39d61a7](https://github.com/Consensys/ask-o11y-plugin/commit/39d61a77cdb01fe0815ee37ba5b819f1dce4fa5a))
+* **ui:** expose tool discovery settings and show activated tools ([#245](https://github.com/Consensys/ask-o11y-plugin/issues/245)) ([d366464](https://github.com/Consensys/ask-o11y-plugin/commit/d366464669c68daecb97a936789bdaaa2d52558c))
+
+
+### Bug Fixes
+
+* **backend:** accept the mcp-grafana v2 alerting tool names ([#243](https://github.com/Consensys/ask-o11y-plugin/issues/243)) ([db23278](https://github.com/Consensys/ask-o11y-plugin/commit/db23278f66623d676ab6eb0d7a28ea480731f5b3))
+
 ## [0.3.23](https://github.com/Consensys/ask-o11y-plugin/compare/v0.3.22...v0.3.23) (2026-10-28)
 
 
