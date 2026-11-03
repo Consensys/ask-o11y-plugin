@@ -33,8 +33,21 @@ export interface SkillEntry {
   enabled?: boolean;
 }
 
+/**
+ * On-demand MCP tool discovery. Mirrors agent.ToolSearchConfig in the backend.
+ * `auto` turns discovery on only when the tool definitions exceed `budgetTokens`.
+ */
+export interface ToolSearchSettings {
+  mode?: 'off' | 'auto' | 'on';
+  budgetTokens?: number;
+  maxActiveTools?: number;
+  activationTokenBudget?: number;
+  alwaysInclude?: string[];
+}
+
 export type AppPluginSettings = {
   mcpServers?: MCPServerConfig[];
+  toolSearch?: ToolSearchSettings;
   useBuiltInMCP?: boolean;
   builtInMCPToolSelections?: Record<string, boolean>;
   useLocalGrafanaURL?: boolean;

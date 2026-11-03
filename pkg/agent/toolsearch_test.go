@@ -367,6 +367,8 @@ func TestAgentLoopToolSearchActivatesTools(t *testing.T) {
 	go loop.Run(context.Background(), req, eventCh)
 	events := collectEvents(eventCh)
 
+	assertToolsActivatedEvent(t, events, "fake_get_thing")
+
 	mu.Lock()
 	defer mu.Unlock()
 	if len(bodies) < 4 {
@@ -423,6 +425,31 @@ func TestAgentLoopToolSearchActivatesTools(t *testing.T) {
 			t.Errorf("meta-tool %q produced an evidence event", data.ToolName)
 		}
 	}
+}
+
+// assertToolsActivatedEvent checks that the run reported the activation to the
+// UI with the given tool name.
+func assertToolsActivatedEvent(t *testing.T, events []SSEEvent, wantTool string) {
+	t.Helper()
+	for _, event := range events {
+		if event.Type != "tools_activated" {
+			continue
+		}
+		data, ok := event.Data.(ToolsActivatedEvent)
+		if !ok {
+			t.Fatalf("tools_activated carried unexpected payload type %T", event.Data)
+		}
+		if len(data.Tools) == 0 {
+			t.Fatalf("tools_activated event carried no tools")
+		}
+		for _, tool := range data.Tools {
+			if tool.Name == wantTool {
+				return
+			}
+		}
+		t.Fatalf("tools_activated did not include %q: %+v", wantTool, data.Tools)
+	}
+	t.Fatalf("no tools_activated event emitted; got %d events", len(events))
 }
 
 func toolCallResponse(name, args string) ChatCompletionResponse {

@@ -107,6 +107,8 @@ export interface ChatMessage {
   finalReport?: AgentFinalReport;
   pageRefs?: GrafanaPageRef[];
   skills?: AgentSkillBadge[];
+  /** Tools activated by a bounded tool search during this turn. */
+  discoveredTools?: AgentSkillBadge[];
   timestamp?: Date;
   /** Set when the agent run for this assistant turn failed; surfaced as a retryable error in the UI. */
   error?: string;

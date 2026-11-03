@@ -267,6 +267,21 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
             ))}
           </div>
         )}
+        {message.discoveredTools && message.discoveredTools.length > 0 && (
+          <div className="flex flex-wrap gap-2 mb-3" aria-label="Discovered tools">
+            {message.discoveredTools.map((tool) => (
+              <span
+                key={tool.name}
+                data-testid={testIds.chat.discoveredToolChip(tool.name)}
+                title={tool.description}
+                className={skillChipStyles}
+              >
+                <Icon name="search" size="xs" />
+                {tool.name}
+              </span>
+            ))}
+          </div>
+        )}
         {message.toolCalls && message.toolCalls.length > 0 && (
           <div className="mb-4">
             <ToolCallsSection toolCalls={message.toolCalls} />

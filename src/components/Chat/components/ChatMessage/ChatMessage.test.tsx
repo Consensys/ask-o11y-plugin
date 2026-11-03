@@ -163,6 +163,30 @@ describe('ChatMessage', () => {
       expect(screen.getByText('Tool Calls: 1')).toBeInTheDocument();
     });
 
+    it('should render chips for tools activated by a bounded tool search', () => {
+      const message: ChatMessageType = {
+        role: 'assistant',
+        content: 'Searching',
+        discoveredTools: [{ name: 'mcp-grafana_alerting_rules_read', description: 'Read alert rules' }],
+      };
+
+      render(<ChatMessage message={message} />);
+
+      expect(screen.getByLabelText('Discovered tools')).toBeInTheDocument();
+      expect(screen.getByTestId('data-testid chat-discovered-tool-chip-mcp-grafana_alerting_rules_read')).toBeInTheDocument();
+    });
+
+    it('should not render the discovered tools row when the agent searched nothing', () => {
+      const message: ChatMessageType = {
+        role: 'assistant',
+        content: 'Just text response',
+      };
+
+      render(<ChatMessage message={message} />);
+
+      expect(screen.queryByLabelText('Discovered tools')).not.toBeInTheDocument();
+    });
+
     it('should not render tool calls section when no tool calls', () => {
       const message: ChatMessageType = {
         role: 'assistant',
