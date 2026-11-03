@@ -116,6 +116,14 @@ type LoopRequest struct {
 	// before the loop runs. Used to hide graphiti write tools from user sessions.
 	ExcludeToolNames []string
 
+	// ToolSearch controls on-demand tool discovery (see search_tools.go). The
+	// zero value is auto mode: discovery turns on when the tool definitions
+	// exceed the token budget.
+	ToolSearch ToolSearchConfig
+	// toolRuntime is the per-run discovery state, created by Run and shared
+	// with the tool executors through this request.
+	toolRuntime *toolRuntime
+
 	// MCPServers carries per-server tool-selection settings, used to honor the
 	// user's Manage Tools choices inside the agent loop (not just at HTTP edges).
 	MCPServers []mcp.ServerConfig
@@ -166,12 +174,17 @@ func (a *AgentLoop) Run(ctx context.Context, req LoopRequest, eventCh chan<- SSE
 		}
 		mcpTools = filtered
 	}
-	openAITools := ConvertMCPToolsToOpenAI(mcpTools)
+	toolRT := newToolRuntime(mcpTools, req.ToolSearch)
+	req.toolRuntime = toolRT
+	openAITools := toolRT.OpenAITools()
 	if len(req.AvailableSkills) > 0 && req.LoadSkill != nil {
 		openAITools = append(openAITools, loadSkillToolSpec(req.AvailableSkills))
 	}
 
 	messages := BuildContextWindow(req.SystemPrompt, req.Messages, req.Summary, req.RecentMessageCount)
+	if catalog := toolRT.Catalog(); catalog != "" {
+		messages = injectSystemContext(messages, catalog)
+	}
 
 	if req.RunID != "" {
 		a.send(ctx, eventCh, SSEEvent{
@@ -285,6 +298,13 @@ func (a *AgentLoop) Run(ctx context.Context, req LoopRequest, eventCh chan<- SSE
 	}, func(toolCallID string) bool {
 		return toolResultIsError[toolCallID]
 	})
+	// The activated set changes between iterations (search_tools), so rebuild
+	// the definitions and let trimming account for the current list rather
+	// than the one captured before the loop.
+	openAITools = toolRT.OpenAITools()
+	if len(req.AvailableSkills) > 0 && req.LoadSkill != nil {
+		openAITools = append(openAITools, loadSkillToolSpec(req.AvailableSkills))
+	}
 	messages = TrimMessagesToTokenLimit(messages, openAITools, promptBudget, limits)
 
 		a.logger.Debug("Agent loop iteration",
@@ -527,13 +547,18 @@ func (a *AgentLoop) Run(ctx context.Context, req LoopRequest, eventCh chan<- SSE
 			}
 			toolCallCount++
 			sigs[i] = canonicalToolSignature(tc.Function.Name, tc.Function.Arguments)
-			if hit, exact := stall.checkExact(sigs[i]); exact {
-				cachedHits[i] = hit
-				skipped[i] = true
-				stall.noteRepetition()
-			} else {
-				// observe counts near-duplicates itself; do not double-count.
-				stall.observe(tc.Function.Name, sigs[i])
+			// Meta-tools are never replayed: search_tools activates tool
+			// definitions and load_skill activates a skill, so a cached reply
+			// would skip the state change the model asked for.
+			if !isMetaTool(tc.Function.Name) {
+				if hit, exact := stall.checkExact(sigs[i]); exact {
+					cachedHits[i] = hit
+					skipped[i] = true
+					stall.noteRepetition()
+				} else {
+					// observe counts near-duplicates itself; do not double-count.
+					stall.observe(tc.Function.Name, sigs[i])
+				}
 			}
 
 			a.send(ctx, eventCh, SSEEvent{
@@ -625,7 +650,7 @@ func (a *AgentLoop) Run(ctx context.Context, req LoopRequest, eventCh chan<- SSE
 			// Cap each result at ingestion: an oversized result would otherwise ride
 			// along in every subsequent prompt until the whole window overflows.
 			llmContent = capToolResultAtIngestion(llmContent, limits.MaxToolResponseTokens)
-			if !isError {
+			if !isError && !isMetaTool(tc.Function.Name) {
 				// Expose the call id so final-report evidenceIds can cite it.
 				evID := evidenceIDFor(len(evidenceIDs) + 1)
 				evidenceIDs[evID] = true
@@ -644,7 +669,7 @@ func (a *AgentLoop) Run(ctx context.Context, req LoopRequest, eventCh chan<- SSE
 			// never LLM-summarized (see evictStaleToolResults), so skip them;
 			// likewise replayed duplicates (the original result is already in
 			// history) and runs where the admin disabled eviction summaries.
-			if !isError && !skipped[i] && !limits.ToolCallSummarizationDisabled {
+			if !isError && !skipped[i] && !isMetaTool(tc.Function.Name) && !limits.ToolCallSummarizationDisabled {
 				future := newToolResultSummaryFuture()
 				pendingSummaries[tc.ID] = future
 				toolName, toolResultContent := tc.Function.Name, toolContent
@@ -663,8 +688,9 @@ func (a *AgentLoop) Run(ctx context.Context, req LoopRequest, eventCh chan<- SSE
 				})
 			}
 			// Evidence events carry real tool outputs to the UI; replayed
-			// duplicates add nothing new and would inflate the evidence list.
-			if !isError && !skipped[i] && tc.Function.Name != loadSkillToolName {
+			// duplicates add nothing new and would inflate the evidence list,
+			// and meta-tools produce no data at all.
+			if !isError && !skipped[i] && !isMetaTool(tc.Function.Name) {
 				a.send(ctx, eventCh, SSEEvent{
 					Type: "evidence",
 					Data: EvidenceEvent{
@@ -685,7 +711,7 @@ func (a *AgentLoop) Run(ctx context.Context, req LoopRequest, eventCh chan<- SSE
 		// final answer with a shortened remaining budget (see stall.go).
 		madeProgress := false
 		for i := range msg.ToolCalls {
-			if skipped[i] || results[i].isError || results[i].content == "" {
+			if skipped[i] || results[i].isError || results[i].content == "" || isMetaTool(msg.ToolCalls[i].Function.Name) {
 				continue
 			}
 			madeProgress = true
@@ -900,7 +926,9 @@ func (a *AgentLoop) batchParallelizable(calls []ToolCall, req LoopRequest) bool 
 		return false
 	}
 	for _, tc := range calls {
-		if tc.Function.Name == loadSkillToolName {
+		// search_tools mutates the run's activated set and load_skill mutates
+		// skill state; both must stay on the loop goroutine.
+		if tc.Function.Name == searchToolsToolName || tc.Function.Name == loadSkillToolName {
 			return false
 		}
 		tool, found := a.mcpProxy.FindToolByName(tc.Function.Name)
@@ -920,6 +948,9 @@ func (a *AgentLoop) batchParallelizable(calls []ToolCall, req LoopRequest) bool 
 // load_skill tool goes to the skill registry, everything else through the
 // approval gate.
 func (a *AgentLoop) executeToolCall(ctx context.Context, eventCh chan<- SSEEvent, tc ToolCall, req LoopRequest) (content string, isError bool, errorKind string) {
+	if tc.Function.Name == searchToolsToolName && req.toolRuntime != nil && req.toolRuntime.Enabled() {
+		return a.executeSearchTools(ctx, tc, req)
+	}
 	if tc.Function.Name == loadSkillToolName && req.LoadSkill != nil {
 		return a.executeLoadSkill(ctx, tc, req)
 	}

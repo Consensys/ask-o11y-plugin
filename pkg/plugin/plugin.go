@@ -139,6 +139,11 @@ type PluginSettings struct {
 	MaxHighVolumeToolResponseTokens        int  `json:"maxHighVolumeToolResponseTokens,omitempty"`
 	AggressiveHighVolumeToolResponseTokens int  `json:"aggressiveHighVolumeToolResponseTokens,omitempty"`
 	ToolCallSummarizationDisabled          bool `json:"toolCallSummarizationDisabled,omitempty"`
+
+	// ToolSearch configures on-demand tool discovery (search_tools). The zero
+	// value is auto mode: discovery turns on when the tool definitions exceed
+	// the token budget.
+	ToolSearch agent.ToolSearchConfig `json:"toolSearch,omitempty"`
 }
 
 const mcpServerHeaderPrefix = "mcpServerHeader."
@@ -1149,6 +1154,7 @@ func (p *Plugin) handleAgentRun(w http.ResponseWriter, r *http.Request) {
 		ApprovalPolicy:       p.settings.ApprovalPolicy,
 		MaxParallelToolCalls: p.settings.MaxParallelToolCalls,
 		ServiceTopology:      toolCtx.ServiceTopology,
+		ToolSearch:           p.settings.ToolSearch,
 		RegisterApproval:     p.approvalRegistrar(runID),
 		CheckApprovalGrant:   p.approvalGrantChecker(sessionID),
 	}
@@ -2140,6 +2146,7 @@ func (p *Plugin) handleGraphitiDiscover(w http.ResponseWriter, r *http.Request) 
 		MCPServers:         p.settingsForFilter(),
 		ConversationType:   "discovery",
 		ApprovalPolicy:     "off",
+		ToolSearch:         p.settings.ToolSearch,
 	}
 
 	eventCh := make(chan agent.SSEEvent, GraphitiDiscoveryMaxIter*6)

@@ -199,6 +199,7 @@ func (s *Scout) Scavenge() {
 		ExcludeToolNames:   graphitiWriteToolNames,
 		ConversationType:   "discovery",
 		ApprovalPolicy:     "off",
+		ToolSearch:         s.settings.ToolSearch,
 	}
 
 	eventCh := make(chan agent.SSEEvent, GraphitiDiscoveryMaxIter*6)
