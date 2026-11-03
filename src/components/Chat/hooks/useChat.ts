@@ -20,6 +20,7 @@ import {
   type RunStartedEvent,
   type ToolCallStartEvent,
   type ToolCallResultEvent,
+  type ToolsActivatedEvent,
 } from '../../../services/agentClient';
 import { getSession } from '../../../services/backendSessionClient';
 import type { AppPluginSettings } from '../../../types/plugin';
@@ -312,6 +313,22 @@ export function useChat(
             ...msg,
             skills: event.skills?.map((skill) => ({ name: skill.name, description: skill.description })),
           }))
+        );
+      },
+      onToolsActivated: (event: ToolsActivatedEvent) => {
+        if (abortController.signal.aborted || !event.tools?.length) {
+          return;
+        }
+        setChatHistory((prev) =>
+          updateLastAssistantMessage(prev, (msg) => {
+            const current = msg.discoveredTools ?? [];
+            const known = new Set(current.map((tool) => tool.name));
+            const added = event.tools.filter((tool) => !known.has(tool.name));
+            if (added.length === 0) {
+              return msg;
+            }
+            return { ...msg, discoveredTools: [...current, ...added] };
+          })
         );
       },
       onReconnect: () => {

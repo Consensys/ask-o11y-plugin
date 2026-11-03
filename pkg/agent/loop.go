@@ -949,7 +949,7 @@ func (a *AgentLoop) batchParallelizable(calls []ToolCall, req LoopRequest) bool 
 // approval gate.
 func (a *AgentLoop) executeToolCall(ctx context.Context, eventCh chan<- SSEEvent, tc ToolCall, req LoopRequest) (content string, isError bool, errorKind string) {
 	if tc.Function.Name == searchToolsToolName && req.toolRuntime != nil && req.toolRuntime.Enabled() {
-		return a.executeSearchTools(ctx, tc, req)
+		return a.executeSearchTools(ctx, eventCh, tc, req)
 	}
 	if tc.Function.Name == loadSkillToolName && req.LoadSkill != nil {
 		return a.executeLoadSkill(ctx, tc, req)

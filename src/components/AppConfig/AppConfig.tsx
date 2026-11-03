@@ -116,6 +116,9 @@ type State = {
   maxHighVolumeToolResponseTokens: number;
   aggressiveHighVolumeToolResponseTokens: number;
   toolCallSummarizationDisabled: boolean;
+  toolSearchMode: string;
+  toolSearchBudgetTokens: number;
+  toolSearchAlwaysInclude: string;
 };
 
 type ValidationErrors = {
@@ -142,6 +145,14 @@ const DEFAULT_MAX_TOOL_RESPONSE_TOKENS = 8000;
 const DEFAULT_AGGRESSIVE_TOOL_RESPONSE_TOKENS = 2000;
 const DEFAULT_MAX_HIGH_VOLUME_TOOL_RESPONSE_TOKENS = 3000;
 const DEFAULT_AGGRESSIVE_HIGH_VOLUME_TOOL_RESPONSE_TOKENS = 800;
+const DEFAULT_TOOL_SEARCH_MODE = 'auto';
+const DEFAULT_TOOL_SEARCH_BUDGET_TOKENS = 6000;
+const TOOL_SEARCH_BUDGET_TOKENS_LIMIT = 100000;
+const TOOL_SEARCH_MODES = [
+  { label: 'Auto', value: 'auto', description: 'Turn discovery on only when the tool definitions exceed the budget' },
+  { label: 'On', value: 'on', description: 'Always discover tools on demand' },
+  { label: 'Off', value: 'off', description: 'Always send every tool definition' },
+];
 const KEEP_RECENT_TOOL_RESULTS_LIMIT = 100;
 const TOOL_RESPONSE_TOKENS_LIMIT = 100000;
 const DEFAULT_TOPOLOGY_QUERY = 'service topology dependencies incidents upstream downstream';
@@ -310,6 +321,9 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
     aggressiveHighVolumeToolResponseTokens:
       jsonData?.aggressiveHighVolumeToolResponseTokens || DEFAULT_AGGRESSIVE_HIGH_VOLUME_TOOL_RESPONSE_TOKENS,
     toolCallSummarizationDisabled: jsonData?.toolCallSummarizationDisabled ?? false,
+    toolSearchMode: jsonData?.toolSearch?.mode || DEFAULT_TOOL_SEARCH_MODE,
+    toolSearchBudgetTokens: jsonData?.toolSearch?.budgetTokens || DEFAULT_TOOL_SEARCH_BUDGET_TOKENS,
+    toolSearchAlwaysInclude: (jsonData?.toolSearch?.alwaysInclude ?? []).join(', '),
   });
   const [validationErrors, setValidationErrors] = useState<ValidationErrors>({
     mcpServers: {},
@@ -389,6 +403,10 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
     state.maxHighVolumeToolResponseTokens > TOOL_RESPONSE_TOKENS_LIMIT ||
     state.aggressiveHighVolumeToolResponseTokens < 1 ||
     state.aggressiveHighVolumeToolResponseTokens > TOOL_RESPONSE_TOKENS_LIMIT;
+  const isToolSearchInvalid =
+    !['off', 'auto', 'on'].includes(state.toolSearchMode) ||
+    state.toolSearchBudgetTokens < 1 ||
+    state.toolSearchBudgetTokens > TOOL_SEARCH_BUDGET_TOKENS_LIMIT;
   const isServiceGraphSettingsDisabled =
     state.serviceGraphMaxNodes < 1 ||
     state.serviceGraphMaxNodes > SERVICE_GRAPH_MAX_NODES_LIMIT ||
@@ -450,7 +468,10 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
         state.aggressiveHighVolumeToolResponseTokens !==
           (savedJsonData.aggressiveHighVolumeToolResponseTokens ||
             DEFAULT_AGGRESSIVE_HIGH_VOLUME_TOOL_RESPONSE_TOKENS) ||
-        state.toolCallSummarizationDisabled !== (savedJsonData.toolCallSummarizationDisabled ?? false),
+        state.toolCallSummarizationDisabled !== (savedJsonData.toolCallSummarizationDisabled ?? false) ||
+        state.toolSearchMode !== (savedJsonData.toolSearch?.mode || DEFAULT_TOOL_SEARCH_MODE) ||
+        state.toolSearchBudgetTokens !== (savedJsonData.toolSearch?.budgetTokens || DEFAULT_TOOL_SEARCH_BUDGET_TOKENS) ||
+        state.toolSearchAlwaysInclude !== ((savedJsonData.toolSearch?.alwaysInclude ?? []).join(', ') || ''),
       mcp: mcpDirty,
       'service-graph':
         state.graphitiScanInterval !== (savedJsonData.graphitiScanInterval || 'off') ||
@@ -954,7 +975,7 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
   }
 
   function onSubmitAgentRuntimeSettings() {
-    if (isAgentRuntimeDisabled || isContextManagementInvalid) {
+    if (isAgentRuntimeDisabled || isContextManagementInvalid || isToolSearchInvalid) {
       return;
     }
 
@@ -972,6 +993,15 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
         maxHighVolumeToolResponseTokens: state.maxHighVolumeToolResponseTokens,
         aggressiveHighVolumeToolResponseTokens: state.aggressiveHighVolumeToolResponseTokens,
         toolCallSummarizationDisabled: state.toolCallSummarizationDisabled,
+        toolSearch: {
+          ...savedJsonData.toolSearch,
+          mode: state.toolSearchMode as 'off' | 'auto' | 'on',
+          budgetTokens: state.toolSearchBudgetTokens,
+          alwaysInclude: state.toolSearchAlwaysInclude
+            .split(',')
+            .map((name) => name.trim())
+            .filter(Boolean),
+        },
       },
     });
   }
@@ -1201,6 +1231,60 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
                 onChange={(e) => setState({ ...state, toolCallSummarizationDisabled: !e.currentTarget.checked })}
               />
             </Field>
+
+            <FieldSet label="Tool discovery">
+              <Field
+                label="Mode"
+                description="Without discovery every MCP tool definition is sent with every request, which costs tokens per tool. Discovery sends one small search_tools tool and activates only the tools the model asks for."
+              >
+                <div data-testid={testIds.appConfig.toolSearchMode}>
+                  <RadioButtonGroup
+                    options={TOOL_SEARCH_MODES.map(({ label, value }) => ({ label, value }))}
+                    value={state.toolSearchMode}
+                    onChange={(value) => setState({ ...state, toolSearchMode: value })}
+                  />
+                </div>
+              </Field>
+
+              {state.toolSearchMode === 'auto' && (
+                <Field
+                  label="Discovery threshold (tokens)"
+                  description={`Discovery turns on only when the tool definitions exceed this many tokens (default: ${DEFAULT_TOOL_SEARCH_BUDGET_TOKENS})`}
+                  className="mt-2"
+                  invalid={state.toolSearchBudgetTokens < 1 || state.toolSearchBudgetTokens > TOOL_SEARCH_BUDGET_TOKENS_LIMIT}
+                  error={`Enter a value from 1 to ${TOOL_SEARCH_BUDGET_TOKENS_LIMIT}`}
+                >
+                  <Input
+                    width={20}
+                    name="toolSearchBudgetTokens"
+                    type="number"
+                    min={1}
+                    max={TOOL_SEARCH_BUDGET_TOKENS_LIMIT}
+                    value={state.toolSearchBudgetTokens}
+                    onChange={onChange}
+                    data-testid={testIds.appConfig.toolSearchBudget}
+                    invalid={
+                      state.toolSearchBudgetTokens < 1 || state.toolSearchBudgetTokens > TOOL_SEARCH_BUDGET_TOKENS_LIMIT
+                    }
+                  />
+                </Field>
+              )}
+
+              <Field
+                label="Always include tools"
+                description="Comma-separated tool names, or prefixes ending in *, that are sent even when discovery is on. Leave empty to discover every tool."
+                className="mt-2"
+              >
+                <Input
+                  width={60}
+                  name="toolSearchAlwaysInclude"
+                  value={state.toolSearchAlwaysInclude}
+                  onChange={onChange}
+                  placeholder="alerting_rules_read, mcp-grafana_*"
+                  data-testid={testIds.appConfig.toolSearchAlwaysInclude}
+                />
+              </Field>
+            </FieldSet>
 
             <Field
               label="Keep recent tool results"

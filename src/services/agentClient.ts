@@ -63,6 +63,18 @@ export interface RunStartedEvent {
   skills?: RunStartedSkill[];
 }
 
+/** A tool that a search_tools call made available for the run. */
+export interface ActivatedTool {
+  name: string;
+  description?: string;
+}
+
+export interface ToolsActivatedEvent {
+  query?: string;
+  tools: ActivatedTool[];
+  evicted?: string[];
+}
+
 export interface MCPUnavailableEvent {
   message: string;
 }
@@ -136,7 +148,8 @@ export type SSEEvent =
   | { type: 'evidence'; data: EvidenceEvent; sequence: number }
   | { type: 'approval_request'; data: ApprovalRequestEvent; sequence: number }
   | { type: 'approval_resolved'; data: ApprovalResolvedEvent; sequence: number }
-  | { type: 'final_report'; data: FinalReportEvent; sequence: number };
+  | { type: 'final_report'; data: FinalReportEvent; sequence: number }
+  | { type: 'tools_activated'; data: ToolsActivatedEvent; sequence: number };
 
 export interface AgentCallbacks {
   onContent: (event: ContentEvent) => void;
@@ -147,6 +160,7 @@ export interface AgentCallbacks {
   onRunStarted?: (event: RunStartedEvent) => void;
   onReconnect?: () => void;
   onMCPUnavailable?: (event: MCPUnavailableEvent) => void;
+  onToolsActivated?: (event: ToolsActivatedEvent) => void;
   onEvidence?: (event: EvidenceEvent) => void;
   onApprovalRequest?: (event: ApprovalRequestEvent) => void;
   onApprovalResolved?: (event: ApprovalResolvedEvent) => void;
@@ -315,6 +329,9 @@ function dispatchEvent(event: SSEEvent, callbacks: AgentCallbacks): void {
       break;
     case 'final_report':
       callbacks.onFinalReport?.(event.data);
+      break;
+    case 'tools_activated':
+      callbacks.onToolsActivated?.(event.data);
       break;
     default:
       break;

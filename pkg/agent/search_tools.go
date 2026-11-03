@@ -334,9 +334,17 @@ type activatedTool struct {
 	Description string `json:"description,omitempty"`
 }
 
+// ToolsActivatedEvent tells the UI which tools a search_tools call made
+// available, so the user can see the discovery step.
+type ToolsActivatedEvent struct {
+	Query   string          `json:"query,omitempty"`
+	Tools   []activatedTool `json:"tools"`
+	Evicted []string        `json:"evicted,omitempty"`
+}
+
 // executeSearchTools serves the internal search_tools call and records the
 // activation on the run runtime.
-func (a *AgentLoop) executeSearchTools(ctx context.Context, tc ToolCall, req LoopRequest) (string, bool, string) {
+func (a *AgentLoop) executeSearchTools(ctx context.Context, eventCh chan<- SSEEvent, tc ToolCall, req LoopRequest) (string, bool, string) {
 	rt := req.toolRuntime
 	if rt == nil || !rt.Enabled() {
 		return "Tool discovery is not enabled for this run; call the tools directly by name.", true, "tool"
@@ -365,18 +373,24 @@ func (a *AgentLoop) executeSearchTools(ctx context.Context, tc ToolCall, req Loo
 	for _, name := range added {
 		addedSet[name] = true
 	}
+	event := ToolsActivatedEvent{Query: args.Query, Evicted: evicted}
 	for _, match := range matches {
 		if !rt.activeIn[match.Name] {
 			continue
 		}
 		if addedSet[match.Name] {
-			res.Activated = append(res.Activated, activatedTool{
+			info := activatedTool{
 				Name:        match.Name,
 				Description: truncateText(match.Description, searchToolsDescriptionChars),
-			})
+			}
+			res.Activated = append(res.Activated, info)
+			event.Tools = append(event.Tools, info)
 			continue
 		}
 		res.AlreadyActive = append(res.AlreadyActive, match.Name)
+	}
+	if len(event.Tools) > 0 {
+		a.send(ctx, eventCh, SSEEvent{Type: "tools_activated", Data: event})
 	}
 	switch {
 	case len(res.Activated) > 0:
