@@ -116,6 +116,14 @@ type LoopRequest struct {
 	// before the loop runs. Used to hide graphiti write tools from user sessions.
 	ExcludeToolNames []string
 
+	// ToolSearch controls on-demand tool discovery (see search_tools.go). The
+	// zero value is auto mode: discovery turns on when the tool definitions
+	// exceed the token budget.
+	ToolSearch ToolSearchConfig
+	// toolRuntime is the per-run discovery state, created by Run and shared
+	// with the tool executors through this request.
+	toolRuntime *toolRuntime
+
 	// MCPServers carries per-server tool-selection settings, used to honor the
 	// user's Manage Tools choices inside the agent loop (not just at HTTP edges).
 	MCPServers []mcp.ServerConfig
@@ -166,12 +174,17 @@ func (a *AgentLoop) Run(ctx context.Context, req LoopRequest, eventCh chan<- SSE
 		}
 		mcpTools = filtered
 	}
-	openAITools := ConvertMCPToolsToOpenAI(mcpTools)
+	toolRT := newToolRuntime(mcpTools, req.ToolSearch)
+	req.toolRuntime = toolRT
+	openAITools := toolRT.OpenAITools()
 	if len(req.AvailableSkills) > 0 && req.LoadSkill != nil {
 		openAITools = append(openAITools, loadSkillToolSpec(req.AvailableSkills))
 	}
 
 	messages := BuildContextWindow(req.SystemPrompt, req.Messages, req.Summary, req.RecentMessageCount)
+	if catalog := toolRT.Catalog(); catalog != "" {
+		messages = injectSystemContext(messages, catalog)
+	}
 
 	if req.RunID != "" {
 		a.send(ctx, eventCh, SSEEvent{
@@ -285,6 +298,13 @@ func (a *AgentLoop) Run(ctx context.Context, req LoopRequest, eventCh chan<- SSE
 	}, func(toolCallID string) bool {
 		return toolResultIsError[toolCallID]
 	})
+	// The activated set changes between iterations (search_tools), so rebuild
+	// the definitions and let trimming account for the current list rather
+	// than the one captured before the loop.
+	openAITools = toolRT.OpenAITools()
+	if len(req.AvailableSkills) > 0 && req.LoadSkill != nil {
+		openAITools = append(openAITools, loadSkillToolSpec(req.AvailableSkills))
+	}
 	messages = TrimMessagesToTokenLimit(messages, openAITools, promptBudget, limits)
 
 		a.logger.Debug("Agent loop iteration",
@@ -900,7 +920,9 @@ func (a *AgentLoop) batchParallelizable(calls []ToolCall, req LoopRequest) bool 
 		return false
 	}
 	for _, tc := range calls {
-		if tc.Function.Name == loadSkillToolName {
+		// search_tools mutates the run's activated set and load_skill mutates
+		// skill state; both must stay on the loop goroutine.
+		if tc.Function.Name == searchToolsToolName || tc.Function.Name == loadSkillToolName {
 			return false
 		}
 		tool, found := a.mcpProxy.FindToolByName(tc.Function.Name)
@@ -920,6 +942,9 @@ func (a *AgentLoop) batchParallelizable(calls []ToolCall, req LoopRequest) bool 
 // load_skill tool goes to the skill registry, everything else through the
 // approval gate.
 func (a *AgentLoop) executeToolCall(ctx context.Context, eventCh chan<- SSEEvent, tc ToolCall, req LoopRequest) (content string, isError bool, errorKind string) {
+	if tc.Function.Name == searchToolsToolName && req.toolRuntime != nil && req.toolRuntime.Enabled() {
+		return a.executeSearchTools(ctx, tc, req)
+	}
 	if tc.Function.Name == loadSkillToolName && req.LoadSkill != nil {
 		return a.executeLoadSkill(ctx, tc, req)
 	}
