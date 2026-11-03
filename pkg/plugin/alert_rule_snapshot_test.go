@@ -316,3 +316,63 @@ func TestAlertRuleSnapshot_CachedMissReportsMissed(t *testing.T) {
 		t.Fatalf("cached failed lookup must not claim a miss, got %q missed=%v", got, missed)
 	}
 }
+
+func TestFindAlertingRulesToolName(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		tools     []string
+		wantName  string
+		wantFound bool
+	}{
+		{
+			name:      "mcp-grafana v2 read tool behind a server prefix",
+			tools:     []string{"mcp-grafana_search_dashboards", "mcp-grafana_alerting_rules_read"},
+			wantName:  "mcp-grafana_alerting_rules_read",
+			wantFound: true,
+		},
+		{
+			name:      "mcp-grafana v1 combined tool behind a server prefix",
+			tools:     []string{"grafana_alerting_manage_rules"},
+			wantName:  "grafana_alerting_manage_rules",
+			wantFound: true,
+		},
+		{
+			name:      "unprefixed v2 read tool",
+			tools:     []string{"alerting_rules_read"},
+			wantName:  "alerting_rules_read",
+			wantFound: true,
+		},
+		{
+			name:      "v2 preferred when both versions are served",
+			tools:     []string{"grafana_alerting_manage_rules", "mcp-grafana_alerting_rules_read"},
+			wantName:  "mcp-grafana_alerting_rules_read",
+			wantFound: true,
+		},
+		{
+			name:      "server id containing underscores",
+			tools:     []string{"my_grafana_server_alerting_rules_read"},
+			wantName:  "my_grafana_server_alerting_rules_read",
+			wantFound: true,
+		},
+		{
+			name:      "write variant alone is not a list tool",
+			tools:     []string{"mcp-grafana_alerting_rules_write"},
+			wantFound: false,
+		},
+		{
+			name:      "no alerting tools at all",
+			tools:     []string{"mcp-grafana_search_dashboards"},
+			wantFound: false,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, found := findAlertingRulesToolName(tc.tools)
+			if found != tc.wantFound {
+				t.Fatalf("found = %v, want %v", found, tc.wantFound)
+			}
+			if got != tc.wantName {
+				t.Errorf("name = %q, want %q", got, tc.wantName)
+			}
+		})
+	}
+}

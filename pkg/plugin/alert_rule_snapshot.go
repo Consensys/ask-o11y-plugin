@@ -19,9 +19,9 @@ import (
 //   - Textual hints (the metric-namespace snapshot) measurably do NOT change
 //     agent behavior — only exact values do. So this block carries the rule's
 //     real expressions, exact metric names, and label matchers.
-//   - label_selectors on alerting_manage_rules matches rule LABELS only, and
-//     ruler rules do not carry an alertname label (the rule name IS the
-//     alertname) — so rule lookup must match by title client-side, here.
+//   - label_selectors on the alerting rules list tool matches rule LABELS
+//     only, and ruler rules do not carry an alertname label (the rule name IS
+//     the alertname) — so rule lookup must match by title client-side, here.
 //   - search_rule_name is dropped by mcp-grafana 1.3.0 on the datasource path
 //     (fixed client-side in 1.4.0 / PR #1161). Passing it is harmless on both
 //     and shrinks internal payloads on 1.4.0; on 1.3.0 this code filters by
@@ -650,15 +650,33 @@ func sortStrings(s []string) {
 	sort.Strings(s)
 }
 
+// alertingRulesToolNames are the tools that list alert rules, newest first.
+// mcp-grafana v2 replaced alerting_manage_rules with an alerting_rules_read /
+// alerting_rules_write pair; the read tool keeps the same list operation and
+// response shape. Servers prefix tool names with their server ID, so match on
+// the suffix.
+var alertingRulesToolNames = []string{"alerting_rules_read", "alerting_manage_rules"}
+
 func (p *Plugin) findAlertingRulesTool() (string, bool) {
 	tools, err := p.mcpProxy.ListTools()
 	if err != nil {
 		return "", false
 	}
+	names := make([]string, 0, len(tools))
 	for _, t := range tools {
-		parts := strings.SplitN(t.Name, "_", 2)
-		if len(parts) == 2 && parts[1] == "alerting_manage_rules" {
-			return t.Name, true
+		names = append(names, t.Name)
+	}
+	return findAlertingRulesToolName(names)
+}
+
+// findAlertingRulesToolName returns the first tool name that lists alert rules,
+// preferring the mcp-grafana v2 read tool over the v1 combined tool.
+func findAlertingRulesToolName(toolNames []string) (string, bool) {
+	for _, want := range alertingRulesToolNames {
+		for _, name := range toolNames {
+			if name == want || strings.HasSuffix(name, "_"+want) {
+				return name, true
+			}
 		}
 	}
 	return "", false
