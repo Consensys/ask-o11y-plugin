@@ -202,16 +202,44 @@ func (p *Proxy) NewStandaloneClient(id string) (*Client, bool) {
 	return c, true
 }
 
+// ServerIDForTool returns the ID of the registered server that owns toolName.
+// Tool names are "<serverID>_<toolName>" (see Client.ListToolsWithContext), and
+// server IDs may themselves contain underscores, so resolve the longest
+// registered ID prefix rather than splitting the name at the first underscore.
+func (p *Proxy) ServerIDForTool(toolName string) (string, bool) {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+
+	best := ""
+	for id := range p.clients {
+		if len(id) > len(best) && strings.HasPrefix(toolName, id+"_") {
+			best = id
+		}
+	}
+	return best, best != ""
+}
+
 // CallToolWithContext routes a tool call to the appropriate MCP server with additional context (e.g., Org ID, Org Name, Scope Org ID).
 // ctx carries the Grafana user ID (via mcp.WithUserID) for servers using per-user OAuth.
 func (p *Proxy) CallToolWithContext(ctx context.Context, toolName string, arguments map[string]interface{}, orgID string, orgName string, scopeOrgId string) (*CallToolResult, error) {
-	// Extract server ID from tool name prefix
-	parts := strings.SplitN(toolName, "_", 2)
-	if len(parts) < 2 {
-		return nil, fmt.Errorf("invalid tool name format: %s (expected serverid_toolname)", toolName)
+	serverID, found := p.ServerIDForTool(toolName)
+	if !found {
+		// No registered server claims this tool. Report the conventional prefix
+		// so the caller sees the server ID it probably meant.
+		prefix, _, hasSeparator := strings.Cut(toolName, "_")
+		if !hasSeparator {
+			return nil, fmt.Errorf("invalid tool name format: %s (expected serverid_toolname)", toolName)
+		}
+		return &CallToolResult{
+			Content: []ContentBlock{
+				{
+					Type: "text",
+					Text: fmt.Sprintf("Server not found: %s", prefix),
+				},
+			},
+			IsError: true,
+		}, nil
 	}
-
-	serverID := parts[0]
 
 	p.mu.RLock()
 	client, exists := p.clients[serverID]

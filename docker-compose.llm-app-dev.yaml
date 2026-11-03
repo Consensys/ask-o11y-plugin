@@ -1,0 +1,27 @@
+# Override on top of docker-compose.dev.yaml: mount a locally built
+# grafana-llm-app instead of the catalog version, so the built-in MCP path
+# (asko11y -> grafana-llm-app -> mcp-grafana library) can be tested against
+# local code.
+#
+#   LLM_APP_DIST=~/Workspace/archives/grafana-llm-app/packages/grafana-llm-app/dist \
+#     docker compose -f docker-compose.dev.yaml -f docker-compose.llm-app-dev.yaml up -d
+#
+# Build the llm-app backend for the container arch first:
+#   cd <llm-app>/packages/grafana-llm-app && mage -v build:linuxARM64
+#
+# Note: the mounted grafana-llm-app is unsigned, hence both ids in
+# GF_PLUGINS_ALLOW_LOADING_UNSIGNED_PLUGINS, and GF_INSTALL_PLUGINS is emptied so
+# the catalog copy cannot land in the same directory.
+services:
+  grafana:
+    volumes: !override
+      - ./dist:/var/lib/grafana/plugins/consensys-asko11y-app
+      - ${LLM_APP_DIST:-/tmp/grafana-llm-app-dist}:/var/lib/grafana/plugins/grafana-llm-app
+      - ./dev/provisioning:/etc/grafana/provisioning
+      - ./provisioning/dashboards:/var/lib/grafana/dashboards/asko11y:ro
+      - ${DEV_CA_BUNDLE:-/etc/ssl/cert.pem}:/etc/ssl/certs/ca-certificates.crt:ro
+    environment:
+      GF_INSTALL_PLUGINS: ''
+      GF_PLUGINS_ALLOW_LOADING_UNSIGNED_PLUGINS: consensys-asko11y-app,grafana-llm-app
+      GF_DEFAULT_APP_MODE: development
+      GF_LOG_FILTERS: plugin.consensys-asko11y-app:debug plugin.grafana-llm-app:debug

@@ -16,7 +16,6 @@ apps:
           dashboard: false
           oncall: false
           asserts: false
-          sift: false
       enableDevSandbox: true
       provider: anthropic
       models:

@@ -1,9 +1,18 @@
 package plugin
 
 import (
+	"consensys-asko11y-app/pkg/mcp"
+	"context"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
+
+	"github.com/grafana/grafana-plugin-sdk-go/backend/log"
 )
 
 func TestExtractAlertNameForSnapshot(t *testing.T) {
@@ -314,5 +323,155 @@ func TestAlertRuleSnapshot_CachedMissReportsMissed(t *testing.T) {
 	p.storeAlertRuleCache("1\x00Flaky", "", arMissTTL)
 	if got, missed := p.alertRuleSnapshot("Flaky", "1", "org", ""); got != "" || missed {
 		t.Fatalf("cached failed lookup must not claim a miss, got %q missed=%v", got, missed)
+	}
+}
+
+func TestFindAlertingRulesToolName(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		tools     []string
+		wantName  string
+		wantFound bool
+	}{
+		{
+			name:      "mcp-grafana v2 read tool behind a server prefix",
+			tools:     []string{"mcp-grafana_search_dashboards", "mcp-grafana_alerting_rules_read"},
+			wantName:  "mcp-grafana_alerting_rules_read",
+			wantFound: true,
+		},
+		{
+			name:      "mcp-grafana v1 combined tool behind a server prefix",
+			tools:     []string{"grafana_alerting_manage_rules"},
+			wantName:  "grafana_alerting_manage_rules",
+			wantFound: true,
+		},
+		{
+			name:      "unprefixed v2 read tool",
+			tools:     []string{"alerting_rules_read"},
+			wantName:  "alerting_rules_read",
+			wantFound: true,
+		},
+		{
+			name:      "v2 preferred when both versions are served",
+			tools:     []string{"grafana_alerting_manage_rules", "mcp-grafana_alerting_rules_read"},
+			wantName:  "mcp-grafana_alerting_rules_read",
+			wantFound: true,
+		},
+		{
+			name:      "server id containing underscores",
+			tools:     []string{"my_grafana_server_alerting_rules_read"},
+			wantName:  "my_grafana_server_alerting_rules_read",
+			wantFound: true,
+		},
+		{
+			name:      "write variant alone is not a list tool",
+			tools:     []string{"mcp-grafana_alerting_rules_write"},
+			wantFound: false,
+		},
+		{
+			name:      "no alerting tools at all",
+			tools:     []string{"mcp-grafana_search_dashboards"},
+			wantFound: false,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, found := findAlertingRulesToolName(tc.tools)
+			if found != tc.wantFound {
+				t.Fatalf("found = %v, want %v", found, tc.wantFound)
+			}
+			if got != tc.wantName {
+				t.Errorf("name = %q, want %q", got, tc.wantName)
+			}
+		})
+	}
+}
+
+// TestFetchAlertRuleSnapshot_RoutesUnderscoreServerID covers discovery through
+// execution: the v2 read tool is discovered behind a server ID that contains
+// underscores, and the prefetch must reach that same server. Resolving the
+// server ID by splitting the tool name at the first underscore sent the call
+// to server "my" instead, which silently disabled the prefetch.
+func TestFetchAlertRuleSnapshot_RoutesUnderscoreServerID(t *testing.T) {
+	const serverID = "my_grafana_server"
+
+	var (
+		mu    sync.Mutex
+		calls []string
+	)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/mcp/list-tools":
+			_ = json.NewEncoder(w).Encode(struct {
+				Tools []mcp.Tool `json:"tools"`
+			}{Tools: []mcp.Tool{
+				{Name: "alerting_rules_read", InputSchema: map[string]interface{}{}},
+			}})
+		case "/mcp/call-tool":
+			var req mcp.MCPRequest
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				t.Errorf("failed to decode request: %v", err)
+				return
+			}
+			var params mcp.CallToolParams
+			if err := json.Unmarshal(req.Params, &params); err != nil {
+				t.Errorf("failed to decode call params: %v", err)
+				return
+			}
+			operation, _ := params.Arguments["operation"].(string)
+			mu.Lock()
+			calls = append(calls, fmt.Sprintf("%s:%s", params.Name, operation))
+			mu.Unlock()
+
+			switch params.Name {
+			case "alerting_rules_read":
+				text := `[{"uid":"rule-1","title":"HighErrorRate","labels":{"severity":"critical"}}]`
+				if operation == "get" {
+					text = `{"data":[{"datasourceUid":"prom1","model":{"expr":"sum(rate(http_requests_total[5m])) > 0"}}]}`
+				}
+				_ = json.NewEncoder(w).Encode(mcp.CallToolResult{
+					Content: []mcp.ContentBlock{{Type: "text", Text: text}},
+				})
+			default:
+				t.Errorf("unexpected tool call: %s", params.Name)
+			}
+		default:
+			t.Errorf("unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	proxy := mcp.NewProxy(context.Background(), log.DefaultLogger)
+	if err := proxy.EnsureServer(mcp.ServerConfig{
+		ID: serverID, Name: "Grafana", URL: server.URL, Type: "standard", Enabled: true,
+	}); err != nil {
+		t.Fatalf("failed to configure proxy: %v", err)
+	}
+	defer proxy.Close()
+
+	p := &Plugin{logger: log.DefaultLogger, mcpProxy: proxy}
+
+	snapshot, searched := p.fetchAlertRuleSnapshot("HighErrorRate", "1", "Org", "")
+	if snapshot == "" {
+		t.Fatal("expected a snapshot from the underscore-ID server")
+	}
+	if !searched {
+		t.Error("expected the managed rule list to be reported as searched")
+	}
+	for _, want := range []string{"HighErrorRate", "http_requests_total", "prom1"} {
+		if !strings.Contains(snapshot, want) {
+			t.Errorf("snapshot missing %q\n---\n%s", want, snapshot)
+		}
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	want := []string{"alerting_rules_read:list", "alerting_rules_read:get"}
+	if len(calls) != len(want) {
+		t.Fatalf("tool calls = %v, want %v", calls, want)
+	}
+	for i := range want {
+		if calls[i] != want[i] {
+			t.Errorf("call %d = %q, want %q", i, calls[i], want[i])
+		}
 	}
 }
