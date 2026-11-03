@@ -9,6 +9,11 @@ jobs:
   validate:
     runs-on: ubuntu-latest
     steps:
+      - name: Wiz sensor
+        uses: Consensys/github-actions/wiz-sensor@c529b19afef5a8e2ff6993638a99a905de633ddb
+        with:
+          enabled: ${{ vars.WIZ_SENSOR_ENABLED }}
+          token: ${{ secrets.WIZ_SENSOR_TOKEN }}
       - uses: amannn/action-semantic-pull-request@e32d7e603df1aa1ba07e981f2a23455dee596825 # v5
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -8,6 +8,11 @@ jobs:
     outputs:
       code: ${{ steps.filter.outputs.code }}
     steps:
+      - name: Wiz sensor
+        uses: Consensys/github-actions/wiz-sensor@c529b19afef5a8e2ff6993638a99a905de633ddb
+        with:
+          enabled: ${{ vars.WIZ_SENSOR_ENABLED }}
+          token: ${{ secrets.WIZ_SENSOR_TOKEN }}
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
           persist-credentials: false
@@ -32,6 +37,11 @@ jobs:
     permissions:
       contents: read
     steps:
+      - name: Wiz sensor
+        uses: Consensys/github-actions/wiz-sensor@c529b19afef5a8e2ff6993638a99a905de633ddb
+        with:
+          enabled: ${{ vars.WIZ_SENSOR_ENABLED }}
+          token: ${{ secrets.WIZ_SENSOR_TOKEN }}
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
           persist-credentials: false
@@ -87,4 +97,9 @@ jobs:
     if: needs.check-changes.outputs.code == 'false'
     runs-on: ubuntu-latest
     steps:
+      - name: Wiz sensor
+        uses: Consensys/github-actions/wiz-sensor@c529b19afef5a8e2ff6993638a99a905de633ddb
+        with:
+          enabled: ${{ vars.WIZ_SENSOR_ENABLED }}
+          token: ${{ secrets.WIZ_SENSOR_TOKEN }}
       - run: echo "No code changes detected, skipping compatibility check (release-please PR)"
