@@ -547,13 +547,18 @@ func (a *AgentLoop) Run(ctx context.Context, req LoopRequest, eventCh chan<- SSE
 			}
 			toolCallCount++
 			sigs[i] = canonicalToolSignature(tc.Function.Name, tc.Function.Arguments)
-			if hit, exact := stall.checkExact(sigs[i]); exact {
-				cachedHits[i] = hit
-				skipped[i] = true
-				stall.noteRepetition()
-			} else {
-				// observe counts near-duplicates itself; do not double-count.
-				stall.observe(tc.Function.Name, sigs[i])
+			// Meta-tools are never replayed: search_tools activates tool
+			// definitions and load_skill activates a skill, so a cached reply
+			// would skip the state change the model asked for.
+			if !isMetaTool(tc.Function.Name) {
+				if hit, exact := stall.checkExact(sigs[i]); exact {
+					cachedHits[i] = hit
+					skipped[i] = true
+					stall.noteRepetition()
+				} else {
+					// observe counts near-duplicates itself; do not double-count.
+					stall.observe(tc.Function.Name, sigs[i])
+				}
 			}
 
 			a.send(ctx, eventCh, SSEEvent{
@@ -645,7 +650,7 @@ func (a *AgentLoop) Run(ctx context.Context, req LoopRequest, eventCh chan<- SSE
 			// Cap each result at ingestion: an oversized result would otherwise ride
 			// along in every subsequent prompt until the whole window overflows.
 			llmContent = capToolResultAtIngestion(llmContent, limits.MaxToolResponseTokens)
-			if !isError {
+			if !isError && !isMetaTool(tc.Function.Name) {
 				// Expose the call id so final-report evidenceIds can cite it.
 				evID := evidenceIDFor(len(evidenceIDs) + 1)
 				evidenceIDs[evID] = true
@@ -664,7 +669,7 @@ func (a *AgentLoop) Run(ctx context.Context, req LoopRequest, eventCh chan<- SSE
 			// never LLM-summarized (see evictStaleToolResults), so skip them;
 			// likewise replayed duplicates (the original result is already in
 			// history) and runs where the admin disabled eviction summaries.
-			if !isError && !skipped[i] && !limits.ToolCallSummarizationDisabled {
+			if !isError && !skipped[i] && !isMetaTool(tc.Function.Name) && !limits.ToolCallSummarizationDisabled {
 				future := newToolResultSummaryFuture()
 				pendingSummaries[tc.ID] = future
 				toolName, toolResultContent := tc.Function.Name, toolContent
@@ -683,8 +688,9 @@ func (a *AgentLoop) Run(ctx context.Context, req LoopRequest, eventCh chan<- SSE
 				})
 			}
 			// Evidence events carry real tool outputs to the UI; replayed
-			// duplicates add nothing new and would inflate the evidence list.
-			if !isError && !skipped[i] && tc.Function.Name != loadSkillToolName {
+			// duplicates add nothing new and would inflate the evidence list,
+			// and meta-tools produce no data at all.
+			if !isError && !skipped[i] && !isMetaTool(tc.Function.Name) {
 				a.send(ctx, eventCh, SSEEvent{
 					Type: "evidence",
 					Data: EvidenceEvent{
@@ -705,7 +711,7 @@ func (a *AgentLoop) Run(ctx context.Context, req LoopRequest, eventCh chan<- SSE
 		// final answer with a shortened remaining budget (see stall.go).
 		madeProgress := false
 		for i := range msg.ToolCalls {
-			if skipped[i] || results[i].isError || results[i].content == "" {
+			if skipped[i] || results[i].isError || results[i].content == "" || isMetaTool(msg.ToolCalls[i].Function.Name) {
 				continue
 			}
 			madeProgress = true

@@ -18,3 +18,11 @@ func ConvertMCPToolsToOpenAI(tools []mcp.Tool) []OpenAITool {
 	}
 	return result
 }
+
+// isMetaTool reports whether a tool name is an internal capability (skill
+// loading, tool discovery) and not a data tool exposed by an MCP server.
+// Meta-tools change run state, so they must never be served from the stall
+// cache, never count as progress, and never become evidence.
+func isMetaTool(name string) bool {
+	return name == loadSkillToolName || name == searchToolsToolName
+}

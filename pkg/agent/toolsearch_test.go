@@ -259,6 +259,7 @@ func TestToolRuntimeCatalogMentionsServers(t *testing.T) {
 func TestAgentLoopToolSearchActivatesTools(t *testing.T) {
 	var mu sync.Mutex
 	var bodies []ChatCompletionRequest
+	repeatedSearch := false
 
 	llmServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var body ChatCompletionRequest
@@ -293,6 +294,13 @@ func TestAgentLoopToolSearchActivatesTools(t *testing.T) {
 					FinishReason: "stop",
 				}},
 			})
+		case strings.Contains(last.Content, "activated") && !repeatedSearch:
+			// Repeat the identical search once: meta-tools must re-execute
+			// rather than be served from the stall cache.
+			mu.Lock()
+			repeatedSearch = true
+			mu.Unlock()
+			respondAsStream(w, toolCallResponse("search_tools", `{"query":"read the thing"}`))
 		default:
 			respondAsStream(w, toolCallResponse("fake_get_thing", `{}`))
 		}
@@ -329,8 +337,18 @@ func TestAgentLoopToolSearchActivatesTools(t *testing.T) {
 
 	mu.Lock()
 	defer mu.Unlock()
-	if len(bodies) < 3 {
-		t.Fatalf("expected 3 LLM calls, got %d", len(bodies))
+	if len(bodies) < 4 {
+		t.Fatalf("expected 4 LLM calls (search, repeated search, tool, answer), got %d", len(bodies))
+	}
+
+	searchResults := 0
+	for _, message := range bodies[len(bodies)-1].Messages {
+		if message.Role == "tool" && strings.Contains(message.Content, "activated") {
+			searchResults++
+		}
+	}
+	if searchResults < 2 {
+		t.Fatalf("repeated search did not execute again: %d search results in history", searchResults)
 	}
 
 	first := toolNames(bodies[0])
@@ -347,6 +365,31 @@ func TestAgentLoopToolSearchActivatesTools(t *testing.T) {
 	second := toolNames(bodies[1])
 	if !containsName(second, "fake_get_thing") {
 		t.Errorf("activated tool missing from the second request: %v", second)
+	}
+
+	// A repeated search must execute again: replaying a cached result would
+	// skip activation and leave the model without the tools it asked for.
+	for _, body := range bodies {
+		for _, message := range body.Messages {
+			if strings.Contains(message.Content, "identical call already executed") {
+				t.Errorf("meta-tool was replayed from the stall cache: %q", message.Content)
+			}
+		}
+	}
+
+	// Meta-tools produce no evidence: they return no data and would pollute
+	// the evidence list and the final-report citation set.
+	for _, event := range events {
+		if event.Type != "evidence" {
+			continue
+		}
+		data, ok := event.Data.(EvidenceEvent)
+		if !ok {
+			continue
+		}
+		if isMetaTool(data.ToolName) {
+			t.Errorf("meta-tool %q produced an evidence event", data.ToolName)
+		}
 	}
 }
 
