@@ -405,8 +405,8 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
     state.aggressiveHighVolumeToolResponseTokens > TOOL_RESPONSE_TOKENS_LIMIT;
   const isToolSearchInvalid =
     !['off', 'auto', 'on'].includes(state.toolSearchMode) ||
-    state.toolSearchBudgetTokens < 1 ||
-    state.toolSearchBudgetTokens > TOOL_SEARCH_BUDGET_TOKENS_LIMIT;
+    (state.toolSearchMode === 'auto' &&
+      (state.toolSearchBudgetTokens < 1 || state.toolSearchBudgetTokens > TOOL_SEARCH_BUDGET_TOKENS_LIMIT));
   const isServiceGraphSettingsDisabled =
     state.serviceGraphMaxNodes < 1 ||
     state.serviceGraphMaxNodes > SERVICE_GRAPH_MAX_NODES_LIMIT ||
@@ -550,7 +550,10 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
 
   function onChange(event: ChangeEvent<HTMLInputElement>) {
     const { name, value, type } = event.target;
-    const parsedValue = type === 'number' ? parseInt(value, 10) || 0 : value.trim();
+    // Comma separated lists keep what the user types, including the space
+    // after a comma; the value is trimmed when it is saved.
+    const parsedValue =
+      type === 'number' ? parseInt(value, 10) || 0 : name === 'toolSearchAlwaysInclude' ? value : value.trim();
 
     setState({
       ...state,
