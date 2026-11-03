@@ -182,3 +182,82 @@ func TestNewStandaloneClient_IsIsolatedFromPooledClient(t *testing.T) {
 		t.Fatal("expected NewStandaloneClient to fail for an unregistered server")
 	}
 }
+
+// TestServerIDForTool guards against resolving a tool name's server by
+// splitting at the first underscore: server IDs may contain underscores, and a
+// wrong split routes the call to the wrong server, or to none at all.
+func TestServerIDForTool(t *testing.T) {
+	proxy := NewProxy(context.Background(), log.DefaultLogger)
+	for _, id := range []string{"grafana", "my", "my_grafana_server"} {
+		if err := proxy.EnsureServer(ServerConfig{
+			ID:      id,
+			URL:     "http://example.invalid",
+			Type:    "streamable-http",
+			Enabled: true,
+		}); err != nil {
+			t.Fatalf("failed to configure server %q: %v", id, err)
+		}
+	}
+	defer proxy.Close()
+
+	for _, tc := range []struct {
+		name     string
+		toolName string
+		wantID   string
+		wantOK   bool
+	}{
+		{
+			name:     "single-segment server ID",
+			toolName: "grafana_alerting_manage_rules",
+			wantID:   "grafana",
+			wantOK:   true,
+		},
+		{
+			name:     "server ID containing underscores",
+			toolName: "my_grafana_server_alerting_rules_read",
+			wantID:   "my_grafana_server",
+			wantOK:   true,
+		},
+		{
+			name:     "longest registered ID wins over a shorter prefix",
+			toolName: "my_grafana_server_alerting_manage_rules",
+			wantID:   "my_grafana_server",
+			wantOK:   true,
+		},
+		{
+			name:     "shorter prefix still resolves its own tools",
+			toolName: "my_search_dashboards",
+			wantID:   "my",
+			wantOK:   true,
+		},
+		{
+			name:     "unknown server",
+			toolName: "unknown_alerting_rules_read",
+			wantOK:   false,
+		},
+		{
+			name:     "bare server ID is not a tool name",
+			toolName: "grafana",
+			wantOK:   false,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			gotID, gotOK := proxy.ServerIDForTool(tc.toolName)
+			if gotOK != tc.wantOK {
+				t.Fatalf("ok = %v, want %v", gotOK, tc.wantOK)
+			}
+			if gotID != tc.wantID {
+				t.Errorf("server ID = %q, want %q", gotID, tc.wantID)
+			}
+		})
+	}
+}
+
+// TestServerIDForTool_NoServers ensures an empty proxy reports no owner instead
+// of inventing one from the tool name.
+func TestServerIDForTool_NoServers(t *testing.T) {
+	proxy := NewProxy(context.Background(), log.DefaultLogger)
+	if id, ok := proxy.ServerIDForTool("grafana_alerting_manage_rules"); ok || id != "" {
+		t.Fatalf("expected no owner with no servers registered, got %q ok=%v", id, ok)
+	}
+}

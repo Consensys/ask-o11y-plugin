@@ -159,9 +159,9 @@ func (p *Plugin) fetchMetricNames(ctx context.Context, toolName, datasourceUID, 
 // every org-context call, by design) close the session out from under the
 // other's in-flight call.
 func (p *Plugin) callToolStandalone(ctx context.Context, toolName string, arguments map[string]interface{}, orgID, orgName, scopeOrgID string) (*mcp.CallToolResult, error) {
-	serverID, _, ok := strings.Cut(toolName, "_")
+	serverID, ok := p.mcpProxy.ServerIDForTool(toolName)
 	if !ok {
-		return nil, fmt.Errorf("invalid tool name %q: expected serverid_toolname", toolName)
+		return nil, fmt.Errorf("no MCP client registered for tool %q", toolName)
 	}
 	client, ok := p.mcpProxy.NewStandaloneClient(serverID)
 	if !ok {
