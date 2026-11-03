@@ -1404,7 +1404,7 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
             <div className="mt-3">
               <Button
                 onClick={onSubmitAgentRuntimeSettings}
-                disabled={isAgentRuntimeDisabled || isContextManagementInvalid}
+                disabled={isAgentRuntimeDisabled || isContextManagementInvalid || isToolSearchInvalid}
               >
                 Save agent runtime
               </Button>
