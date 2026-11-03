@@ -333,7 +333,7 @@ func TestAgentLoopToolSearchActivatesTools(t *testing.T) {
 		ToolSearch:   ToolSearchConfig{Mode: "on"},
 	}
 	go loop.Run(context.Background(), req, eventCh)
-	collectEvents(eventCh)
+	events := collectEvents(eventCh)
 
 	mu.Lock()
 	defer mu.Unlock()
