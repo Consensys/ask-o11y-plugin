@@ -180,6 +180,7 @@ func (rt *toolRuntime) Activate(matches []ToolMatch) (added, evicted []string) {
 	for _, name := range rt.always {
 		pinned[name] = true
 	}
+	candidates := make([]string, 0, len(matches))
 	for _, match := range matches {
 		name := match.Name
 		if pinned[name] || rt.activeIn[name] {
@@ -188,14 +189,29 @@ func (rt *toolRuntime) Activate(matches []ToolMatch) (added, evicted []string) {
 		if _, ok := rt.byName[name]; !ok {
 			continue
 		}
-		rt.active = append(rt.active, name)
-		rt.activeIn[name] = true
-		added = append(added, name)
+		candidates = append(candidates, name)
 	}
-	if len(added) == 0 {
+	if len(candidates) == 0 {
 		return nil, nil
 	}
+	// Append the weakest match first: enforceCaps evicts from the front of the
+	// active list, so a batch larger than the caps drops the lowest ranked
+	// matches and keeps the best ones.
+	for i := len(candidates) - 1; i >= 0; i-- {
+		name := candidates[i]
+		rt.active = append(rt.active, name)
+		rt.activeIn[name] = true
+	}
 	evicted = rt.enforceCaps(pinned)
+	dropped := make(map[string]bool, len(evicted))
+	for _, name := range evicted {
+		dropped[name] = true
+	}
+	for _, name := range candidates {
+		if !dropped[name] {
+			added = append(added, name)
+		}
+	}
 	return added, evicted
 }
 

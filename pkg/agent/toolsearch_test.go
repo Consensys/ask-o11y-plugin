@@ -134,6 +134,38 @@ func TestToolRuntimeModeSelection(t *testing.T) {
 	}
 }
 
+func TestToolRuntimeBatchActivationKeepsBestMatches(t *testing.T) {
+	// A batch larger than the cap must drop the weakest matches, not the
+	// highest ranked ones: activation order feeds the eviction order.
+	tools := sampleTools()
+	rt := newToolRuntime(tools, ToolSearchConfig{Mode: "on", MaxActiveTools: 2})
+
+	matches := []ToolMatch{
+		{Name: "mcp-grafana_alerting_silences_read", Score: 9},
+		{Name: "mcp-grafana_alerting_rules_read", Score: 8},
+		{Name: "mcp-grafana_get_annotations", Score: 3},
+		{Name: "mcp-grafana_list_dashboards", Score: 2},
+	}
+	added, evicted := rt.Activate(matches)
+
+	if len(evicted) != 2 {
+		t.Fatalf("expected two evictions, got %v (added %v)", evicted, added)
+	}
+	if len(added) != 2 || added[0] != "mcp-grafana_alerting_silences_read" || added[1] != "mcp-grafana_alerting_rules_read" {
+		t.Fatalf("expected the two best matches to survive, got added=%v evicted=%v", added, evicted)
+	}
+	active := map[string]bool{}
+	for _, tool := range rt.activeTools() {
+		active[tool.Name] = true
+	}
+	if !active["mcp-grafana_alerting_silences_read"] || !active["mcp-grafana_alerting_rules_read"] {
+		t.Fatalf("best matches were evicted: %v", active)
+	}
+	if active["mcp-grafana_get_annotations"] || active["mcp-grafana_list_dashboards"] {
+		t.Fatalf("weak matches stayed active: %v", active)
+	}
+}
+
 func TestToolRuntimeActivationAndCaps(t *testing.T) {
 	tools := sampleTools()
 	rt := newToolRuntime(tools, ToolSearchConfig{Mode: "on", MaxActiveTools: 2})
@@ -272,8 +304,8 @@ func TestAgentLoopToolSearchActivatesTools(t *testing.T) {
 		// machine below.
 		if len(body.Tools) == 0 {
 			respondAsStream(w, ChatCompletionResponse{
-				ID:       "aux",
-				Choices:  []Choice{{Message: Message{Role: "assistant", Content: "ok"}, FinishReason: "stop"}},
+				ID:      "aux",
+				Choices: []Choice{{Message: Message{Role: "assistant", Content: "ok"}, FinishReason: "stop"}},
 			})
 			return
 		}
