@@ -34,12 +34,14 @@ test.describe('Tool discovery settings', () => {
     void appConfigPage;
     await openSettingsTab(page, 'agent-runtime');
 
-    await page.locator('[data-testid="data-testid ac-tool-search-mode"]').getByText('Off', { exact: true }).click();
+    // The radio input sits on top of its label, so click the input itself.
+    const modeGroup = page.locator('[data-testid="data-testid ac-tool-search-mode"]');
+    await modeGroup.getByRole('radio', { name: 'Off' }).check({ force: true });
 
     await expect(page.locator('[data-testid="data-testid ac-tool-search-budget"]')).toHaveCount(0);
     await expect(page.locator('[data-testid="data-testid ac-tool-search-always-include"]')).toBeVisible();
 
     // Leave the plugin on a clean state for the specs that follow.
-    await page.locator('[data-testid="data-testid ac-tool-search-mode"]').getByText('Auto', { exact: true }).click();
+    await modeGroup.getByRole('radio', { name: 'Auto' }).check({ force: true });
   });
 });
