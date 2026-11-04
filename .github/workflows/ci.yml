@@ -36,6 +36,7 @@ jobs:
               - '.github/workflows/**'
               - '.github/actions/**'
               - '.github/plugin-validator.config.yaml'
+              - 'scripts/verify-retro-specs.mjs'
 
   build:
     name: Build, lint and unit tests

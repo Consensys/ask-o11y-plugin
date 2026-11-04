@@ -59,14 +59,14 @@ if (!existsSync(RETRO_DIR) || !statSync(RETRO_DIR).isDirectory()) {
 }
 
 const indexContent = existsSync(INDEX) ? readFileSync(INDEX, 'utf8') : '';
-if (!indexContent) fail('README.md', 'missing specs/retro/README.md');
+if (!indexContent) {fail('README.md', 'missing specs/retro/README.md');}
 
 const specDirs = readdirSync(RETRO_DIR, { withFileTypes: true })
   .filter((entry) => entry.isDirectory() && SPEC_DIR_RE.test(entry.name))
   .map((entry) => entry.name)
   .sort();
 
-if (specDirs.length === 0) fail('README.md', 'no spec directories match NNN-slug');
+if (specDirs.length === 0) {fail('README.md', 'no spec directories match NNN-slug');}
 
 for (const dir of specDirs) {
   const specPath = join(RETRO_DIR, dir, 'spec.md');
@@ -104,18 +104,18 @@ for (const dir of specDirs) {
     rulesStart === -1 ? '' : content.slice(rulesStart, rulesEnd === -1 ? undefined : rulesEnd);
 
   for (const line of rulesBlock.split('\n')) {
-    if (!/^\d+\.\s/.test(line)) continue;
+    if (!/^\d+\.\s/.test(line)) {continue;}
     stats.rules += 1;
     const found = TAGS.filter((tag) => new RegExp(`\\b${tag}\\b`).test(line));
     if (found.length !== 1) {
       fail(dir, `rule without exactly one coverage tag: "${line.slice(0, 80)}..."`);
       continue;
     }
-    if (found[0] === 'VERIFIED') stats.verified += 1;
-    if (found[0] === 'ASSUMED') stats.assumed += 1;
-    if (found[0] === 'GAP') stats.gap += 1;
+    if (found[0] === 'VERIFIED') {stats.verified += 1;}
+    if (found[0] === 'ASSUMED') {stats.assumed += 1;}
+    if (found[0] === 'GAP') {stats.gap += 1;}
     if (found[0] !== 'VERIFIED') {
-      if (!reviewItems.has(dir)) reviewItems.set(dir, []);
+      if (!reviewItems.has(dir)) {reviewItems.set(dir, []);}
       reviewItems.get(dir).push({ tag: found[0], text: line.trim() });
     }
   }
@@ -123,14 +123,14 @@ for (const dir of specDirs) {
   for (const match of content.matchAll(EVIDENCE_RE)) {
     const [, path, lineNumber] = match;
     // Bare filenames and URL paths are prose, not evidence pointers.
-    if (path.startsWith('http') || path.startsWith('/') || !path.includes('/')) continue;
+    if (path.startsWith('http') || path.startsWith('/') || !path.includes('/')) {continue;}
     const absPath = join(ROOT, path);
     if (!existsSync(absPath) || !statSync(absPath).isFile()) {
       fail(dir, `evidence path does not exist: ${path}`);
       continue;
     }
     stats.pointers += 1;
-    if (!lineNumber) continue;
+    if (!lineNumber) {continue;}
     const total = lineCount(absPath);
     if (Number(lineNumber) < 1 || Number(lineNumber) > total) {
       fail(dir, `evidence line out of range: ${path}:${lineNumber} (file has ${total} lines)`);
@@ -151,12 +151,12 @@ if (!QUIET) {
 
 if (errors.length > 0) {
   console.error(`\n${errors.length} problem(s) found:\n`);
-  for (const error of errors) console.error(`  - ${error}`);
+  for (const error of errors) {console.error(`  - ${error}`);}
   console.error(`\nRun node scripts/verify-retro-specs.mjs after the fix.`);
   process.exit(1);
 }
 
-if (!QUIET) console.log('\nAll retro-spec checks passed.');
+if (!QUIET) {console.log('\nAll retro-spec checks passed.');}
 
 if (REVIEW) {
   const head = [
@@ -177,5 +177,5 @@ if (REVIEW) {
     }
   }
   writeFileSync(join(RETRO_DIR, 'REVIEW.md'), [...head, ...body].join('\n'));
-  if (!QUIET) console.log(`Wrote specs/retro/REVIEW.md (${stats.assumed + stats.gap} items).`);
+  if (!QUIET) {console.log(`Wrote specs/retro/REVIEW.md (${stats.assumed + stats.gap} items).`);}
 }
