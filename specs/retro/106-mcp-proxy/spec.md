@@ -4,7 +4,7 @@
 
 **Status**: Retrospective
 
-**Last verified**: `f1a7736`
+**Last verified**: `55ca1dc`
 
 **Owner**: Ask O11y maintainers
 
