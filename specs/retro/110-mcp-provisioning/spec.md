@@ -56,17 +56,17 @@ at start, adds runtime servers, and sends W3C trace context with each tool call.
 
 | Tool | Read-only | Evidence |
 |---|---|---|
-| all tools of every provisioned server | per annotation | `pkg/mcp/client.go:466` |
+| all tools of every provisioned server | per annotation | `pkg/mcp/client.go:560` |
 
 ## Behaviour Rules
 
 1. `mcpServers` is a JSON array at the root of `jsonData`. `VERIFIED` — `provisioning/plugins/app.yaml:32`
 2. Settings are decoded once with `json.Unmarshal` into `PluginSettings`. `VERIFIED` — `pkg/plugin/plugin.go:269`
 3. Four `type` values are documented: `openapi`, `standard`, `sse`, `streamable-http`. `VERIFIED` — `pkg/mcp/types.go:95`
-4. `http+streamable` is an alias of `streamable-http`; both use the SDK streamable transport with 3 retries, and `sse` uses the SDK SSE transport. `VERIFIED` — `pkg/mcp/client.go:202`, `pkg/mcp/client.go:198`
-5. `openapi` fetches a spec from `{url}/openapi.json` when the URL lacks that suffix. `VERIFIED` — `pkg/mcp/client.go:858`
-6. `standard` is declared but cannot connect. `GAP` — `pkg/mcp/client.go:212` returns an error; `listStandardTools` is unreachable
-7. Any other type returns `unsupported MCP transport type: <type>`. `VERIFIED` — `pkg/mcp/client.go:217`
+4. `http+streamable` is an alias of `streamable-http`; both use the SDK streamable transport with 3 retries, and `sse` uses the SDK SSE transport. `VERIFIED` — `pkg/mcp/client.go:247`, `pkg/mcp/client.go:242`
+5. `openapi` fetches a spec from `{url}/openapi.json` when the URL lacks that suffix. `VERIFIED` — `pkg/mcp/client.go:998`
+6. `standard` is declared but cannot connect. `GAP` — `pkg/mcp/client.go:253` returns an error; `listStandardTools` is unreachable
+7. Any other type returns `unsupported MCP transport type: <type>`. `VERIFIED` — `pkg/mcp/client.go:261`
 8. Secrets arrive as `mcpServerHeader.{serverID}.{headerName}` in `secureJsonData`. `VERIFIED` — `pkg/plugin/plugin.go:149`
 9. That mapping requires a server ID without dots, because it splits at the first dot. `VERIFIED` — `pkg/plugin/plugin.go:160`
 10. `trustedMCPServers` overrides `Trusted`; global `riskOverrides` copy into servers with none. `VERIFIED` — `pkg/plugin/plugin.go:188`
@@ -89,7 +89,7 @@ at start, adds runtime servers, and sends W3C trace context with each tool call.
 27. A provisioned `timeoutSeconds: 90` is honoured for the Grafana sidecar. `VERIFIED` — `provisioning/plugins/full.yaml_:38`
 28. Trace context is propagated outbound only: from asko11y to the MCP server. `VERIFIED` — `pkg/mcp/trace_propagation.go:77`
 29. The propagated headers are W3C `traceparent` and `tracestate`, injected directly rather than through the OTel global. `VERIFIED` — `pkg/mcp/trace_propagation.go:51`
-30. Every client transport is wrapped with `tracePropagationTransport`. `VERIFIED` — `pkg/mcp/client.go:277`
+30. Every client transport is wrapped with `tracePropagationTransport`. `VERIFIED` — `pkg/mcp/client.go:321`
 31. A stashed caller span is the preferred parent source. `VERIFIED` — test `TestTracePropagationTransport_MergedContextCallerSpan`
 32. Without any span the request passes through with no trace header, and the caller request is never mutated. `VERIFIED` — test `TestTracePropagationTransport_NoSpan`
 33. No sampling decision is made or forwarded by the plugin. `GAP` — `pkg/mcp/trace_propagation.go:77` injects context only

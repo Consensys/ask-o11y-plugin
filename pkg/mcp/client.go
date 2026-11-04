@@ -485,7 +485,37 @@ func (c *Client) ListToolsWithContext(ctx context.Context) ([]Tool, error) {
 	}
 	c.mu.RUnlock()
 
-	return c.listAndPublish(ctx)
+	// OpenAPI and standard clients have no catalog-refresh protocol, so they
+	// keep the plain list-and-publish path.
+	if !c.supportsCatalogRefresh() {
+		return c.listAndPublish(ctx)
+	}
+
+	// Every MCP miss goes through refreshTools so one set of guards applies on
+	// all paths: single-flight under refreshMu, an empty listing is rejected,
+	// and a failed listing never replaces the last known-good catalog.
+	refreshed, err := c.refreshTools(ctx, 0)
+	if refreshed {
+		c.mu.RLock()
+		tools := c.tools
+		c.mu.RUnlock()
+		return tools, nil
+	}
+
+	// The re-list failed. Serve the last known-good catalog: a health probe
+	// must not flap and a run must not start with no tools (FR-007, FR-008).
+	c.mu.RLock()
+	cached := c.tools
+	c.mu.RUnlock()
+	if cached != nil {
+		c.logger.Debug("mcp catalog refresh failed; serving cached tools",
+			"server", c.config.ID, "tools", len(cached), "error", sanitizeError(err))
+		return cached, nil
+	}
+	if err == nil {
+		err = fmt.Errorf("failed to list tools for server %s", c.config.ID)
+	}
+	return nil, err
 }
 
 // listAndPublish fetches the catalog from the server, applies the server-ID

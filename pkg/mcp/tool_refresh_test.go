@@ -121,6 +121,74 @@ func TestListAndPublishIncrementsGeneration(t *testing.T) {
 	}
 }
 
+// The reader path must not lose the last known-good catalog. A stale flag or a
+// pending notification makes ListToolsWithContext re-list, but a failed or
+// empty re-list still serves the cached slice: a health probe must not flap and
+// a run must not start with no tools (FR-007, FR-008).
+func TestListToolsWithContextKeepsCatalogWhenRefreshFails(t *testing.T) {
+	tests := []struct {
+		name   string
+		stale  bool
+		dirty  bool
+		lister func(context.Context) ([]Tool, error)
+	}{
+		{
+			name:  "stale catalog and a failed re-list",
+			stale: true,
+			lister: func(context.Context) ([]Tool, error) {
+				return nil, errors.New("connection refused")
+			},
+		},
+		{
+			name:  "announced change and a failed re-list",
+			dirty: true,
+			lister: func(context.Context) ([]Tool, error) {
+				return nil, errors.New("connection refused")
+			},
+		},
+		{
+			name:  "announced change and an empty re-list",
+			dirty: true,
+			lister: func(context.Context) ([]Tool, error) {
+				return nil, nil
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			c := refreshTestClient(t, tc.lister)
+			c.toolsStale = tc.stale
+			c.toolsDirty.Store(tc.dirty)
+
+			tools, err := c.ListToolsWithContext(context.Background())
+			if err != nil {
+				t.Fatalf("ListToolsWithContext error = %v, want nil", err)
+			}
+			if len(tools) != 1 || tools[0].Name != "test_old" {
+				t.Fatalf("tools = %v, want the cached test_old", tools)
+			}
+			if got, want := c.catalogGeneration(), uint64(1); got != want {
+				t.Fatalf("catalogGen = %d, want %d (nothing published)", got, want)
+			}
+		})
+	}
+}
+
+// A cold client has no catalog to fall back to, so a listing failure stays an
+// error. This keeps the pre-existing first-list behaviour.
+func TestListToolsWithContextReturnsErrorOnlyWhenCold(t *testing.T) {
+	c := refreshTestClient(t, func(context.Context) ([]Tool, error) {
+		return nil, errors.New("connection refused")
+	})
+	c.tools = nil
+	c.catalogGen = 0
+
+	if _, err := c.ListToolsWithContext(context.Background()); err == nil {
+		t.Fatal("ListToolsWithContext error = nil, want the listing error for a cold client")
+	}
+}
+
 // A stagger between replicas can drop a name from tools/list and accept it on
 // tools/call. The retry covers that, and it must happen exactly once.
 func TestCallToolRetriesOnceAfterRefresh(t *testing.T) {

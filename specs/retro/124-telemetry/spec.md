@@ -68,7 +68,7 @@ Show token usage and cost in one provisioned dashboard.
 9. The `mcp_tool_call` span is not the parent of the MCP request. `executeTool` discards the span context, so the HTTP span parents onto `agent_run`. `GAP` — `pkg/agent/loop.go:960` drops the context that `pkg/agent/loop.go:987` passes on
 10. The MCP client injects W3C `traceparent` and `tracestate` headers. `VERIFIED` — test `TestTracePropagationTransport_InjectsTraceparent`
 11. The transport uses a direct W3C propagator, not the global one. `VERIFIED` — `pkg/mcp/trace_propagation.go:51`
-12. The transport wraps the MCP SDK HTTP client. `VERIFIED` — `pkg/mcp/client.go:277`
+12. The transport wraps the MCP SDK HTTP client. `VERIFIED` — `pkg/mcp/client.go:321`
 13. A caller span survives `mergeUserCtx`, and the context is enriched for inner middleware. `VERIFIED` — tests `TestTracePropagationTransport_MergedContextCallerSpan`, `TestTracePropagationTransport_EnrichesContextForInnerMiddleware`
 14. A request with no span passes through unmodified. `VERIFIED` — test `TestTracePropagationTransport_NoSpan`
 15. All three spans come from `tracing.DefaultTracer()`. The repo never calls `InitDefaultTracer`. `VERIFIED` — `pkg/plugin/plugin.go:882`, `pkg/agent/llm_client.go:134`, `pkg/agent/loop.go:960`

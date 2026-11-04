@@ -46,7 +46,7 @@ The agent path has no dedicated route. The direct MCP edge is `POST /api/mcp/cal
 ### MCP tool names
 | Tool | Read-only | Evidence |
 |---|---|---|
-| `{serverID}_{toolName}` for external servers | per tool annotation | `pkg/mcp/client.go:525` |
+| `{serverID}_{toolName}` for external servers | per tool annotation | `pkg/mcp/client.go:560` |
 | `mcp-grafana_*` for the built-in server | per tool annotation | `pkg/plugin/plugin.go:87` |
 | `search_tools` | yes (internal) | `pkg/agent/search_tools.go:28` |
 | `load_skill` | yes (internal) | `pkg/agent/loop.go:45` |
@@ -72,8 +72,8 @@ The agent path has no dedicated route. The direct MCP edge is `POST /api/mcp/cal
 19. An empty result becomes "No results returned (empty response)". `VERIFIED` — `pkg/agent/loop.go:1006`
 20. The model receives errors as a normal `tool` message with the error text. `VERIFIED` — `pkg/agent/loop.go:659`
 21. Transport failures reach the model as an explicit "UNAVAILABLE" directive, while SSE keeps the raw error. `VERIFIED` — `pkg/agent/loop.go:645`
-22. External tool names carry the server ID prefix. `VERIFIED` — `pkg/mcp/client.go:525`
-23. The prefix is stripped before the upstream call. `VERIFIED` — `pkg/mcp/client.go:664`
+22. External tool names carry the server ID prefix. `VERIFIED` — `pkg/mcp/client.go:560`
+23. The prefix is stripped before the upstream call. `VERIFIED` — `pkg/mcp/client.go:694`
 24. Server lookup prefers the longest registered ID that prefixes the name. `VERIFIED` — test `TestServerIDForTool`
 25. `search_tools` ranks tools with BM25 over name, description, and parameter names. `VERIFIED` — `pkg/agent/toolindex.go:98`
 26. Name weight is 3.0, description and parameter weight 1.0, synonym weight 0.6. `VERIFIED` — `pkg/agent/toolindex.go:26`
