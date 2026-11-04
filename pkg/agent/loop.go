@@ -89,8 +89,8 @@ type LoopRequest struct {
 	// RunID/SessionID identify the run for the run_started SSE event (which
 	// carries the active-skill metadata for the UI). Empty RunID (internal
 	// Scout/discovery runs) suppresses the event.
-	RunID            string
-	SessionID        string
+	RunID             string
+	SessionID         string
 	ActiveSkillsEvent []RunStartedSkill
 
 	// AvailableSkills is the load_skill catalog: enabled public skills that
@@ -134,8 +134,8 @@ type LoopRequest struct {
 	// propagation paths. Empty disables that check.
 	ServiceTopology string
 
-	RegisterApproval     ApprovalRegistrar
-	CheckApprovalGrant   ApprovalGrantChecker
+	RegisterApproval   ApprovalRegistrar
+	CheckApprovalGrant ApprovalGrantChecker
 }
 
 func (a *AgentLoop) Run(ctx context.Context, req LoopRequest, eventCh chan<- SSEEvent) {
@@ -280,31 +280,31 @@ func (a *AgentLoop) Run(ctx context.Context, req LoopRequest, eventCh chan<- SSE
 			return
 		}
 
-	messages = evictStaleToolResults(messages, limits.KeepRecentToolResults, func(toolCallID, toolName, content string) string {
-		if limits.ToolCallSummarizationDisabled {
-			// Admin disabled eviction summaries: fall back to a plain
-			// truncation of the raw content, no LLM call.
-			return truncateWhitespace(content, evictionSummaryFallbackChars)
+		messages = evictStaleToolResults(messages, limits.KeepRecentToolResults, func(toolCallID, toolName, content string) string {
+			if limits.ToolCallSummarizationDisabled {
+				// Admin disabled eviction summaries: fall back to a plain
+				// truncation of the raw content, no LLM call.
+				return truncateWhitespace(content, evictionSummaryFallbackChars)
+			}
+			if future, ok := pendingSummaries[toolCallID]; ok {
+				delete(pendingSummaries, toolCallID)
+				return future.wait(ctx)
+			}
+			// No background future found (shouldn't normally happen since every
+			// non-error tool result starts one on append) — fall back to a
+			// synchronous summary so eviction still completes correctly.
+			return a.summarizeForEviction(ctx, req, usageByModel, &usageMu, toolName, content)
+		}, func(toolCallID string) bool {
+			return toolResultIsError[toolCallID]
+		})
+		// The activated set changes between iterations (search_tools), so rebuild
+		// the definitions and let trimming account for the current list rather
+		// than the one captured before the loop.
+		openAITools = toolRT.OpenAITools()
+		if len(req.AvailableSkills) > 0 && req.LoadSkill != nil {
+			openAITools = append(openAITools, loadSkillToolSpec(req.AvailableSkills))
 		}
-		if future, ok := pendingSummaries[toolCallID]; ok {
-			delete(pendingSummaries, toolCallID)
-			return future.wait(ctx)
-		}
-		// No background future found (shouldn't normally happen since every
-		// non-error tool result starts one on append) — fall back to a
-		// synchronous summary so eviction still completes correctly.
-		return a.summarizeForEviction(ctx, req, usageByModel, &usageMu, toolName, content)
-	}, func(toolCallID string) bool {
-		return toolResultIsError[toolCallID]
-	})
-	// The activated set changes between iterations (search_tools), so rebuild
-	// the definitions and let trimming account for the current list rather
-	// than the one captured before the loop.
-	openAITools = toolRT.OpenAITools()
-	if len(req.AvailableSkills) > 0 && req.LoadSkill != nil {
-		openAITools = append(openAITools, loadSkillToolSpec(req.AvailableSkills))
-	}
-	messages = TrimMessagesToTokenLimit(messages, openAITools, promptBudget, limits)
+		messages = TrimMessagesToTokenLimit(messages, openAITools, promptBudget, limits)
 
 		a.logger.Debug("Agent loop iteration",
 			"iteration", iteration,

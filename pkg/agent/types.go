@@ -171,14 +171,14 @@ type ModelUsage struct {
 }
 
 type DoneEvent struct {
-	TotalIterations  int                    `json:"totalIterations"`
-	PromptTokens     int64                  `json:"promptTokens"`
-	CompletionTokens int64                  `json:"completionTokens"`
-	TotalTokens      int64                  `json:"totalTokens"`
-	ToolCallCount    int                    `json:"toolCallCount"`
+	TotalIterations  int                   `json:"totalIterations"`
+	PromptTokens     int64                 `json:"promptTokens"`
+	CompletionTokens int64                 `json:"completionTokens"`
+	TotalTokens      int64                 `json:"totalTokens"`
+	ToolCallCount    int                   `json:"toolCallCount"`
 	UsageByModel     map[string]ModelUsage `json:"usageByModel,omitempty"`
-	StallNudges      int                    `json:"stallNudges,omitempty"`
-	ForcedFinal      bool                   `json:"forcedFinal,omitempty"`
+	StallNudges      int                   `json:"stallNudges,omitempty"`
+	ForcedFinal      bool                  `json:"forcedFinal,omitempty"`
 }
 
 // StallEvent is emitted when the repetition/stall guard intervenes: the

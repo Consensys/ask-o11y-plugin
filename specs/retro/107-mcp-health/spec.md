@@ -55,7 +55,7 @@ Response body: `{servers, systemHealth, oauth}`. `pkg/plugin/plugin.go:845`
 
 | Tool | Read-only | Evidence |
 |---|---|---|
-| none — the probe calls `tools/list` on each client | n/a | `pkg/mcp/health.go:169` |
+| none — the probe calls `tools/list` on each client | n/a | `pkg/mcp/health.go:182` |
 
 ## Behaviour Rules
 
@@ -63,9 +63,9 @@ Response body: `{servers, systemHealth, oauth}`. `pkg/plugin/plugin.go:845`
 2. `Start` runs one check immediately, before the first tick. `VERIFIED` — `pkg/mcp/health.go:80`
 3. Each tick checks every registered client. `VERIFIED` — `pkg/mcp/health.go:85`
 4. Servers are checked sequentially inside one tick. `VERIFIED` — `pkg/mcp/health.go:132`
-5. The probe is `client.ListTools()`. There is no separate ping or handshake probe. `VERIFIED` — `pkg/mcp/health.go:169`
+5. The probe is `client.ListTools()`. There is no separate ping or handshake probe. `VERIFIED` — `pkg/mcp/health.go:182`
 6. Five statuses exist: `healthy`, `degraded`, `unhealthy`, `disconnected`, `connecting`. `VERIFIED` — `pkg/mcp/health.go:14`
-7. A server seen for the first time starts as `connecting` with zero tools. `VERIFIED` — `pkg/mcp/health.go:186`
+7. A server seen for the first time starts as `connecting` with zero tools. `VERIFIED` — `pkg/mcp/health.go:211`
 8. A failed probe increments `errorCount` and `consecutiveFailures`, and records `lastError`. `VERIFIED` — `pkg/mcp/health.go:198`
 9. Failures 1 and 2 report `degraded`. Failures 3 and 4 report `unhealthy`. Five or more report `disconnected`. `VERIFIED` — `pkg/mcp/health.go:202`
 10. On the second consecutive failure the monitor calls `forceReconnect`. `VERIFIED` — `pkg/mcp/health.go:217`
@@ -85,7 +85,7 @@ Response body: `{servers, systemHealth, oauth}`. `pkg/plugin/plugin.go:845`
 24. `GetAllHealth` copies values, so a caller cannot mutate the stored state. `VERIFIED` — `pkg/mcp/health.go:259`
 25. The status constants are a closed set of five strings. `VERIFIED` — `pkg/mcp/health.go:13`
 26. There is no exponential backoff. The probe interval stays constant. `GAP` — `pkg/mcp/health.go:65`
-27. Removing a server also removes its health entry. `VERIFIED` — `pkg/mcp/proxy.go:116`
+27. Removing a server also removes its health entry, and a probe that was already running cannot recreate it. `VERIFIED` — `pkg/mcp/proxy.go:116`, `pkg/mcp/health.go:120`, `pkg/mcp/health.go:206`
 28. `Stop` returns without blocking when `Start` never ran. `VERIFIED` — `pkg/mcp/health.go:98`
 29. No test covers the health state machine, the thresholds, or `/api/mcp/servers`. `GAP` — no `health_test.go` exists
 30. `responseTime` measures `ListTools` wall time, which includes a cached tool list. `ASSUMED` — `pkg/mcp/client.go:440` returns the cache without a network call
@@ -93,7 +93,7 @@ Response body: `{servers, systemHealth, oauth}`. `pkg/plugin/plugin.go:845`
 ## Invariants
 
 - The poll interval is 30s and is not user-configurable. `VERIFIED` — `pkg/plugin/config.go:40`
-- A probe never mutates tool data; it only replaces the stored copy. `VERIFIED` — `pkg/mcp/health.go:224`
+- A probe never mutates tool data; it only replaces the stored copy. `VERIFIED` — `pkg/mcp/health.go:222`
 - Reconnect runs outside the health lock. `VERIFIED` — `pkg/mcp/health.go:244`
 
 ## Failure Modes
@@ -119,7 +119,7 @@ Health state is per replica and is lost on restart. Replicas can disagree.
 | Signal | Name | Where | Evidence |
 |---|---|---|---|
 | Span | none | — | `pkg/mcp/health.go:165` starts no span |
-| Log field | `consecutiveFailures`, `error`, `server` | plugin log on failure | `pkg/mcp/health.go:210` |
+| Log field | `consecutiveFailures`, `error`, `server` | plugin log on failure | `pkg/mcp/health.go:245` |
 | Log line | `forceReconnect triggered by health monitor` | plugin log | `pkg/mcp/health.go:248` |
 
 ## Evidence Index

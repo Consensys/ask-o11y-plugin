@@ -45,12 +45,12 @@ func (s *RedisShareStore) CreateShare(sessionID string, sessionData []byte, orgI
 	expiresAt, ttl := CalculateExpiration(expiresInHours)
 
 	share := &ShareMetadata{
-		ShareID:    shareID,
-		SessionID:  sessionID,
-		OrgID:      orgID,
-		UserID:     userID,
-		ExpiresAt:  expiresAt,
-		CreatedAt:  time.Now(),
+		ShareID:     shareID,
+		SessionID:   sessionID,
+		OrgID:       orgID,
+		UserID:      userID,
+		ExpiresAt:   expiresAt,
+		CreatedAt:   time.Now(),
 		SessionData: sessionData,
 	}
 
@@ -249,4 +249,3 @@ func (s *RedisShareStore) CleanupExpired() {
 	// However, we can clean up stale entries in session index sets
 	// This is optional and can be done periodically if needed
 }
-

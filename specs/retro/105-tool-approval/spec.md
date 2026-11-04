@@ -89,7 +89,7 @@ The decision body is `{"decision":"approved\|rejected","comment":"...","approval
 37. The `trusted` server flag is recorded on the risk result but never read by the gate. `GAP` — `pkg/mcp/risk.go:26`
 38. No HTTP route lists or revokes saved grants; the only write path is approve-always. `GAP` — `pkg/plugin/plugin.go:1476`
 39. The in-memory broker is unsafe with more than one Grafana replica; the code only logs a warning. `GAP` — `pkg/plugin/plugin.go:420`
-40. Deleting a session also deletes its saved approval grants. `VERIFIED` — `pkg/plugin/plugin.go:2745`, `pkg/plugin/approval_grants.go:153`
+40. Deleting a session also deletes its saved approval grants, and deleting all sessions deletes every grant of that user. `VERIFIED` — `pkg/plugin/plugin.go:2612`, `pkg/plugin/plugin.go:2758`, `pkg/plugin/approval_grants.go:153`
 ## Invariants
 - Only an Admin or Editor can resolve an approval. `VERIFIED` — `pkg/plugin/plugin.go:1454`
 - Only the run owner in the run org can resolve an approval. `VERIFIED` — `pkg/plugin/plugin.go:1449`

@@ -49,6 +49,11 @@ type HealthMonitor struct {
 	// order, including Stop before Start and a repeated Stop.
 	lifecycleMu sync.Mutex
 	started     bool
+
+	// generation increments on every config change that touches the server
+	// set. A probe captures it before the network call and drops its result
+	// when the value moved, so a removed server cannot come back.
+	generation uint64
 }
 
 // NewHealthMonitor creates a new health monitor
@@ -115,6 +120,7 @@ func (hm *HealthMonitor) Stop() {
 func (hm *HealthMonitor) RemoveServer(serverID string) {
 	hm.mu.Lock()
 	delete(hm.health, serverID)
+	hm.generation++
 	hm.mu.Unlock()
 }
 
@@ -163,81 +169,20 @@ func (hm *HealthMonitor) CheckServerNow(serverID string) {
 
 // checkServer performs a health check on a single server
 func (hm *HealthMonitor) checkServer(serverID string, client *Client) {
+	// Capture the config generation before the probe. A removal during the
+	// probe bumps it, and the stale result is then discarded instead of
+	// recreating a health row for a server that is gone.
+	hm.mu.RLock()
+	generation := hm.generation
+	hm.mu.RUnlock()
+
 	startTime := time.Now()
 
 	// List tools to check server health
 	tools, err := client.ListTools()
 	responseTime := time.Since(startTime).Milliseconds()
 
-	needReconnect := false
-	serverName := ""
-
-	func() {
-		hm.mu.Lock()
-		defer hm.mu.Unlock()
-
-		health, exists := hm.health[serverID]
-		if !exists {
-			health = &ServerHealth{
-				ServerID:  serverID,
-				Name:      client.config.Name,
-				URL:       client.config.URL,
-				Type:      client.config.Type,
-				Status:    StatusConnecting,
-				Tools:     []Tool{},
-				ToolCount: 0,
-			}
-			hm.health[serverID] = health
-		}
-
-		health.LastCheck = time.Now()
-		health.ResponseTime = responseTime
-		health.TotalChecks++
-
-		if err != nil {
-			health.ErrorCount++
-			health.ConsecutiveFailures++
-			health.LastError = sanitizeError(err)
-
-			if health.ConsecutiveFailures >= 5 {
-				health.Status = StatusDisconnected
-			} else if health.ConsecutiveFailures >= 3 {
-				health.Status = StatusUnhealthy
-			} else {
-				health.Status = StatusDegraded
-			}
-
-			hm.logger.Warn("Health check failed",
-				"server", health.Name,
-				"error", health.LastError,
-				"consecutiveFailures", health.ConsecutiveFailures)
-
-			// One step before StatusUnhealthy, ask the client to re-establish its
-			// session so the next user request doesn't hit a dead socket.
-			if health.ConsecutiveFailures == 2 {
-				needReconnect = true
-				serverName = health.Name
-			}
-		} else {
-			health.ConsecutiveFailures = 0
-			health.LastError = ""
-			health.Tools = tools
-			health.ToolCount = len(tools)
-
-			if responseTime > 2000 {
-				health.Status = StatusDegraded
-			} else {
-				health.Status = StatusHealthy
-			}
-
-			hm.logger.Debug("Health check succeeded",
-				"server", health.Name,
-				"responseTime", responseTime,
-				"toolCount", len(tools))
-		}
-
-		health.SuccessRate = float64(health.TotalChecks-health.ErrorCount) / float64(health.TotalChecks) * 100
-	}()
+	needReconnect, serverName := hm.recordHealth(serverID, client, generation, tools, responseTime, err)
 
 	// Do the potentially-blocking reconnect outside the health-map lock to keep
 	// checkAllServers from serializing on one stuck server.
@@ -248,6 +193,84 @@ func (hm *HealthMonitor) checkServer(serverID string, client *Client) {
 			hm.logger.Info("forceReconnect triggered by health monitor", "server", serverName)
 		}
 	}
+}
+
+// recordHealth applies one probe result to the health map. It reports whether
+// the client should reconnect, and the server name for the reconnect log line.
+// A result older than the current generation is dropped: the server set changed
+// while the probe ran, so the row may belong to a server that was removed.
+func (hm *HealthMonitor) recordHealth(serverID string, client *Client, generation uint64, tools []Tool, responseTime int64, err error) (needReconnect bool, serverName string) {
+	hm.mu.Lock()
+	defer hm.mu.Unlock()
+
+	if generation != hm.generation {
+		hm.logger.Debug("Discarding stale health result", "server", serverID)
+		return false, ""
+	}
+
+	health, exists := hm.health[serverID]
+	if !exists {
+		health = &ServerHealth{
+			ServerID:  serverID,
+			Name:      client.config.Name,
+			URL:       client.config.URL,
+			Type:      client.config.Type,
+			Status:    StatusConnecting,
+			Tools:     []Tool{},
+			ToolCount: 0,
+		}
+		hm.health[serverID] = health
+	}
+
+	health.LastCheck = time.Now()
+	health.ResponseTime = responseTime
+	health.TotalChecks++
+
+	if err != nil {
+		health.ErrorCount++
+		health.ConsecutiveFailures++
+		health.LastError = sanitizeError(err)
+
+		if health.ConsecutiveFailures >= 5 {
+			health.Status = StatusDisconnected
+		} else if health.ConsecutiveFailures >= 3 {
+			health.Status = StatusUnhealthy
+		} else {
+			health.Status = StatusDegraded
+		}
+
+		hm.logger.Warn("Health check failed",
+			"server", health.Name,
+			"error", health.LastError,
+			"consecutiveFailures", health.ConsecutiveFailures)
+
+		// One step before StatusUnhealthy, ask the client to re-establish its
+		// session so the next user request doesn't hit a dead socket.
+		if health.ConsecutiveFailures == 2 {
+			needReconnect = true
+			serverName = health.Name
+		}
+	} else {
+		health.ConsecutiveFailures = 0
+		health.LastError = ""
+		health.Tools = tools
+		health.ToolCount = len(tools)
+
+		if responseTime > 2000 {
+			health.Status = StatusDegraded
+		} else {
+			health.Status = StatusHealthy
+		}
+
+		hm.logger.Debug("Health check succeeded",
+			"server", health.Name,
+			"responseTime", responseTime,
+			"toolCount", len(tools))
+	}
+
+	health.SuccessRate = float64(health.TotalChecks-health.ErrorCount) / float64(health.TotalChecks) * 100
+
+	return needReconnect, serverName
 }
 
 // GetAllHealth returns the health status of all servers

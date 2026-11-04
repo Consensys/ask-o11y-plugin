@@ -15,13 +15,13 @@ var ErrShareRateLimit = errors.New("rate limit exceeded: too many share requests
 
 // ShareMetadata represents a shared session with its metadata
 type ShareMetadata struct {
-	ShareID    string     `json:"shareId"`
-	SessionID  string     `json:"sessionId"`
-	OrgID      int64      `json:"orgId"`
-	UserID     int64      `json:"userId"`
-	ExpiresAt  *time.Time `json:"expiresAt,omitempty"`
-	CreatedAt  time.Time  `json:"createdAt"`
-	SessionData []byte    `json:"sessionData"` // JSON snapshot of session
+	ShareID     string     `json:"shareId"`
+	SessionID   string     `json:"sessionId"`
+	OrgID       int64      `json:"orgId"`
+	UserID      int64      `json:"userId"`
+	ExpiresAt   *time.Time `json:"expiresAt,omitempty"`
+	CreatedAt   time.Time  `json:"createdAt"`
+	SessionData []byte     `json:"sessionData"` // JSON snapshot of session
 }
 
 // ShareStoreInterface defines the interface for share storage implementations
@@ -70,12 +70,12 @@ func (s *ShareStore) CreateShare(sessionID string, sessionData []byte, orgID, us
 	expiresAt, _ := CalculateExpiration(expiresInHours)
 
 	share := &ShareMetadata{
-		ShareID:    shareID,
-		SessionID:  sessionID,
-		OrgID:      orgID,
-		UserID:     userID,
-		ExpiresAt:  expiresAt,
-		CreatedAt:  time.Now(),
+		ShareID:     shareID,
+		SessionID:   sessionID,
+		OrgID:       orgID,
+		UserID:      userID,
+		ExpiresAt:   expiresAt,
+		CreatedAt:   time.Now(),
 		SessionData: sessionData,
 	}
 
@@ -156,4 +156,3 @@ func (s *ShareStore) CleanupExpired() {
 		s.logger.Info("Cleaned up expired shares", "count", count)
 	}
 }
-
