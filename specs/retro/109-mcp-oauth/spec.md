@@ -90,7 +90,7 @@ Routes mount from `pkg/plugin/plugin.go:608`. Paths are published in
 27. The derived callback URL is `{base}/api/plugins/consensys-asko11y-app/resources/api/oauth/{serverID}/callback`. `VERIFIED` — `pkg/plugin/oauth/handlers.go:217`
 28. A request without a user passes through with no Authorization header, and a static Authorization header is ignored for OAuth servers. `VERIFIED` — test `TestUserTokenRoundTripperPassesThroughWithoutUser`, test `TestConfigHeaderRoundTripperSkipsAuthorizationForOAuth`
 29. A missing token produces a message that tells the user to click Connect. `VERIFIED` — test `TestUserTokenRoundTripperNotConnected`
-30. `/api/mcp/servers` adds an `oauth` map where `connected` means unexpired or refreshable. `VERIFIED` — `pkg/plugin/plugin.go:862`
+30. `/api/mcp/servers` adds an `oauth` map where `connected` means unexpired or refreshable. `VERIFIED` — `pkg/plugin/plugin.go:867`
 31. Deleting a dynamic server purges every user's token for it. `VERIFIED` — `pkg/plugin/mcp_provisioner.go:365`
 32. One MCP session per server is shared across users; only the header is swapped. `GAP` — `pkg/mcp/types.go:113`
 33. No device-code flow and no client-credentials flow exist. `GAP` — only two grant types are sent (`pkg/plugin/oauth/exchange.go:42`)

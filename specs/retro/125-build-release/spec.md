@@ -45,7 +45,7 @@ Ship a versioned archive, a container image, and a local stack.
 |---|---|---|---|
 | `RELEASE_TOKEN` | repository secret | none | `.github/workflows/release-please.yml:19` |
 | `GRAFANA_ACCESS_POLICY_TOKEN` | repository secret | none | `.github/workflows/release.yml:35` |
-| `LLM_API_KEY` | repository secret | none | `.github/workflows/e2e.yml:129` |
+| `LLM_API_KEY` | repository secret | none | `.github/workflows/e2e.yml:131` |
 | `AWS_ACCOUNT_ID`, `AWS_REGION`, `AWS_IAM_ROLE`, `ECR_REPOSITORY`, `IMAGE_TAG_PREFIX` | repository variables | none | `.github/workflows/docker-release.yml:18` |
 
 ### MCP tool names
@@ -58,7 +58,7 @@ Ship a versioned archive, a container image, and a local stack.
 
 1. CI runs on push to main, on every pull request, and on manual dispatch. `VERIFIED` — `.github/workflows/ci.yml:3`
 2. CI detects code changes with `dorny/paths-filter`, and the eleven paths include `.github/workflows/**` and `.github/actions/**`. `VERIFIED` — `.github/workflows/ci.yml:23`, `.github/workflows/ci.yml:36`
-3. E2E and compatibility checks use a narrower filter with no `.github` paths, so a workflow-only edit skips them. `GAP` — `.github/workflows/e2e.yml:26`, `.github/workflows/is-compatible.yml:18`
+3. E2E and compatibility checks use the same `.github` paths as the build filter, so a workflow-only edit runs them. `VERIFIED` — `.github/workflows/e2e.yml:34`, `.github/workflows/is-compatible.yml:26`
 4. The build job runs when code changed, or on push, or on dispatch. `VERIFIED` — `.github/workflows/ci.yml:43`
 5. A pull request with no code change runs `skip-build`, which reports the same job name. `VERIFIED` — `.github/workflows/ci.yml:162`, `.github/workflows/ci.yml:163`
 6. A docs-only pull request therefore satisfies the build gate with a no-op job. `ASSUMED` — `.github/workflows/ci.yml:165`; no test or branch rule states this intent
@@ -72,9 +72,9 @@ Ship a versioned archive, a container image, and a local stack.
 14. Signing runs only when a policy token is present. `VERIFIED` — `.github/actions/package-plugin/action.yml:141`
 15. CI runs the validator from the pinned image `grafana/plugin-validator-cli:v0.51.3` with the repo config. `VERIFIED` — `.github/workflows/ci.yml:153`
 16. The validator config disables the `version` analyzer, and `govulncheck` runs separately on the pinned Go 1.26.10 toolchain. `VERIFIED` — `.github/plugin-validator.config.yaml:11`, `.github/workflows/ci.yml:103`
-17. Local `npm run validate` uses unpinned `@grafana/plugin-validator@latest`, not the pinned image. `GAP` — `package.json:35` can report findings that CI never sees
+17. Local `npm run validate` pins `@grafana/plugin-validator@0.51.3`, the same version as the CI image. `VERIFIED` — `package.json:35`
 18. Three validator findings are benign: unsigned plugin, sponsor link, and `react-19-dep-jsxRuntimeImport` for `@floating-ui/react`. `VERIFIED` — `CLAUDE.md:42`
-19. E2E skips fork pull requests because secrets are unavailable, and otherwise builds a coverage bundle and runs Playwright. `VERIFIED` — `.github/workflows/e2e.yml:94`, `.github/workflows/e2e.yml:143`
+19. E2E skips fork pull requests because secrets are unavailable, and otherwise builds a coverage bundle and runs Playwright. `VERIFIED` — `.github/workflows/e2e.yml:96`, `.github/workflows/e2e.yml:145`
 20. The artifact workflow builds on every branch push, keeps the zip for 15 days, and passes `create_release: false`, so it never creates a release. `VERIFIED` — `.github/workflows/artifact.yml:42`, `.github/workflows/artifact.yml:34`
 21. The release workflow runs on a push of a `v*` tag. `VERIFIED` — `.github/workflows/release.yml:7`
 22. The release build enables provenance attestation, passes the policy token for signing, and verifies the attestation. `VERIFIED` — `.github/workflows/release.yml:32`, `.github/workflows/release.yml:74`
@@ -86,8 +86,8 @@ Ship a versioned archive, a container image, and a local stack.
 28. commitlint validates every commit in a pull request against the eleven allowed types. `VERIFIED` — `.github/workflows/commitlint.yml:25`
 29. The scope list is a warning only, so a new scope does not block a commit. `VERIFIED` — `commitlint.config.js:10`
 30. The PR title check requires a conventional type and does not require a scope. `VERIFIED` — `.github/workflows/pr-title.yml:44`
-31. `CONTRIBUTING.md` says scopes are "CI-enforced"; the commitlint config and the PR title check do not enforce them. `GAP` — `CONTRIBUTING.md:595`, `commitlint.config.js:10`
-32. `CONTRIBUTING.md` says `golangci-lint` is enforced by CI; no workflow runs it. `GAP` — `CONTRIBUTING.md:260`
+31. `CONTRIBUTING.md` says commit types are checked by commitlint; scopes are a warning only. `VERIFIED` — `CONTRIBUTING.md:607`, `commitlint.config.js:10`
+32. `CONTRIBUTING.md` states that `golangci-lint` is local only; no workflow runs it. `VERIFIED` — `CONTRIBUTING.md:288`
 33. `npm run server` starts `docker-compose.yaml`; `server:full` swaps in `full.yaml_`, starts the full stack, and restores both files on exit. `VERIFIED` — `package.json:26`, `package.json:27`
 34. `full.yaml_` provisions two orgs; `app.yaml` provisions org 1 with the built-in MCP. `VERIFIED` — `provisioning/plugins/full.yaml_:42`, `provisioning/plugins/app.yaml:31`
 35. `npm run dev:stack` runs `scripts/dev.sh` against `docker-compose.dev.yaml`. `VERIFIED` — `package.json:28`
@@ -104,7 +104,7 @@ Ship a versioned archive, a container image, and a local stack.
 
 | Condition | User-visible result | Evidence |
 |---|---|---|
-| Fork pull request | E2E is skipped by design; no E2E result for that PR | `.github/workflows/e2e.yml:214` |
+| Fork pull request | E2E is skipped by design; no E2E result for that PR | `.github/workflows/e2e.yml:216` |
 | Validator finds a non-benign warning | CI fails at the validate step | `.github/workflows/ci.yml:148` |
 | Policy token is missing | Archive is unsigned; validator reports `unsigned plugin` | `.github/actions/package-plugin/action.yml:141` |
 
@@ -112,15 +112,15 @@ Ship a versioned archive, a container image, and a local stack.
 
 | Store | Key or table | TTL | Fallback | Evidence |
 |---|---|---|---|---|
-| GitHub Actions artifact | zip and sha1, coverage build, Playwright report, server log | 15 days, 5 to 30 days | none | `.github/workflows/artifact.yml:42`, `.github/workflows/e2e.yml:88`, `.github/workflows/e2e.yml:155` |
+| GitHub Actions artifact | zip and sha1, coverage build, Playwright report, server log | 15 days, 5 to 30 days | none | `.github/workflows/artifact.yml:42`, `.github/workflows/e2e.yml:90`, `.github/workflows/e2e.yml:157` |
 
 ## Observability
 
 | Signal | Name | Where | Evidence |
 |---|---|---|---|
 | Check | `Build, lint and unit tests` | CI job | `.github/workflows/ci.yml:41` |
-| Check | `E2E Tests with Coverage` | E2E job | `.github/workflows/e2e.yml:91` |
-| Check | `compatibilitycheck` | Compatibility job | `.github/workflows/is-compatible.yml:28` |
+| Check | `E2E Tests with Coverage` | E2E job | `.github/workflows/e2e.yml:93` |
+| Check | `compatibilitycheck` | Compatibility job | `.github/workflows/is-compatible.yml:30` |
 | Check | `commitlint` and PR title | Message gates | `.github/workflows/commitlint.yml:8` |
 
 ## Evidence Index

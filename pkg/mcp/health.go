@@ -29,6 +29,7 @@ type ServerHealth struct {
 	ResponseTime        int64        `json:"responseTime"` // milliseconds
 	SuccessRate         float64      `json:"successRate"`
 	ErrorCount          int          `json:"errorCount"`
+	TotalChecks         int          `json:"totalChecks"`
 	ConsecutiveFailures int          `json:"consecutiveFailures"`
 	LastError           string       `json:"lastError,omitempty"`
 	Tools               []Tool       `json:"tools"`
@@ -43,6 +44,11 @@ type HealthMonitor struct {
 	health map[string]*ServerHealth
 	ticker *time.Ticker
 	done   chan bool
+
+	// lifecycleMu guards started so Start and Stop are safe to call in any
+	// order, including Stop before Start and a repeated Stop.
+	lifecycleMu sync.Mutex
+	started     bool
 }
 
 // NewHealthMonitor creates a new health monitor
@@ -57,7 +63,18 @@ func NewHealthMonitor(proxy *Proxy, logger log.Logger) *HealthMonitor {
 
 // Start begins health monitoring
 func (hm *HealthMonitor) Start(interval time.Duration) {
-	hm.ticker = time.NewTicker(interval)
+	hm.lifecycleMu.Lock()
+	if hm.started {
+		hm.lifecycleMu.Unlock()
+		hm.logger.Warn("Health monitor already started")
+		return
+	}
+	ticker := time.NewTicker(interval)
+	done := make(chan bool)
+	hm.ticker = ticker
+	hm.done = done
+	hm.started = true
+	hm.lifecycleMu.Unlock()
 
 	// Perform initial health check
 	hm.checkAllServers()
@@ -65,9 +82,9 @@ func (hm *HealthMonitor) Start(interval time.Duration) {
 	go func() {
 		for {
 			select {
-			case <-hm.ticker.C:
+			case <-ticker.C:
 				hm.checkAllServers()
-			case <-hm.done:
+			case <-done:
 				return
 			}
 		}
@@ -76,13 +93,29 @@ func (hm *HealthMonitor) Start(interval time.Duration) {
 	hm.logger.Info("Health monitor started", "interval", interval)
 }
 
-// Stop stops health monitoring
+// Stop stops health monitoring. It is a no-op when Start never ran, so a
+// plugin that disposes before it initialises does not block forever.
 func (hm *HealthMonitor) Stop() {
-	if hm.ticker != nil {
-		hm.ticker.Stop()
+	hm.lifecycleMu.Lock()
+	if !hm.started {
+		hm.lifecycleMu.Unlock()
+		return
 	}
-	hm.done <- true
+	hm.started = false
+	hm.ticker.Stop()
+	done := hm.done
+	hm.lifecycleMu.Unlock()
+
+	close(done)
 	hm.logger.Info("Health monitor stopped")
+}
+
+// RemoveServer forgets the health state of a server that is no longer
+// configured, so a removed server does not stay in /api/mcp/servers forever.
+func (hm *HealthMonitor) RemoveServer(serverID string) {
+	hm.mu.Lock()
+	delete(hm.health, serverID)
+	hm.mu.Unlock()
 }
 
 // checkAllServers performs health checks on all servers
@@ -159,6 +192,7 @@ func (hm *HealthMonitor) checkServer(serverID string, client *Client) {
 
 		health.LastCheck = time.Now()
 		health.ResponseTime = responseTime
+		health.TotalChecks++
 
 		if err != nil {
 			health.ErrorCount++
@@ -196,15 +230,13 @@ func (hm *HealthMonitor) checkServer(serverID string, client *Client) {
 				health.Status = StatusHealthy
 			}
 
-			totalChecks := health.ErrorCount + 1
-			successfulChecks := totalChecks - health.ErrorCount
-			health.SuccessRate = float64(successfulChecks) / float64(totalChecks) * 100
-
 			hm.logger.Debug("Health check succeeded",
 				"server", health.Name,
 				"responseTime", responseTime,
 				"toolCount", len(tools))
 		}
+
+		health.SuccessRate = float64(health.TotalChecks-health.ErrorCount) / float64(health.TotalChecks) * 100
 	}()
 
 	// Do the potentially-blocking reconnect outside the health-map lock to keep

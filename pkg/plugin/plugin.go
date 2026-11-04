@@ -727,6 +727,11 @@ func (p *Plugin) handleOpenAPISpec(w http.ResponseWriter, r *http.Request) {
 }
 
 func (p *Plugin) handleMCPTools(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
 	userRole := getUserRole(r)
 	p.logger.Debug("MCP tools request", "method", r.Method, "role", userRole)
 
@@ -2420,7 +2425,7 @@ func (p *Plugin) handleCreateShare(w http.ResponseWriter, r *http.Request) {
 
 	share, err := p.shareStore.CreateShare(req.SessionID, req.SessionData, orgID, userID, expiresInHours)
 	if err != nil {
-		if err.Error() == "rate limit exceeded: too many share requests" {
+		if errors.Is(err, ErrShareRateLimit) {
 			http.Error(w, "Too many share requests. Please try again later.", http.StatusTooManyRequests)
 			return
 		}
@@ -2735,6 +2740,11 @@ func (p *Plugin) handleSessionRouter(w http.ResponseWriter, r *http.Request) {
 		if err := p.sessionStore.DeleteSession(sessionID, userID, orgID); err != nil {
 			http.Error(w, "Session not found", http.StatusNotFound)
 			return
+		}
+		if p.approvalGrants != nil {
+			if err := p.approvalGrants.DeleteSession(r.Context(), sessionID); err != nil {
+				p.logger.Warn("Failed to delete session approval grants", "sessionId", sessionID, "error", err)
+			}
 		}
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]bool{"success": true})

@@ -14,7 +14,7 @@ type ToolRisk struct {
 }
 
 func ClassifyToolRisk(tool Tool, servers []ServerConfig) ToolRisk {
-	serverID, unprefixedName := splitToolName(tool.Name)
+	serverID, unprefixedName := resolveServerPrefix(tool.Name, servers)
 	risk := ToolRisk{
 		ToolName: tool.Name,
 		ServerID: serverID,
@@ -63,14 +63,6 @@ func ClassifyToolRisk(tool Tool, servers []ServerConfig) ToolRisk {
 
 	risk.Reason = riskReason(risk, heuristicWrite, override)
 	return risk
-}
-
-func splitToolName(toolName string) (serverID string, unprefixed string) {
-	serverID, rest, ok := strings.Cut(toolName, "_")
-	if !ok {
-		return "", toolName
-	}
-	return serverID, rest
 }
 
 func findServerConfig(serverID string, servers []ServerConfig) (ServerConfig, bool) {

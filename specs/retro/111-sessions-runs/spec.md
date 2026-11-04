@@ -20,9 +20,9 @@ Both survive a pod restart when Redis is configured.
 
 | Capability | Admin | Editor | Viewer | Evidence |
 |---|---|---|---|---|
-| Manage own sessions and the current session | yes | yes | yes | `pkg/plugin/plugin.go:2555` |
-| Start, read, cancel, or stream a run | yes | yes | yes | `pkg/plugin/plugin.go:871` |
-| Approve a pending tool call | yes | yes | no | `pkg/plugin/plugin.go:1449` |
+| Manage own sessions and the current session | yes | yes | yes | `pkg/plugin/plugin.go:2560` |
+| Start, read, cancel, or stream a run | yes | yes | yes | `pkg/plugin/plugin.go:876` |
+| Approve a pending tool call | yes | yes | no | `pkg/plugin/plugin.go:1454` |
 
 ## Contract
 
@@ -30,14 +30,14 @@ Both survive a pod restart when Redis is configured.
 
 | Method | Path | Handler | Evidence |
 |---|---|---|---|
-| POST | `/api/agent/run` | `handleAgentRun` | `pkg/plugin/plugin.go:871` |
-| GET | `/api/agent/runs/{id}` | `handleAgentRuns` | `pkg/plugin/plugin.go:1366` |
-| GET | `/api/agent/runs/{id}/events` | `handleAgentRunEvents` | `pkg/plugin/plugin.go:1602` |
-| POST | `/api/agent/runs/{id}/cancel` | `handleCancelRun` | `pkg/plugin/plugin.go:1579` |
-| GET, POST, DELETE | `/api/sessions` | `handleSessionsRoot` | `pkg/plugin/plugin.go:2555` |
-| GET, PUT, DELETE | `/api/sessions/current` | `handleSessionCurrent` | `pkg/plugin/plugin.go:2608` |
-| GET, PUT, DELETE | `/api/sessions/{id}` | `handleSessionRouter` | `pkg/plugin/plugin.go:2660` |
-| GET | `/api/sessions/{id}/stats` | `handleGetSessionStats` | `pkg/plugin/plugin.go:2787` |
+| POST | `/api/agent/run` | `handleAgentRun` | `pkg/plugin/plugin.go:876` |
+| GET | `/api/agent/runs/{id}` | `handleAgentRuns` | `pkg/plugin/plugin.go:1371` |
+| GET | `/api/agent/runs/{id}/events` | `handleAgentRunEvents` | `pkg/plugin/plugin.go:1607` |
+| POST | `/api/agent/runs/{id}/cancel` | `handleCancelRun` | `pkg/plugin/plugin.go:1584` |
+| GET, POST, DELETE | `/api/sessions` | `handleSessionsRoot` | `pkg/plugin/plugin.go:2560` |
+| GET, PUT, DELETE | `/api/sessions/current` | `handleSessionCurrent` | `pkg/plugin/plugin.go:2613` |
+| GET, PUT, DELETE | `/api/sessions/{id}` | `handleSessionRouter` | `pkg/plugin/plugin.go:2665` |
+| GET | `/api/sessions/{id}/stats` | `handleGetSessionStats` | `pkg/plugin/plugin.go:2797` |
 
 ### SSE events
 
@@ -65,7 +65,7 @@ Both survive a pod restart when Redis is configured.
 Coverage: `VERIFIED` = code pointer or test; `ASSUMED` = code suggests, no test; `GAP` = missing or contradictory.
 
 1. `GET /api/sessions` returns metadata only, sorted by `UpdatedAt` descending. `VERIFIED` — `pkg/plugin/sessionstore.go:185`
-2. `POST /api/sessions` creates the session, then sets it as current. `VERIFIED` — `pkg/plugin/plugin.go:2586`
+2. `POST /api/sessions` creates the session, then sets it as current. `VERIFIED` — `pkg/plugin/plugin.go:2591`
 3. The store interface holds 14 methods, from `CreateSession` to `CleanupOld`. `VERIFIED` — `pkg/plugin/sessionstore.go:74`
 4. The owner key is `"<userID>:<orgID>"`; every read and write is scoped by it. `VERIFIED` — `pkg/plugin/sessionstore.go:94`
 5. A session owned by another user or org returns `session not found`. `VERIFIED` — `pkg/plugin/sessionstore.go:175`
@@ -80,17 +80,17 @@ Coverage: `VERIFIED` = code pointer or test; `ASSUMED` = code suggests, no test;
 14. Concurrent appends lose no messages. `VERIFIED` — test `TestRedisSessionStore_AppendMessages_ConcurrentNoLostUpdates`
 15. Usage stats live in a separate hash and use `HINCRBY`, so concurrent runs add independently. `VERIFIED` — `pkg/plugin/sessionstore_redis.go:481`
 16. Concurrent increments lose no counts. `VERIFIED` — test `TestRedisSessionStore_IncrementStats_ConcurrentNoLostUpdates`
-17. Stats increment on `done` before the event is stored and streamed. `VERIFIED` — `pkg/plugin/plugin.go:1205`
+17. Stats increment on `done` before the event is stored and streamed. `VERIFIED` — `pkg/plugin/plugin.go:1210`
 18. Stats increment is tested. `VERIFIED` — test `TestConsumeAgentEvents_IncrementsSessionStats`
 19. A run holds status, events, trace, error, and owners; a session holds messages, title, model, and stats. `VERIFIED` — `pkg/plugin/runstore.go:23`
 20. `AppendEvent` assigns an increasing `Sequence` and keeps the newest 500 events. `VERIFIED` — `pkg/plugin/runstore.go:183`
 21. The in-memory sweep deletes finished runs older than one hour and never a running run. `VERIFIED` — `pkg/plugin/runstore.go:415`
 22. Skipping running runs is tested. `VERIFIED` — test `TestRunStore_CleanupOld_SkipsRunning`
-23. A run owned by another user or org returns HTTP 403. `VERIFIED` — `pkg/plugin/plugin.go:1336`
+23. A run owned by another user or org returns HTTP 403. `VERIFIED` — `pkg/plugin/plugin.go:1341`
 24. In Redis each run has a heartbeat with a 90-second TTL, refreshed every 30 seconds. `VERIFIED` — `pkg/plugin/runstore_redis.go:118`
 25. A running run with no heartbeat for 90 seconds becomes `failed` with `agent run was interrupted before it completed`. `VERIFIED` — `pkg/plugin/runstore_redis.go:266`
 26. The interrupted transition happens once, claimed with `SETNX`. `VERIFIED` — test `TestRedisRunStore_ReconcileIsClaimedOnce`
-27. Nothing prevents two concurrent runs on one session; `ActiveRunID` keeps only the last ID. `GAP` — `pkg/plugin/plugin.go:1098`
+27. Nothing prevents two concurrent runs on one session; `ActiveRunID` keeps only the last ID. `GAP` — `pkg/plugin/plugin.go:1103`
 
 ## Invariants
 
@@ -102,9 +102,9 @@ Coverage: `VERIFIED` = code pointer or test; `ASSUMED` = code suggests, no test;
 
 | Condition | User-visible result | Evidence |
 |---|---|---|
-| Session ID is malformed | 400 `Invalid session ID format` | `pkg/plugin/plugin.go:2698` |
-| Session is missing or owned by another user | 404 `Session not found` | `pkg/plugin/plugin.go:2710` |
-| Run belongs to another user or org | 403 `Access denied` | `pkg/plugin/plugin.go:1337` |
+| Session ID is malformed | 400 `Invalid session ID format` | `pkg/plugin/plugin.go:2703` |
+| Session is missing or owned by another user | 404 `Session not found` | `pkg/plugin/plugin.go:2715` |
+| Run belongs to another user or org | 403 `Access denied` | `pkg/plugin/plugin.go:1342` |
 | Redis is unreachable at startup | In-memory stores; the health message warns | `pkg/plugin/plugin.go:570` |
 
 ## Data and Persistence
@@ -123,7 +123,7 @@ Coverage: `VERIFIED` = code pointer or test; `ASSUMED` = code suggests, no test;
 
 | Signal | Name | Where | Evidence |
 |---|---|---|---|
-| Span | `agent_run`, with `org_id`, `user_role`, `session_id` | Grafana tracing exporter | `pkg/plugin/plugin.go:877` |
+| Span | `agent_run`, with `org_id`, `user_role`, `session_id` | Grafana tracing exporter | `pkg/plugin/plugin.go:882` |
 | Log field | `runId`, `status` | Plugin logger on run finish | `pkg/plugin/runstore.go:216` |
 
 ## Evidence Index
@@ -136,4 +136,4 @@ Coverage: `VERIFIED` = code pointer or test; `ASSUMED` = code suggests, no test;
 
 - Concurrent runs on one session are allowed and uncoordinated. A forward spec should define single-flight or per-session serialisation.
 - The Redis session index has no TTL; it is pruned only on create, so an idle user keeps stale members.
-- `GET /api/sessions/{id}/shares` filters by `UserID` only, not by org (`pkg/plugin/plugin.go:2760`). Cross-org leakage needs a review.
+- `GET /api/sessions/{id}/shares` filters by `UserID` only, not by org (`pkg/plugin/plugin.go:2770`). Cross-org leakage needs a review.

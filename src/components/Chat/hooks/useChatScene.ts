@@ -8,8 +8,9 @@ export function useChatScene(
   chatState: ChatInterfaceState,
   sidePanelState: GrafanaPageState,
   chatPanelPosition: 'left' | 'right' = 'right'
-): EmbeddedScene | null {
+): { scene: EmbeddedScene | null; error: string | null } {
   const [scene, setScene] = useState<EmbeddedScene | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const sceneRef = useRef<EmbeddedScene | null>(null);
   const deactivateRef = useRef<(() => void) | null>(null);
 
@@ -40,16 +41,20 @@ export function useChatScene(
         deactivateRef.current = embeddedScene.activate();
         sceneRef.current = embeddedScene;
         setScene(embeddedScene);
-      } catch {
+        setError(null);
+      } catch (err) {
         if (deactivateRef.current) {
           try {
             deactivateRef.current();
-          } catch (cleanupError) {
+          } catch {
+            // Deactivation is best effort; the build failure below is the
+            // error the user needs to see.
           }
         }
         deactivateRef.current = null;
         sceneRef.current = null;
         setScene(null);
+        setError(err instanceof Error ? err.message : 'Failed to build the chat layout');
       }
     }
 
@@ -114,5 +119,5 @@ export function useChatScene(
     }
   }, [chatState, sidePanelState]);
 
-  return scene;
+  return { scene, error };
 }

@@ -22,9 +22,9 @@ Every activation is reviewable and role-safe.
 
 | Capability | Admin | Editor | Viewer | Evidence |
 |---|---|---|---|---|
-| List skill metadata | yes | yes | yes | `pkg/plugin/plugin.go:1725` |
-| List content (`?include=content`) | yes | no | no | `pkg/plugin/plugin.go:1719` |
-| Activate a skill on a run | yes | yes | yes | `pkg/plugin/plugin.go:954` |
+| List skill metadata | yes | yes | yes | `pkg/plugin/plugin.go:1730` |
+| List content (`?include=content`) | yes | no | no | `pkg/plugin/plugin.go:1724` |
+| Activate a skill on a run | yes | yes | yes | `pkg/plugin/plugin.go:959` |
 
 ## Contract
 
@@ -33,7 +33,7 @@ Every activation is reviewable and role-safe.
 | Method | Path | Handler | Evidence |
 |---|---|---|---|
 | GET | `/api/skills` | `handleSkills` | `pkg/plugin/plugin.go:594` |
-| GET | `/api/prompt-defaults` | `handlePromptDefaults` | `pkg/plugin/plugin.go:1681` |
+| GET | `/api/prompt-defaults` | `handlePromptDefaults` | `pkg/plugin/plugin.go:1686` |
 
 ### SSE events
 
@@ -47,8 +47,8 @@ Every activation is reviewable and role-safe.
 |---|---|---|---|
 | `skills.entries[].content` | plugin jsonData | empty | `pkg/plugin/plugin.go:102` |
 | `skills.entries[].enabled` | plugin jsonData | `true` when absent | `pkg/skills/registry.go:95` |
-| `investigationPrompt` | plugin jsonData (legacy) | bundled default | `pkg/plugin/plugin.go:1762` |
-| `performancePrompt` | plugin jsonData (legacy) | bundled default | `pkg/plugin/plugin.go:1763` |
+| `investigationPrompt` | plugin jsonData (legacy) | bundled default | `pkg/plugin/plugin.go:1767` |
+| `performancePrompt` | plugin jsonData (legacy) | bundled default | `pkg/plugin/plugin.go:1768` |
 
 ### MCP tool names
 
@@ -88,9 +88,9 @@ Tags: `VERIFIED` (code pointer or test), `ASSUMED` (untested), `GAP` (missing).
 26. Trigger matching scans only enabled public skills and skips names already active. `VERIFIED` — `pkg/skills/selection.go:65`
 27. `ModelPreference` returns the first model set by an active skill. `VERIFIED` — `pkg/skills/selection.go:97`
 28. `IterationBudget` returns the highest value; zero falls back to `resolveMaxIterations`. `VERIFIED` — `pkg/skills/selection.go:112`
-29. `load_skill` is advertised only when the catalog is non-empty and a loader exists. `VERIFIED` — `pkg/agent/loop.go:180`
-30. `load_skill` dispatches before the approval gate and bypasses RBAC. `VERIFIED` — `pkg/agent/loop.go:954`
-31. `load_skill` requires `skill`, accepts optional `file`, and loads a file raw and untemplated. `VERIFIED` — `pkg/agent/loop.go:1097`
+29. `load_skill` is advertised only when the catalog is non-empty and a loader exists. `VERIFIED` — `pkg/agent/loop.go:179`
+30. `load_skill` dispatches before the approval gate and bypasses RBAC. `VERIFIED` — `pkg/agent/loop.go:953`
+31. `load_skill` requires `skill`, accepts optional `file`, and loads a file raw and untemplated. `VERIFIED` — `pkg/agent/loop.go:1096`
 32. `load_skill` on an unknown, hidden, or body-empty skill returns a tool error. `ASSUMED` — `pkg/skills/registry.go:303` (hidden branch untested)
 33. A legacy prompt field overrides the user prompt only while no Skills entry exists. `VERIFIED` — test `TestApplyLegacyPromptOverrides_SkillsTabEntryWins`
 34. `/api/prompt-defaults` always returns both keys, falling back to the bundled default. `VERIFIED` — test `TestHandlePromptDefaults_DisabledSkillStillReturnsStableKeys`
@@ -100,7 +100,7 @@ Tags: `VERIFIED` (code pointer or test), `ASSUMED` (untested), `GAP` (missing).
 
 - A hidden skill never enters the catalog or the public listing. `VERIFIED` — `pkg/skills/registry.go:257`
 - Activation never mutates a stored skill; overrides clone it. `VERIFIED` — `pkg/skills/registry.go:291`
-- An explicit selection error is a 400, never a silent drop. `VERIFIED` — `pkg/plugin/plugin.go:956`
+- An explicit selection error is a 400, never a silent drop. `VERIFIED` — `pkg/plugin/plugin.go:961`
 
 ## Failure Modes
 
@@ -123,7 +123,7 @@ Tags: `VERIFIED` (code pointer or test), `ASSUMED` (untested), `GAP` (missing).
 | Signal | Name | Where | Evidence |
 |---|---|---|---|
 | Log | `Invalid custom skill skipped` | plugin backend log | `pkg/skills/registry.go:121` |
-| Log field | `skills` (comma-joined active names) | `Agent run request` | `pkg/plugin/plugin.go:1110` |
+| Log field | `skills` (comma-joined active names) | `Agent run request` | `pkg/plugin/plugin.go:1115` |
 | Span / metric | none | — | `GAP` — no skill-specific signal |
 
 ## Evidence Index

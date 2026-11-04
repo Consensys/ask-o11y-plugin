@@ -32,7 +32,7 @@ func NewRedisShareStore(ctx context.Context, client *redis.Client, logger log.Lo
 func (s *RedisShareStore) CreateShare(sessionID string, sessionData []byte, orgID, userID int64, expiresInHours *int) (*ShareMetadata, error) {
 	// Check rate limit
 	if !s.rateLimiter.CheckLimit(userID) {
-		return nil, fmt.Errorf("rate limit exceeded: too many share requests")
+		return nil, ErrShareRateLimit
 	}
 
 	// Generate secure share ID

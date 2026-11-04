@@ -36,7 +36,7 @@ Sessions are scoped by the `X-Grafana-Org-Id` header. No role check exists in th
 ### Configuration keys
 | Key | Location | Default | Evidence |
 |---|---|---|---|
-| `sessionTTLDays` | `jsonData` | `90` | `src/components/AppConfig/AppConfig.tsx:140` |
+| `sessionTTLDays` | `jsonData` | `90` | `src/components/AppConfig/AppConfig.tsx:142` |
 ### MCP tool names
 | Tool | Read-only | Evidence |
 |---|---|---|

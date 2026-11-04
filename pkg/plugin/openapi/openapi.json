@@ -496,7 +496,7 @@
     "/api/agent/run": {
       "post": {
         "summary": "Start detached agent run",
-        "description": "Starts an agentic conversation loop in detached mode. The agent processes the user's message asynchronously, calling MCP tools as needed. Returns immediately with a `runId` and `sessionId`. Use `/api/agent/runs/{runId}/events` to stream the results via SSE.\n\n## RBAC\nTool execution within the agent loop respects user role permissions. Viewer role can only use read-only tools.\n\n## Iteration Limit\nMax 25 iterations per run.",
+        "description": "Starts an agentic conversation loop in detached mode. The agent processes the user's message asynchronously, calling MCP tools as needed. Returns immediately with a `runId` and `sessionId`. Use `/api/agent/runs/{runId}/events` to stream the results via SSE.\n\n## RBAC\nTool execution within the agent loop respects user role permissions. Viewer role can only use read-only tools.\n\n## Iteration Limit\nMax 50 iterations per run. Alert investigations (`type=investigation`) allow 60.",
         "operationId": "startAgentRun",
         "tags": [
           "Agent"

@@ -22,7 +22,7 @@ Every record and tool call is scoped to the org that made the request.
 |---|---|---|---|---|
 | Change plugin settings | yes | no | no | `ASSUMED` — Grafana app config is Admin-only; no plugin-side check |
 | Read the health message | yes | yes | yes | `VERIFIED` — `pkg/plugin/plugin.go:553` |
-| Use the configured org stores | yes | yes | yes | `VERIFIED` — `pkg/plugin/plugin.go:2322` |
+| Use the configured org stores | yes | yes | yes | `VERIFIED` — `pkg/plugin/plugin.go:2327` |
 
 ## Contract
 
@@ -66,18 +66,18 @@ Every record and tool call is scoped to the org that made the request.
 4. Per-server headers use the `mcpServerHeader.{serverID}.{headerName}` prefix and match an existing server ID. `VERIFIED` — `pkg/plugin/plugin.go:149`
 5. The parser is tested for matching, unknown, malformed, empty, multiple, and dotted keys. `VERIFIED` — test `TestApplySecureHeaders_DottedHeaderName`
 6. Header keys assume a server ID with no dot; the parser splits the key at the first dot. `VERIFIED` — `pkg/plugin/plugin.go:160`
-7. The service-account token comes from `GrafanaConfig.PluginAppClientSecret`, never from plugin settings. `VERIFIED` — `pkg/plugin/plugin.go:920`
+7. The service-account token comes from `GrafanaConfig.PluginAppClientSecret`, never from plugin settings. `VERIFIED` — `pkg/plugin/plugin.go:925`
 8. `maxTotalTokens` at or below zero becomes `agent.DefaultMaxTotalTokens`. `VERIFIED` — `pkg/plugin/plugin.go:280`
 9. An unparsable `builtInMCPBaseURL` is cleared, and the fallback is `http://localhost:3000`. `VERIFIED` — `pkg/plugin/plugin.go:287`
 10. `sessionTTLDays` at or below zero becomes 90 days. `VERIFIED` — `pkg/plugin/config.go:78`
 11. The Grafana URL resolution order is: local loopback, `GrafanaConfig.AppURL`, then the base-URL fallback. `VERIFIED` — `pkg/plugin/plugin.go:54`
 12. All HTTP clients come from `httpclient.New`, with a 30-second timeout for OAuth and 600 seconds for LLM calls. `VERIFIED` — `pkg/plugin/plugin.go:370`
 13. The LLM client never sets `X-Grafana-Org-Id`; the SA token is Org-1 scoped. `VERIFIED` — `pkg/agent/llm_client.go:324`
-14. `getOrgID` reads the server-populated plugin context and defaults to `1` when absent. `VERIFIED` — `pkg/plugin/plugin.go:2327`
+14. `getOrgID` reads the server-populated plugin context and defaults to `1` when absent. `VERIFIED` — `pkg/plugin/plugin.go:2332`
 15. When `orgID` is not `1`, the LLM client logs a warning and still sends the token without an org header. `VERIFIED` — `pkg/agent/llm_client.go:326`
 16. MCP calls do send `X-Grafana-Org-Id` with the caller's org. `VERIFIED` — `pkg/mcp/client.go:84`
 17. The context-first rule is tested. `VERIFIED` — test `TestGetOrgIDPrefersPluginContext`
-18. `getUserID` hashes the login; no client header can set it. `VERIFIED` — `pkg/plugin/plugin.go:2020`
+18. `getUserID` hashes the login; no client header can set it. `VERIFIED` — `pkg/plugin/plugin.go:2025`
 19. `useBuiltInMCP` with no SA token removes the built-in server and logs a warning. `VERIFIED` — `pkg/plugin/plugin.go:621`
 20. `full.yaml_` never enables `useBuiltInMCP`. `VERIFIED` — `provisioning/plugins/full.yaml_:18`
 21. `app.yaml` enables `useBuiltInMCP` for org 1. `VERIFIED` — `provisioning/plugins/app.yaml:31`
@@ -96,7 +96,7 @@ Coverage: `VERIFIED` = code pointer or test; `ASSUMED` = code suggests, no test;
 
 - No secret is read from plain `JSONData`. `VERIFIED` — `pkg/plugin/plugin.go:276`
 - The LLM request never carries `X-Grafana-Org-Id`. `VERIFIED` — `pkg/agent/llm_client.go:324`
-- Org identity comes from the plugin context, never from a client header. `VERIFIED` — `pkg/plugin/plugin.go:2326`
+- Org identity comes from the plugin context, never from a client header. `VERIFIED` — `pkg/plugin/plugin.go:2331`
 - `useBuiltInMCP: true` never appears in `provisioning/plugins/full.yaml_`. `VERIFIED` — `provisioning/plugins/full.yaml_:18`
 
 ## Failure Modes
@@ -105,7 +105,7 @@ Coverage: `VERIFIED` = code pointer or test; `ASSUMED` = code suggests, no test;
 |---|---|---|
 | `builtInMCPBaseURL` is invalid | Error logged; `http://localhost:3000` used | `pkg/plugin/plugin.go:287` |
 | Redis connection fails | Warning; in-memory stores | `pkg/plugin/plugin.go:345` |
-| SA token unavailable | Warning; built-in MCP and SA LLM calls fail | `pkg/plugin/plugin.go:921` |
+| SA token unavailable | Warning; built-in MCP and SA LLM calls fail | `pkg/plugin/plugin.go:926` |
 | `useBuiltInMCP` with no SA token | Built-in server removed; warning | `pkg/plugin/plugin.go:622` |
 | SDK HTTP client fails to build | `NewPlugin` returns an error | `pkg/plugin/plugin.go:431` |
 

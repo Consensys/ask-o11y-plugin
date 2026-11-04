@@ -50,10 +50,10 @@ func ValidateSessionData(sessionData []byte) error {
 	return nil
 }
 
-// CalculateExpiration calculates the expiration time and TTL for a share
-// Returns (expiresAt, ttl) where:
-// - expiresAt is nil if no explicit expiration is set
-// - ttl is the time-to-live duration (uses DefaultShareMaxTTL if no explicit expiration)
+// CalculateExpiration calculates the expiration time and TTL for a share.
+// Every share has an expiry: an explicit one when expiresInHours is set,
+// otherwise DefaultShareMaxTTL. The returned time is never nil, so the
+// in-memory and Redis stores apply the same rule.
 func CalculateExpiration(expiresInHours *int) (*time.Time, time.Duration) {
 	var expiresAt *time.Time
 	var ttl time.Duration
@@ -63,7 +63,8 @@ func CalculateExpiration(expiresInHours *int) (*time.Time, time.Duration) {
 		expiresAt = &exp
 		ttl = time.Until(exp)
 	} else {
-		// Default max TTL for shares without explicit expiration
+		exp := time.Now().Add(DefaultShareMaxTTL)
+		expiresAt = &exp
 		ttl = DefaultShareMaxTTL
 	}
 

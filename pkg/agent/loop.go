@@ -74,7 +74,6 @@ func NewAgentLoop(llmClient *LLMClient, mcpProxy *mcp.Proxy, logger log.Logger) 
 type LoopRequest struct {
 	Messages           []Message
 	SystemPrompt       string
-	Summary            string
 	MaxTotalTokens     int
 	RecentMessageCount int
 	MaxIterations      int
@@ -181,7 +180,7 @@ func (a *AgentLoop) Run(ctx context.Context, req LoopRequest, eventCh chan<- SSE
 		openAITools = append(openAITools, loadSkillToolSpec(req.AvailableSkills))
 	}
 
-	messages := BuildContextWindow(req.SystemPrompt, req.Messages, req.Summary, req.RecentMessageCount)
+	messages := BuildContextWindow(req.SystemPrompt, req.Messages, req.RecentMessageCount)
 	if catalog := toolRT.Catalog(); catalog != "" {
 		messages = injectSystemContext(messages, catalog)
 	}

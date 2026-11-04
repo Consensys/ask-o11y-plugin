@@ -68,10 +68,10 @@ Datasource access is Grafana's own permission model. This code adds no role chec
 32. TraceQL counts an aggregation only after a pipe. `VERIFIED` — test `does not classify span duration filters as aggregations`
 33. TraceQL `span:status` is not an aggregation. `VERIFIED` — test `does not classify span status filters as aggregations`
 34. TraceQL `count`, `avg`, and `rate` pipeline functions are detected. `VERIFIED` — test `detects count aggregation in TraceQL pipelines`
-35. `useChatScene` builds a `SplitLayout` of `ChatInterfaceScene` and `GrafanaPageScene`. `VERIFIED` — `src/components/Chat/hooks/useChatScene.ts:29`
-36. `chatPanelPosition` `right` makes the Grafana page the primary pane at 0.4. `ASSUMED` — `src/components/Chat/hooks/useChatScene.ts:25`
-37. Scene state changes are pushed into the live scene objects. `ASSUMED` — `src/components/Chat/hooks/useChatScene.ts:98`
-38. A scene build failure returns null, and the chat renders nothing. `GAP` — `src/components/Chat/hooks/useChatScene.ts:43` is a silent catch
+35. `useChatScene` builds a `SplitLayout` of `ChatInterfaceScene` and `GrafanaPageScene`. `VERIFIED` — `src/components/Chat/hooks/useChatScene.ts:30`
+36. `chatPanelPosition` `right` makes the Grafana page the primary pane at 0.4. `ASSUMED` — `src/components/Chat/hooks/useChatScene.ts:26`
+37. Scene state changes are pushed into the live scene objects. `ASSUMED` — `src/components/Chat/hooks/useChatScene.ts:103`
+38. A scene build failure is captured and returned to the caller; it is not swallowed. `VERIFIED` — `src/components/Chat/hooks/useChatScene.ts:57`
 39. Tempo traces come from the datasource proxy with `limit` 20 and `spss` 3. `ASSUMED` — `src/components/Chat/components/TracesRenderer/TracesRenderer.tsx:106`
 40. A Tempo failure shows "Failed to fetch traces from Tempo". `ASSUMED` — `src/components/Chat/components/TracesRenderer/TracesRenderer.tsx:116`
 41. Logs use a Loki datasource and a logs panel. `VERIFIED` — `src/components/Chat/components/LogsRenderer/LogsRenderer.tsx:50`
@@ -96,7 +96,7 @@ Coverage tags:
 | No datasource of the type | "No … datasource found. Add one under Connections, or set a default." | `src/components/Chat/utils/resolveVisualizationDatasource.ts:36` |
 | Panel construction throws | Error boundary "Graph Rendering Error" | `src/components/Chat/components/GraphRenderer/GraphRenderer.tsx:351` |
 | Tempo search fails | "Failed to fetch traces from Tempo" | `src/components/Chat/components/TracesRenderer/TracesRenderer.tsx:116` |
-| Scene bootstrap throws | Nothing renders, no message | `src/components/Chat/hooks/useChatScene.ts:43` |
+| Scene bootstrap throws | Error Alert names the failure | `src/components/Chat/Chat.tsx:284` |
 ## Data and Persistence
 | Store | Key or table | TTL | Fallback | Evidence |
 |---|---|---|---|---|

@@ -123,6 +123,8 @@ type State = {
 
 type ValidationErrors = {
   maxTotalTokens?: string;
+  prompt?: string;
+  mcpServersForm?: string;
   mcpServers: { [id: string]: { name?: string; url?: string } };
 };
 
@@ -916,8 +918,13 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
 
   function savePrompt(field: 'defaultSystemPrompt', value: string) {
     if (value.length > 15000) {
+      setValidationErrors((prev) => ({
+        ...prev,
+        prompt: `System prompt is ${value.length} characters. The maximum is 15000.`,
+      }));
       return;
     }
+    setValidationErrors((prev) => ({ ...prev, prompt: undefined }));
     saveAndReload({
       enabled,
       pinned,
@@ -1044,8 +1051,13 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
       (server) => server.headers && Object.keys(server.headers).some((key) => key.includes('__collision_'))
     );
     if (hasDuplicateHeaders) {
+      setValidationErrors((prev) => ({
+        ...prev,
+        mcpServersForm: 'Two headers in one server have the same name. Header names are case-insensitive.',
+      }));
       return;
     }
+    setValidationErrors((prev) => ({ ...prev, mcpServersForm: undefined }));
 
     const secureJsonData: Record<string, string> = {};
 
@@ -1422,6 +1434,12 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
               with the grafana-llm-app plugin; external servers extend the toolset.
             </p>
 
+            {validationErrors.mcpServersForm && (
+              <Alert severity="error" title="MCP servers not saved" className="mb-3">
+                {validationErrors.mcpServersForm}
+              </Alert>
+            )}
+
             {state.builtInMCPAvailable === false && (
               <Alert severity="warning" title="Built-in MCP unavailable" className="mb-3">
                 The grafana-llm-app plugin is not installed or MCP is not enabled. To use the built-in Grafana MCP,
@@ -1740,6 +1758,12 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
               Customize the base system prompt used across all conversations. Templates use Go text/template syntax.
               Domain workflows live in skills — edit them in the Skills tab.
             </p>
+
+            {validationErrors.prompt && (
+              <Alert severity="error" title="System prompt not saved" className="mb-3">
+                {validationErrors.prompt}
+              </Alert>
+            )}
 
             <PromptEditor
               label="System Prompt"

@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react';
-import { useTheme2 } from '@grafana/ui';
+import { Alert, useTheme2 } from '@grafana/ui';
 
 import { useChat } from './hooks/useChat';
 import { useKeyboardNavigation } from './hooks/useKeyboardNavigation';
@@ -255,7 +255,12 @@ function ChatComponent({
     [visiblePageRefs, handleRemoveTab, kioskModeEnabled, handleSidePanelClose]
   );
 
-  const chatScene = useChatScene(showSidePanel, chatInterfaceState, grafanaPageState, chatPanelPosition);
+  const { scene: chatScene, error: chatSceneError } = useChatScene(
+    showSidePanel,
+    chatInterfaceState,
+    grafanaPageState,
+    chatPanelPosition
+  );
 
   return (
     <div
@@ -274,6 +279,12 @@ function ChatComponent({
         onClose={() => setIsHistoryOpen(false)}
         docked={!readOnly}
       />
+
+      {chatSceneError && (
+        <Alert severity="error" title="Chat failed to load" className="m-4">
+          {chatSceneError}
+        </Alert>
+      )}
 
       {chatScene && (
         <div data-plugin-split-layout style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>

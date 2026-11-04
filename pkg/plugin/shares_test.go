@@ -42,13 +42,18 @@ func TestShareStore_CreateShare_NoExpiry(t *testing.T) {
 	store := NewShareStore(log.DefaultLogger, NewInMemoryRateLimiter(log.DefaultLogger))
 	sessionData := []byte(`{"id":"session-123","messages":[{"role":"user","content":"test"}]}`)
 
+	before := time.Now()
 	share, err := store.CreateShare("session-123", sessionData, 1, 100, nil)
 	if err != nil {
 		t.Fatalf("Failed to create share: %v", err)
 	}
 
-	if share.ExpiresAt != nil {
-		t.Error("ExpiresAt should be nil when no expiry is provided")
+	if share.ExpiresAt == nil {
+		t.Fatal("ExpiresAt should default to DefaultShareMaxTTL when no expiry is provided")
+	}
+	want := before.Add(DefaultShareMaxTTL)
+	if share.ExpiresAt.Before(want) || share.ExpiresAt.After(want.Add(time.Minute)) {
+		t.Errorf("ExpiresAt = %v, want about %v", share.ExpiresAt, want)
 	}
 }
 

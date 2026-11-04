@@ -1,12 +1,17 @@
 package plugin
 
 import (
+	"errors"
 	"fmt"
 	"sync"
 	"time"
 
 	"github.com/grafana/grafana-plugin-sdk-go/backend/log"
 )
+
+// ErrShareRateLimit reports that the user exceeded the share creation limit.
+// Callers compare it with errors.Is instead of matching the message text.
+var ErrShareRateLimit = errors.New("rate limit exceeded: too many share requests")
 
 // ShareMetadata represents a shared session with its metadata
 type ShareMetadata struct {
@@ -52,7 +57,7 @@ func (s *ShareStore) CreateShare(sessionID string, sessionData []byte, orgID, us
 
 	// Check rate limit
 	if !s.rateLimiter.CheckLimit(userID) {
-		return nil, fmt.Errorf("rate limit exceeded: too many share requests")
+		return nil, ErrShareRateLimit
 	}
 
 	// Generate secure share ID

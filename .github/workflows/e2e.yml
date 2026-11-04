@@ -31,6 +31,8 @@ jobs:
               - 'go.mod'
               - 'go.sum'
               - 'tsconfig.json'
+              - '.github/workflows/**'
+              - '.github/actions/**'
 
   build:
     name: Build Plugin with Coverage
