@@ -1,0 +1,19 @@
+{
+  "version": "1.3.0",
+  "integration_state_schema": 1,
+  "installed_integrations": [
+    "opencode"
+  ],
+  "integration_settings": {
+    "opencode": {
+      "script": "sh",
+      "raw_options": "--events false",
+      "parsed_options": {
+        "events": "false"
+      },
+      "invoke_separator": "."
+    }
+  },
+  "integration": "opencode",
+  "default_integration": "opencode"
+}

@@ -1,0 +1,43 @@
+name: Specs
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'specs/**'
+      - '.specify/**'
+      - 'scripts/verify-retro-specs.mjs'
+      - '.github/workflows/specs.yml'
+  pull_request:
+    paths:
+      - 'specs/**'
+      - '.specify/**'
+      - 'scripts/verify-retro-specs.mjs'
+      - '.github/workflows/specs.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify-retro-specs:
+    name: Verify retro-specs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '22'
+
+      - name: Verify retro-specs
+        run: node scripts/verify-retro-specs.mjs
+
+      - name: Verify template overrides resolve
+        run: |
+          for template in spec-template plan-template tasks-template; do
+            .specify/scripts/bash/resolve-template.sh "$template" > /dev/null
+          done
