@@ -1,7 +1,7 @@
 # Retro-Spec: Inline Visualisations
 **Capability ID**: `121-visualisations`
 **Status**: Retrospective
-**Last verified**: `6c09d13`
+**Last verified**: `18e315b`
 **Owner**: Ask O11y maintainers
 **Module**: `src/components/Chat/utils/`, `src/components/Chat/scenes/`
 ---

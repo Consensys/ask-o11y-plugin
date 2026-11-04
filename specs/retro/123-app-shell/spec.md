@@ -1,7 +1,7 @@
 # Retro-Spec: App Config UI, Shell, and Services
 **Capability ID**: `123-app-shell`
 **Status**: Retrospective
-**Last verified**: `6c09d13`
+**Last verified**: `18e315b`
 **Owner**: Ask O11y maintainers
 **Module**: `src/module.tsx`, `src/components/AppConfig/`, `src/services/`, `src/utils/`
 ---

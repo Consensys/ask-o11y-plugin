@@ -1,7 +1,7 @@
 # Retro-Spec: Chat UI and Streaming Render
 **Capability ID**: `120-chat-ui`
 **Status**: Retrospective
-**Last verified**: `6c09d13`
+**Last verified**: `18e315b`
 **Owner**: Ask O11y maintainers
 **Module**: `src/components/Chat/`, `src/services/agentClient.ts`
 ---

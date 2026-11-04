@@ -4,7 +4,7 @@
 
 **Status**: Retrospective
 
-**Last verified**: `6c09d13`
+**Last verified**: `18e315b`
 
 **Owner**: Ask O11y maintainers
 

@@ -1,7 +1,7 @@
 # Retro-Spec: Sidebar, Stats, and Session UX
 **Capability ID**: `122-session-ux`
 **Status**: Retrospective
-**Last verified**: `6c09d13`
+**Last verified**: `18e315b`
 **Owner**: Ask O11y maintainers
 **Module**: `src/components/Chat/components/SessionSidebar/`, `src/services/backendSessionClient.ts`
 ---
