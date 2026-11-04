@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/grafana/grafana-plugin-sdk-go/backend/log"
@@ -31,6 +32,32 @@ type Client struct {
 	logger            log.Logger
 	mu                sync.RWMutex
 	tools             []Tool
+	// toolsStale records that the published catalog is known to disagree with
+	// the server (an unknown-tool failure, or a list_changed notification).
+	// Readers keep serving tools: the slice is never emptied, because
+	// FindToolByName must keep resolving in-flight runs while a refresh runs.
+	toolsStale bool
+	// catalogGen increments on every successful publication. A caller that
+	// waited on refreshMu behind another caller's refresh compares it against
+	// the value it saw before its failed call: a moved generation means the
+	// catalog is already newer, so the caller retries without a second I/O.
+	// Guarded by mu.
+	catalogGen uint64
+	// toolsDirty is written only by the SDK's tool-list-changed notification
+	// callback, which must not take a lock: the SDK dispatches it from the
+	// connection reader while connectMCP holds mu. Cleared only by
+	// publishTools, after a successful listing.
+	toolsDirty atomic.Bool
+	// refreshMu serialises catalog refreshes for this server and guards
+	// lastRefresh. Lock order: refreshMu, then mu. Never the reverse.
+	refreshMu sync.Mutex
+	// lastRefresh is the time of the last successful re-list. It bounds
+	// failure-triggered refreshes to one per toolCatalogRefreshMinInterval.
+	// Guarded by refreshMu.
+	lastRefresh time.Time
+	// listTools is a test seam. Nil means "use the real transport dispatch".
+	// Set once before the client is used.
+	listTools func(context.Context) ([]Tool, error)
 	mcpClient         *mcpsdk.Client
 	session           *mcpsdk.ClientSession
 	operationMetadata map[string]OperationMetadata
@@ -174,6 +201,26 @@ func (c *Client) connectSession(callerCtx context.Context, transport mcpsdk.Tran
 // callerCtx only contributes the per-user identity for the connection
 // handshake of OAuth-enabled servers; the session lifetime stays rooted at
 // the client context. Pass context.Background() for system-level connects.
+// newSDKClient builds the SDK client with the notification handler wired in.
+// The handler is advisory: a transport that cannot deliver server-initiated
+// messages (both streamable-http transports disable standalone SSE) simply
+// never calls it, and unknown-tool recovery still repairs the catalog.
+func (c *Client) newSDKClient() *mcpsdk.Client {
+	return mcpsdk.NewClient(&mcpsdk.Implementation{
+		Name:    "consensys-asko11y-app",
+		Version: "1.0.0",
+	}, &mcpsdk.ClientOptions{
+		ToolListChangedHandler: c.onToolListChanged,
+	})
+}
+
+// onToolListChanged marks the catalog dirty for the next listing. It runs on
+// the SDK's connection reader, so it must not take a lock and must not do I/O:
+// the re-list belongs to the next ListToolsWithContext.
+func (c *Client) onToolListChanged(context.Context, *mcpsdk.ToolListChangedRequest) {
+	c.toolsDirty.Store(true)
+}
+
 func (c *Client) connectMCP(callerCtx context.Context) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -183,10 +230,7 @@ func (c *Client) connectMCP(callerCtx context.Context) error {
 	}
 
 	// Create MCP client
-	c.mcpClient = mcpsdk.NewClient(&mcpsdk.Implementation{
-		Name:    "consensys-asko11y-app",
-		Version: "1.0.0",
-	}, nil)
+	c.mcpClient = c.newSDKClient()
 
 	httpClient := c.httpClientWithHeaders()
 
@@ -381,10 +425,7 @@ func (c *Client) connectMCPWithOrgContext(callerCtx context.Context, orgID strin
 	c.closeSessionLocked()
 
 	// Create MCP client
-	c.mcpClient = mcpsdk.NewClient(&mcpsdk.Implementation{
-		Name:    "consensys-asko11y-app",
-		Version: "1.0.0",
-	}, nil)
+	c.mcpClient = c.newSDKClient()
 
 	customHTTPClient := c.sdkHTTPClientWithTransport(c.wrapPerUserToken(&customRoundTripper{
 		base:       c.baseTransport(),
@@ -437,40 +478,104 @@ func (c *Client) ListTools() ([]Tool, error) {
 // anonymous probe would be rejected by providers that gate discovery.
 func (c *Client) ListToolsWithContext(ctx context.Context) ([]Tool, error) {
 	c.mu.RLock()
-	if c.tools != nil {
+	if c.tools != nil && !c.toolsStale && !c.toolsDirty.Load() {
 		cached := c.tools
 		c.mu.RUnlock()
 		return cached, nil
 	}
 	c.mu.RUnlock()
 
+	// OpenAPI and standard clients have no catalog-refresh protocol, so they
+	// keep the plain list-and-publish path.
+	if !c.supportsCatalogRefresh() {
+		return c.listAndPublish(ctx)
+	}
+
+	// Every MCP miss goes through refreshTools so one set of guards applies on
+	// all paths: single-flight under refreshMu, an empty listing is rejected,
+	// and a failed listing never replaces the last known-good catalog.
+	refreshed, err := c.refreshTools(ctx, 0)
+	if refreshed {
+		c.mu.RLock()
+		tools := c.tools
+		c.mu.RUnlock()
+		return tools, nil
+	}
+
+	// The re-list failed. Serve the last known-good catalog: a health probe
+	// must not flap and a run must not start with no tools (FR-007, FR-008).
+	c.mu.RLock()
+	cached := c.tools
+	c.mu.RUnlock()
+	if cached != nil {
+		c.logger.Debug("mcp catalog refresh failed; serving cached tools",
+			"server", c.config.ID, "tools", len(cached), "error", sanitizeError(err))
+		return cached, nil
+	}
+	if err == nil {
+		err = fmt.Errorf("failed to list tools for server %s", c.config.ID)
+	}
+	return nil, err
+}
+
+// listAndPublish fetches the catalog from the server, applies the server-ID
+// prefix, and publishes it under c.mu. It is the only path that publishes,
+// so every publication bumps catalogGen and clears both stale flags.
+func (c *Client) listAndPublish(ctx context.Context) ([]Tool, error) {
+	tools, err := c.fetchTools(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return c.publishTools(tools), nil
+}
+
+// fetchTools lists the server's catalog and returns it with every tool name
+// prefixed by the server ID. The caller owns the returned slice.
+func (c *Client) fetchTools(ctx context.Context) ([]Tool, error) {
 	var tools []Tool
 	var err error
 
-	switch c.config.Type {
-	case "openapi":
-		tools, err = c.listOpenAPITools()
-	case "sse", "streamable-http", "http+streamable":
-		tools, err = c.listMCPTools(ctx)
-	default:
-		// Fallback to standard MCP protocol
-		tools, err = c.listStandardTools()
+	if c.listTools != nil {
+		tools, err = c.listTools(ctx)
+	} else {
+		switch c.config.Type {
+		case "openapi":
+			tools, err = c.listOpenAPITools()
+		case "sse", "streamable-http", "http+streamable":
+			tools, err = c.listMCPTools(ctx)
+		default:
+			// Fallback to standard MCP protocol
+			tools, err = c.listStandardTools()
+		}
 	}
-
 	if err != nil {
 		return nil, err
 	}
 
-	// Prefix tool names with server ID to avoid conflicts
+	// Prefix tool names with server ID to avoid conflicts. Copy first: the
+	// published slice must never share backing storage with a caller's slice.
+	prefixed := make([]Tool, len(tools))
 	for i := range tools {
-		tools[i].Name = fmt.Sprintf("%s_%s", c.config.ID, tools[i].Name)
+		prefixed[i] = tools[i]
+		prefixed[i].Name = fmt.Sprintf("%s_%s", c.config.ID, tools[i].Name)
 	}
+	return prefixed, nil
+}
 
+// publishTools installs a freshly listed catalog. The slice is immutable once
+// published: readers copy the header under RLock and never touch its elements.
+func (c *Client) publishTools(tools []Tool) []Tool {
 	c.mu.Lock()
 	c.tools = tools
+	c.catalogGen++
+	c.toolsStale = false
 	c.mu.Unlock()
 
-	return tools, nil
+	// The dirty flag is advisory and is cleared only here, once a listing that
+	// started after the notification has been published.
+	c.toolsDirty.Store(false)
+
+	return tools
 }
 
 // normalizeJSONSchema ensures the schema has proper JSON Schema structure
@@ -634,13 +739,48 @@ func jitteredDuration(base time.Duration, fraction float64) time.Duration {
 // type so tests can inject a stub without spinning up a streamable-http server.
 type callToolOncer func(ctx context.Context, toolName string, arguments map[string]interface{}, orgID, orgName, scopeOrgId string) (*CallToolResult, error)
 
-// callMCPToolWithContext wraps callMCPToolOnce with classification-aware retry.
-// Only ErrKindTransport errors are retried; tool-logic, protocol, and canceled
-// errors are returned immediately. After the last retry the underlying error
-// is wrapped in *TransportError so callers can distinguish transport outages
-// from tool-layer failures and avoid fabricating around missing data.
+// callMCPToolWithContext wraps the retry loop with one catalog refresh when
+// the server rejects the tool name. See callToolWithCatalogRefresh.
 func (c *Client) callMCPToolWithContext(ctx context.Context, toolName string, arguments map[string]interface{}, orgID string, orgName string, scopeOrgId string) (*CallToolResult, error) {
-	return c.callMCPToolWithRetry(ctx, c.callMCPToolOnce, toolName, arguments, orgID, orgName, scopeOrgId)
+	return c.callToolWithCatalogRefresh(ctx, c.callMCPToolOnce, toolName, arguments, orgID, orgName, scopeOrgId)
+}
+
+// callToolWithCatalogRefresh runs a tool call and repairs a stale catalog when
+// the server answers "unknown tool".
+//
+// A server upgraded in place renames tools while this process keeps the old
+// list. On that failure the catalog is re-listed once for that server and the
+// call is retried exactly once against the refreshed list. The transport retry
+// loop stays a separate layer: an unknown-tool error classifies as a protocol
+// error, so it never enters that loop.
+func (c *Client) callToolWithCatalogRefresh(ctx context.Context, once callToolOncer, toolName string, arguments map[string]interface{}, orgID, orgName, scopeOrgId string) (*CallToolResult, error) {
+	gen := c.catalogGeneration()
+
+	result, err := c.callMCPToolWithRetry(ctx, once, toolName, arguments, orgID, orgName, scopeOrgId)
+	if err == nil || !isUnknownToolError(err) {
+		return result, err
+	}
+
+	// The OpenAPI and standard paths keep their behaviour, including the
+	// error text: no refresh, no retry, no hint.
+	if !c.supportsCatalogRefresh() {
+		return result, err
+	}
+
+	// A failed refresh is logged inside refreshTools. The user sees the
+	// original call error, never a fabricated result and never a hint: the
+	// catalog did not change, so any "now provides" list would just repeat
+	// the name that was refused.
+	refreshed, _ := c.refreshTools(ctx, gen)
+	if !refreshed {
+		return result, err
+	}
+
+	result, err = c.callMCPToolWithRetry(ctx, once, toolName, arguments, orgID, orgName, scopeOrgId)
+	if err != nil && isUnknownToolError(err) {
+		return result, c.enrichUnknownToolError(err, toolName)
+	}
+	return result, err
 }
 
 func (c *Client) callMCPToolWithRetry(ctx context.Context, once callToolOncer, toolName string, arguments map[string]interface{}, orgID, orgName, scopeOrgId string) (*CallToolResult, error) {

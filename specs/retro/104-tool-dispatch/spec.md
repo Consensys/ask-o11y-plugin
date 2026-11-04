@@ -4,7 +4,7 @@
 
 **Status**: Retrospective
 
-**Last verified**: `18e315b`
+**Last verified**: `f3db81a`
 
 **Owner**: Ask O11y maintainers
 
@@ -46,7 +46,7 @@ The agent path has no dedicated route. The direct MCP edge is `POST /api/mcp/cal
 ### MCP tool names
 | Tool | Read-only | Evidence |
 |---|---|---|
-| `{serverID}_{toolName}` for external servers | per tool annotation | `pkg/mcp/client.go:466` |
+| `{serverID}_{toolName}` for external servers | per tool annotation | `pkg/mcp/client.go:560` |
 | `mcp-grafana_*` for the built-in server | per tool annotation | `pkg/plugin/plugin.go:87` |
 | `search_tools` | yes (internal) | `pkg/agent/search_tools.go:28` |
 | `load_skill` | yes (internal) | `pkg/agent/loop.go:45` |
@@ -72,8 +72,8 @@ The agent path has no dedicated route. The direct MCP edge is `POST /api/mcp/cal
 19. An empty result becomes "No results returned (empty response)". `VERIFIED` — `pkg/agent/loop.go:1006`
 20. The model receives errors as a normal `tool` message with the error text. `VERIFIED` — `pkg/agent/loop.go:659`
 21. Transport failures reach the model as an explicit "UNAVAILABLE" directive, while SSE keeps the raw error. `VERIFIED` — `pkg/agent/loop.go:645`
-22. External tool names carry the server ID prefix. `VERIFIED` — `pkg/mcp/client.go:466`
-23. The prefix is stripped before the upstream call. `VERIFIED` — `pkg/mcp/client.go:589`
+22. External tool names carry the server ID prefix. `VERIFIED` — `pkg/mcp/client.go:560`
+23. The prefix is stripped before the upstream call. `VERIFIED` — `pkg/mcp/client.go:694`
 24. Server lookup prefers the longest registered ID that prefixes the name. `VERIFIED` — test `TestServerIDForTool`
 25. `search_tools` ranks tools with BM25 over name, description, and parameter names. `VERIFIED` — `pkg/agent/toolindex.go:98`
 26. Name weight is 3.0, description and parameter weight 1.0, synonym weight 0.6. `VERIFIED` — `pkg/agent/toolindex.go:26`
@@ -94,12 +94,15 @@ The agent path has no dedicated route. The direct MCP edge is `POST /api/mcp/cal
 41. `ExcludeToolNames` is not enforced at execution; a direct call to an excluded name can still run. `GAP` — `pkg/agent/loop.go:959`
 42. A `limit` outside 1–25 is silently replaced, not rejected. `GAP` — `pkg/agent/toolindex.go:149`
 43. `AlwaysInclude` supports exact names and a trailing `*` only; other glob forms do not match. `GAP` — `pkg/agent/search_tools.go:438`
+44. A tool-call error may name the tools the server now provides, ranked by shared name tokens. `VERIFIED` — test `TestCallToolDoesNotLoopOnPersistentUnknownTool`
+45. Execution resolves a name against the current catalog, so a replacement named in an error is callable in the same run. `VERIFIED` — `pkg/mcp/proxy.go:380`
 ## Invariants
 - A tool the user cannot call is never indexed or advertised. `VERIFIED` — `pkg/agent/search_tools.go:104`
 - RBAC is checked again after name resolution. `VERIFIED` — `pkg/agent/loop.go:974`
 - Tool results keep the assistant call order. `VERIFIED` — `pkg/agent/loop.go:618`
 - A tool call never reaches MCP with unparsed arguments. `VERIFIED` — `pkg/agent/loop.go:982`
 - The activated set never exceeds the count or token caps. `VERIFIED` — `pkg/agent/search_tools.go:229`
+- The advertised tool set is fixed at run start, so a catalog change reaches the model only through tool results. `VERIFIED` — `pkg/agent/loop.go:176`
 ## Failure Modes
 | Condition | User-visible result | Evidence |
 |---|---|---|

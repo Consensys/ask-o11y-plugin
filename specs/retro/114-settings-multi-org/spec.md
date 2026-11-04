@@ -75,7 +75,7 @@ Every record and tool call is scoped to the org that made the request.
 13. The LLM client never sets `X-Grafana-Org-Id`; the SA token is Org-1 scoped. `VERIFIED` — `pkg/agent/llm_client.go:324`
 14. `getOrgID` reads the server-populated plugin context and defaults to `1` when absent. `VERIFIED` — `pkg/plugin/plugin.go:2332`
 15. When `orgID` is not `1`, the LLM client logs a warning and still sends the token without an org header. `VERIFIED` — `pkg/agent/llm_client.go:326`
-16. MCP calls do send `X-Grafana-Org-Id` with the caller's org. `VERIFIED` — `pkg/mcp/client.go:84`
+16. MCP calls do send `X-Grafana-Org-Id` with the caller's org. `VERIFIED` — `pkg/mcp/client.go:111`
 17. The context-first rule is tested. `VERIFIED` — test `TestGetOrgIDPrefersPluginContext`
 18. `getUserID` hashes the login; no client header can set it. `VERIFIED` — `pkg/plugin/plugin.go:2025`
 19. `useBuiltInMCP` with no SA token removes the built-in server and logs a warning. `VERIFIED` — `pkg/plugin/plugin.go:621`
@@ -88,7 +88,7 @@ Every record and tool call is scoped to the org that made the request.
 26. When Redis is absent, the health message says session sharing will not work across replicas. `VERIFIED` — `pkg/plugin/plugin.go:570`
 27. Settings, sessions, and runs are all keyed by org, so org 2 gets separate records. `VERIFIED` — `pkg/plugin/sessionstore.go:94`
 28. In a non-Org-1 org, the plugin keeps using the Org-1 service-account token for the LLM. The configured LLM app for that org is therefore not selected. `GAP` — `pkg/agent/llm_client.go:326`
-29. The same mismatch applies to the built-in MCP: the Org-1 SA token is paired with the caller's `X-Grafana-Org-Id`. `GAP` — `pkg/mcp/client.go:84`
+29. The same mismatch applies to the built-in MCP: the Org-1 SA token is paired with the caller's `X-Grafana-Org-Id`. `GAP` — `pkg/mcp/client.go:111`
 
 Coverage: `VERIFIED` = code pointer or test; `ASSUMED` = code suggests, no test; `GAP` = missing or contradictory.
 
@@ -128,7 +128,7 @@ Coverage: `VERIFIED` = code pointer or test; `ASSUMED` = code suggests, no test;
 ## Evidence Index
 
 - `pkg/plugin/plugin.go:265` — `NewPlugin`
-- `pkg/mcp/client.go:84` — MCP org header
+- `pkg/mcp/client.go:111` — MCP org header
 - `provisioning/plugins/full.yaml_:18` — built-in MCP absent
 - `pkg/agent/llm_client_test.go` — `TestLLMClient_ChatCompletion` — no org header with SA auth
 

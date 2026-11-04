@@ -4,7 +4,7 @@
 
 **Status**: Retrospective
 
-**Last verified**: `18e315b`
+**Last verified**: `f3db81a`
 
 **Owner**: Ask O11y maintainers
 
@@ -88,13 +88,15 @@ Response body: `{servers, systemHealth, oauth}`. `pkg/plugin/plugin.go:845`
 27. Removing a server also removes its health entry, and a probe that was already running cannot recreate it. `VERIFIED` — `pkg/mcp/proxy.go:116`, `pkg/mcp/health.go:120`, `pkg/mcp/health.go:206`
 28. `Stop` returns without blocking when `Start` never ran. `VERIFIED` — `pkg/mcp/health.go:98`
 29. No test covers the health state machine, the thresholds, or `/api/mcp/servers`. `GAP` — no `health_test.go` exists
-30. `responseTime` measures `ListTools` wall time, which includes a cached tool list. `ASSUMED` — `pkg/mcp/client.go:440` returns the cache without a network call
+30. `responseTime` measures `ListTools` wall time, which includes a cached tool list. `ASSUMED` — `pkg/mcp/client.go:481` returns the cache without a network call
+31. A failed catalog refresh does not change a server's health: the probe receives the cached catalog and a nil error. `VERIFIED` — test `TestRefreshFailureKeepsCatalogAndHealth`
 
 ## Invariants
 
 - The poll interval is 30s and is not user-configurable. `VERIFIED` — `pkg/plugin/config.go:40`
 - A probe never mutates tool data; it only replaces the stored copy. `VERIFIED` — `pkg/mcp/health.go:222`
 - Reconnect runs outside the health lock. `VERIFIED` — `pkg/mcp/health.go:244`
+- A refresh failure never reaches the probe as an error, so health cannot flap on a catalog refresh. `VERIFIED` — `pkg/mcp/tool_refresh.go:98`
 
 ## Failure Modes
 
