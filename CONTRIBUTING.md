@@ -12,6 +12,7 @@ This project and everyone participating in it is expected to uphold professional
 - [Reporting Issues](#reporting-issues)
 - [Contributing Code](#contributing-code)
 - [Development Setup](#development-setup)
+- [Specifications](#specifications)
 - [Code Standards](#code-standards)
 - [REST API Reference](#rest-api-reference)
 - [Testing Guidelines](#testing-guidelines)
@@ -213,6 +214,33 @@ git rebase upstream/main
 # Push to your fork (force push if already pushed)
 git push origin your-branch-name --force-with-lease
 ```
+
+---
+
+## Specifications
+
+This repository uses [spec-kit](https://github.com/github/spec-kit) to design features.
+
+- **Process law**: `.specify/memory/constitution.md`.
+- **Existing contracts**: `specs/retro/`. Read one spec for the module you touch.
+- **New features**: `specs/NNN-slug/`. Create one with `/speckit.specify` in OpenCode.
+- **Review queue**: `specs/retro/REVIEW.md` lists every unproven claim.
+
+The workflow:
+
+1. `/speckit.specify` — write the specification from the ticket.
+2. `/speckit.clarify` — optional. Resolve ambiguous requirements first.
+3. `/speckit.plan` — write the technical plan. Cite the retro-specs the change can break.
+4. `/speckit.tasks` — produce the task list.
+5. `/speckit.implement` — execute the tasks.
+6. `/speckit.converge` — append work that the implementation revealed.
+
+Rules:
+
+- A retro-spec is a living contract. When you change a module, update its spec and its `Last verified` commit in the same PR.
+- A `VERIFIED` rule needs a code pointer or a test name. Never mark a rule `VERIFIED` without one.
+- Run `node scripts/verify-retro-specs.mjs` before you open a PR.
+- Do not edit `.opencode/commands/speckit-*.md` by hand. Regenerate them with `specify init`.
 
 ---
 

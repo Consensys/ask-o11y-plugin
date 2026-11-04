@@ -8,6 +8,16 @@
 
 **Architecture:** Server-side agentic loop (Go) streams SSE to React frontend. MCP proxy aggregates multiple tool servers. RBAC enforced at tool listing and execution via `ToolAnnotations`.
 
+## Specifications (spec-kit)
+
+Process law lives in `.specify/memory/constitution.md`. Existing contracts live in `specs/retro/`.
+
+- Read the one retro-spec for the module you touch. Never load the whole set.
+- New feature chain: `/speckit.specify` → `clarify` → `plan` → `tasks` → `implement` → `converge`.
+- `specs/retro/REVIEW.md` holds the open review queue for `ASSUMED` and `GAP` rows.
+- Update a retro-spec and its `Last verified` in the same PR that changes the module.
+- Gate: `node scripts/verify-retro-specs.mjs`.
+
 ## Exploration & Investigation Rules
 
 When asked to explore a codebase or investigate an issue, limit initial exploration to 3-5 targeted file reads before proposing a plan. Do NOT do exhaustive grep/search loops. If you haven't found what you need in 5 minutes of exploration, stop and ask the user for direction.
