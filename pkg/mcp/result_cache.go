@@ -87,3 +87,12 @@ func (c *resultCache) set(key string, result *CallToolResult, ttl time.Duration)
 	}
 	c.entries[key] = resultCacheEntry{result: result, expiresAt: now.Add(ttl)}
 }
+
+// clear drops every cached result. The proxy calls it when the server
+// configuration changes, because a cached value may describe a server that
+// no longer exists or now points somewhere else.
+func (c *resultCache) clear() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.entries = make(map[string]resultCacheEntry)
+}

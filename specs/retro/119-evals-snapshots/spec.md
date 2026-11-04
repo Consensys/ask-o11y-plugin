@@ -4,7 +4,7 @@
 
 **Status**: Retrospective
 
-**Last verified**: `6c09d13`
+**Last verified**: `18e315b`
 
 **Owner**: Ask O11y maintainers
 
@@ -22,9 +22,9 @@ Snapshot prefetch gives the agent exact identifiers before its first query.
 
 | Capability | Admin | Editor | Viewer | Evidence |
 |---|---|---|---|---|
-| List evals (`GET /api/agent/evals`) | yes | yes | yes | `pkg/plugin/plugin.go:1779` (no role check) |
-| Run evals (`POST /api/agent/evals/run`) | yes | yes | no (403) | `pkg/plugin/plugin.go:1821` |
-| Receive snapshot prefetch on a run | yes | yes | yes | `pkg/plugin/plugin.go:952` |
+| List evals (`GET /api/agent/evals`) | yes | yes | yes | `pkg/plugin/plugin.go:1784` (no role check) |
+| Run evals (`POST /api/agent/evals/run`) | yes | yes | no (403) | `pkg/plugin/plugin.go:1826` |
+| Receive snapshot prefetch on a run | yes | yes | yes | `pkg/plugin/plugin.go:957` |
 | Configure the scan interval | yes | no | no | `pkg/plugin/plugin.go:114` (jsonData, Admin AppConfig) |
 
 ## Contract
@@ -38,7 +38,7 @@ Snapshot prefetch gives the agent exact identifiers before its first query.
 
 ### SSE events
 
-None. Evals read stored run traces; runs stream on `/api/agent/runs/`. `VERIFIED` — `pkg/plugin/plugin.go:1853`
+None. Evals read stored run traces; runs stream on `/api/agent/runs/`. `VERIFIED` — `pkg/plugin/plugin.go:1858`
 
 ### Configuration keys
 
@@ -68,14 +68,14 @@ Tags: `VERIFIED` (code pointer or test), `ASSUMED` (untested), `GAP` (missing).
 6. RCA quality averages evidence coverage, report completeness, and status. `VERIFIED` — `pkg/plugin/agent_eval.go:62`
 7. Hallucination risk is 100 minus the average of coverage and completeness, floored at 80 for a report with zero evidence. `VERIFIED` — `pkg/plugin/agent_eval.go:63`
 8. Overall averages the five sub-scores and clamps to 0-100. `VERIFIED` — `pkg/plugin/agent_eval.go:67`
-9. GET returns `{enabled: false, evals: []}` when capture is disabled. `VERIFIED` — `pkg/plugin/plugin.go:1784`
+9. GET returns `{enabled: false, evals: []}` when capture is disabled. `VERIFIED` — `pkg/plugin/plugin.go:1789`
 10. GET returns only the caller's runs in the caller's org, newest first. `VERIFIED` — `pkg/plugin/runstore.go:247`
-11. The GET limit defaults to 20 and clamps to 100. `VERIFIED` — `pkg/plugin/plugin.go:2312`
-12. POST returns 404 when capture is disabled. `VERIFIED` — `pkg/plugin/plugin.go:1817`
-13. POST rejects a Viewer with 403 and accepts Admin or Editor. `VERIFIED` — `pkg/plugin/plugin.go:1821`
-14. POST with `runId` scores one run after an ownership check. `VERIFIED` — `pkg/plugin/plugin.go:1834`
-15. POST without `runId` scores up to `limit` of the caller's recent runs. `VERIFIED` — `pkg/plugin/plugin.go:1840`
-16. POST returns `{status: "completed", results: [...]}`. `VERIFIED` — `pkg/plugin/plugin.go:1854`
+11. The GET limit defaults to 20 and clamps to 100. `VERIFIED` — `pkg/plugin/plugin.go:2317`
+12. POST returns 404 when capture is disabled. `VERIFIED` — `pkg/plugin/plugin.go:1822`
+13. POST rejects a Viewer with 403 and accepts Admin or Editor. `VERIFIED` — `pkg/plugin/plugin.go:1826`
+14. POST with `runId` scores one run after an ownership check. `VERIFIED` — `pkg/plugin/plugin.go:1839`
+15. POST without `runId` scores up to `limit` of the caller's recent runs. `VERIFIED` — `pkg/plugin/plugin.go:1845`
+16. POST returns `{status: "completed", results: [...]}`. `VERIFIED` — `pkg/plugin/plugin.go:1859`
 17. Scores are computed per request and never persisted; there is no eval store. `VERIFIED` — `pkg/plugin/agent_eval.go:36`
 18. Scout skips a scavenge until org ID, Grafana URL, and Graphiti tools are known. `VERIFIED` — `pkg/plugin/scout.go:152`
 19. Scan intervals are 5m, 15m, 30m, 1h, 3h, 12h, 24h; anything else disables discovery. `VERIFIED` — test `TestParseScanInterval`
@@ -90,23 +90,23 @@ Tags: `VERIFIED` (code pointer or test), `ASSUMED` (untested), `GAP` (missing).
 28. Metric namespaces cache for one hour, fetch up to 5,000 names per datasource, and render 40 prefixes. `VERIFIED` — `pkg/plugin/metric_namespace_snapshot.go:19`
 29. The alert-rule snapshot has a 5-second budget, 90-second hit TTL, and 30-second miss TTL. `VERIFIED` — `pkg/plugin/alert_rule_snapshot.go:37`
 30. The alert-rule snapshot renders at most 3 rules from at most 8 datasources. `VERIFIED` — `pkg/plugin/alert_rule_snapshot.go:49`
-31. The alert-rule prefetch runs only when the alert name is extractable from the message. `VERIFIED` — `pkg/plugin/plugin.go:968`
+31. The alert-rule prefetch runs only when the alert name is extractable from the message. `VERIFIED` — `pkg/plugin/plugin.go:973`
 32. Every snapshot fails open: an empty result renders no prompt block and the run continues. `VERIFIED` — `pkg/plugin/alert_rule_snapshot.go:29`
 
 ## Invariants
 
 - An eval never mutates a run. `VERIFIED` — `pkg/plugin/agent_eval.go:36`
-- A run is visible only to its owner in its own org. `VERIFIED` — `pkg/plugin/plugin.go:1336`
+- A run is visible only to its owner in its own org. `VERIFIED` — `pkg/plugin/plugin.go:1341`
 - No prefetch can fail a run. `VERIFIED` — `pkg/plugin/datasource_snapshot.go:96`
 
 ## Failure Modes
 
 | Condition | User-visible result | Evidence |
 |---|---|---|
-| Capture disabled | GET `enabled: false`; POST 404 | `pkg/plugin/plugin.go:1816` |
-| Viewer calls eval run | HTTP 403 `Access denied` | `pkg/plugin/plugin.go:1821` |
-| Run not owned | HTTP 403 `Access denied` | `pkg/plugin/plugin.go:1337` |
-| Run list fails | HTTP 500 `Failed to list agent evals` | `pkg/plugin/plugin.go:1796` |
+| Capture disabled | GET `enabled: false`; POST 404 | `pkg/plugin/plugin.go:1821` |
+| Viewer calls eval run | HTTP 403 `Access denied` | `pkg/plugin/plugin.go:1826` |
+| Run not owned | HTTP 403 `Access denied` | `pkg/plugin/plugin.go:1342` |
+| Run list fails | HTTP 500 `Failed to list agent evals` | `pkg/plugin/plugin.go:1801` |
 | `list_datasources` times out | Fail-open warning block in prompt | `pkg/plugin/datasource_snapshot.go:95` |
 | Scavenge fails | Run skipped; warning logged | `pkg/plugin/scout.go:214` |
 

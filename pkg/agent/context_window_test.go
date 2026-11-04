@@ -12,7 +12,7 @@ func TestBuildContextWindow(t *testing.T) {
 		messages[i] = Message{Role: "user", Content: "msg"}
 	}
 
-	result := BuildContextWindow("system prompt", messages, "", 5)
+	result := BuildContextWindow("system prompt", messages, 5)
 
 	// system prompt + last 5 messages
 	if len(result) != 6 {
@@ -23,32 +23,14 @@ func TestBuildContextWindow(t *testing.T) {
 	}
 }
 
-func TestBuildContextWindow_WithSummary(t *testing.T) {
-	messages := make([]Message, 20)
-	for i := range messages {
-		messages[i] = Message{Role: "user", Content: "msg"}
-	}
-
-	result := BuildContextWindow("system prompt", messages, "summary of old msgs", 5)
-
-	// system + summary + last 5 messages
-	if len(result) != 7 {
-		t.Fatalf("expected 7 messages, got %d", len(result))
-	}
-	if !strings.Contains(result[1].Content, "summary of old msgs") {
-		t.Errorf("expected summary in second message, got %q", result[1].Content)
-	}
-}
-
 func TestBuildContextWindow_ShortConversation(t *testing.T) {
 	messages := []Message{
 		{Role: "user", Content: "hello"},
 		{Role: "assistant", Content: "hi"},
 	}
 
-	// Summary should be ignored when conversation is shorter than recentCount
-	result := BuildContextWindow("sys", messages, "summary", 10)
-	if len(result) != 3 { // system + 2 messages (no summary)
+	result := BuildContextWindow("sys", messages, 10)
+	if len(result) != 3 { // system + 2 messages
 		t.Fatalf("expected 3 messages, got %d", len(result))
 	}
 }
@@ -195,7 +177,7 @@ func TestBuildContextWindow_FiltersEmptyAssistant(t *testing.T) {
 		{Role: "user", Content: "retry"},
 	}
 
-	result := BuildContextWindow("sys", messages, "", 10)
+	result := BuildContextWindow("sys", messages, 10)
 	if len(result) != 3 {
 		t.Fatalf("expected 3 messages, got %d", len(result))
 	}

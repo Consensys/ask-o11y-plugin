@@ -157,20 +157,13 @@ func estimateMessagesTokens(messages []Message, tools []OpenAITool) int {
 	return total
 }
 
-func BuildContextWindow(systemPrompt string, allMessages []Message, summary string, recentCount int) []Message {
+func BuildContextWindow(systemPrompt string, allMessages []Message, recentCount int) []Message {
 	if recentCount <= 0 {
 		recentCount = defaultRecentMessageCount
 	}
 
-	ctx := make([]Message, 0, recentCount+3)
+	ctx := make([]Message, 0, recentCount+2)
 	ctx = append(ctx, Message{Role: "system", Content: systemPrompt})
-
-	if summary != "" && len(allMessages) > recentCount {
-		ctx = append(ctx, Message{
-			Role:    "system",
-			Content: "[Previous conversation summary: " + summary + "]",
-		})
-	}
 
 	start := 0
 	if len(allMessages) > recentCount {

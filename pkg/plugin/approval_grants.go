@@ -23,6 +23,7 @@ type ApprovalGrant struct {
 type ApprovalGrantStore interface {
 	Has(ctx context.Context, sessionID, toolName string) (bool, error)
 	Grant(ctx context.Context, grant ApprovalGrant) error
+	DeleteSession(ctx context.Context, sessionID string) error
 	Close()
 }
 
@@ -77,6 +78,26 @@ func (s *InMemoryApprovalGrantStore) Grant(ctx context.Context, grant ApprovalGr
 
 func (s *InMemoryApprovalGrantStore) Close() {}
 
+// DeleteSession drops every grant that belongs to sessionID, so a deleted
+// session leaves no standing approval behind.
+func (s *InMemoryApprovalGrantStore) DeleteSession(ctx context.Context, sessionID string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	trimmed := strings.TrimSpace(sessionID)
+	if trimmed == "" {
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for key, grant := range s.grants {
+		if strings.TrimSpace(grant.SessionID) == trimmed {
+			delete(s.grants, key)
+		}
+	}
+	return nil
+}
+
 type RedisApprovalGrantStore struct {
 	ctx    context.Context
 	client *redis.Client
@@ -126,3 +147,15 @@ func (s *RedisApprovalGrantStore) Grant(ctx context.Context, grant ApprovalGrant
 }
 
 func (s *RedisApprovalGrantStore) Close() {}
+
+// DeleteSession drops every grant that belongs to sessionID, so a deleted
+// session leaves no standing approval behind.
+func (s *RedisApprovalGrantStore) DeleteSession(ctx context.Context, sessionID string) error {
+	trimmed := strings.TrimSpace(sessionID)
+	if trimmed == "" {
+		return nil
+	}
+	opCtx, cancel := redisContext(ctx, RedisOpTimeout)
+	defer cancel()
+	return s.client.Del(opCtx, approvalGrantRedisKey(trimmed)).Err()
+}

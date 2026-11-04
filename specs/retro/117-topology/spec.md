@@ -4,7 +4,7 @@
 
 **Status**: Retrospective
 
-**Last verified**: `6c09d13`
+**Last verified**: `18e315b`
 
 **Owner**: Ask O11y maintainers
 
@@ -22,8 +22,8 @@ Both paths fail open: a missing graph never blocks an investigation.
 
 | Capability | Admin | Editor | Viewer | Evidence |
 |---|---|---|---|---|
-| Read `GET /api/agent/topology` | yes | yes | yes | `pkg/plugin/plugin.go:1859` (no role check) |
-| Receive the prefetched topology block on an RCA run | yes | yes | yes | `pkg/plugin/plugin.go:987` |
+| Read `GET /api/agent/topology` | yes | yes | yes | `pkg/plugin/plugin.go:1864` (no role check) |
+| Receive the prefetched topology block on an RCA run | yes | yes | yes | `pkg/plugin/plugin.go:992` |
 | Open the AppConfig service-graph panel | yes | no | no | `GAP` — no route-level check; Grafana gates the config page |
 
 ## Contract
@@ -34,18 +34,18 @@ Both paths fail open: a missing graph never blocks an investigation.
 |---|---|---|---|
 | GET | `/api/agent/topology` | `handleAgentTopology` | `pkg/plugin/plugin.go:592` |
 
-Query parameters: `query` (string), `maxNodes` (default 100, max 500), `maxEdges` (default 200, max 1000). `VERIFIED` — `pkg/plugin/plugin.go:1864`
+Query parameters: `query` (string), `maxNodes` (default 100, max 500), `maxEdges` (default 200, max 1000). `VERIFIED` — `pkg/plugin/plugin.go:1869`
 
 ### SSE events
 
-None. The route returns one JSON body. `VERIFIED` — `pkg/plugin/plugin.go:1989`
+None. The route returns one JSON body. `VERIFIED` — `pkg/plugin/plugin.go:1994`
 
 ### Configuration keys
 
 | Key | Location | Default | Evidence |
 |---|---|---|---|
-| `serviceGraphMaxNodes` | plugin jsonData | 100 | `src/components/AppConfig/AppConfig.tsx:136` |
-| `serviceGraphMaxEdges` | plugin jsonData | 200 | `src/components/AppConfig/AppConfig.tsx:137` |
+| `serviceGraphMaxNodes` | plugin jsonData | 100 | `src/components/AppConfig/AppConfig.tsx:138` |
+| `serviceGraphMaxEdges` | plugin jsonData | 200 | `src/components/AppConfig/AppConfig.tsx:139` |
 
 The backend does not read either key; the UI forwards them as query parameters. `GAP` — `pkg/plugin/plugin.go:115`
 
@@ -64,9 +64,9 @@ Tags: `VERIFIED` (code pointer or test), `ASSUMED` (untested), `GAP` (missing).
 
 1. The response carries `enabled`, `source`, `nodes`, `edges`, `rawFactCount`, and `warnings`. `VERIFIED` — `pkg/plugin/topology.go:25`
 2. A node is `{id, label, type}`; an edge is `{id, source, target, label}`. `VERIFIED` — `pkg/plugin/topology.go:12`
-3. `source` is always `graphiti` on this route. `VERIFIED` — `pkg/plugin/plugin.go:1978`
-4. `enabled: false` and empty arrays return when `graphiti_add_memory` is absent. `VERIFIED` — `pkg/plugin/plugin.go:1873`
-5. A missing facts tool returns `enabled: true`, empty arrays, and a warning. `VERIFIED` — `pkg/plugin/plugin.go:1890`
+3. `source` is always `graphiti` on this route. `VERIFIED` — `pkg/plugin/plugin.go:1983`
+4. `enabled: false` and empty arrays return when `graphiti_add_memory` is absent. `VERIFIED` — `pkg/plugin/plugin.go:1878`
+5. A missing facts tool returns `enabled: true`, empty arrays, and a warning. `VERIFIED` — `pkg/plugin/plugin.go:1895`
 6. The default fact query covers topology, dependencies, deployment, and signals. `VERIFIED` — `pkg/plugin/topology.go:708`
 7. Node type derives from Graphiti labels: service, namespace, cluster, database, queue. `VERIFIED` — `pkg/plugin/topology.go:388`
 8. Known infrastructure names are dropped from the graph. `VERIFIED` — `pkg/plugin/topology.go:82`
@@ -75,16 +75,16 @@ Tags: `VERIFIED` (code pointer or test), `ASSUMED` (untested), `GAP` (missing).
 11. An edge ID is `source->target`; repeated pairs keep the first edge and self edges are rejected. `VERIFIED` — `pkg/plugin/topology.go:495`
 12. An edge label is the lowercased relation name, or `depends`/`relates to` when absent. `VERIFIED` — `pkg/plugin/topology.go:828`
 13. Free text is parsed for arrows, call verbs, deployment, cluster, signal, and queue patterns. `VERIFIED` — `pkg/plugin/topology.go:437`
-14. A missing nodes tool falls back to text-only parsing and adds a warning. `VERIFIED` — `pkg/plugin/plugin.go:1921`
+14. A missing nodes tool falls back to text-only parsing and adds a warning. `VERIFIED` — `pkg/plugin/plugin.go:1926`
 15. Centered fact lookups are capped at 12 nodes per request. `VERIFIED` — `pkg/plugin/topology.go:43`
 16. Per-center fact limit is between 25 and 100, scaled by the edge limit. `VERIFIED` — `pkg/plugin/topology.go:741`
-17. Invalid or absent limits fall back to the defaults. `VERIFIED` — `pkg/plugin/plugin.go:1992`
+17. Invalid or absent limits fall back to the defaults. `VERIFIED` — `pkg/plugin/plugin.go:1997`
 18. A limit above the hard maximum is clamped, not rejected. `VERIFIED` — `pkg/plugin/topology.go:182`
 18. Node truncation and edge truncation each append a warning. `VERIFIED` — `pkg/plugin/topology.go:197`
 19. Edges whose endpoints were truncated away are dropped. `VERIFIED` — `pkg/plugin/topology.go:207`
-20. An empty graph appends a "no facts matched" warning. `VERIFIED` — `pkg/plugin/plugin.go:1985`
+20. An empty graph appends a "no facts matched" warning. `VERIFIED` — `pkg/plugin/plugin.go:1990`
 21. Nil nodes or edges serialise as `[]`, never `null`. `VERIFIED` — `pkg/plugin/topology.go:224`
-22. The route has no cache; every request fans out to Graphiti. `GAP` — `pkg/plugin/plugin.go:1859` (no cache lookup)
+22. The route has no cache; every request fans out to Graphiti. `GAP` — `pkg/plugin/plugin.go:1864` (no cache lookup)
 23. The prompt snapshot prefers Tempo service-graph metrics over Graphiti. `VERIFIED` — `pkg/plugin/topology_snapshot.go:264`
 24. The snapshot budget is 3 seconds for the whole prefetch. `VERIFIED` — `pkg/plugin/topology_snapshot.go:27`
 25. A successful snapshot caches for 5 minutes; a miss caches for 1 minute. `VERIFIED` — test `TestTopologySnapshot_ServiceGraphPrimaryAndCached`
@@ -95,11 +95,11 @@ Tags: `VERIFIED` (code pointer or test), `ASSUMED` (untested), `GAP` (missing).
 30. The snapshot scopes to the alert's `service` label, and keeps all edges when nothing matches. `VERIFIED` — `pkg/plugin/topology_snapshot.go:154`
 31. Graphiti fallback is capped at 60 facts and labels edges as unverified. `VERIFIED` — `pkg/plugin/topology_snapshot.go:48`
 32. An empty snapshot renders no prompt block. `VERIFIED` — `pkg/plugin/prompt_defaults.go:85`
-33. Failed or partial node lookups return a warning and partial data, never a 500. `VERIFIED` — `pkg/plugin/plugin.go:1934`
+33. Failed or partial node lookups return a warning and partial data, never a 500. `VERIFIED` — `pkg/plugin/plugin.go:1939`
 
 ## Invariants
 
-- The route always answers JSON, even when the graph is absent. `VERIFIED` — `pkg/plugin/plugin.go:1873`
+- The route always answers JSON, even when the graph is absent. `VERIFIED` — `pkg/plugin/plugin.go:1878`
 - A topology failure never blocks a run: the snapshot is best-effort. `VERIFIED` — `pkg/plugin/topology_snapshot.go:20`
 - Graphiti queries always carry the org `group_id`, never a caller-supplied one. `VERIFIED` — `pkg/plugin/topology.go:646`
 
@@ -107,10 +107,10 @@ Tags: `VERIFIED` (code pointer or test), `ASSUMED` (untested), `GAP` (missing).
 
 | Condition | User-visible result | Evidence |
 |---|---|---|
-| Tool listing fails | 500 `Failed to load topology tools` | `pkg/plugin/plugin.go:1870` |
-| Facts call fails | 500 `Failed to load topology` | `pkg/plugin/plugin.go:1911` |
-| Graphiti not registered | 200 with `enabled: false` | `pkg/plugin/plugin.go:1873` |
-| Nodes tool missing | 200, text-only graph, warning | `pkg/plugin/plugin.go:1921` |
+| Tool listing fails | 500 `Failed to load topology tools` | `pkg/plugin/plugin.go:1875` |
+| Facts call fails | 500 `Failed to load topology` | `pkg/plugin/plugin.go:1916` |
+| Graphiti not registered | 200 with `enabled: false` | `pkg/plugin/plugin.go:1878` |
+| Nodes tool missing | 200, text-only graph, warning | `pkg/plugin/plugin.go:1926` |
 | Prompt snapshot empty | No topology block in the prompt | `pkg/plugin/prompt_defaults.go:85` |
 
 ## Data and Persistence

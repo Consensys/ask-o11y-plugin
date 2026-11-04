@@ -1,7 +1,7 @@
 # Retro-Spec: Chat UI and Streaming Render
 **Capability ID**: `120-chat-ui`
 **Status**: Retrospective
-**Last verified**: `6c09d13`
+**Last verified**: `18e315b`
 **Owner**: Ask O11y maintainers
 **Module**: `src/components/Chat/`, `src/services/agentClient.ts`
 ---
@@ -94,7 +94,7 @@ Read-only views hide the input. The gate is the `readOnly` prop, not the user ro
 44. The stop button appears only while generating. `VERIFIED` — test `should show stop button during generation`
 45. The queue indicator appears only when messages are queued. `VERIFIED` — test `should show queue indicator when messages are queued`
 46. A read-only view hides the chat input. `VERIFIED` — test `should view a shared session in read-only mode`
-47. `Chat` renders nothing when the scene builder returns null. `GAP` — `src/components/Chat/Chat.tsx:278` has no fallback UI
+47. A scene build failure shows an error Alert instead of an empty pane. `VERIFIED` — `src/components/Chat/Chat.tsx:284`
 Coverage tags:
 
 | Tag | Meaning | Review action |

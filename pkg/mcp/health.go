@@ -29,6 +29,7 @@ type ServerHealth struct {
 	ResponseTime        int64        `json:"responseTime"` // milliseconds
 	SuccessRate         float64      `json:"successRate"`
 	ErrorCount          int          `json:"errorCount"`
+	TotalChecks         int          `json:"totalChecks"`
 	ConsecutiveFailures int          `json:"consecutiveFailures"`
 	LastError           string       `json:"lastError,omitempty"`
 	Tools               []Tool       `json:"tools"`
@@ -43,6 +44,16 @@ type HealthMonitor struct {
 	health map[string]*ServerHealth
 	ticker *time.Ticker
 	done   chan bool
+
+	// lifecycleMu guards started so Start and Stop are safe to call in any
+	// order, including Stop before Start and a repeated Stop.
+	lifecycleMu sync.Mutex
+	started     bool
+
+	// generation increments on every config change that touches the server
+	// set. A probe captures it before the network call and drops its result
+	// when the value moved, so a removed server cannot come back.
+	generation uint64
 }
 
 // NewHealthMonitor creates a new health monitor
@@ -57,7 +68,18 @@ func NewHealthMonitor(proxy *Proxy, logger log.Logger) *HealthMonitor {
 
 // Start begins health monitoring
 func (hm *HealthMonitor) Start(interval time.Duration) {
-	hm.ticker = time.NewTicker(interval)
+	hm.lifecycleMu.Lock()
+	if hm.started {
+		hm.lifecycleMu.Unlock()
+		hm.logger.Warn("Health monitor already started")
+		return
+	}
+	ticker := time.NewTicker(interval)
+	done := make(chan bool)
+	hm.ticker = ticker
+	hm.done = done
+	hm.started = true
+	hm.lifecycleMu.Unlock()
 
 	// Perform initial health check
 	hm.checkAllServers()
@@ -65,9 +87,9 @@ func (hm *HealthMonitor) Start(interval time.Duration) {
 	go func() {
 		for {
 			select {
-			case <-hm.ticker.C:
+			case <-ticker.C:
 				hm.checkAllServers()
-			case <-hm.done:
+			case <-done:
 				return
 			}
 		}
@@ -76,13 +98,30 @@ func (hm *HealthMonitor) Start(interval time.Duration) {
 	hm.logger.Info("Health monitor started", "interval", interval)
 }
 
-// Stop stops health monitoring
+// Stop stops health monitoring. It is a no-op when Start never ran, so a
+// plugin that disposes before it initialises does not block forever.
 func (hm *HealthMonitor) Stop() {
-	if hm.ticker != nil {
-		hm.ticker.Stop()
+	hm.lifecycleMu.Lock()
+	if !hm.started {
+		hm.lifecycleMu.Unlock()
+		return
 	}
-	hm.done <- true
+	hm.started = false
+	hm.ticker.Stop()
+	done := hm.done
+	hm.lifecycleMu.Unlock()
+
+	close(done)
 	hm.logger.Info("Health monitor stopped")
+}
+
+// RemoveServer forgets the health state of a server that is no longer
+// configured, so a removed server does not stay in /api/mcp/servers forever.
+func (hm *HealthMonitor) RemoveServer(serverID string) {
+	hm.mu.Lock()
+	delete(hm.health, serverID)
+	hm.generation++
+	hm.mu.Unlock()
 }
 
 // checkAllServers performs health checks on all servers
@@ -130,82 +169,20 @@ func (hm *HealthMonitor) CheckServerNow(serverID string) {
 
 // checkServer performs a health check on a single server
 func (hm *HealthMonitor) checkServer(serverID string, client *Client) {
+	// Capture the config generation before the probe. A removal during the
+	// probe bumps it, and the stale result is then discarded instead of
+	// recreating a health row for a server that is gone.
+	hm.mu.RLock()
+	generation := hm.generation
+	hm.mu.RUnlock()
+
 	startTime := time.Now()
 
 	// List tools to check server health
 	tools, err := client.ListTools()
 	responseTime := time.Since(startTime).Milliseconds()
 
-	needReconnect := false
-	serverName := ""
-
-	func() {
-		hm.mu.Lock()
-		defer hm.mu.Unlock()
-
-		health, exists := hm.health[serverID]
-		if !exists {
-			health = &ServerHealth{
-				ServerID:  serverID,
-				Name:      client.config.Name,
-				URL:       client.config.URL,
-				Type:      client.config.Type,
-				Status:    StatusConnecting,
-				Tools:     []Tool{},
-				ToolCount: 0,
-			}
-			hm.health[serverID] = health
-		}
-
-		health.LastCheck = time.Now()
-		health.ResponseTime = responseTime
-
-		if err != nil {
-			health.ErrorCount++
-			health.ConsecutiveFailures++
-			health.LastError = sanitizeError(err)
-
-			if health.ConsecutiveFailures >= 5 {
-				health.Status = StatusDisconnected
-			} else if health.ConsecutiveFailures >= 3 {
-				health.Status = StatusUnhealthy
-			} else {
-				health.Status = StatusDegraded
-			}
-
-			hm.logger.Warn("Health check failed",
-				"server", health.Name,
-				"error", health.LastError,
-				"consecutiveFailures", health.ConsecutiveFailures)
-
-			// One step before StatusUnhealthy, ask the client to re-establish its
-			// session so the next user request doesn't hit a dead socket.
-			if health.ConsecutiveFailures == 2 {
-				needReconnect = true
-				serverName = health.Name
-			}
-		} else {
-			health.ConsecutiveFailures = 0
-			health.LastError = ""
-			health.Tools = tools
-			health.ToolCount = len(tools)
-
-			if responseTime > 2000 {
-				health.Status = StatusDegraded
-			} else {
-				health.Status = StatusHealthy
-			}
-
-			totalChecks := health.ErrorCount + 1
-			successfulChecks := totalChecks - health.ErrorCount
-			health.SuccessRate = float64(successfulChecks) / float64(totalChecks) * 100
-
-			hm.logger.Debug("Health check succeeded",
-				"server", health.Name,
-				"responseTime", responseTime,
-				"toolCount", len(tools))
-		}
-	}()
+	needReconnect, serverName := hm.recordHealth(serverID, client, generation, tools, responseTime, err)
 
 	// Do the potentially-blocking reconnect outside the health-map lock to keep
 	// checkAllServers from serializing on one stuck server.
@@ -216,6 +193,84 @@ func (hm *HealthMonitor) checkServer(serverID string, client *Client) {
 			hm.logger.Info("forceReconnect triggered by health monitor", "server", serverName)
 		}
 	}
+}
+
+// recordHealth applies one probe result to the health map. It reports whether
+// the client should reconnect, and the server name for the reconnect log line.
+// A result older than the current generation is dropped: the server set changed
+// while the probe ran, so the row may belong to a server that was removed.
+func (hm *HealthMonitor) recordHealth(serverID string, client *Client, generation uint64, tools []Tool, responseTime int64, err error) (needReconnect bool, serverName string) {
+	hm.mu.Lock()
+	defer hm.mu.Unlock()
+
+	if generation != hm.generation {
+		hm.logger.Debug("Discarding stale health result", "server", serverID)
+		return false, ""
+	}
+
+	health, exists := hm.health[serverID]
+	if !exists {
+		health = &ServerHealth{
+			ServerID:  serverID,
+			Name:      client.config.Name,
+			URL:       client.config.URL,
+			Type:      client.config.Type,
+			Status:    StatusConnecting,
+			Tools:     []Tool{},
+			ToolCount: 0,
+		}
+		hm.health[serverID] = health
+	}
+
+	health.LastCheck = time.Now()
+	health.ResponseTime = responseTime
+	health.TotalChecks++
+
+	if err != nil {
+		health.ErrorCount++
+		health.ConsecutiveFailures++
+		health.LastError = sanitizeError(err)
+
+		if health.ConsecutiveFailures >= 5 {
+			health.Status = StatusDisconnected
+		} else if health.ConsecutiveFailures >= 3 {
+			health.Status = StatusUnhealthy
+		} else {
+			health.Status = StatusDegraded
+		}
+
+		hm.logger.Warn("Health check failed",
+			"server", health.Name,
+			"error", health.LastError,
+			"consecutiveFailures", health.ConsecutiveFailures)
+
+		// One step before StatusUnhealthy, ask the client to re-establish its
+		// session so the next user request doesn't hit a dead socket.
+		if health.ConsecutiveFailures == 2 {
+			needReconnect = true
+			serverName = health.Name
+		}
+	} else {
+		health.ConsecutiveFailures = 0
+		health.LastError = ""
+		health.Tools = tools
+		health.ToolCount = len(tools)
+
+		if responseTime > 2000 {
+			health.Status = StatusDegraded
+		} else {
+			health.Status = StatusHealthy
+		}
+
+		hm.logger.Debug("Health check succeeded",
+			"server", health.Name,
+			"responseTime", responseTime,
+			"toolCount", len(tools))
+	}
+
+	health.SuccessRate = float64(health.TotalChecks-health.ErrorCount) / float64(health.TotalChecks) * 100
+
+	return needReconnect, serverName
 }
 
 // GetAllHealth returns the health status of all servers

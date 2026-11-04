@@ -6,8 +6,8 @@ import "strings"
 // Tool names from external MCP servers are prefixed "{serverID}_". Tools without
 // a known server prefix (built-in or embedded Grafana MCP) are always enabled.
 func IsToolEnabled(toolName string, servers []ServerConfig) bool {
-	serverID, _, ok := strings.Cut(toolName, "_")
-	if !ok {
+	serverID, _ := resolveServerPrefix(toolName, servers)
+	if serverID == "" {
 		return true
 	}
 	for _, s := range servers {
@@ -23,6 +23,24 @@ func IsToolEnabled(toolName string, servers []ServerConfig) bool {
 		return true
 	}
 	return true
+}
+
+// resolveServerPrefix returns the ID of the configured server that owns
+// toolName, and the tool name without that prefix. Server IDs may contain
+// underscores, so the longest matching "id_" prefix wins — the same rule as
+// Proxy.ServerIDForTool. An empty server ID means no configured server owns
+// the name.
+func resolveServerPrefix(toolName string, servers []ServerConfig) (serverID, unprefixed string) {
+	best := ""
+	for _, s := range servers {
+		if len(s.ID) > len(best) && strings.HasPrefix(toolName, s.ID+"_") {
+			best = s.ID
+		}
+	}
+	if best == "" {
+		return "", toolName
+	}
+	return best, toolName[len(best)+1:]
 }
 
 // FilterToolsBySelection returns tools allowed by the user's per-server selections.

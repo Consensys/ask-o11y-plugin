@@ -285,7 +285,7 @@ Rules:
 
 **Style Guide:**
 - Follow standard Go formatting (`gofmt`)
-- Use `golangci-lint` (enforced by CI)
+- Use `golangci-lint` locally (`golangci-lint run`); CI does not run it
 - **Naming**: camelCase for private, PascalCase for public
 - **Error Handling**: Always check errors, return early
 - **Context**: Pass `context.Context` as first parameter
@@ -604,7 +604,7 @@ We use **Conventional Commits** for clear, structured commit history. **Every co
 
 ### Type
 
-Allowed (CI-enforced): **feat**, **fix**, **docs**, **style**, **refactor**, **perf**, **test**, **build**, **ci**, **chore**, **revert**
+Allowed (checked by commitlint): **feat**, **fix**, **docs**, **style**, **refactor**, **perf**, **test**, **build**, **ci**, **chore**, **revert**
 
 - **feat**: New feature
 - **fix**: Bug fix
@@ -620,7 +620,7 @@ Allowed (CI-enforced): **feat**, **fix**, **docs**, **style**, **refactor**, **p
 
 ### Scope
 
-Optional but recommended. Allowed (CI-enforced): **chat**, **mcp**, **session**, **config**, **rbac**, **oauth**, **share**, **viz**, **backend**, **ui**, **frontend**, **deps**, **release**, **ci**, **main**
+Optional but recommended. Allowed (commitlint warns, does not block): **chat**, **mcp**, **session**, **config**, **rbac**, **oauth**, **share**, **viz**, **backend**, **ui**, **frontend**, **deps**, **release**, **ci**, **main**
 
 ### Subject
 

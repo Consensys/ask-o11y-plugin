@@ -83,12 +83,14 @@ func (p *Proxy) UpdateConfig(configs []ServerConfig) error {
 	// Collect stale clients under lock, then close outside the lock
 	// to avoid holding mu while blocking on network I/O.
 	var stale []*Client
+	var removed []string
 
 	p.mu.Lock()
 	for id := range p.clients {
 		if _, exists := newConfigs[id]; !exists {
 			stale = append(stale, p.clients[id])
 			delete(p.clients, id)
+			removed = append(removed, id)
 			p.logger.Info("Removed MCP client", "id", id)
 		}
 	}
@@ -109,6 +111,15 @@ func (p *Proxy) UpdateConfig(configs []ServerConfig) error {
 			p.logger.Warn("Failed to close removed MCP client", "error", err)
 		}
 	}
+
+	for _, id := range removed {
+		p.healthMonitor.RemoveServer(id)
+	}
+
+	// A cached result belongs to the previous server configuration: the URL,
+	// the headers, or the datasource behind the tool may have changed.
+	p.resultCache.clear()
+
 	return nil
 }
 
@@ -421,7 +432,7 @@ func (p *Proxy) EnsureServer(config ServerConfig) error {
 			return nil
 		}
 		replaced = existing
-		p.logger.Debug("Replacing MCP client", "id", config.ID)
+		p.logger.Warn("Replacing MCP client", "id", config.ID, "url", config.URL)
 	}
 
 	c := NewClient(p.ctx, config, p.logger, sdkHTTPClient)
@@ -453,6 +464,8 @@ func (p *Proxy) RemoveServer(id string) {
 		if err := client.Close(); err != nil {
 			p.logger.Warn("Failed to close removed MCP client", "id", id, "error", err)
 		}
+		p.healthMonitor.RemoveServer(id)
+		p.resultCache.clear()
 		p.logger.Info("Removed MCP client", "id", id)
 	}
 }

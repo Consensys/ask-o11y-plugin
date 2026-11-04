@@ -32,7 +32,7 @@ func NewRedisShareStore(ctx context.Context, client *redis.Client, logger log.Lo
 func (s *RedisShareStore) CreateShare(sessionID string, sessionData []byte, orgID, userID int64, expiresInHours *int) (*ShareMetadata, error) {
 	// Check rate limit
 	if !s.rateLimiter.CheckLimit(userID) {
-		return nil, fmt.Errorf("rate limit exceeded: too many share requests")
+		return nil, ErrShareRateLimit
 	}
 
 	// Generate secure share ID
@@ -45,12 +45,12 @@ func (s *RedisShareStore) CreateShare(sessionID string, sessionData []byte, orgI
 	expiresAt, ttl := CalculateExpiration(expiresInHours)
 
 	share := &ShareMetadata{
-		ShareID:    shareID,
-		SessionID:  sessionID,
-		OrgID:      orgID,
-		UserID:     userID,
-		ExpiresAt:  expiresAt,
-		CreatedAt:  time.Now(),
+		ShareID:     shareID,
+		SessionID:   sessionID,
+		OrgID:       orgID,
+		UserID:      userID,
+		ExpiresAt:   expiresAt,
+		CreatedAt:   time.Now(),
 		SessionData: sessionData,
 	}
 
@@ -249,4 +249,3 @@ func (s *RedisShareStore) CleanupExpired() {
 	// However, we can clean up stale entries in session index sets
 	// This is optional and can be done periodically if needed
 }
-

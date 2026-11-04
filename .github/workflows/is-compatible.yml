@@ -24,6 +24,8 @@ jobs:
               - 'go.mod'
               - 'go.sum'
               - 'tsconfig.json'
+              - '.github/workflows/**'
+              - '.github/actions/**'
 
   compatibilitycheck:
     needs: check-changes

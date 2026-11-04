@@ -1,7 +1,7 @@
 # Retro-Spec: Sidebar, Stats, and Session UX
 **Capability ID**: `122-session-ux`
 **Status**: Retrospective
-**Last verified**: `6c09d13`
+**Last verified**: `18e315b`
 **Owner**: Ask O11y maintainers
 **Module**: `src/components/Chat/components/SessionSidebar/`, `src/services/backendSessionClient.ts`
 ---
@@ -36,7 +36,7 @@ Sessions are scoped by the `X-Grafana-Org-Id` header. No role check exists in th
 ### Configuration keys
 | Key | Location | Default | Evidence |
 |---|---|---|---|
-| `sessionTTLDays` | `jsonData` | `90` | `src/components/AppConfig/AppConfig.tsx:140` |
+| `sessionTTLDays` | `jsonData` | `90` | `src/components/AppConfig/AppConfig.tsx:142` |
 ### MCP tool names
 | Tool | Read-only | Evidence |
 |---|---|---|

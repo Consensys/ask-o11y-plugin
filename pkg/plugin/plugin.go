@@ -210,30 +210,30 @@ func contextLimitsFromSettings(settings PluginSettings) agent.ContextLimits {
 
 type Plugin struct {
 	backend.CallResourceHandler
-	logger         log.Logger
-	mcpProxy       *mcp.Proxy
-	agentLoop      *agent.AgentLoop
-	scout          *Scout
-	shareStore     ShareStoreInterface
-	runStore       RunStoreInterface
-	sessionStore   SessionStoreInterface
-	redisClient    *redis.Client
-	usingRedis     bool
+	logger       log.Logger
+	mcpProxy     *mcp.Proxy
+	agentLoop    *agent.AgentLoop
+	scout        *Scout
+	shareStore   ShareStoreInterface
+	runStore     RunStoreInterface
+	sessionStore SessionStoreInterface
+	redisClient  *redis.Client
+	usingRedis   bool
 	// agentRateLimiter throttles expensive LLM agent runs and knowledge-graph
 	// writes; toolCallRateLimiter throttles direct MCP tool invocations.
 	agentRateLimiter    RateLimiter
 	toolCallRateLimiter RateLimiter
-	approvalBroker ApprovalBroker
-	approvalGrants ApprovalGrantStore
-	useBuiltInMCP  bool
-	promptRegistry *PromptRegistry
-	skillRegistry  *skills.Registry
-	settings       PluginSettings
-	settingsMu     sync.RWMutex
-	ctx            context.Context
-	cancel         context.CancelFunc
-	runCancelsMu   sync.Mutex
-	runCancels     map[string]context.CancelFunc
+	approvalBroker      ApprovalBroker
+	approvalGrants      ApprovalGrantStore
+	useBuiltInMCP       bool
+	promptRegistry      *PromptRegistry
+	skillRegistry       *skills.Registry
+	settings            PluginSettings
+	settingsMu          sync.RWMutex
+	ctx                 context.Context
+	cancel              context.CancelFunc
+	runCancelsMu        sync.Mutex
+	runCancels          map[string]context.CancelFunc
 	// oauthManager drives per-user OAuth for external MCP servers; it also
 	// implements mcp.PerUserTokenProvider for the proxy.
 	oauthManager *oauth.Manager
@@ -448,27 +448,27 @@ func NewPlugin(ctx context.Context, settings backend.AppInstanceSettings) (insta
 	go scout.StartRetention()
 
 	p := &Plugin{
-		logger:         logger,
-		mcpProxy:       mcpProxy,
-		agentLoop:      agentLoop,
-		scout:          scout,
-		shareStore:     shareStore,
-		runStore:       runStore,
-		sessionStore:   sessionStore,
-		redisClient:    redisClient,
-		usingRedis:     usingRedis,
+		logger:       logger,
+		mcpProxy:     mcpProxy,
+		agentLoop:    agentLoop,
+		scout:        scout,
+		shareStore:   shareStore,
+		runStore:     runStore,
+		sessionStore: sessionStore,
+		redisClient:  redisClient,
+		usingRedis:   usingRedis,
 
 		agentRateLimiter:    agentRateLimiter,
 		toolCallRateLimiter: toolCallRateLimiter,
-		approvalBroker: approvalBroker,
-		approvalGrants: approvalGrants,
-		useBuiltInMCP:  pluginSettings.UseBuiltInMCP,
-		promptRegistry: promptRegistry,
-		skillRegistry:  skillRegistry,
-		settings:       pluginSettings,
-		ctx:            pluginCtx,
-		cancel:         cancel,
-		runCancels:     make(map[string]context.CancelFunc),
+		approvalBroker:      approvalBroker,
+		approvalGrants:      approvalGrants,
+		useBuiltInMCP:       pluginSettings.UseBuiltInMCP,
+		promptRegistry:      promptRegistry,
+		skillRegistry:       skillRegistry,
+		settings:            pluginSettings,
+		ctx:                 pluginCtx,
+		cancel:              cancel,
+		runCancels:          make(map[string]context.CancelFunc),
 
 		oauthManager:       oauthManager,
 		dynamicServerStore: dynamicServerStore,
@@ -727,6 +727,11 @@ func (p *Plugin) handleOpenAPISpec(w http.ResponseWriter, r *http.Request) {
 }
 
 func (p *Plugin) handleMCPTools(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
 	userRole := getUserRole(r)
 	p.logger.Debug("MCP tools request", "method", r.Method, "role", userRole)
 
@@ -1126,19 +1131,19 @@ func (p *Plugin) handleAgentRun(w http.ResponseWriter, r *http.Request) {
 	}
 
 	loopReq := agent.LoopRequest{
-		Messages:             messages,
-		SystemPrompt:         systemPrompt,
-		MaxTotalTokens:       p.settings.MaxTotalTokens,
-		RecentMessageCount:   p.settings.RecentMessageCount,
-		ContextLimits:        contextLimitsFromSettings(p.settings),
-		MaxIterations:        maxIterations,
-		Model:                effectiveRunModel,
-		AllowModelFallback:   (modelSource == "auto" || modelSource == "skill") && effectiveRunModel == "large",
-		ConversationType:     req.Type,
-		RunID:                runID,
-		SessionID:            sessionID,
-		ActiveSkillsEvent:    skillEventInfos(activation.Skills),
-		AvailableSkills:      skillSpecs(toolCtx.SkillsCatalog),
+		Messages:           messages,
+		SystemPrompt:       systemPrompt,
+		MaxTotalTokens:     p.settings.MaxTotalTokens,
+		RecentMessageCount: p.settings.RecentMessageCount,
+		ContextLimits:      contextLimitsFromSettings(p.settings),
+		MaxIterations:      maxIterations,
+		Model:              effectiveRunModel,
+		AllowModelFallback: (modelSource == "auto" || modelSource == "skill") && effectiveRunModel == "large",
+		ConversationType:   req.Type,
+		RunID:              runID,
+		SessionID:          sessionID,
+		ActiveSkillsEvent:  skillEventInfos(activation.Skills),
+		AvailableSkills:    skillSpecs(toolCtx.SkillsCatalog),
 		LoadSkill: func(ctx context.Context, name, file string) (string, error) {
 			return p.skillRegistry.Load(name, file, toolCtx)
 		},
@@ -2420,7 +2425,7 @@ func (p *Plugin) handleCreateShare(w http.ResponseWriter, r *http.Request) {
 
 	share, err := p.shareStore.CreateShare(req.SessionID, req.SessionData, orgID, userID, expiresInHours)
 	if err != nil {
-		if err.Error() == "rate limit exceeded: too many share requests" {
+		if errors.Is(err, ErrShareRateLimit) {
 			http.Error(w, "Too many share requests. Please try again later.", http.StatusTooManyRequests)
 			return
 		}
@@ -2591,10 +2596,23 @@ func (p *Plugin) handleSessionsRoot(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(session)
 
 	case http.MethodDelete:
+		// Capture the session IDs before the wipe: approval grants are keyed by
+		// session, so the list is the only way to find every grant to drop.
+		sessions, listErr := p.sessionStore.ListSessions(userID, orgID)
+		if listErr != nil {
+			p.logger.Warn("Failed to list sessions before delete-all", "error", listErr)
+		}
 		if err := p.sessionStore.DeleteAllSessions(userID, orgID); err != nil {
 			p.logger.Error("Failed to delete all sessions", "error", err)
 			http.Error(w, "Failed to delete sessions", http.StatusInternalServerError)
 			return
+		}
+		if p.approvalGrants != nil {
+			for _, session := range sessions {
+				if err := p.approvalGrants.DeleteSession(r.Context(), session.ID); err != nil {
+					p.logger.Warn("Failed to delete approval grants for deleted session", "sessionId", session.ID, "error", err)
+				}
+			}
 		}
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]bool{"success": true})
@@ -2735,6 +2753,11 @@ func (p *Plugin) handleSessionRouter(w http.ResponseWriter, r *http.Request) {
 		if err := p.sessionStore.DeleteSession(sessionID, userID, orgID); err != nil {
 			http.Error(w, "Session not found", http.StatusNotFound)
 			return
+		}
+		if p.approvalGrants != nil {
+			if err := p.approvalGrants.DeleteSession(r.Context(), sessionID); err != nil {
+				p.logger.Warn("Failed to delete session approval grants", "sessionId", sessionID, "error", err)
+			}
 		}
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]bool{"success": true})

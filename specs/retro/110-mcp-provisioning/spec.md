@@ -4,7 +4,7 @@
 
 **Status**: Retrospective
 
-**Last verified**: `6c09d13`
+**Last verified**: `18e315b`
 
 **Owner**: Ask O11y maintainers
 
@@ -75,7 +75,7 @@ at start, adds runtime servers, and sends W3C trace context with each tool call.
 13. Runtime servers are restored from the dynamic server store after provisioning. `VERIFIED` — `pkg/plugin/plugin.go:398`
 14. `EnsureServer` keeps an existing client when URL and headers match. `VERIFIED` — test `TestEnsureServerNoopWhenConfigMatchesExisting`
 15. `EnsureServer` replaces the client when URL or headers differ. `VERIFIED` — test `TestEnsureServerClosesReplacedClientOutsideLock`
-16. A runtime server with the same ID as a provisioned one silently replaces it. `GAP` — `pkg/mcp/proxy.go:431` overwrites without a warning
+16. Replacing a client for an existing ID logs a warning with the ID and URL. `VERIFIED` — `pkg/mcp/proxy.go:435`
 17. Deleting a runtime server removes the client, the OAuth config, and every user token. `VERIFIED` — `pkg/plugin/mcp_provisioner.go:361`
 18. A runtime server ID must be 1-64 chars of `[a-z0-9-]`. `VERIFIED` — `pkg/plugin/mcp_provisioner.go:206`
 19. A runtime server transport must be `streamable-http` or `sse`. `VERIFIED` — `pkg/plugin/mcp_provisioner.go:240`
@@ -120,7 +120,7 @@ at start, adds runtime servers, and sends W3C trace context with each tool call.
 
 | Signal | Name | Where | Evidence |
 |---|---|---|---|
-| Span | `mcp_tool_call` (parent of the outgoing request) | Tempo | `pkg/agent/loop.go:961` |
+| Span | `mcp_tool_call` (parent of the outgoing request) | Tempo | `pkg/agent/loop.go:960` |
 | Span context header | `traceparent`, `tracestate` | outgoing MCP request | `pkg/mcp/trace_propagation.go:77` |
 
 ## Evidence Index
