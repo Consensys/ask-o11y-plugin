@@ -63,7 +63,7 @@ Ship a versioned archive, a container image, and a local stack.
 5. A pull request with no code change runs `skip-build`, which reports the same job name. `VERIFIED` — `.github/workflows/ci.yml:162`, `.github/workflows/ci.yml:163`
 6. A docs-only pull request therefore satisfies the build gate with a no-op job. `ASSUMED` — `.github/workflows/ci.yml:165`; no test or branch rule states this intent
 7. Required checks and branch protection rules are not stored in the repository. `GAP` — `CODEOWNERS:5` is the only review rule found
-8. The build job runs typecheck, lint, unit tests, frontend build, and React 19 validation in that order. `VERIFIED` — `.github/workflows/ci.yml:72`
+8. The build job runs typecheck, lint, unit tests, frontend build, and React 19 validation in that order. `VERIFIED` — `.github/workflows/ci.yml:73`
 9. The frontend build merges the `@grafana/create-plugin` base config and adds Tailwind CSS rules. `VERIFIED` — `webpack.config.ts:3`
 10. Production builds add a contenthash to chunk filenames. `VERIFIED` — `webpack.config.ts:160`
 11. The build aliases `react/jsx-runtime` and `react/jsx-dev-runtime` to a local shim. `VERIFIED` — `webpack.config.ts:149`
@@ -105,7 +105,7 @@ Ship a versioned archive, a container image, and a local stack.
 | Condition | User-visible result | Evidence |
 |---|---|---|
 | Fork pull request | E2E is skipped by design; no E2E result for that PR | `.github/workflows/e2e.yml:214` |
-| Validator finds a non-benign warning | CI fails at the validate step | `.github/workflows/ci.yml:147` |
+| Validator finds a non-benign warning | CI fails at the validate step | `.github/workflows/ci.yml:148` |
 | Policy token is missing | Archive is unsigned; validator reports `unsigned plugin` | `.github/actions/package-plugin/action.yml:141` |
 
 ## Data and Persistence
