@@ -9,7 +9,7 @@ description: >-
   "how many errors", "log query", or "show me latency" without naming a
   query language.
 metadata:
-  version: "1.1"
+  version: "1.2"
 ---
 
 ## Golden rules
@@ -19,6 +19,13 @@ metadata:
 - Keep `le` in the inner aggregation of `histogram_quantile` or the result is NaN
 - Guard ratios against divide-by-zero: `sum(rate(errs[5m])) / (sum(rate(reqs[5m])) > 0)`
 - Use label matchers to cut cardinality; start with short time ranges and expand
+
+## Verify before you return a query
+
+Run the query against the datasource before you give it to the user or put it in a panel. A query that returns `bad_data`, `invalid parameter "query"`, or an unknown metric is wrong, even when the syntax looks correct.
+
+- A metric name is literal, including `:` and `.`. Use `{__name__=~"..."}` for a regex match — `counter:api:.*_total{...}` is parsed as a metric name and fails at the first `.`.
+- If a query returns no data, first confirm the metric exists and the label values exist. Do not rewrite the query on a guess.
 
 ## PromQL
 

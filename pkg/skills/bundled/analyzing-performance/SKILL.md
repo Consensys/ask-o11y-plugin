@@ -9,7 +9,7 @@ description: >-
   without the word performance.
 metadata:
   model: large
-  version: "1.1"
+  version: "1.2"
   user-prompt: |
     Analyze performance issues in the system "{{.Target}}".
 
@@ -23,6 +23,14 @@ metadata:
 
     Use the available MCP tools to gather real data.
 ---
+
+## Investigation contract
+
+1. **Fix the scope and the window first** — service, cluster, UTC from/to, and a baseline window. Discover missing identifiers; never invent them.
+2. **Separate the three outcomes** — an empty result, an unsupported capability, and a failed query are different facts. An empty result is not evidence that the service is healthy.
+3. **Stop at the strongest supported conclusion.** Return a root cause only when the mechanism and the symptom connect. Otherwise return a suspected cause, a cost location, or `inconclusive` with the missing evidence named.
+4. **Answer, do not ask.** End with a conclusion when the evidence you hold supports one. Ask only when a required identifier is missing and no tool can discover it.
+5. **Report the counterevidence** you checked, not only the evidence that fits the leading hypothesis.
 
 ## Performance analysis workflow
 
@@ -41,4 +49,4 @@ metadata:
 - **Triage order** — saturation before latency before errors: a saturated resource (CPU throttling, connection-pool exhaustion, disk I/O) explains downstream latency and errors; fixing the symptom query first wastes the investigation.
 - **Compare against baseline** — diff the same window one day or one week earlier (`offset 1d`) rather than judging absolute values.
 
-**Final answer shape** — Lead with the primary bottleneck, then the evidence (queries and samples), then ranked recommendations.
+**Final answer shape** — Start with the verdict: the primary bottleneck, a suspected cause, or `inconclusive`. Then the evidence (queries and samples), then ranked recommendations with one verification query each, then the limits of the data (window, retention, sampling).

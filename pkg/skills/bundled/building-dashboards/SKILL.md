@@ -4,12 +4,13 @@ license: Apache-2.0
 description: >-
   Creates and updates Grafana dashboards panel by panel through the
   dashboard MCP tools, with correct panel types, units, thresholds, and
-  template variables. Use when the user asks to build, create, modify, or
+  template variables, and verifies that every panel query runs before
+  claiming success. Use when the user asks to build, create, modify, fix, or
   extend a dashboard — even when they say "add a panel", "make a chart",
-  "dashboard for this service", or "visualize this metric" without saying
-  dashboard.
+  "dashboard for this service", "this dashboard is broken", or "visualize
+  this metric" without saying dashboard.
 metadata:
-  version: "1.1"
+  version: "1.2"
 ---
 
 ## Dashboard creation workflow
@@ -22,7 +23,16 @@ metadata:
 
 This keeps each tool call payload small and reliable.
 
-**Panel queries** — Prefer label matchers and aggregation in PromQL so panels stay fast; set sensible time ranges per panel. When unsure which metric names exist, run the metric-name listing tool with a targeted regex before writing panel queries.
+**Panel queries** — Prefer label matchers and aggregation in PromQL so panels stay fast; set sensible time ranges per panel. When unsure which metric names exist, run the metric-name listing tool with a targeted regex before writing panel queries. Never invent metric names, label names, or recording-rule prefixes: confirm each one exists, or the panel fails with `bad_data`.
+
+## Before you update an existing dashboard
+
+Read the current object first with `get_dashboard_by_uid`. Record `uid`, `title`, `folderUid`, `schemaVersion`, and the panel IDs. Then:
+
+- Keep `uid`, `folderUid`, `title`, and panel IDs unchanged unless the user asks for a change.
+- **Never delete, recreate, move, or re-save in another schema to escape a permission error.** That loses folder placement and user permissions. Recreate only when the user asks.
+- If the save changes `folderUid` or `schemaVersion`, revert the save and report the change. Do not continue.
+- Copy query patterns from a dashboard that is known to work when one exists, instead of writing a new variant.
 
 ## Panel type selection
 
@@ -49,6 +59,25 @@ This keeps each tool call payload small and reliable.
 
 See [references/dashboard-json.md](references/dashboard-json.md) for the full schema — panel JSON, units table, variables, transformations (e.g. an "Error %" `calculateField`), data links, and deploy annotations.
 
-## Verify after every update
+## Verify before you claim success
 
-After each create/update call, confirm success from the tool response (updated version number / saved state), and after the final panel re-read the dashboard and confirm the panel count and titles. A silent failure leaves the user with a stale dashboard.
+A saved version is not a working dashboard. After each write, run these checks. Report the result of each one.
+
+1. **Read back the object.** `get_dashboard_by_uid`: confirm `uid`, `title`, `folderUid`, and `schemaVersion` match the intended state.
+2. **Check every datasource.** Each panel's `datasource.uid` must exist in the datasource list. A panel with a missing UID renders blank.
+3. **Run every panel query.** Execute the panel's query through its datasource, over the dashboard's default time range. The version fails if any query returns a parse error (`bad_data`, `invalid parameter "query"`), an unknown metric, or an empty series where data must exist. Fix the failing query, then re-run the check.
+4. **Name the URL you verified.** Give the exact dashboard link. If the user reports `403`, the save path or schema is wrong — report that as a permission defect, not as a successful fix.
+5. **Claim only what passed.** Do not write "✅", "fixed", or "should now work" when a check failed, was skipped, or returned an error. State the failed check, the evidence, and the next change.
+
+An update is complete only when all of steps 1–3 pass, or when the remaining failure needs user action (missing permission, missing datasource, missing data).
+
+## Stop rule
+
+Two failed fix cycles mean the hypothesis is wrong, not the wording.
+
+1. Fetch the live dashboard JSON.
+2. Run the exact failing query and show the raw result.
+3. Name one root cause with evidence.
+4. Change only that cause.
+
+If the user reports the same error after a fix, do not write another version on a guess. Do not tell the user the dashboard is fixed without a new passing check from the current turn.
