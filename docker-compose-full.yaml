@@ -28,8 +28,10 @@ services:
       GRAFANA_USERNAME: admin
       GRAFANA_PASSWORD: admin
       PORT: 8000
-    command: >
-      -t streamable-http --log-level debug --disable-incident	--disable-oncall	--disable-sift	--disable-admin	--disable-asserts	--disable-annotations
+    # mcp-v1.1.3 CLI: host/port/transport and all tool-group toggles now come
+    # from the mounted YAML (CONFIG_PATH); the old -t/--log-level/--disable-*
+    # flags no longer exist. Log level is fixed at INFO in the server.
+    command: uv run --no-sync main.py --transport http
     depends_on:
       - grafana
 

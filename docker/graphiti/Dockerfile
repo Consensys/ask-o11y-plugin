@@ -21,27 +21,35 @@ ENV PATH="/root/.local/bin:${PATH}"
 ENV UV_COMPILE_BYTECODE=1 \
     UV_LINK_MODE=copy \
     UV_PYTHON_DOWNLOADS=never \
-    MCP_SERVER_HOST="0.0.0.0" \
     PYTHONUNBUFFERED=1
 
 WORKDIR /app/mcp
 
 # Pins graphiti-core (via pyproject.toml, below) and the mcp_server source
 # tree (via git clone) to the same release train.
-ARG GRAPHITI_CORE_VERSION=0.30.1
-ARG MCP_SERVER_REF=mcp-v1.1.0
+ARG GRAPHITI_CORE_VERSION=0.31.2
+ARG MCP_SERVER_REF=mcp-v1.1.3
 
 RUN git clone --depth 1 --branch ${MCP_SERVER_REF} https://github.com/getzep/graphiti.git /tmp/graphiti \
     && cp -r /tmp/graphiti/mcp_server/. /app/mcp/ \
     && rm -rf /tmp/graphiti /app/mcp/tests \
     && echo "3.11" > /app/mcp/.python-version
 
-# Remove the local path override for graphiti-core, pin to the PyPI release
-# with only the neo4j/falkordb graph-driver extras, and regenerate the lock
-# file against that — mirrors getzep's own Dockerfile.standalone, minus the
-# --extra providers --extra azure flags that pull in the unused SDKs/PyTorch.
+# Strip any [tool.uv.sources] local path override for graphiti-core (present
+# in older mcp_server releases), pin to the PyPI release with the falkordb
+# graph-driver extra (the neo4j driver is a base dependency), and regenerate
+# the lock file against that — mirrors getzep's own standalone build, minus
+# the --extra providers --extra azure flags that pull in the unused
+# SDKs/PyTorch.
+#
+# Keep openai on the 2.x line: openai 3.x replaced httpx with httpx2, but
+# graphiti-core 0.31.x imports httpx without declaring it, so a fresh
+# resolve to openai 3.x breaks the server at import time. getzep's committed
+# lock pins openai 2.43.0 + httpx 0.28.1; the <3 cap keeps the regenerated
+# lock on that same verified set.
 RUN sed -i '/\[tool\.uv\.sources\]/,/graphiti-core/d' pyproject.toml \
-    && sed -i "s/graphiti-core\[falkordb\][>=]\+[0-9]\+\.[0-9]\+\.[0-9]\+/graphiti-core[neo4j,falkordb]==${GRAPHITI_CORE_VERSION}/" pyproject.toml \
+    && sed -i "s/graphiti-core\[falkordb\][>=]\+[0-9]\+\.[0-9]\+\.[0-9]\+/graphiti-core[falkordb]==${GRAPHITI_CORE_VERSION}/" pyproject.toml \
+    && sed -i "s/openai>=2\.41\.0/openai>=2.41.0,<3/" pyproject.toml \
     && rm -f uv.lock \
     && uv lock
 
