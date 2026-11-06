@@ -201,7 +201,13 @@ type ErrorEvent struct {
 }
 
 type RunRequest struct {
-	Message    string   `json:"message"`
+	Message string `json:"message"`
+	// AlertName is the short alert-rule name for investigation runs. API
+	// callers that send a rich prompt (for example the NOC alert trigger)
+	// set it here, so the prompt template quotes a name instead of the whole
+	// message. Empty keeps the legacy behaviour: derive the name from
+	// Message.
+	AlertName  string   `json:"alertName,omitempty"`
 	Type       string   `json:"type,omitempty"`
 	Skills     []string `json:"skills,omitempty"`
 	SessionID  string   `json:"sessionId,omitempty"`

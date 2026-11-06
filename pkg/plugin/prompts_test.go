@@ -318,6 +318,57 @@ func TestBuildUserPrompt_InvestigationWithoutPrefixUsesFullMessage(t *testing.T)
 	}
 }
 
+func TestBuildUserPrompt_ExplicitAlertNameKeepsCallerPromptOutOfTheNameSlot(t *testing.T) {
+	r, err := NewPromptRegistry(PluginSettings{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	reg := newTestSkillRegistry(t)
+	act, err := skills.Resolve(reg, "Investigating the NOC alert", nil, "investigation")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	prompt := "Investigate this Opsgenie alert for the NOC - MMCX team.\nalertName: [FIRING:1] GatewayUpstreamErrorRateHigh\nPriority: P3"
+	ctx := BuildToolContext("Org1", "Admin")
+	ctx.UserPromptSkill = act.UserPromptSkill
+	ctx.AlertName = "GatewayUpstreamErrorRateHigh"
+
+	out, err := r.BuildUserPrompt("investigation", prompt, ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, `Investigate the alert "GatewayUpstreamErrorRateHigh"`) {
+		t.Fatalf("expected the short alert name in the template, got: %s", out)
+	}
+	if strings.Contains(out, `Investigate the alert "Investigate this Opsgenie`) {
+		t.Fatal("caller prompt must not be interpolated into the alert-name slot")
+	}
+	if !strings.Contains(out, "## Caller context") {
+		t.Fatalf("expected caller context section, got: %s", out)
+	}
+	if !strings.Contains(out, prompt) {
+		t.Fatal("caller prompt must be preserved verbatim in the context section")
+	}
+}
+
+func TestGenerateSessionTitleFromType_UsesExplicitAlertName(t *testing.T) {
+	got := generateSessionTitleFromType("investigation", "Investigate this Opsgenie alert for the NOC - MMCX team.\nalertName: [FIRING:1] HighBatchArrivalLag", "HighBatchArrivalLag")
+	if !strings.HasPrefix(got, "Alert Investigation: HighBatchArrivalLag") {
+		t.Fatalf("expected the explicit alert name in the title, got: %q", got)
+	}
+	if strings.Contains(got, "Opsgenie") {
+		t.Fatalf("title must not embed the caller prompt, got: %q", got)
+	}
+}
+
+func TestGenerateSessionTitleFromType_LegacyDerivesFromMessage(t *testing.T) {
+	got := generateSessionTitleFromType("investigation", "alertName:HighErrorRate", "")
+	if got != "Alert Investigation: HighErrorRate" {
+		t.Fatalf("legacy title derivation changed, got: %q", got)
+	}
+}
+
 func TestBuildUserPrompt_UnknownTypeErrors(t *testing.T) {
 	r, err := NewPromptRegistry(PluginSettings{})
 	if err != nil {

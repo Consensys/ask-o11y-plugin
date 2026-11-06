@@ -12,9 +12,11 @@ metadata:
   model: large
   max-iterations: "60"
   triggers: '\[FIRING[:\s]|alert investigation:|perform root cause analysis'
-  version: "1.2"
+  version: "1.3"
   user-prompt: |
     Investigate the alert "{{.AlertName}}" and perform root cause analysis.
+
+    If a **Caller context** section follows this prompt, it comes from the alert trigger and is part of the request: treat its scope, links, and identifiers as authoritative.
 
     **Efficiency:** Treat this alert name and any labels on its rule or firing instance as the primary scope. Prefer **targeted** metrics and logs for the affected service or namespace over unfocused cluster-wide listing. Combine related queries where one PromQL or LogQL answers several checks.
 

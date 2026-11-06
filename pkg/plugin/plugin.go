@@ -953,6 +953,7 @@ func (p *Plugin) handleAgentRun(w http.ResponseWriter, r *http.Request) {
 	toolCtx := BuildToolContext(req.OrgName, userRole)
 	toolCtx.ConversationType = req.Type
 	toolCtx.Message = req.Message
+	toolCtx.AlertName = strings.TrimSpace(req.AlertName)
 	toolCtx.IsAlertInvestigation = isAlertInvestigation(req.Type, req.Message)
 	toolCtx.DatasourceSnapshot = p.datasourceSnapshot(orgID, req.OrgName, req.ScopeOrgID)
 
@@ -970,7 +971,11 @@ func (p *Plugin) handleAgentRun(w http.ResponseWriter, r *http.Request) {
 		// Prefetch the alert rule synchronously (small fail-open budget): the
 		// block carries the rule's exact expressions, metrics, and matchers,
 		// letting the agent skip rule discovery and metric listing entirely.
-		if alertName := extractAlertNameForSnapshot(req.Message); alertName != "" {
+		alertName := toolCtx.AlertName
+		if alertName == "" {
+			alertName = extractAlertNameForSnapshot(req.Message)
+		}
+		if alertName != "" {
 			toolCtx.AlertRuleSnapshot, toolCtx.AlertRuleLookupMissed = p.alertRuleSnapshot(alertName, orgID, req.OrgName, req.ScopeOrgID)
 			if toolCtx.AlertRuleLookupMissed {
 				toolCtx.AlertRuleLookupName = alertName
@@ -1064,7 +1069,7 @@ func (p *Plugin) handleAgentRun(w http.ResponseWriter, r *http.Request) {
 			Content: userPrompt,
 		}}
 
-		sessionTitle := generateSessionTitleFromType(req.Type, req.Message)
+		sessionTitle := generateSessionTitleFromType(req.Type, req.Message, req.AlertName)
 
 		session, err := p.sessionStore.CreateSession(userID, numericOrgID, sessionTitle, []SessionMessage{{
 			Role:    "user",
@@ -2836,11 +2841,13 @@ func (p *Plugin) handleGetSessionStats(w http.ResponseWriter, r *http.Request, s
 	})
 }
 
-func generateSessionTitleFromType(convType, message string) string {
+func generateSessionTitleFromType(convType, message, alertName string) string {
 	const maxTitleLen = 50
 	switch convType {
 	case "investigation":
-		alertName := extractAlertNameForTitle(message)
+		if alertName == "" {
+			alertName = extractAlertNameForTitle(message)
+		}
 		return truncateTitle(fmt.Sprintf("Alert Investigation: %s", alertName), maxTitleLen)
 	case "performance":
 		target := extractTargetForTitle(message)
