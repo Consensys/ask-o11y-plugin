@@ -182,11 +182,24 @@ func (r *PromptRegistry) BuildSystemPrompt(ctx PromptContext) (string, error) {
 // user-prompt template (investigation/performance deep-link contract), or
 // passes the message through verbatim for chat.
 func (r *PromptRegistry) BuildUserPrompt(convType, message string, ctx PromptContext) (string, error) {
+	// callerContext carries the API caller's full prompt when it supplied the
+	// alert name separately. It is appended after the skill template instead
+	// of being interpolated into the quoted alert-name slot.
+	var callerContext string
+	explicitAlertName := ctx.AlertName != ""
+
 	switch convType {
 	case "investigation":
-		ctx.AlertName = extractAlertNameForTitle(message)
+		if ctx.AlertName == "" {
+			ctx.AlertName = extractAlertNameForTitle(message)
+		}
 		if ctx.AlertName == "" {
 			return "", fmt.Errorf("investigation type requires alertName")
+		}
+		if explicitAlertName {
+			if trimmed := strings.TrimSpace(message); trimmed != "" && trimmed != ctx.AlertName {
+				callerContext = trimmed
+			}
 		}
 
 	case "performance":
@@ -207,6 +220,9 @@ func (r *PromptRegistry) BuildUserPrompt(convType, message string, ctx PromptCon
 			return "", fmt.Errorf("failed to render %s user prompt: %w", ctx.UserPromptSkill.Name, err)
 		}
 		if rendered != "" {
+			if callerContext != "" {
+				rendered += "\n\n## Caller context\n\n" + callerContext
+			}
 			return rendered, nil
 		}
 	}
