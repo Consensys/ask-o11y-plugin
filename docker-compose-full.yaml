@@ -29,10 +29,14 @@ services:
       GRAFANA_PASSWORD: admin
       PORT: 8000
     # grafana/mcp-grafana is a Go binary whose default transport is stdio;
-    # streamable-http is required for the 8001 HTTP endpoint. (The command
-    # block that used to sit here was graphiti's CLI and never worked on
-    # this image.)
-    command: -transport streamable-http
+    # -t streamable-http serves the 8001 HTTP endpoint. The --disable-* flags
+    # hide admin/IRM/asserts/annotations tool groups from the agent.
+    # --disable-sift (present before) was removed upstream and is dropped:
+    # with it, the command exits with "flag provided but not defined".
+    command: >
+      -t streamable-http --log-level debug
+      --disable-incident --disable-oncall
+      --disable-admin --disable-asserts --disable-annotations
     depends_on:
       - grafana
 
