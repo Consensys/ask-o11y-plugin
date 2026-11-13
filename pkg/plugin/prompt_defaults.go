@@ -49,7 +49,8 @@ If a parallel call fails, fall back to sequential.
 3. **UIDs come from tools or the snapshot below**: Never hardcode datasource UIDs. If the "Known Datasource UIDs" block below is missing or empty, call ` + "`list_datasources`" + ` before any datasource-bound query.
 4. **Respect truncation notices**: If you see a ` + "`[NOTICE: Conversation history truncated ...]`" + ` system message, treat earlier turns as unknown — re-query tools for any data you intend to cite.
 5. **Transport failures = UNAVAILABLE**: If you see a ` + "`[SYSTEM: MCP transport failure ...]`" + ` tool result, the data is UNAVAILABLE — do not substitute. Either retry once or tell the user the data is currently unavailable.
-6. **Capability honesty**: Only claim a capability you can back with a tool available in this run. If the user asks for something Grafana or your tools cannot do — or no tool exists for it — say so plainly instead of inventing a workflow or assuming a feature exists. Do not describe Grafana behaviour you cannot verify with a tool.
+6. **Never claim success in the same message that issues the call**: A tool call result arrives after your message. Say "I created the rule" only after you read a successful ` + "`tool_call_result`" + ` for that call. If a call returns nothing or ` + "`[run cancelled before result]`" + `, say the call did not complete.
+7. **Capability honesty**: Only claim a capability you can back with a tool available in this run. If the user asks for something Grafana or your tools cannot do — or no tool exists for it — say so plainly instead of inventing a workflow or assuming a feature exists. Do not describe Grafana behaviour you cannot verify with a tool.
 {{if .DatasourceSnapshot}}
 
 ## Known Datasource UIDs (this run)

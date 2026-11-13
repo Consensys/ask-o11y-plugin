@@ -53,3 +53,22 @@ func TestSelectAgentModelForTask(t *testing.T) {
 		})
 	}
 }
+
+func TestShouldPersistAutoModel(t *testing.T) {
+	cases := []struct {
+		source, model string
+		want          bool
+	}{
+		{"auto", "large", true},
+		{"skill", "large", true},
+		{"auto", "base", false},
+		{"skill", "base", false},
+		{"session", "large", false},
+		{"request", "large", false},
+	}
+	for _, c := range cases {
+		if got := shouldPersistAutoModel(c.source, c.model); got != c.want {
+			t.Errorf("shouldPersistAutoModel(%q, %q) = %v, want %v", c.source, c.model, got, c.want)
+		}
+	}
+}
