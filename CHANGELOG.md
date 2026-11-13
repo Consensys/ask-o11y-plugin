@@ -5,6 +5,14 @@ All notable changes to the Ask O11y Grafana plugin will be documented in this fi
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.28](https://github.com/Consensys/ask-o11y-plugin/compare/v0.3.27...v0.3.28) (2026-11-13)
+
+
+### Bug Fixes
+
+* **backend:** keep complex sessions on the large model and stop guessed tool calls ([934f1bf](https://github.com/Consensys/ask-o11y-plugin/commit/934f1bf))
+* build with Go 1.26.11 for GO-2026-6859 ([58bc12e](https://github.com/Consensys/ask-o11y-plugin/commit/58bc12e))
+
 ## [0.3.27](https://github.com/Consensys/ask-o11y-plugin/compare/v0.3.26...v0.3.27) (2026-11-06)
 
 
