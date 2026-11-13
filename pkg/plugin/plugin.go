@@ -1105,6 +1105,16 @@ func (p *Plugin) handleAgentRun(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Keep the large model for the rest of the session. Selection above looks
+	// only at the current message, and follow-ups ("yes", "create it") carry no
+	// large-signal word, so a complex task would silently downgrade mid-way.
+	// Persisting is idempotent and only happens when a non-session source
+	// picked large, so an explicit later choice still wins.
+	if shouldPersistAutoModel(modelSource, effectiveRunModel) {
+		if err := persistSessionModel(p.sessionStore, sessionID, userID, numericOrgID, effectiveRunModel); err != nil {
+			p.logger.Warn("Failed to persist session model", "error", err)
+		}
+	}
 	if err := p.sessionStore.SetActiveRunID(sessionID, userID, numericOrgID, runID); err != nil {
 		p.logger.Warn("Failed to set active run ID", "error", err)
 	}

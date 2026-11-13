@@ -304,6 +304,13 @@ func (a *AgentLoop) Run(ctx context.Context, req LoopRequest, eventCh chan<- SSE
 		if len(req.AvailableSkills) > 0 && req.LoadSkill != nil {
 			openAITools = append(openAITools, loadSkillToolSpec(req.AvailableSkills))
 		}
+		// Tools the model can see for THIS request. A call to any other tool
+		// was made on a description alone (search_tools activates definitions
+		// for the next iteration), so the arguments are a guess.
+		offeredTools := make(map[string]bool, len(openAITools))
+		for _, t := range openAITools {
+			offeredTools[t.Function.Name] = true
+		}
 		messages = TrimMessagesToTokenLimit(messages, openAITools, promptBudget, limits)
 
 		a.logger.Debug("Agent loop iteration",
@@ -540,12 +547,23 @@ func (a *AgentLoop) Run(ctx context.Context, req LoopRequest, eventCh chan<- SSE
 		sigs := make([]string, len(msg.ToolCalls))
 		cachedHits := make([]stallCacheHit, len(msg.ToolCalls))
 		skipped := make([]bool, len(msg.ToolCalls))
+		lateBlocked := make([]bool, len(msg.ToolCalls))
+		results := make([]toolExecResult, len(msg.ToolCalls))
 		for i, tc := range msg.ToolCalls {
-			if ctx.Err() != nil {
-				return
-			}
 			toolCallCount++
 			sigs[i] = canonicalToolSignature(tc.Function.Name, tc.Function.Arguments)
+			// Tools the model can see were offered above. Anything else was
+			// named from a search_tools description, before its definition
+			// arrived, so its arguments are a guess: activate it and send the
+			// full schema back instead of executing a malformed call.
+			if !isMetaTool(tc.Function.Name) && toolRT.Enabled() && !offeredTools[tc.Function.Name] {
+				if tool, ok := toolRT.byName[tc.Function.Name]; ok {
+					toolRT.Activate([]ToolMatch{{Name: tool.Name, Description: tool.Description, Tool: tool}})
+					lateBlocked[i] = true
+					results[i] = toolExecResult{content: lateActivationDirective(tool), isError: true, errorKind: "tool"}
+				}
+			}
+
 			// Meta-tools are never replayed: search_tools activates tool
 			// definitions and load_skill activates a skill, so a cached reply
 			// would skip the state change the model asked for.
@@ -573,7 +591,6 @@ func (a *AgentLoop) Run(ctx context.Context, req LoopRequest, eventCh chan<- SSE
 		// Execute the batch. Results land in results[i]; everything that
 		// touches shared run state (transport-failure map, history, pending
 		// summaries, ordered SSE events) happens below on the loop goroutine.
-		results := make([]toolExecResult, len(msg.ToolCalls))
 		if a.batchParallelizable(msg.ToolCalls, req) {
 			maxParallel := req.MaxParallelToolCalls
 			if maxParallel <= 0 {
@@ -585,7 +602,7 @@ func (a *AgentLoop) Run(ctx context.Context, req LoopRequest, eventCh chan<- SSE
 			var wg sync.WaitGroup
 			sem := make(chan struct{}, maxParallel)
 			for i, tc := range msg.ToolCalls {
-				if skipped[i] {
+				if skipped[i] || lateBlocked[i] {
 					continue
 				}
 				wg.Add(1)
@@ -598,12 +615,28 @@ func (a *AgentLoop) Run(ctx context.Context, req LoopRequest, eventCh chan<- SSE
 				}()
 			}
 			wg.Wait()
+			// A cancelled run leaves goroutines with no result. Record that
+			// fact so the next turn cannot mistake silence for success.
+			for i := range msg.ToolCalls {
+				if skipped[i] || lateBlocked[i] {
+					continue
+				}
+				if results[i].content == "" && results[i].errorKind == "" {
+					results[i] = toolExecResult{content: cancelledToolContent, isError: true, errorKind: "cancelled"}
+				}
+			}
 		} else {
 			for i, tc := range msg.ToolCalls {
 				if ctx.Err() != nil {
-					return
+					for j := i; j < len(msg.ToolCalls); j++ {
+						if skipped[j] || lateBlocked[j] {
+							continue
+						}
+						results[j] = toolExecResult{content: cancelledToolContent, isError: true, errorKind: "cancelled"}
+					}
+					break
 				}
-				if skipped[i] {
+				if skipped[i] || lateBlocked[i] {
 					continue
 				}
 				content, isError, errorKind := a.executeToolCall(ctx, eventCh, tc, req)
@@ -626,7 +659,7 @@ func (a *AgentLoop) Run(ctx context.Context, req LoopRequest, eventCh chan<- SSE
 				toolContent = duplicateCallContent(cachedHits[i])
 			}
 
-			a.send(ctx, eventCh, SSEEvent{
+			a.sendToolResult(ctx, eventCh, SSEEvent{
 				Type: "tool_call_result",
 				Data: ToolCallResultEvent{
 					ID:        tc.ID,
@@ -1248,9 +1281,30 @@ func (a *AgentLoop) send(ctx context.Context, ch chan<- SSEEvent, event SSEEvent
 	}
 }
 
+// sendToolResult delivers a tool result even when the run context is already
+// cancelled, so the session writer can record that a call produced no result.
+// Without it, a cancelled run leaves tool_call_start entries with no result,
+// and the next turn reads that silence as success.
+func (a *AgentLoop) sendToolResult(ctx context.Context, ch chan<- SSEEvent, event SSEEvent) {
+	if ctx.Err() == nil {
+		a.send(ctx, ch, event)
+		return
+	}
+	timer := time.NewTimer(250 * time.Millisecond)
+	defer timer.Stop()
+	select {
+	case ch <- event:
+	case <-timer.C:
+	}
+}
+
 // continueUserTurn is appended when a request would otherwise end on an
 // assistant turn with no steering message to follow it.
 const continueUserTurn = "Continue."
+
+// cancelledToolContent replaces the missing result of a tool call that was
+// aborted with the run. The model must see the failure, not an empty slot.
+const cancelledToolContent = "[run cancelled before result] This call produced no result. Do not claim it succeeded; re-issue it if the user still wants it."
 
 // ensureNonAssistantTail guarantees the request does not end on an assistant
 // turn once system messages are set aside. Providers such as Gemini (through

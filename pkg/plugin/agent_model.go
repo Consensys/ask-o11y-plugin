@@ -71,3 +71,11 @@ func selectAgentModelForTask(conversationType, message string) string {
 
 	return agentModelBase
 }
+
+// shouldPersistAutoModel reports whether a model chosen by auto or skill
+// selection must be stored on the session. Only large is sticky: it marks a
+// task complex enough to keep for follow-ups, while a base choice is cheap to
+// re-derive from the next message.
+func shouldPersistAutoModel(modelSource, effective string) bool {
+	return effective == agentModelLarge && (modelSource == "auto" || modelSource == "skill")
+}

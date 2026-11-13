@@ -334,6 +334,41 @@ type activatedTool struct {
 	Description string `json:"description,omitempty"`
 }
 
+// requiredToolFields returns the parameter names listed under "required" in
+// the tool's input schema.
+func requiredToolFields(t mcp.Tool) []string {
+	if t.InputSchema == nil {
+		return nil
+	}
+	raw, ok := t.InputSchema["required"]
+	if !ok {
+		return nil
+	}
+	switch v := raw.(type) {
+	case []string:
+		return v
+	case []interface{}:
+		out := make([]string, 0, len(v))
+		for _, item := range v {
+			if s, ok := item.(string); ok {
+				out = append(out, s)
+			}
+		}
+		return out
+	}
+	return nil
+}
+
+// lateActivationDirective tells the model that a tool it just named was not
+// part of the request it answered, and gives it the full definition.
+func lateActivationDirective(t mcp.Tool) string {
+	schema, err := json.Marshal(t.InputSchema)
+	if err != nil {
+		schema = []byte("{}")
+	}
+	return fmt.Sprintf("[SYSTEM: '%s' was not available in the request that named it, so the call was not executed. It is active now. Re-issue the call with arguments that match this schema: %s]", t.Name, schema)
+}
+
 // ToolsActivatedEvent tells the UI which tools a search_tools call made
 // available, so the user can see the discovery step.
 type ToolsActivatedEvent struct {
@@ -382,6 +417,13 @@ func (a *AgentLoop) executeSearchTools(ctx context.Context, eventCh chan<- SSEEv
 			info := activatedTool{
 				Name:        match.Name,
 				Description: truncateText(match.Description, searchToolsDescriptionChars),
+			}
+			// A 240-char description cannot carry an 11-field schema, and the
+			// model may call the tool in the same turn it was activated. Name
+			// the required fields so a call made before the full definition
+			// arrives still has a chance to be well formed.
+			if required := requiredToolFields(match.Tool); len(required) > 0 {
+				info.Description += " Required: " + strings.Join(required, ", ")
 			}
 			res.Activated = append(res.Activated, info)
 			event.Tools = append(event.Tools, info)

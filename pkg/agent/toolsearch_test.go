@@ -494,3 +494,29 @@ func hasCatalogMessage(req ChatCompletionRequest) bool {
 	}
 	return false
 }
+
+func TestRequiredToolFields(t *testing.T) {
+	tool := mcp.Tool{InputSchema: map[string]interface{}{
+		"type":     "object",
+		"required": []interface{}{"operation", "title", "rule_group"},
+	}}
+	got := requiredToolFields(tool)
+	if len(got) != 3 || got[0] != "operation" || got[2] != "rule_group" {
+		t.Fatalf("requiredToolFields = %v, want the schema order", got)
+	}
+	if got := requiredToolFields(mcp.Tool{}); got != nil {
+		t.Fatalf("requiredToolFields(nil schema) = %v, want nil", got)
+	}
+}
+
+func TestLateActivationDirectiveCarriesSchema(t *testing.T) {
+	tool := testTool("mcp-grafana_alerting_rules_write", "Create rules.", "operation", "title", "rule_group")
+	tool.InputSchema["required"] = []string{"operation", "title", "rule_group"}
+
+	msg := lateActivationDirective(tool)
+	for _, want := range []string{"was not executed", "rule_group", "Re-issue the call"} {
+		if !strings.Contains(msg, want) {
+			t.Fatalf("directive missing %q: %s", want, msg)
+		}
+	}
+}
