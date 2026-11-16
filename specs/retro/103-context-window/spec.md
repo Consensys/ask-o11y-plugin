@@ -99,7 +99,7 @@ The limits arrive through the run request only. `VERIFIED` — `pkg/plugin/plugi
 | Store | Key or table | TTL | Fallback | Evidence |
 |---|---|---|---|---|
 | Message history | in-memory slice per run | run lifetime | none | `pkg/agent/loop.go:183` |
-| Pending summaries | `pendingSummaries[toolCallID]` | run lifetime | synchronous summary | `pkg/agent/loop.go:276` |
+| Pending summaries | `pendingSummaries[toolCallID]` | run lifetime | synchronous summary | `pkg/agent/loop.go:275` |
 | Token usage | `usageByModel["base"]` | run lifetime | none | `pkg/agent/loop.go:809` |
 ## Observability
 | Signal | Name | Where | Evidence |

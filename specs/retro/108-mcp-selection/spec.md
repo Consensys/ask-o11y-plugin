@@ -69,7 +69,7 @@ Both meta-tools bypass MCP filtering by design. `pkg/agent/tools.go:26`
 2. An agent run applies the same two filters in the same order. `VERIFIED` — `pkg/agent/loop.go:161`
 3. Execution re-checks the role and returns 403 on failure. `VERIFIED` — `pkg/plugin/plugin.go:802`
 4. Execution re-checks selection and returns 403 `Tool is not enabled`. `VERIFIED` — `pkg/plugin/plugin.go:808`
-5. The agent execution path returns a tool error instead of an HTTP status. `VERIFIED` — `pkg/agent/loop.go:977`
+5. The agent execution path returns a tool error instead of an HTTP status. `VERIFIED` — `pkg/agent/loop.go:976`
 6. A Viewer gets only tools whose `readOnlyHint` is exactly `true`. `VERIFIED` — test `TestIsReadOnlyTool`
 7. A tool with no annotations is not read-only. `VERIFIED` — `pkg/rbac/rbac.go:6`
 8. Tool ownership resolves by the longest configured server-ID prefix, the same rule as `Proxy.ServerIDForTool`. `VERIFIED` — `pkg/mcp/selection.go:33`

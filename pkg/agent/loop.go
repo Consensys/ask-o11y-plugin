@@ -175,10 +175,9 @@ func (a *AgentLoop) Run(ctx context.Context, req LoopRequest, eventCh chan<- SSE
 	}
 	toolRT := newToolRuntime(mcpTools, req.ToolSearch)
 	req.toolRuntime = toolRT
-	openAITools := toolRT.OpenAITools()
-	if len(req.AvailableSkills) > 0 && req.LoadSkill != nil {
-		openAITools = append(openAITools, loadSkillToolSpec(req.AvailableSkills))
-	}
+	// The tool definitions are built at the top of every iteration (see below),
+	// because search_tools can activate more of them mid-run. Building them here
+	// as well produced an assignment nothing read.
 
 	messages := BuildContextWindow(req.SystemPrompt, req.Messages, req.RecentMessageCount)
 	if catalog := toolRT.Catalog(); catalog != "" {
@@ -300,7 +299,7 @@ func (a *AgentLoop) Run(ctx context.Context, req LoopRequest, eventCh chan<- SSE
 		// The activated set changes between iterations (search_tools), so rebuild
 		// the definitions and let trimming account for the current list rather
 		// than the one captured before the loop.
-		openAITools = toolRT.OpenAITools()
+		openAITools := toolRT.OpenAITools()
 		if len(req.AvailableSkills) > 0 && req.LoadSkill != nil {
 			openAITools = append(openAITools, loadSkillToolSpec(req.AvailableSkills))
 		}

@@ -92,7 +92,7 @@ The raw JSON-RPC `/mcp` route is removed because it bypassed RBAC. `pkg/plugin/p
 31. `connection closed` or `client is closing` triggers one reconnect and one retry. `VERIFIED` — `pkg/mcp/client.go:876`
 32. `ClassifyError` checks cancellation first, then transport signals, then protocol. `VERIFIED` — test `TestClassifyError`
 33. `TransportError` unwraps to its cause. `VERIFIED` — test `TestTransportError_UnwrapAndMessage`
-34. The agent maps `TransportError` to `transport` and every other error to `protocol`. `VERIFIED` — `pkg/agent/loop.go:990`
+34. The agent maps `TransportError` to `transport` and every other error to `protocol`. `VERIFIED` — `pkg/agent/loop.go:989`
 35. Two distinct tools with transport errors emit one `mcp_unavailable` event per run. `VERIFIED` — `pkg/agent/loop.go:680`
 36. A server configuration change clears the result cache. `VERIFIED` — `pkg/mcp/proxy.go:121`
 37. Type `standard` is documented but cannot connect. `GAP` — `pkg/mcp/client.go:253` errors while `listStandardTools` exists at `pkg/mcp/client.go:1165`

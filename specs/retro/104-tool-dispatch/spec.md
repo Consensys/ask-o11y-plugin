@@ -58,20 +58,20 @@ The agent path has no dedicated route. The direct MCP edge is `POST /api/mcp/cal
 5. `ExcludeToolNames` removes names from the advertised list. `VERIFIED` — `pkg/agent/loop.go:163`
 6. The runtime builds the index from the filtered set. `VERIFIED` — `pkg/agent/loop.go:176`
 7. Tool definitions are rebuilt every iteration so new activations appear. `VERIFIED` — `pkg/agent/loop.go:303`
-8. Dispatch order is `search_tools`, then `load_skill`, then the approval gate. `VERIFIED` — `pkg/agent/loop.go:949`
+8. Dispatch order is `search_tools`, then `load_skill`, then the approval gate. `VERIFIED` — `pkg/agent/loop.go:948`
 9. `search_tools` runs only when discovery is enabled for the run. `VERIFIED` — `pkg/agent/search_tools.go:349`
 10. Every other call resolves the tool by exact name in the proxy. `VERIFIED` — `pkg/agent/loop.go:970`
 11. An unknown tool returns `Unknown tool: <name>` with `isError` true and kind `tool`. `VERIFIED` — `pkg/agent/loop.go:972`
 12. RBAC is re-checked at execution. `VERIFIED` — `pkg/agent/loop.go:974`
-13. A tool disabled in server settings is rejected. `VERIFIED` — `pkg/agent/loop.go:977`
+13. A tool disabled in server settings is rejected. `VERIFIED` — `pkg/agent/loop.go:976`
 14. Arguments must parse as a JSON object. `VERIFIED` — `pkg/agent/loop.go:982`
 15. Graphiti arguments are org-scoped before the call. `VERIFIED` — `pkg/agent/loop.go:985`
 16. The MCP call receives user id, org id, org name, and scope org id. `VERIFIED` — `pkg/agent/loop.go:987`
-17. A transport failure returns kind `transport`; other proxy failures return kind `protocol`. `VERIFIED` — `pkg/agent/loop.go:990`
+17. A transport failure returns kind `transport`; other proxy failures return kind `protocol`. `VERIFIED` — `pkg/agent/loop.go:989`
 18. A tool-level error returns the extracted text with kind `tool`. `VERIFIED` — `pkg/agent/loop.go:997`
 19. An empty result becomes "No results returned (empty response)". `VERIFIED` — `pkg/agent/loop.go:1006`
 20. The model receives errors as a normal `tool` message with the error text. `VERIFIED` — `pkg/agent/loop.go:659`
-21. Transport failures reach the model as an explicit "UNAVAILABLE" directive, while SSE keeps the raw error. `VERIFIED` — `pkg/agent/loop.go:645`
+21. Transport failures reach the model as an explicit "UNAVAILABLE" directive, while SSE keeps the raw error. `VERIFIED` — `pkg/agent/loop.go:644`
 22. External tool names carry the server ID prefix. `VERIFIED` — `pkg/mcp/client.go:560`
 23. The prefix is stripped before the upstream call. `VERIFIED` — `pkg/mcp/client.go:694`
 24. Server lookup prefers the longest registered ID that prefixes the name. `VERIFIED` — test `TestServerIDForTool`
@@ -110,7 +110,7 @@ The agent path has no dedicated route. The direct MCP edge is `POST /api/mcp/cal
 | Viewer calls a write tool | `tool_call_result` with "Access denied", kind `tool` | `pkg/agent/loop.go:975` |
 | Tool disabled in settings | `tool_call_result` with "disabled in MCP server settings" | `pkg/agent/loop.go:1011` |
 | Invalid JSON arguments | `tool_call_result` with "Invalid tool arguments" | `pkg/agent/loop.go:983` |
-| MCP transport error | raw error to the UI; directive to the model, kind `transport` | `pkg/agent/loop.go:645` |
+| MCP transport error | raw error to the UI; directive to the model, kind `transport` | `pkg/agent/loop.go:644` |
 | MCP protocol error | `tool_call_result` with the error text, kind `protocol` | `pkg/agent/loop.go:994` |
 | `search_tools` when discovery is off | tool error "Tool discovery is not enabled for this run" | `pkg/agent/search_tools.go:350` |
 | `search_tools` without `query` | tool error "requires a 'query' argument" | `pkg/agent/search_tools.go:360` |

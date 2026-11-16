@@ -37,6 +37,10 @@ jobs:
               - '.github/actions/**'
               - '.github/plugin-validator.config.yaml'
               - 'scripts/verify-retro-specs.mjs'
+              # The standards gate and its config: a change here can turn a
+              # passing rule into a failing one, so it must be exercised.
+              - '.golangci.yml'
+              - 'scripts/**'
 
   build:
     name: Build, lint and unit tests
@@ -74,6 +78,18 @@ jobs:
         run: npm run typecheck
       - name: Lint
         run: npm run lint
+
+      # Deterministic rules for the standards the catalog review enforces by
+      # hand: no bare http.NewRequest, no unbounded body reads, no raw URL or
+      # provider body in a log line, no global CSS keyframe names.
+      - name: Lint house standards
+        run: npm run lint:standards
+
+      - name: Lint Go
+        uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
+        with:
+          version: v2.13.2
+          args: --timeout=5m ./pkg/...
       - name: Unit tests
         run: npm run test:ci
       - name: Build frontend
