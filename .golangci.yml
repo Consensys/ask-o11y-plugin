@@ -1,0 +1,30 @@
+version: "2"
+
+# Deterministic Go gate. Keep this list short and justified: every linter here
+# maps to a defect that reached a plugin catalog review, so adding one is cheap
+# and removing one needs a reason in the PR.
+#
+# Deliberately absent:
+#   staticcheck — its SA1019 deprecation checks fire on the multi-org SDK APIs
+#                 that CLAUDE.md requires (backend.NewGrafanaCfg,
+#                 backend.GrafanaConfigFromContext, PluginContext.OrgID, ...).
+#   errcheck    — the repo has 19 accepted unchecked errors today.
+linters:
+  default: none
+  enable:
+    - govet        # printf, lostcancel, copylocks
+    - ineffassign  # dead assignments
+    - unused       # dead code
+    - noctx        # http.NewRequest / .Get / .Post without a context
+    - nolintlint   # a nolint must name its linter and give a reason
+  exclusions:
+    rules:
+      # Test helpers call net/http convenience methods on purpose. Production
+      # code must carry the caller's context, so production findings stay fatal.
+      - path: _test\.go
+        linters:
+          - noctx
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
