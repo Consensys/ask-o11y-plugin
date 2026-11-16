@@ -68,7 +68,9 @@ func postToken(ctx context.Context, httpClient *http.Client, cfg *mcp.OAuthConfi
 		return Token{}, fmt.Errorf("read token response: %w", err)
 	}
 	if resp.StatusCode >= 400 {
-		return Token{}, fmt.Errorf("token endpoint returned %s: %s", resp.Status, strings.TrimSpace(string(body)))
+		// Never embed the provider body in the error: it can carry tokens,
+		// refresh tokens or client secrets, and callers log errors at Warn.
+		return Token{}, fmt.Errorf("token endpoint returned %s", resp.Status)
 	}
 
 	var parsed tokenResponse

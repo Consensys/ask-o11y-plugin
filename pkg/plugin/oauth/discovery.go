@@ -9,6 +9,8 @@ import (
 	"net/url"
 	"regexp"
 	"strings"
+
+	"consensys-asko11y-app/pkg/mcp"
 )
 
 // AuthServerMetadata is the subset of RFC 8414 metadata needed to drive the
@@ -92,7 +94,8 @@ func RegisterClient(ctx context.Context, client *http.Client, meta AuthServerMet
 		return DCRResult{}, fmt.Errorf("read DCR response: %w", err)
 	}
 	if resp.StatusCode >= 400 {
-		return DCRResult{}, fmt.Errorf("DCR returned %s: %s", resp.Status, strings.TrimSpace(string(data)))
+		// The DCR body can echo the issued client_secret. Keep the status only.
+		return DCRResult{}, fmt.Errorf("DCR returned %s", resp.Status)
 	}
 	var parsed struct {
 		ClientID                string `json:"client_id"`
@@ -120,7 +123,7 @@ func originOf(raw string) (string, error) {
 		return "", err
 	}
 	if u.Scheme == "" || u.Host == "" {
-		return "", fmt.Errorf("url missing scheme/host: %s", raw)
+		return "", fmt.Errorf("url missing scheme/host: %s", mcp.RedactURL(raw))
 	}
 	return u.Scheme + "://" + u.Host, nil
 }
@@ -161,7 +164,7 @@ func discoverViaChallenge(ctx context.Context, client *http.Client, mcpURL strin
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		return AuthServerMetadata{}, fmt.Errorf("probe %s: %w", mcpURL, err)
+		return AuthServerMetadata{}, fmt.Errorf("probe %s: %w", mcp.RedactURL(mcpURL), err)
 	}
 	defer resp.Body.Close()
 	io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<20))
@@ -169,7 +172,7 @@ func discoverViaChallenge(ctx context.Context, client *http.Client, mcpURL strin
 	challenge := resp.Header.Get("WWW-Authenticate")
 	match := resourceMetadataRE.FindStringSubmatch(challenge)
 	if len(match) < 2 {
-		return AuthServerMetadata{}, fmt.Errorf("no OAuth metadata advertised at %s (status %s)", mcpURL, resp.Status)
+		return AuthServerMetadata{}, fmt.Errorf("no OAuth metadata advertised at %s (status %s)", mcp.RedactURL(mcpURL), resp.Status)
 	}
 	prMeta, err := fetchProtectedResource(ctx, client, match[1])
 	if err != nil {
