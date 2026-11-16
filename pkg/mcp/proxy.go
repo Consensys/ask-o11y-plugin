@@ -101,7 +101,7 @@ func (p *Proxy) UpdateConfig(configs []ServerConfig) error {
 				c.SetPerUserTokenProvider(p.perUserToken)
 			}
 			p.clients[id] = c
-			p.logger.Info("Added MCP client", "id", id, "url", config.URL, "type", config.Type)
+			p.logger.Info("Added MCP client", "id", id, "url", RedactURL(config.URL), "type", config.Type)
 		}
 	}
 	p.mu.Unlock()
@@ -432,7 +432,7 @@ func (p *Proxy) EnsureServer(config ServerConfig) error {
 			return nil
 		}
 		replaced = existing
-		p.logger.Warn("Replacing MCP client", "id", config.ID, "url", config.URL)
+		p.logger.Warn("Replacing MCP client", "id", config.ID, "url", RedactURL(config.URL))
 	}
 
 	c := NewClient(p.ctx, config, p.logger, sdkHTTPClient)
@@ -448,7 +448,7 @@ func (p *Proxy) EnsureServer(config ServerConfig) error {
 		}
 	}
 
-	p.logger.Info("Ensured MCP client", "id", config.ID, "url", config.URL, "type", config.Type)
+	p.logger.Info("Ensured MCP client", "id", config.ID, "url", RedactURL(config.URL), "type", config.Type)
 	return nil
 }
 
