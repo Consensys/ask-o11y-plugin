@@ -224,7 +224,7 @@ func TestTopologySnapshot_ServiceGraphPrimaryAndCached(t *testing.T) {
 	defer proxy.Close()
 	p := &Plugin{logger: log.DefaultLogger, mcpProxy: proxy}
 
-	snapshot := p.topologySnapshot(`- Labels: service="checkout"`, "1", "Org1", "")
+	snapshot := p.topologySnapshot(context.Background(), `- Labels: service="checkout"`, "1", "Org1", "")
 
 	// Service scoping: the alert names checkout, so the busy-but-unrelated
 	// frontend->checkout edge (sub-floor anyway) and no other services'
@@ -247,7 +247,7 @@ func TestTopologySnapshot_ServiceGraphPrimaryAndCached(t *testing.T) {
 
 	// Second call: served from the per-org cache, no extra fetches.
 	before := queryCalls.Load()
-	snapshot2 := p.topologySnapshot(`- Labels: service="checkout"`, "1", "Org1", "")
+	snapshot2 := p.topologySnapshot(context.Background(), `- Labels: service="checkout"`, "1", "Org1", "")
 	if snapshot2 != snapshot {
 		t.Errorf("cached snapshot differs:\nfirst:\n%s\nsecond:\n%s", snapshot, snapshot2)
 	}
@@ -263,7 +263,7 @@ func TestTopologySnapshot_CacheMissStored(t *testing.T) {
 	defer proxy.Close()
 	p := &Plugin{logger: log.DefaultLogger, mcpProxy: proxy}
 
-	if got := p.topologySnapshot("", "1", "Org1", ""); got != "" {
+	if got := p.topologySnapshot(context.Background(), "", "1", "Org1", ""); got != "" {
 		t.Errorf("expected empty snapshot, got %q", got)
 	}
 	if _, ok := p.lookupTopologyCache("1\x00"); !ok {
@@ -294,14 +294,14 @@ func TestTopologySnapshot_CacheKeyIncludesService(t *testing.T) {
 	defer proxy.Close()
 	p := &Plugin{logger: log.DefaultLogger, mcpProxy: proxy}
 
-	checkout := p.topologySnapshot(`- Labels: service="checkout"`, "1", "Org1", "")
+	checkout := p.topologySnapshot(context.Background(), `- Labels: service="checkout"`, "1", "Org1", "")
 	if !strings.Contains(checkout, "checkout -> db") {
 		t.Fatalf("expected checkout-scoped snapshot, got:\n%s", checkout)
 	}
 
 	// Same org, different service: a cache hit here would leak checkout's
 	// neighborhood into payment's prompt.
-	payment := p.topologySnapshot(`- Labels: service="payment"`, "1", "Org1", "")
+	payment := p.topologySnapshot(context.Background(), `- Labels: service="payment"`, "1", "Org1", "")
 	if got := queryCalls.Load(); got != 4 { // total+failed re-fetched for the new scope
 		t.Errorf("scoped snapshot was served from the wrong cache entry: %d extra queries", got-2)
 	}
@@ -340,7 +340,7 @@ func TestTopologySnapshot_GraphitiFallback(t *testing.T) {
 	defer proxy.Close()
 	p := &Plugin{logger: log.DefaultLogger, mcpProxy: proxy}
 
-	snapshot := p.topologySnapshot("", "1", "Org1", "")
+	snapshot := p.topologySnapshot(context.Background(), "", "1", "Org1", "")
 	if factCalls.Load() == 0 {
 		t.Fatal("expected the graphiti facts tool to be called")
 	}
@@ -398,7 +398,7 @@ func TestTopologySnapshot_ProbesMultiplePrometheusDatasources(t *testing.T) {
 	defer proxy.Close()
 	p := &Plugin{logger: log.DefaultLogger, mcpProxy: proxy}
 
-	snapshot := p.topologySnapshot("", "1", "Org1", "")
+	snapshot := p.topologySnapshot(context.Background(), "", "1", "Org1", "")
 	if !strings.Contains(snapshot, "api -> db (rps 5.00)") {
 		t.Errorf("expected edge from the second Prometheus datasource, got:\n%s", snapshot)
 	}

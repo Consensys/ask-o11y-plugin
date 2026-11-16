@@ -238,13 +238,13 @@ func extractServiceLabelFromSnapshot(alertSnapshot string) string {
 // Cached per org and per scoped service label (the fetch narrows the graph
 // to the alert's service, so a different alert must not reuse it); empty
 // string renders no prompt block.
-func (p *Plugin) topologySnapshot(alertSnapshot, orgID, orgName, scopeOrgID string) string {
+func (p *Plugin) topologySnapshot(ctx context.Context, alertSnapshot, orgID, orgName, scopeOrgID string) string {
 	cacheKey := orgID + "\x00" + extractServiceLabelFromSnapshot(alertSnapshot)
 	if snap, ok := p.lookupTopologyCache(cacheKey); ok {
 		return snap
 	}
 
-	snapshot := p.fetchTopologySnapshot(alertSnapshot, orgID, orgName, scopeOrgID)
+	snapshot := p.fetchTopologySnapshot(ctx, alertSnapshot, orgID, orgName, scopeOrgID)
 
 	ttl := topoCacheTTL
 	if snapshot == "" {
@@ -254,11 +254,11 @@ func (p *Plugin) topologySnapshot(alertSnapshot, orgID, orgName, scopeOrgID stri
 	return snapshot
 }
 
-func (p *Plugin) fetchTopologySnapshot(alertSnapshot, orgID, orgName, scopeOrgID string) string {
+func (p *Plugin) fetchTopologySnapshot(ctx context.Context, alertSnapshot, orgID, orgName, scopeOrgID string) string {
 	if p.mcpProxy == nil {
 		return ""
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), topoBudget)
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), topoBudget)
 	defer cancel()
 
 	if edges := p.fetchServiceGraphEdges(ctx, orgID, orgName, scopeOrgID); len(edges) > 0 {
@@ -279,7 +279,7 @@ func (p *Plugin) fetchTopologySnapshot(alertSnapshot, orgID, orgName, scopeOrgID
 // one receives the Tempo metrics-generator output, so picking the first or
 // default datasource misses the graph.
 func (p *Plugin) fetchServiceGraphEdges(ctx context.Context, orgID, orgName, scopeOrgID string) []serviceGraphEdge {
-	queryTool, ok := p.findQueryPrometheusTool()
+	queryTool, ok := p.findQueryPrometheusTool(ctx)
 	if !ok {
 		return nil
 	}
@@ -312,7 +312,7 @@ func (p *Plugin) fetchServiceGraphEdges(ctx context.Context, orgID, orgName, sco
 // fetchGraphitiTopology renders the Graphiti fallback when the service graph
 // metrics are absent (no metrics-generator, no Tempo integration yet).
 func (p *Plugin) fetchGraphitiTopology(ctx context.Context, orgID, orgName, scopeOrgID string) string {
-	tools, err := p.mcpProxy.ListTools()
+	tools, err := p.mcpProxy.ListToolsWithContext(ctx)
 	if err != nil {
 		return ""
 	}
@@ -341,8 +341,8 @@ func (p *Plugin) fetchGraphitiTopology(ctx context.Context, orgID, orgName, scop
 	return renderGraphitiTopology(parseGraphitiTopology(body).Edges)
 }
 
-func (p *Plugin) findQueryPrometheusTool() (string, bool) {
-	tools, err := p.mcpProxy.ListTools()
+func (p *Plugin) findQueryPrometheusTool(ctx context.Context) (string, bool) {
+	tools, err := p.mcpProxy.ListToolsWithContext(ctx)
 	if err != nil {
 		return "", false
 	}
@@ -358,7 +358,7 @@ func (p *Plugin) findQueryPrometheusTool() (string, bool) {
 // findPrometheusDatasourceUIDs lists the org's Prometheus datasources via the
 // standard list tool, capped at topoMaxDatasources.
 func (p *Plugin) findPrometheusDatasourceUIDs(ctx context.Context, orgID, orgName, scopeOrgID string) []string {
-	dsTool, ok := p.findDatasourceListTool()
+	dsTool, ok := p.findDatasourceListTool(ctx)
 	if !ok {
 		return nil
 	}

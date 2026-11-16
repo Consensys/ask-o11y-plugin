@@ -50,7 +50,7 @@ const (
 // hit returns immediately; a miss returns "" for this request and kicks off
 // a background refresh (deduplicated via msInFlight) so the next request
 // within msCacheTTL gets the real snapshot.
-func (p *Plugin) metricNamespaceSnapshot(orgID, orgName, scopeOrgID string) string {
+func (p *Plugin) metricNamespaceSnapshot(ctx context.Context, orgID, orgName, scopeOrgID string) string {
 	cacheKey := orgID
 	if cacheKey == "" {
 		cacheKey = orgName
@@ -74,25 +74,23 @@ func (p *Plugin) metricNamespaceSnapshot(orgID, orgName, scopeOrgID string) stri
 	p.msCacheMu.Unlock()
 
 	if !alreadyRefreshing {
-		go p.refreshMetricNamespaceSnapshot(cacheKey, orgID, orgName, scopeOrgID)
+		go p.refreshMetricNamespaceSnapshot(context.WithoutCancel(ctx), cacheKey, orgID, orgName, scopeOrgID)
 	}
 	return ""
 }
 
-func (p *Plugin) refreshMetricNamespaceSnapshot(cacheKey, orgID, orgName, scopeOrgID string) {
+func (p *Plugin) refreshMetricNamespaceSnapshot(ctx context.Context, cacheKey, orgID, orgName, scopeOrgID string) {
 	defer func() {
 		p.msCacheMu.Lock()
 		delete(p.msInFlight, cacheKey)
 		p.msCacheMu.Unlock()
 	}()
 
-	ctx := context.Background()
-
-	toolName, ok := p.findMetricNamesListTool()
+	toolName, ok := p.findMetricNamesListTool(ctx)
 	if !ok {
 		return
 	}
-	dsToolName, ok := p.findDatasourceListTool()
+	dsToolName, ok := p.findDatasourceListTool(ctx)
 	if !ok {
 		return
 	}
@@ -232,8 +230,8 @@ func renderMetricNamespaceSnapshot(rows []datasourceRow, namesByUID map[string][
 // findMetricNamesListTool searches all registered MCP servers for a tool
 // whose base name (the part after the server-id prefix) is
 // "list_prometheus_metric_names" — mirrors findDatasourceListTool.
-func (p *Plugin) findMetricNamesListTool() (string, bool) {
-	tools, err := p.mcpProxy.ListTools()
+func (p *Plugin) findMetricNamesListTool(ctx context.Context) (string, bool) {
+	tools, err := p.mcpProxy.ListToolsWithContext(ctx)
 	if err != nil {
 		return "", false
 	}
