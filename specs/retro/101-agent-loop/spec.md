@@ -22,7 +22,7 @@ A run is readable and cancellable only by its owning user in its owning org. The
 | Method | Path | Handler | Evidence |
 |---|---|---|---|
 | POST | `/api/agent/run` | `handleAgentRun` | `pkg/plugin/plugin.go:588` |
-| GET | `/api/agent/runs/{runId}` | `handleAgentRuns` | `pkg/plugin/plugin.go:1433` |
+| GET | `/api/agent/runs/{runId}` | `handleAgentRuns` | `pkg/plugin/plugin.go:1430` |
 | GET | `/api/agent/runs/{runId}/events` | `handleAgentRunEvents` | `pkg/plugin/plugin.go:1607` |
 | POST | `/api/agent/runs/{runId}/cancel` | `handleCancelRun` | `pkg/plugin/plugin.go:1584` |
 | POST | `/api/agent/runs/{runId}/approvals/{approvalId}` | `handleAgentApproval` | `pkg/plugin/plugin.go:1448` |
@@ -109,7 +109,7 @@ The run store adds `sequence` to every event (`pkg/plugin/runstore.go:183`). The
 | LLM app returns 5xx | `error`, code `llm_http_5xx`, retryable | `pkg/agent/llm_client.go:82` |
 | Stream ends without `finish_reason` twice | `error`, code `llm_incomplete_stream`, retryable | `pkg/agent/loop.go:863` |
 | Tool arguments are truncated and no retry is left | `error`, code `llm_truncated_tool_call`, retryable | `pkg/agent/loop.go:404` |
-| Iteration cap reached | `error` "Agent loop reached maximum iterations (N)" | `pkg/agent/loop.go:739` |
+| Iteration cap reached | `error` "Agent loop reached maximum iterations (N)" | `pkg/agent/loop.go:774` |
 | MCP tool listing fails | none; the run continues with an empty tool set | `pkg/agent/loop.go:157` |
 | User cancels | no terminal event; run status becomes `cancelled` | `pkg/plugin/plugin.go:1263` |
 ## Data and Persistence
@@ -117,7 +117,7 @@ The run store adds `sequence` to every event (`pkg/plugin/runstore.go:183`). The
 |---|---|---|---|---|
 | Run store | `runID` → events, trace, status | 1 hour (`RunMaxAge`) | none | `pkg/plugin/config.go:47` |
 | Event list | per-run slice | capped at 500 events | oldest events dropped | `pkg/plugin/runstore.go:186` |
-| Cancel registry | `p.runCancels[runID]` | deleted when the consumer exits | no cancel | `pkg/plugin/plugin.go:1178` |
+| Cancel registry | `p.runCancels[runID]` | deleted when the consumer exits | no cancel | `pkg/plugin/plugin.go:1175` |
 ## Observability
 | Signal | Name | Where | Evidence |
 |---|---|---|---|

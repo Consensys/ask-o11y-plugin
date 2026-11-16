@@ -44,8 +44,8 @@ The UI reads the shipped defaults from one endpoint.
 |---|---|---|---|
 | `defaultSystemPrompt` | jsonData | `DefaultSystemPrompt` | `pkg/plugin/prompt_defaults.go:8` |
 | `investigationPrompt` | jsonData | bundled skill user prompt | `pkg/plugin/plugin.go:97` |
-| `performancePrompt` | jsonData | bundled skill user prompt | `pkg/plugin/plugin.go:98` |
-| `skills` | jsonData | empty registry | `pkg/plugin/plugin.go:102` |
+| `performancePrompt` | jsonData | bundled skill user prompt | `pkg/plugin/plugin.go:97` |
+| `skills` | jsonData | empty registry | `pkg/plugin/plugin.go:101` |
 
 ### MCP tool names
 
@@ -69,13 +69,13 @@ The UI reads the shipped defaults from one endpoint.
 12. The base prompt always contains the anti-hallucination contract. `VERIFIED` — test `TestBuildSystemPrompt_AntiHallucinationContractAlwaysPresent`
 13. Optional blocks render only when their field is non-empty: datasource, metric namespaces, alert rule, topology. `VERIFIED` — `pkg/plugin/prompt_defaults.go:53`
 14. The datasource block is tested. `VERIFIED` — test `TestBuildSystemPrompt_DatasourceSnapshotSlot`
-15. `CurrentTime` is fixed at run start in UTC and rendered into the time section. `VERIFIED` — `pkg/plugin/prompts.go:305`
+15. `CurrentTime` is fixed at run start in UTC and rendered into the time section. `VERIFIED` — `pkg/plugin/prompts.go:316`
 16. The current-time block is tested. `VERIFIED` — test `TestBuildSystemPrompt_CurrentTimeSlot`
 17. `BuildUserPrompt` for `investigation` extracts the alert name and errors when it is absent. `VERIFIED` — `pkg/plugin/prompts.go:187`
 18. `BuildUserPrompt` for `performance` falls back to the whole message as the target. `VERIFIED` — `pkg/plugin/prompts.go:194`
 19. `BuildUserPrompt` for `chat` or an empty type returns the message unchanged. `VERIFIED` — test `TestBuildUserPrompt_ChatPassesMessageVerbatim`
 20. An unknown conversation type returns an error. `VERIFIED` — test `TestBuildUserPrompt_UnknownTypeErrors`
-21. When `UserPromptSkill` is set, its rendered template replaces the user message; an empty render falls back to the message. `VERIFIED` — `pkg/plugin/prompts.go:204`
+21. When `UserPromptSkill` is set, its rendered template replaces the user message; an empty render falls back to the message. `VERIFIED` — `pkg/plugin/prompts.go:217`
 22. The legacy type mapping is tested. `VERIFIED` — test `TestBuildUserPrompt_LegacyTypeRendersSkillTemplate`
 23. `GET /api/prompt-defaults` returns a flat JSON object with exactly `defaultSystemPrompt`, `investigationPrompt`, and `performancePrompt`. `VERIFIED` — `pkg/plugin/plugin.go:1691`
 24. The response shape is tested. `VERIFIED` — test `TestHandlePromptDefaults`

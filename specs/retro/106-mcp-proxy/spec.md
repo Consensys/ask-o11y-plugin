@@ -4,7 +4,7 @@
 
 **Status**: Retrospective
 
-**Last verified**: `f3db81a`
+**Last verified**: `ecc29ce`
 
 **Owner**: Ask O11y maintainers
 
@@ -34,7 +34,7 @@ The proxy holds no role logic. Callers filter before and after it.
 |---|---|---|---|
 | GET | `/api/mcp/tools` | `handleMCPTools` | `pkg/plugin/plugin.go:729` |
 | POST | `/api/mcp/call-tool` | `handleMCPCallTool` | `pkg/plugin/plugin.go:761` |
-| GET | `/api/mcp/servers` | `handleMCPServers` | `pkg/plugin/plugin.go:834` |
+| GET | `/api/mcp/servers` | `handleMCPServers` | `pkg/plugin/plugin.go:832` |
 
 The raw JSON-RPC `/mcp` route is removed because it bypassed RBAC. `pkg/plugin/plugin.go:582`
 
@@ -112,12 +112,16 @@ The raw JSON-RPC `/mcp` route is removed because it bypassed RBAC. `pkg/plugin/p
 50. A tool result with `IsError` set never triggers a refresh or a retry. `VERIFIED` — test `TestToolResultErrorDoesNotRefresh`
 51. A refused refresh (rate limit) or a failed re-list returns the original error envelope unchanged, with no hint and no retry. `VERIFIED` — test `TestCallToolRateLimitedProducesNoHint`
 52. A listing triggered by a stale flag or a pending notification never replaces the catalog with a failed or empty result: the reader receives the last known-good slice with no error. `VERIFIED` — test `TestListToolsWithContextKeepsCatalogWhenRefreshFails`
+53. Every hand-rolled MCP HTTP request is created with `http.NewRequestWithContext` and carries the caller's context. `VERIFIED` — `pkg/mcp/client.go:1009`, `pkg/mcp/client.go:1187`, `pkg/mcp/client.go:1411`, `pkg/mcp/client.go:1505`
+54. A successful response body is read through one bound, `effectiveResponseLimit(ctx)`, and an oversized body returns an error that names the limit. `VERIFIED` — `pkg/mcp/client.go:1574`
+55. The bound is Grafana's configured response limit, then `GF_DATAPROXY_RESPONSE_LIMIT`, then a hard 32 MiB ceiling; an unset or unparsable value uses the ceiling. `VERIFIED` — `pkg/mcp/client.go:1554`
+56. A non-200 response body is drained at most 64 KiB before the connection closes. `VERIFIED` — `pkg/mcp/client.go:1587`
 
 ## Invariants
 
 - Lock order is `proxy.mu` then `client.mu`, never reversed. `VERIFIED` — `pkg/mcp/proxy.go:379`
 - Catalog lock order is `refreshMu` then `mu`. No path takes `refreshMu` while holding `mu`. `VERIFIED` — `pkg/mcp/tool_refresh.go:98`
-- A published tool slice is never mutated in place; every publication builds a new slice. `VERIFIED` — `pkg/mcp/client.go:567`
+- A published tool slice is never mutated in place; every publication builds a new slice. `VERIFIED` — `pkg/mcp/client.go:570`
 - The server prefix is applied exactly once per listed tool. `VERIFIED` — `pkg/mcp/client.go:560`
 - Every outbound MCP request uses an SDK-built HTTP client. `VERIFIED` — `pkg/mcp/proxy.go:474`
 

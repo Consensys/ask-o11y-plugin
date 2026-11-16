@@ -22,7 +22,7 @@ a response time, and the server tool list. The AppConfig UI reads that state fro
 
 | Capability | Admin | Editor | Viewer | Evidence |
 |---|---|---|---|---|
-| Read `/api/mcp/servers` | yes | yes | yes | `pkg/plugin/plugin.go:834` |
+| Read `/api/mcp/servers` | yes | yes | yes | `pkg/plugin/plugin.go:832` |
 | Change the poll interval | no | no | no — compile-time constant | `pkg/plugin/config.go:40` |
 | Trigger a health probe | no | no | no — internal only | `pkg/mcp/health.go:141` |
 
@@ -34,7 +34,7 @@ The route has no role check. Any authenticated caller sees every server's status
 
 | Method | Path | Handler | Evidence |
 |---|---|---|---|
-| GET | `/api/mcp/servers` | `handleMCPServers` | `pkg/plugin/plugin.go:834` |
+| GET | `/api/mcp/servers` | `handleMCPServers` | `pkg/plugin/plugin.go:832` |
 
 Response body: `{servers, systemHealth, oauth}`. `pkg/plugin/plugin.go:845`
 
@@ -42,7 +42,7 @@ Response body: `{servers, systemHealth, oauth}`. `pkg/plugin/plugin.go:845`
 
 | Event | Payload fields | Evidence |
 |---|---|---|
-| none | health state is pulled, never pushed | `pkg/plugin/plugin.go:834` |
+| none | health state is pulled, never pushed | `pkg/plugin/plugin.go:832` |
 
 ### Configuration keys
 
@@ -59,7 +59,7 @@ Response body: `{servers, systemHealth, oauth}`. `pkg/plugin/plugin.go:845`
 
 ## Behaviour Rules
 
-1. The monitor starts at plugin init with a 30s interval. `VERIFIED` — `pkg/plugin/plugin.go:323`
+1. The monitor starts at plugin init with a 30s interval. `VERIFIED` — `pkg/plugin/plugin.go:322`
 2. `Start` runs one check immediately, before the first tick. `VERIFIED` — `pkg/mcp/health.go:80`
 3. Each tick checks every registered client. `VERIFIED` — `pkg/mcp/health.go:85`
 4. Servers are checked sequentially inside one tick. `VERIFIED` — `pkg/mcp/health.go:132`

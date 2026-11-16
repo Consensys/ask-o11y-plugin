@@ -20,7 +20,7 @@ Limits stay correct across replicas when Redis is configured.
 
 | Capability | Admin | Editor | Viewer | Evidence |
 |---|---|---|---|---|
-| Create a share link for own session | yes | yes | yes | `pkg/plugin/plugin.go:2371` |
+| Create a share link for own session | yes | yes | yes | `pkg/plugin/plugin.go:2366` |
 | Read a share link in the same org | yes | yes | yes | `pkg/plugin/plugin.go:2455` |
 | Revoke a share that they created | yes | yes | yes | `pkg/plugin/plugin.go:2540` |
 | List shares for own sessions | yes | yes | yes | `pkg/plugin/plugin.go:2774` |
@@ -31,10 +31,10 @@ Limits stay correct across replicas when Redis is configured.
 
 | Method | Path | Handler | Evidence |
 |---|---|---|---|
-| POST | `/api/sessions/share` | `handleCreateShare` | `pkg/plugin/plugin.go:2371` |
+| POST | `/api/sessions/share` | `handleCreateShare` | `pkg/plugin/plugin.go:2366` |
 | GET | `/api/sessions/shared/{shareId}` | `handleGetSharedSession` | `pkg/plugin/plugin.go:2455` |
 | DELETE | `/api/sessions/share/{shareId}` | `handleDeleteShare` | `pkg/plugin/plugin.go:2509` |
-| GET | `/api/sessions/{id}/shares` | `handleGetSessionShares` | `pkg/plugin/plugin.go:2757` |
+| GET | `/api/sessions/{id}/shares` | `handleGetSessionShares` | `pkg/plugin/plugin.go:2748` |
 
 ### SSE events
 
@@ -46,7 +46,7 @@ Limits stay correct across replicas when Redis is configured.
 
 | Key | Location | Default | Evidence |
 |---|---|---|---|
-| `redisURL` | secureJsonData | `redis://localhost:6379/0` | `pkg/plugin/plugin.go:70` |
+| `redisURL` | secureJsonData | `redis://localhost:6379/0` | `pkg/plugin/plugin.go:69` |
 | `shareRateLimitPerHour` | constant | `50` | `pkg/plugin/config.go:13` |
 | `shareRateLimitWindow` | constant | `1h` | `pkg/plugin/config.go:14` |
 | `defaultShareMaxTTL` | constant | `365d` | `pkg/plugin/config.go:15` |

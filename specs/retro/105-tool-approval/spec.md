@@ -18,7 +18,7 @@ A risky tool call pauses until a human approves it. The user can approve once, a
 |---|---|---|---|---|
 | Approve or deny a pending call | yes | yes | no | `pkg/plugin/plugin.go:1454` |
 | Approve a tool for the whole session | yes | yes | no | `pkg/plugin/plugin.go:1476` |
-| Decide on another user's run | no | no | no | `pkg/plugin/plugin.go:1449` |
+| Decide on another user's run | no | no | no | `pkg/plugin/plugin.go:1446` |
 | Trigger a gated call through the agent | yes | yes | read-only only | `pkg/agent/loop.go:1018` |
 | Read the decision in run state | yes | yes | yes | `pkg/plugin/runstore.go:298` |
 A Viewer cannot reach a gated write tool because RBAC removes it first. A Viewer cannot approve because the handler requires Admin or Editor. `VERIFIED` — `pkg/plugin/plugin.go:1454`
@@ -27,7 +27,7 @@ A Viewer cannot reach a gated write tool because RBAC removes it first. A Viewer
 | Method | Path | Handler | Evidence |
 |---|---|---|---|
 | POST | `/api/agent/runs/{runId}/approvals/{approvalId}` | `handleAgentApproval` | `pkg/plugin/plugin.go:1448` |
-| GET | `/api/agent/runs/{runId}` | `handleAgentRuns` (returns the approval trace) | `pkg/plugin/plugin.go:1433` |
+| GET | `/api/agent/runs/{runId}` | `handleAgentRuns` (returns the approval trace) | `pkg/plugin/plugin.go:1430` |
 The decision body is `{"decision":"approved\|rejected","comment":"...","approvalScope":"once\|always"}`. `VERIFIED` — `pkg/plugin/plugin.go:1442`
 ### SSE events
 | Event | Payload fields | Evidence |
@@ -38,7 +38,7 @@ The decision body is `{"decision":"approved\|rejected","comment":"...","approval
 | Key | Location | Default | Evidence |
 |---|---|---|---|
 | `approvalPolicy` | plugin jsonData | `approval-gated-writes` | `pkg/plugin/plugin.go:181` |
-| `riskOverrides` | plugin jsonData | empty | `pkg/plugin/plugin.go:94` |
+| `riskOverrides` | plugin jsonData | empty | `pkg/plugin/plugin.go:93` |
 | `trustedMCPServers` | plugin jsonData | empty | `pkg/plugin/plugin.go:93` |
 | `approvalTimeout` | process variable | 30 minutes | `pkg/plugin/plugin.go:36` |
 | `maxParallelToolCalls` | plugin jsonData | 4 | `pkg/plugin/plugin.go:185` |
@@ -92,7 +92,7 @@ The decision body is `{"decision":"approved\|rejected","comment":"...","approval
 40. Deleting a session also deletes its saved approval grants, and deleting all sessions deletes every grant of that user. `VERIFIED` — `pkg/plugin/plugin.go:2612`, `pkg/plugin/plugin.go:2758`, `pkg/plugin/approval_grants.go:153`
 ## Invariants
 - Only an Admin or Editor can resolve an approval. `VERIFIED` — `pkg/plugin/plugin.go:1454`
-- Only the run owner in the run org can resolve an approval. `VERIFIED` — `pkg/plugin/plugin.go:1449`
+- Only the run owner in the run org can resolve an approval. `VERIFIED` — `pkg/plugin/plugin.go:1446`
 - A viewed approval carries the tool name, risk, reason, and raw arguments. `VERIFIED` — `pkg/agent/loop.go:1023`
 - A decision resolves at most once; a later different decision conflicts. `VERIFIED` — `pkg/plugin/approval_broker.go:108`
 - A grant never leaks to another session. `VERIFIED` — test `TestHandleAgentApprovalApproveAlwaysPersistsToolGrant`
@@ -108,7 +108,7 @@ The decision body is `{"decision":"approved\|rejected","comment":"...","approval
 | Approval registration fails | tool result "Failed to prepare approval for tool X" | `pkg/agent/loop.go:1053` |
 | User denies | model sees "was not approved by the user"; no SSE error | `pkg/agent/loop.go:1078` |
 | Approval times out | `approval_resolved` with decision `rejected` and timeout comment | `pkg/plugin/approval_broker.go:92` |
-| Run is cancelled while waiting | wait returns the context error; tool result is empty and errored | `pkg/agent/loop.go:1064` |
+| Run is cancelled while waiting | wait returns the context error; tool result is empty and errored | `pkg/agent/loop.go:1098` |
 ## Data and Persistence
 | Store | Key or table | TTL | Fallback | Evidence |
 |---|---|---|---|---|

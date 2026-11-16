@@ -4,7 +4,7 @@
 
 **Status**: Retrospective
 
-**Last verified**: `18e315b`
+**Last verified**: `ecc29ce`
 
 **Owner**: Ask O11y maintainers
 
@@ -31,7 +31,7 @@ Both survive a pod restart when Redis is configured.
 | Method | Path | Handler | Evidence |
 |---|---|---|---|
 | POST | `/api/agent/run` | `handleAgentRun` | `pkg/plugin/plugin.go:876` |
-| GET | `/api/agent/runs/{id}` | `handleAgentRuns` | `pkg/plugin/plugin.go:1371` |
+| GET | `/api/agent/runs/{id}` | `handleAgentRuns` | `pkg/plugin/plugin.go:1368` |
 | GET | `/api/agent/runs/{id}/events` | `handleAgentRunEvents` | `pkg/plugin/plugin.go:1607` |
 | POST | `/api/agent/runs/{id}/cancel` | `handleCancelRun` | `pkg/plugin/plugin.go:1584` |
 | GET, POST, DELETE | `/api/sessions` | `handleSessionsRoot` | `pkg/plugin/plugin.go:2560` |
@@ -52,7 +52,7 @@ Both survive a pod restart when Redis is configured.
 | Key | Location | Default | Evidence |
 |---|---|---|---|
 | `sessionTTLDays` | jsonData | `90` | `pkg/plugin/config.go:71` |
-| `redisURL` | secureJsonData | `redis://localhost:6379/0` | `pkg/plugin/plugin.go:70` |
+| `redisURL` | secureJsonData | `redis://localhost:6379/0` | `pkg/plugin/plugin.go:69` |
 
 ### MCP tool names
 
@@ -91,6 +91,8 @@ Coverage: `VERIFIED` = code pointer or test; `ASSUMED` = code suggests, no test;
 25. A running run with no heartbeat for 90 seconds becomes `failed` with `agent run was interrupted before it completed`. `VERIFIED` — `pkg/plugin/runstore_redis.go:266`
 26. The interrupted transition happens once, claimed with `SETNX`. `VERIFIED` — test `TestRedisRunStore_ReconcileIsClaimedOnce`
 27. Nothing prevents two concurrent runs on one session; `ActiveRunID` keeps only the last ID. `GAP` — `pkg/plugin/plugin.go:1103`
+28. A session create or update body is capped at 8 MiB; a larger body answers 413 and no session is written. `VERIFIED` — `pkg/plugin/request.go:19`, `pkg/plugin/request.go:26`
+29. Every other control request body is capped at 1 MiB. `VERIFIED` — `pkg/plugin/request.go:16`
 
 ## Invariants
 
@@ -104,7 +106,7 @@ Coverage: `VERIFIED` = code pointer or test; `ASSUMED` = code suggests, no test;
 |---|---|---|
 | Session ID is malformed | 400 `Invalid session ID format` | `pkg/plugin/plugin.go:2707` |
 | Session is missing or owned by another user | 404 `Session not found` | `pkg/plugin/plugin.go:2715` |
-| Run belongs to another user or org | 403 `Access denied` | `pkg/plugin/plugin.go:1342` |
+| Run belongs to another user or org | 403 `Access denied` | `pkg/plugin/plugin.go:1339` |
 | Redis is unreachable at startup | In-memory stores; the health message warns | `pkg/plugin/plugin.go:570` |
 
 ## Data and Persistence
@@ -136,4 +138,4 @@ Coverage: `VERIFIED` = code pointer or test; `ASSUMED` = code suggests, no test;
 
 - Concurrent runs on one session are allowed and uncoordinated. A forward spec should define single-flight or per-session serialisation.
 - The Redis session index has no TTL; it is pruned only on create, so an idle user keeps stale members.
-- `GET /api/sessions/{id}/shares` filters by `UserID` only, not by org (`pkg/plugin/plugin.go:2770`). Cross-org leakage needs a review.
+- `GET /api/sessions/{id}/shares` filters by `UserID` only, not by org (`pkg/plugin/plugin.go:2761`). Cross-org leakage needs a review.

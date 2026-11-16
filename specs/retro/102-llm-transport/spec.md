@@ -26,7 +26,7 @@ No role receives a different model. Model choice is not an RBAC boundary. `VERIF
 | Method | Path | Handler | Evidence |
 |---|---|---|---|
 | POST | `/api/agent/run?model=base\|large` | `handleAgentRun` | `pkg/plugin/plugin.go:588` |
-| GET | `/api/agent/runs/{runId}` | `handleAgentRuns` | `pkg/plugin/plugin.go:1433` |
+| GET | `/api/agent/runs/{runId}` | `handleAgentRuns` | `pkg/plugin/plugin.go:1430` |
 The run response carries `model` and `modelSource` (`auto`, `request`, `session`, or `skill`). `VERIFIED` — `pkg/plugin/plugin.go:1188`
 ### SSE events
 | Event | Payload fields | Evidence |
@@ -98,7 +98,7 @@ The transport emits no event of its own. A transport failure reaches the client 
 | 5xx | `error`, code `llm_http_5xx`, retryable | `pkg/agent/llm_client.go:82` |
 | Stream ends early twice | `error`, code `llm_incomplete_stream` | `pkg/agent/loop.go:863` |
 | Request timeout | transport error, then one retry, then `error` | `pkg/agent/llm_client.go:175` |
-| Invalid `model` value | HTTP 400 with the supported values | `pkg/plugin/plugin.go:915` |
+| Invalid `model` value | HTTP 400 with the supported values | `pkg/plugin/plugin.go:912` |
 | Conflicting session model | HTTP 400 "Session model cannot be changed" | `pkg/plugin/plugin.go:1030` |
 ## Data and Persistence
 | Store | Key or table | TTL | Fallback | Evidence |

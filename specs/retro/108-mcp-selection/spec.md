@@ -61,7 +61,7 @@ Role names are matched case-sensitively. Any unknown role is treated as Viewer.
 | `load_skill` | yes | `pkg/agent/loop.go:953` |
 | Graphiti base names: `add_memory`, `search_memory_facts`, `search_memory_nodes`, `delete_entity_edge`, `delete_episode`, `clear_graph` | mixed | `pkg/mcp/selection.go:97` |
 
-Both meta-tools bypass MCP filtering by design. `pkg/agent/loop.go:950`
+Both meta-tools bypass MCP filtering by design. `pkg/agent/tools.go:26`
 
 ## Behaviour Rules
 
@@ -110,7 +110,7 @@ Both meta-tools bypass MCP filtering by design. `pkg/agent/loop.go:950`
 | Viewer asks for a write tool | 403 `Access denied: Viewer role cannot access tool ...` | `pkg/plugin/plugin.go:804` |
 | Tool disabled by selection | 403 `Tool is not enabled` | `pkg/plugin/plugin.go:810` |
 | Agent calls a denied tool | Tool result `Access denied: ...` | `pkg/agent/loop.go:975` |
-| Agent calls a disabled tool | Tool result `Tool ... is disabled in MCP server settings` | `pkg/agent/loop.go:978` |
+| Agent calls a disabled tool | Tool result `Tool ... is disabled in MCP server settings` | `pkg/agent/loop.go:1011` |
 
 ## Data and Persistence
 

@@ -49,7 +49,7 @@ at start, adds runtime servers, and sends W3C trace context with each tool call.
 | `mcpServers[]` | `jsonData` | empty | `pkg/plugin/plugin.go:90` |
 | `mcpServers[].id`, `.url`, `.type`, `.enabled` | `jsonData` | required, `enabled` false | `pkg/mcp/types.go:91` |
 | `mcpServers[].timeoutSeconds` | `jsonData` | `0` means 30s | `pkg/mcp/types.go:107` |
-| `mcpServerHeader.{id}.{header}` | `secureJsonData` | none | `pkg/plugin/plugin.go:149` |
+| `mcpServerHeader.{id}.{header}` | `secureJsonData` | none | `pkg/plugin/plugin.go:148` |
 | `useBuiltInMCP` | `jsonData` | `false` | `pkg/plugin/plugin.go:91` |
 
 ### MCP tool names
@@ -63,11 +63,11 @@ at start, adds runtime servers, and sends W3C trace context with each tool call.
 1. `mcpServers` is a JSON array at the root of `jsonData`. `VERIFIED` — `provisioning/plugins/app.yaml:32`
 2. Settings are decoded once with `json.Unmarshal` into `PluginSettings`. `VERIFIED` — `pkg/plugin/plugin.go:269`
 3. Four `type` values are documented: `openapi`, `standard`, `sse`, `streamable-http`. `VERIFIED` — `pkg/mcp/types.go:95`
-4. `http+streamable` is an alias of `streamable-http`; both use the SDK streamable transport with 3 retries, and `sse` uses the SDK SSE transport. `VERIFIED` — `pkg/mcp/client.go:247`, `pkg/mcp/client.go:242`
+4. `http+streamable` is an alias of `streamable-http`; both use the SDK streamable transport with 3 retries, and `sse` uses the SDK SSE transport. `VERIFIED` — `pkg/mcp/client.go:247`, `pkg/mcp/client.go:245`
 5. `openapi` fetches a spec from `{url}/openapi.json` when the URL lacks that suffix. `VERIFIED` — `pkg/mcp/client.go:998`
 6. `standard` is declared but cannot connect. `GAP` — `pkg/mcp/client.go:253` returns an error; `listStandardTools` is unreachable
 7. Any other type returns `unsupported MCP transport type: <type>`. `VERIFIED` — `pkg/mcp/client.go:261`
-8. Secrets arrive as `mcpServerHeader.{serverID}.{headerName}` in `secureJsonData`. `VERIFIED` — `pkg/plugin/plugin.go:149`
+8. Secrets arrive as `mcpServerHeader.{serverID}.{headerName}` in `secureJsonData`. `VERIFIED` — `pkg/plugin/plugin.go:148`
 9. That mapping requires a server ID without dots, because it splits at the first dot. `VERIFIED` — `pkg/plugin/plugin.go:160`
 10. `trustedMCPServers` overrides `Trusted`; global `riskOverrides` copy into servers with none. `VERIFIED` — `pkg/plugin/plugin.go:188`
 11. Provisioned servers are attached with `UpdateConfig` at plugin init. `VERIFIED` — `pkg/plugin/plugin.go:318`
@@ -80,7 +80,7 @@ at start, adds runtime servers, and sends W3C trace context with each tool call.
 18. A runtime server ID must be 1-64 chars of `[a-z0-9-]`. `VERIFIED` — `pkg/plugin/mcp_provisioner.go:206`
 19. A runtime server transport must be `streamable-http` or `sse`. `VERIFIED` — `pkg/plugin/mcp_provisioner.go:240`
 20. Presets are `github-read`, `github-write`, and `atlassian`. `VERIFIED` — `pkg/plugin/oauth/presets.go:38`
-21. The built-in MCP registers as server ID `mcp-grafana`. `VERIFIED` — `pkg/plugin/plugin.go:87`
+21. The built-in MCP registers as server ID `mcp-grafana`. `VERIFIED` — `pkg/plugin/plugin.go:86`
 22. The built-in URL is `{grafanaURL}/api/plugins/grafana-llm-app/resources/mcp/grafana` and it authenticates with the service-account bearer. `VERIFIED` — `pkg/plugin/plugin.go:629`, `pkg/plugin/plugin.go:633`
 23. With no service-account token the plugin removes the built-in client instead of failing. `VERIFIED` — `pkg/plugin/plugin.go:621`
 24. The service-account token is Org 1 only, so `useBuiltInMCP` must not appear in `full.yaml_`. `ASSUMED` — documentation only: `CLAUDE.md:69`
@@ -89,7 +89,7 @@ at start, adds runtime servers, and sends W3C trace context with each tool call.
 27. A provisioned `timeoutSeconds: 90` is honoured for the Grafana sidecar. `VERIFIED` — `provisioning/plugins/full.yaml_:38`
 28. Trace context is propagated outbound only: from asko11y to the MCP server. `VERIFIED` — `pkg/mcp/trace_propagation.go:77`
 29. The propagated headers are W3C `traceparent` and `tracestate`, injected directly rather than through the OTel global. `VERIFIED` — `pkg/mcp/trace_propagation.go:51`
-30. Every client transport is wrapped with `tracePropagationTransport`. `VERIFIED` — `pkg/mcp/client.go:321`
+30. Every client transport is wrapped with `tracePropagationTransport`. `VERIFIED` — `pkg/mcp/client.go:324`
 31. A stashed caller span is the preferred parent source. `VERIFIED` — test `TestTracePropagationTransport_MergedContextCallerSpan`
 32. Without any span the request passes through with no trace header, and the caller request is never mutated. `VERIFIED` — test `TestTracePropagationTransport_NoSpan`
 33. No sampling decision is made or forwarded by the plugin. `GAP` — `pkg/mcp/trace_propagation.go:77` injects context only
