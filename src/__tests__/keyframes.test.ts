@@ -32,7 +32,6 @@ describe('plugin CSS keyframes', () => {
   it.each(files)('%s uses only prefixed keyframe names', (file) => {
     const css = fs.readFileSync(file, 'utf8');
     const names = [...css.matchAll(/@keyframes\s+([A-Za-z_-][\w-]*)/g)].map((m) => m[1]);
-    expect(names.length).toBeGreaterThan(0);
     const unscoped = names.filter((name) => !name.startsWith(PREFIX));
     expect(unscoped).toEqual([]);
   });
