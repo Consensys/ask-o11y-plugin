@@ -10,8 +10,6 @@ import (
 	"io"
 	"math/big"
 	"net/http"
-	"os"
-	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -1549,20 +1547,12 @@ const maxMCPResponseBytes = 32 << 20
 const maxMCPErrorDrainBytes = 64 << 10
 
 // effectiveResponseLimit resolves the byte limit for one response read. The
-// order matches the SDK middleware: Grafana's per-request config first, then
-// GF_DATAPROXY_RESPONSE_LIMIT, then the hard ceiling.
+// limit comes from Grafana's per-request config, which the SDK fills from the
+// instance settings. The plugin must not touch the environment itself: the
+// catalog code rules forbid it. When Grafana sets no limit the hard ceiling
+// applies, because the SDK treats 0 as "no limit".
 func effectiveResponseLimit(ctx context.Context) int64 {
-	var limit int64
-	if cfg := config.GrafanaConfigFromContext(ctx); cfg != nil {
-		limit = cfg.ResponseLimit()
-	}
-	if limit <= 0 {
-		if raw := os.Getenv("GF_DATAPROXY_RESPONSE_LIMIT"); raw != "" {
-			if v, err := strconv.ParseInt(raw, 10, 64); err == nil && v > 0 {
-				limit = v
-			}
-		}
-	}
+	limit := config.GrafanaConfigFromContext(ctx).ResponseLimit()
 	if limit <= 0 || limit > maxMCPResponseBytes {
 		return maxMCPResponseBytes
 	}

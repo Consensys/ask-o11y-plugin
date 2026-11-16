@@ -10,29 +10,35 @@ import (
 	"time"
 
 	"github.com/grafana/grafana-plugin-sdk-go/backend/log"
+	"github.com/grafana/grafana-plugin-sdk-go/config"
 )
+
+// withResponseLimit puts Grafana's configured response limit into the context
+// the same way the SDK does. The plugin reads it from the context only: the
+// catalog code rules forbid reading the environment.
+func withResponseLimit(ctx context.Context, raw string) context.Context {
+	return config.WithGrafanaConfig(ctx, config.NewGrafanaCfg(map[string]string{config.ResponseLimit: raw}))
+}
 
 // TestEffectiveResponseLimit covers the 32 MiB hard ceiling. Grafana's
 // configured limit wins when it is set and tighter; the ceiling applies when
 // nothing is configured, because the SDK treats 0 as "no limit".
 func TestEffectiveResponseLimit(t *testing.T) {
-	t.Setenv("GF_DATAPROXY_RESPONSE_LIMIT", "")
 	if got := effectiveResponseLimit(context.Background()); got != maxMCPResponseBytes {
 		t.Fatalf("unset limit should fall back to %d, got %d", maxMCPResponseBytes, got)
 	}
 
-	t.Setenv("GF_DATAPROXY_RESPONSE_LIMIT", "1024")
-	if got := effectiveResponseLimit(context.Background()); got != 1024 {
-		t.Fatalf("env limit should win, got %d", got)
+	if got := effectiveResponseLimit(withResponseLimit(context.Background(), "1024")); got != 1024 {
+		t.Fatalf("configured limit should win, got %d", got)
 	}
 
-	t.Setenv("GF_DATAPROXY_RESPONSE_LIMIT", "999999999999")
-	if got := effectiveResponseLimit(context.Background()); got != maxMCPResponseBytes {
+	ctx := withResponseLimit(context.Background(), "999999999999")
+	if got := effectiveResponseLimit(ctx); got != maxMCPResponseBytes {
 		t.Fatalf("limit above the ceiling must clamp to %d, got %d", maxMCPResponseBytes, got)
 	}
 
-	t.Setenv("GF_DATAPROXY_RESPONSE_LIMIT", "not-a-number")
-	if got := effectiveResponseLimit(context.Background()); got != maxMCPResponseBytes {
+	ctx = withResponseLimit(context.Background(), "not-a-number")
+	if got := effectiveResponseLimit(ctx); got != maxMCPResponseBytes {
 		t.Fatalf("unparsable limit should fall back to the ceiling, got %d", got)
 	}
 }
@@ -129,7 +135,6 @@ func TestCallStandardToolUsesCallerContext(t *testing.T) {
 // TestCallOpenAPIToolCapsResponseBody drives the readBounded path end to end:
 // a response above the resolved limit must fail instead of buffering forever.
 func TestCallOpenAPIToolCapsResponseBody(t *testing.T) {
-	t.Setenv("GF_DATAPROXY_RESPONSE_LIMIT", "16")
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -147,7 +152,8 @@ func TestCallOpenAPIToolCapsResponseBody(t *testing.T) {
 		httpClient: srv.Client(),
 	}
 
-	_, err := c.callOpenAPIToolWithContext(context.Background(), "thing", map[string]interface{}{}, "", "", "")
+	ctx := withResponseLimit(context.Background(), "16")
+	_, err := c.callOpenAPIToolWithContext(ctx, "thing", map[string]interface{}{}, "", "", "")
 	if err == nil || !strings.Contains(err.Error(), "exceeds") {
 		t.Fatalf("response over the configured limit must be rejected, got %v", err)
 	}
