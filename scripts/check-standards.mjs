@@ -45,6 +45,24 @@ const GO_RULES = [
         ? 'keep the HTTP status only; a provider body can carry credentials'
         : null,
   },
+  {
+    id: 'forbidden-os-environment',
+    test: (line) =>
+      /\bos\.(?:Getenv|LookupEnv|Environ)\b/.test(line)
+        ? 'the catalog code rules forbid environment access; read config.GrafanaConfigFromContext(ctx) instead'
+        : null,
+  },
+  {
+    id: 'forbidden-filesystem-access',
+    test: (line) =>
+      /\bos\.(?:ReadFile|WriteFile|Open|OpenFile|Create|Remove|Rename|Stat|ReadDir)\b/.test(line)
+        ? 'the catalog code rules forbid filesystem access from the plugin backend'
+        : null,
+  },
+  {
+    id: 'forbidden-syscall',
+    test: (line) => (/\bsyscall\./.test(line) ? 'the catalog code rules forbid syscall access' : null),
+  },
 ];
 
 /** @type {{ id: string; test: (line: string) => string | null }[]} */

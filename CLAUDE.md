@@ -110,6 +110,7 @@ mcpServers:
 - **Response bodies never reach an error or a log** — an upstream failure reports the HTTP status code only. A provider body can carry a token, a password or a full user record.
 - **Log a URL as `scheme://host/path`** — use `mcp.RedactURL`. Userinfo and query parameters can hold credentials.
 - **Prefix CSS keyframe names with `ask-o11y-`** — `@keyframes` names are global even inside a CSS module. Class names in a CSS module are safe; keyframe names are not.
+- **Never read the environment, the filesystem or a syscall from `pkg/`** — `os.Getenv`, `os.LookupEnv`, `os.Environ`, `os.ReadFile`, `os.Open`, `os.Stat` and `syscall.*` are rejected by the catalog code rules. Grafana settings arrive through `config.GrafanaConfigFromContext(ctx)`.
 - **No `&http.Client{}` direct construction** — always use `github.com/grafana/grafana-plugin-sdk-go/backend/httpclient.New()`. When wrapping for custom headers, copy `.Timeout` from the SDK client into the wrapper. Never create a bare `&http.Client{}` as a fallback — propagate the error instead.
 - Prefer `@grafana/ui` components over custom implementations
 - Catch blocks must handle errors meaningfully — never swallow silently

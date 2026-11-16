@@ -85,9 +85,10 @@ Severity policy: Critical = fix now. Major = fix before commit. Medium = fix bef
 - A log line and an error string name the HTTP status only. They never embed an upstream response body, a token, a header, a cookie, or a session payload.
 - A logged URL is reduced to `scheme://host/path` through `mcp.RedactURL`. Userinfo and query parameters can hold credentials.
 - A CSS `@keyframes` name carries the `ask-o11y-` prefix. Keyframe names are global even inside a CSS module.
+- The plugin backend never reads the environment, the filesystem, or a syscall. `os.Getenv`, `os.LookupEnv`, `os.Environ`, `os.ReadFile`, `os.Open`, `os.Stat` and `syscall.*` are forbidden in `pkg/`. Grafana settings arrive through `config.GrafanaConfigFromContext(ctx)`. The catalog code rules reject the process, and a rejection costs a full submission round trip.
 - Each rule above has a mechanical check: `npm run lint:standards` and `golangci-lint run ./pkg/...`. A rule without a check is not enforceable, and a review finding that returns means the check is missing.
 
-**Rationale**: The 0.3.27 catalog review found five defects of this class after the gates of the time passed. Every one of them was invisible to a compiler, a type checker and a test suite.
+**Rationale**: The 0.3.27 catalog review found five defects of this class after the gates of the time passed. Every one of them was invisible to a compiler, a type checker and a test suite. The 0.3.29 review then rejected an `os.Getenv` call that the same class of gate would have caught.
 
 ## Specification Policy
 
