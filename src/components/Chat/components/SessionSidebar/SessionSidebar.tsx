@@ -4,7 +4,7 @@ import { LoadingButton, InlineLoading } from '../../../LoadingOverlay';
 import { ShareDialog } from '../ShareDialog/ShareDialog';
 import { sessionShareService, CreateShareResponse } from '../../../../services/sessionShare';
 import { getSession, getSessionStats, SessionStats } from '../../../../services/backendSessionClient';
-import { Icon, useTheme2 } from '@grafana/ui';
+import { ConfirmModal, Icon, useTheme2 } from '@grafana/ui';
 
 interface SessionSidebarProps {
   sessionManager: UseSessionManagerReturn;
@@ -18,6 +18,7 @@ interface SessionSidebarProps {
 export function SessionSidebar({ sessionManager, currentSessionId, isOpen, onClose, docked = false }: SessionSidebarProps) {
   const theme = useTheme2();
   const [showDeleteConfirm, setShowDeleteConfirm] = useState<string | null>(null);
+  const [showClearAllConfirm, setShowClearAllConfirm] = useState(false);
   const [loadingAction, setLoadingAction] = useState<string | null>(null);
   const [creatingSession, setCreatingSession] = useState(false);
   const [shareDialogSessionId, setShareDialogSessionId] = useState<string | null>(null);
@@ -229,15 +230,7 @@ export function SessionSidebar({ sessionManager, currentSessionId, isOpen, onClo
         <div className="p-2 border-t border-weak">
           {sessionManager.sessions.length > 0 && (
             <button
-              onClick={async () => {
-                if (confirm('Are you sure you want to delete all conversations? This cannot be undone.')) {
-                  try {
-                    await sessionManager.deleteAllSessions();
-                  } catch {
-                    // Best-effort delete all
-                  }
-                }
-              }}
+              onClick={() => setShowClearAllConfirm(true)}
               className="w-full px-2 py-1 text-xs text-error hover:bg-error/10 rounded transition-colors"
             >
               Clear All History
@@ -245,6 +238,21 @@ export function SessionSidebar({ sessionManager, currentSessionId, isOpen, onClo
           )}
         </div>
 
+
+        {showClearAllConfirm && (
+          <ConfirmModal
+            isOpen
+            title="Clear all conversations"
+            body="Every conversation in this list is deleted. This cannot be undone."
+            confirmText="Clear all"
+            onConfirm={() => {
+              setShowClearAllConfirm(false);
+              // Best-effort: a failed delete must not block the UI.
+              sessionManager.deleteAllSessions().catch(() => undefined);
+            }}
+            onDismiss={() => setShowClearAllConfirm(false)}
+          />
+        )}
 
         {/* Share dialog */}
         {shareDialogSessionId && (
