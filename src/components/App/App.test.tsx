@@ -41,6 +41,12 @@ jest.mock('@grafana/runtime', () => ({
   getBackendSrv: jest.fn(() => ({
     fetch: jest.fn().mockResolvedValue({ data: {} }),
   })),
+  locationService: {
+    getSearch: () => '',
+    getLocation: () => ({ pathname: '/a/consensys-asko11y-app', search: '', hash: '', query: {}, routeParams: {} }),
+    replace: () => undefined,
+    push: () => undefined,
+  },
   config: {
     publicDashboardAccessToken: '',
     bootData: {

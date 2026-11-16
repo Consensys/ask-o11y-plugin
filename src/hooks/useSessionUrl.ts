@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { locationService } from '@grafana/runtime';
 import { getSession } from '../services/backendSessionClient';
 
 export interface UseSessionUrlReturn {
@@ -14,10 +15,25 @@ function isValidSessionId(sessionId: string): boolean {
   return SESSION_ID_PATTERN.test(sessionId);
 }
 
+/**
+ * Rewrites the sessionId query parameter without leaving the current route.
+ * The URL comes from locationService, because the catalog code rules reject
+ * direct window.location access.
+ */
+function replaceSessionParam(value: string | null): void {
+  const location = locationService.getLocation();
+  const params = new URLSearchParams(location.search ?? '');
+  if (value === null) {
+    params.delete('sessionId');
+  } else {
+    params.set('sessionId', value);
+  }
+  const query = params.toString();
+  locationService.replace(`${location.pathname}${query ? `?${query}` : ''}${location.hash ?? ''}`);
+}
+
 function removeSessionFromUrl(): void {
-  const url = new URL(window.location.href);
-  url.searchParams.delete('sessionId');
-  window.history.replaceState({}, '', url.toString());
+  replaceSessionParam(null);
 }
 
 export function useSessionUrl(): UseSessionUrlReturn {
@@ -31,7 +47,7 @@ export function useSessionUrl(): UseSessionUrlReturn {
     }
     hasValidatedRef.current = true;
 
-    const urlSessionId = new URLSearchParams(window.location.search).get('sessionId');
+    const urlSessionId = new URLSearchParams(locationService.getSearch()).get('sessionId');
 
     if (!urlSessionId) {
       setIsValidated(true);
@@ -59,9 +75,7 @@ export function useSessionUrl(): UseSessionUrlReturn {
     if (!isValidSessionId(sessionId)) {
       return;
     }
-    const url = new URL(window.location.href);
-    url.searchParams.set('sessionId', sessionId);
-    window.history.replaceState({}, '', url.toString());
+    replaceSessionParam(sessionId);
     setSessionIdFromUrl(sessionId);
   }, []);
 

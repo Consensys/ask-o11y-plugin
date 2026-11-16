@@ -19,6 +19,12 @@ jest.mock('@grafana/runtime', () => ({
         },
       }),
   }),
+  locationService: {
+    getSearch: () => '',
+    getLocation: () => ({ pathname: '/a/consensys-asko11y-app', search: '', hash: '', query: {}, routeParams: {} }),
+    replace: () => undefined,
+    push: () => undefined,
+  },
   config: {
     bootData: {
       user: {
