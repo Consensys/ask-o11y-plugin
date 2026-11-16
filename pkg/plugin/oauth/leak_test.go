@@ -23,10 +23,12 @@ func TestPostTokenErrorHasStatusOnly(t *testing.T) {
 	}))
 	defer srv.Close()
 
+	// The secret reuses leakMarker so the file holds no credential-shaped
+	// literal: gosec G101 flags those, and this value only has to be non-empty.
 	cfg := &mcp.OAuthConfig{
 		TokenURL:     srv.URL,
 		ClientID:     "client",
-		ClientSecret: "secret",
+		ClientSecret: leakMarker,
 	}
 	form := url.Values{"grant_type": {"refresh_token"}, "refresh_token": {"stale"}}
 
