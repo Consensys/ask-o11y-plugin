@@ -266,7 +266,7 @@ func TestAlertRuleSnapshotCache(t *testing.T) {
 
 func TestAlertRuleSnapshot_FailOpenWithoutProxy(t *testing.T) {
 	p := &Plugin{}
-	if got, missed := p.alertRuleSnapshot("whatever", "1", "org", ""); got != "" || missed {
+	if got, missed := p.alertRuleSnapshot(context.Background(), "whatever", "1", "org", ""); got != "" || missed {
 		t.Errorf("nil mcpProxy must fail open to empty snapshot without a miss, got %q missed=%v", got, missed)
 	}
 }
@@ -317,11 +317,11 @@ func TestParseDatasourceRef(t *testing.T) {
 func TestAlertRuleSnapshot_CachedMissReportsMissed(t *testing.T) {
 	p := &Plugin{}
 	p.storeAlertRuleCache("1\x00Gone", arMissSentinel, arMissTTL)
-	if got, missed := p.alertRuleSnapshot("Gone", "1", "org", ""); got != "" || !missed {
+	if got, missed := p.alertRuleSnapshot(context.Background(), "Gone", "1", "org", ""); got != "" || !missed {
 		t.Fatalf("cached miss sentinel must return empty snapshot + missed, got %q missed=%v", got, missed)
 	}
 	p.storeAlertRuleCache("1\x00Flaky", "", arMissTTL)
-	if got, missed := p.alertRuleSnapshot("Flaky", "1", "org", ""); got != "" || missed {
+	if got, missed := p.alertRuleSnapshot(context.Background(), "Flaky", "1", "org", ""); got != "" || missed {
 		t.Fatalf("cached failed lookup must not claim a miss, got %q missed=%v", got, missed)
 	}
 }
@@ -450,7 +450,7 @@ func TestFetchAlertRuleSnapshot_RoutesUnderscoreServerID(t *testing.T) {
 
 	p := &Plugin{logger: log.DefaultLogger, mcpProxy: proxy}
 
-	snapshot, searched := p.fetchAlertRuleSnapshot("HighErrorRate", "1", "Org", "")
+	snapshot, searched := p.fetchAlertRuleSnapshot(context.Background(), "HighErrorRate", "1", "Org", "")
 	if snapshot == "" {
 		t.Fatal("expected a snapshot from the underscore-ID server")
 	}

@@ -4,7 +4,7 @@
 
 **Status**: Retrospective
 
-**Last verified**: `18e315b`
+**Last verified**: `ecc29ce`
 
 **Owner**: Ask O11y maintainers
 
@@ -96,6 +96,9 @@ Routes mount from `pkg/plugin/plugin.go:608`. Paths are published in
 33. No device-code flow and no client-credentials flow exist. `GAP` — only two grant types are sent (`pkg/plugin/oauth/exchange.go:42`)
 34. Disconnect does not revoke the token at the provider. `GAP` — `pkg/plugin/oauth/handlers.go:194` deletes locally only
 35. The callback `postMessage` uses `targetOrigin: '*'`. `ASSUMED` — `pkg/plugin/oauth/handlers.go:269`
+36. A token exchange failure returns the HTTP status only; the provider response body never enters the error string. `VERIFIED` — `pkg/plugin/oauth/exchange.go:73`, test `TestPostTokenErrorHasStatusOnly`
+37. A dynamic client registration failure returns the HTTP status only; the provider response body never enters the error string. `VERIFIED` — `pkg/plugin/oauth/discovery.go:98`, test `TestRegisterClientErrorHasStatusOnly`
+38. Errors that name a discovery or probe URL carry the redacted form, `scheme://host/path`. `VERIFIED` — `pkg/plugin/oauth/discovery.go:126`, `pkg/plugin/oauth/discovery.go:167`, `pkg/plugin/oauth/discovery.go:175`
 
 ## Invariants
 

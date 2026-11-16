@@ -45,7 +45,7 @@ Every activation is reviewable and role-safe.
 
 | Key | Location | Default | Evidence |
 |---|---|---|---|
-| `skills.entries[].content` | plugin jsonData | empty | `pkg/plugin/plugin.go:102` |
+| `skills.entries[].content` | plugin jsonData | empty | `pkg/plugin/plugin.go:101` |
 | `skills.entries[].enabled` | plugin jsonData | `true` when absent | `pkg/skills/registry.go:95` |
 | `investigationPrompt` | plugin jsonData (legacy) | bundled default | `pkg/plugin/plugin.go:1767` |
 | `performancePrompt` | plugin jsonData (legacy) | bundled default | `pkg/plugin/plugin.go:1768` |
@@ -69,7 +69,7 @@ Tags: `VERIFIED` (code pointer or test), `ASSUMED` (untested), `GAP` (missing).
 7. `metadata.triggers` compiles as a case-insensitive regex; a bad regex fails parse. `VERIFIED` — `pkg/skills/skill.go:157`
 8. Body and `user-prompt` reject `call`, `template`, `define`, and `block`. `VERIFIED` — `pkg/skills/skill.go:166`
 9. Body renders as a Go template per activation; a render panic becomes an error. `VERIFIED` — `pkg/skills/skill.go:230`
-10. Without a `user-prompt`, the user message passes through verbatim. `VERIFIED` — `pkg/plugin/prompts.go:204`
+10. Without a `user-prompt`, the user message passes through verbatim. `VERIFIED` — `pkg/plugin/prompts.go:217`
 11. Bundled skills embed from `pkg/skills/bundled`, one directory each with `SKILL.md` and optional `references/*`. `VERIFIED` — `pkg/skills/registry.go:12`
 12. A directory name must equal the frontmatter name, else the skill is skipped and logged. `VERIFIED` — `pkg/skills/registry.go:367`
 13. An admin entry whose key differs from the frontmatter name is listed invalid. `VERIFIED` — `pkg/skills/registry.go:124`
@@ -115,7 +115,7 @@ Tags: `VERIFIED` (code pointer or test), `ASSUMED` (untested), `GAP` (missing).
 
 | Store | Key or table | TTL | Fallback | Evidence |
 |---|---|---|---|---|
-| Plugin jsonData | `skills.entries` | none | bundled SKILL.md | `pkg/plugin/plugin.go:102` |
+| Plugin jsonData | `skills.entries` | none | bundled SKILL.md | `pkg/plugin/plugin.go:101` |
 | Plugin binary | embedded `bundled/` FS | build-time | none | `pkg/skills/registry.go:13` |
 
 ## Observability

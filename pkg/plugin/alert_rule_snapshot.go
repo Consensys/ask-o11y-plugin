@@ -192,7 +192,7 @@ const arMissSentinel = "\x00rule-not-found"
 // when the prefetch found nothing usable (fail open). missed reports that the
 // lookup completed over the managed rules and found no matching rule, so the
 // prompt can tell the agent not to repeat the search.
-func (p *Plugin) alertRuleSnapshot(alertName, orgID, orgName, scopeOrgID string) (snapshot string, missed bool) {
+func (p *Plugin) alertRuleSnapshot(ctx context.Context, alertName, orgID, orgName, scopeOrgID string) (snapshot string, missed bool) {
 	cacheKey := orgID + "\x00" + alertName
 	if snap, ok := p.lookupAlertRuleCache(cacheKey); ok {
 		if snap == arMissSentinel {
@@ -201,7 +201,7 @@ func (p *Plugin) alertRuleSnapshot(alertName, orgID, orgName, scopeOrgID string)
 		return snap, false
 	}
 
-	snapshot, searched := p.fetchAlertRuleSnapshot(alertName, orgID, orgName, scopeOrgID)
+	snapshot, searched := p.fetchAlertRuleSnapshot(ctx, alertName, orgID, orgName, scopeOrgID)
 	missed = snapshot == "" && searched
 
 	cached, ttl := snapshot, arCacheTTL
@@ -218,15 +218,15 @@ func (p *Plugin) alertRuleSnapshot(alertName, orgID, orgName, scopeOrgID string)
 // fetchAlertRuleSnapshot returns the rendered snapshot and whether the
 // Grafana-managed rule list was actually searched (tool present and call
 // succeeded), which distinguishes "no such rule" from "lookup failed".
-func (p *Plugin) fetchAlertRuleSnapshot(alertName, orgID, orgName, scopeOrgID string) (string, bool) {
+func (p *Plugin) fetchAlertRuleSnapshot(ctx context.Context, alertName, orgID, orgName, scopeOrgID string) (string, bool) {
 	if p.mcpProxy == nil {
 		return "", false
 	}
-	rulesTool, ok := p.findAlertingRulesTool()
+	rulesTool, ok := p.findAlertingRulesTool(ctx)
 	if !ok {
 		return "", false
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), arBudget)
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), arBudget)
 	defer cancel()
 
 	var matched []alertRuleData
@@ -302,7 +302,7 @@ func (p *Plugin) listManagedAlertRules(ctx context.Context, toolName, alertName,
 }
 
 func (p *Plugin) listDatasourceAlertRules(ctx context.Context, rulesTool, alertName, orgID, orgName, scopeOrgID string) []alertRuleData {
-	dsTool, ok := p.findDatasourceListTool()
+	dsTool, ok := p.findDatasourceListTool(ctx)
 	if !ok {
 		return nil
 	}
@@ -657,8 +657,8 @@ func sortStrings(s []string) {
 // the suffix.
 var alertingRulesToolNames = []string{"alerting_rules_read", "alerting_manage_rules"}
 
-func (p *Plugin) findAlertingRulesTool() (string, bool) {
-	tools, err := p.mcpProxy.ListTools()
+func (p *Plugin) findAlertingRulesTool(ctx context.Context) (string, bool) {
+	tools, err := p.mcpProxy.ListToolsWithContext(ctx)
 	if err != nil {
 		return "", false
 	}

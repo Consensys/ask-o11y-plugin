@@ -23,7 +23,7 @@ Snapshot prefetch gives the agent exact identifiers before its first query.
 | Capability | Admin | Editor | Viewer | Evidence |
 |---|---|---|---|---|
 | List evals (`GET /api/agent/evals`) | yes | yes | yes | `pkg/plugin/plugin.go:1784` (no role check) |
-| Run evals (`POST /api/agent/evals/run`) | yes | yes | no (403) | `pkg/plugin/plugin.go:1826` |
+| Run evals (`POST /api/agent/evals/run`) | yes | yes | no (403) | `pkg/plugin/plugin.go:1822` |
 | Receive snapshot prefetch on a run | yes | yes | yes | `pkg/plugin/plugin.go:957` |
 | Configure the scan interval | yes | no | no | `pkg/plugin/plugin.go:114` (jsonData, Admin AppConfig) |
 
@@ -44,7 +44,7 @@ None. Evals read stored run traces; runs stream on `/api/agent/runs/`. `VERIFIED
 
 | Key | Location | Default | Evidence |
 |---|---|---|---|
-| `agentEvalCaptureEnabled` | plugin jsonData | `false` | `pkg/plugin/plugin.go:132` |
+| `agentEvalCaptureEnabled` | plugin jsonData | `false` | `pkg/plugin/plugin.go:131` |
 | `graphitiScanInterval` | plugin jsonData | `off` | `pkg/plugin/scout.go:303` |
 | `graphitiEpisodeTTLDays` | plugin jsonData | 30 | `pkg/plugin/config.go:72` |
 
@@ -72,18 +72,18 @@ Tags: `VERIFIED` (code pointer or test), `ASSUMED` (untested), `GAP` (missing).
 10. GET returns only the caller's runs in the caller's org, newest first. `VERIFIED` — `pkg/plugin/runstore.go:247`
 11. The GET limit defaults to 20 and clamps to 100. `VERIFIED` — `pkg/plugin/plugin.go:2317`
 12. POST returns 404 when capture is disabled. `VERIFIED` — `pkg/plugin/plugin.go:1822`
-13. POST rejects a Viewer with 403 and accepts Admin or Editor. `VERIFIED` — `pkg/plugin/plugin.go:1826`
+13. POST rejects a Viewer with 403 and accepts Admin or Editor. `VERIFIED` — `pkg/plugin/plugin.go:1822`
 14. POST with `runId` scores one run after an ownership check. `VERIFIED` — `pkg/plugin/plugin.go:1839`
 15. POST without `runId` scores up to `limit` of the caller's recent runs. `VERIFIED` — `pkg/plugin/plugin.go:1845`
 16. POST returns `{status: "completed", results: [...]}`. `VERIFIED` — `pkg/plugin/plugin.go:1859`
 17. Scores are computed per request and never persisted; there is no eval store. `VERIFIED` — `pkg/plugin/agent_eval.go:36`
 18. Scout skips a scavenge until org ID, Grafana URL, and Graphiti tools are known. `VERIFIED` — `pkg/plugin/scout.go:152`
 19. Scan intervals are 5m, 15m, 30m, 1h, 3h, 12h, 24h; anything else disables discovery. `VERIFIED` — test `TestParseScanInterval`
-20. The discovery loop starts only for a valid interval; retention always starts. `VERIFIED` — `pkg/plugin/plugin.go:448`
+20. The discovery loop starts only for a valid interval; retention always starts. `VERIFIED` — `pkg/plugin/plugin.go:447`
 21. Each scavenge scopes its discovery message to the scan interval. `VERIFIED` — `pkg/plugin/scout.go:274`
 22. A scavenge ingests `scout_synthesis` only when the run ends with `done`. `VERIFIED` — `pkg/plugin/scout.go:213`
 23. Retention builds communities, then prunes episodes older than the TTL. `VERIFIED` — `pkg/plugin/scout.go:252`
-24. The datasource snapshot is synchronous with a 2-second budget and fails open to a warning string. `VERIFIED` — `pkg/plugin/datasource_snapshot.go:94`
+24. The datasource snapshot is synchronous with a 2-second budget and fails open to a warning string. `VERIFIED` — `pkg/plugin/datasource_snapshot.go:98`
 25. A datasource snapshot caches 5 minutes; the fail-open text caches 30 seconds. `VERIFIED` — test `TestDatasourceCache_FailOpenTTL`
 26. The datasource snapshot renders at most 40 entries and evicts the oldest org beyond 256. `VERIFIED` — test `TestDatasourceCache_EvictsOldestOverMax`
 27. The metric-namespace snapshot never blocks: a miss returns empty and refreshes in the background, deduplicated per org. `VERIFIED` — test `TestMetricNamespaceSnapshot_DedupesConcurrentRefreshes`
@@ -104,8 +104,8 @@ Tags: `VERIFIED` (code pointer or test), `ASSUMED` (untested), `GAP` (missing).
 | Condition | User-visible result | Evidence |
 |---|---|---|
 | Capture disabled | GET `enabled: false`; POST 404 | `pkg/plugin/plugin.go:1821` |
-| Viewer calls eval run | HTTP 403 `Access denied` | `pkg/plugin/plugin.go:1826` |
-| Run not owned | HTTP 403 `Access denied` | `pkg/plugin/plugin.go:1342` |
+| Viewer calls eval run | HTTP 403 `Access denied` | `pkg/plugin/plugin.go:1822` |
+| Run not owned | HTTP 403 `Access denied` | `pkg/plugin/plugin.go:1339` |
 | Run list fails | HTTP 500 `Failed to list agent evals` | `pkg/plugin/plugin.go:1801` |
 | `list_datasources` times out | Fail-open warning block in prompt | `pkg/plugin/datasource_snapshot.go:95` |
 | Scavenge fails | Run skipped; warning logged | `pkg/plugin/scout.go:214` |

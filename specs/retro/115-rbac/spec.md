@@ -69,7 +69,7 @@ Admin and Editor keep full access.
 11. `FilterToolsByRole` keeps only read-only tools for every other role. `VERIFIED` — `pkg/rbac/rbac.go:25`
 12. The filter is tested for Admin, Editor, Viewer, and an empty list. `VERIFIED` — test `TestFilterToolsByRole`
 13. `GET /api/mcp/tools` filters the list after it is fetched. `VERIFIED` — `pkg/plugin/plugin.go:747`
-14. Tool selection filtering runs after the RBAC filter, so selection cannot widen access. `VERIFIED` — `pkg/plugin/plugin.go:748`
+14. Tool selection filtering runs after the RBAC filter, so selection cannot widen access. `VERIFIED` — `pkg/plugin/plugin.go:747`
 15. The agent loop applies the same filter when it builds its tool list. `VERIFIED` — `pkg/agent/loop.go:161`
 16. A direct tool call is checked again before dispatch. `VERIFIED` — `pkg/plugin/plugin.go:802`
 17. The agent loop checks again inside `executeTool`. `VERIFIED` — `pkg/agent/loop.go:974`
@@ -118,7 +118,7 @@ Coverage: `VERIFIED` = code pointer or test; `ASSUMED` = code suggests, no test;
 | Span attribute | `mcp.tool_name`, `mcp.is_error` | `mcp_tool_call` span | `pkg/agent/loop.go:961` |
 | Metric | None. No denial counter exists. | — | `pkg/plugin/plugin.go:803` |
 | Log field | `tool`, `role` | Plugin logger on denial | `pkg/plugin/plugin.go:803` |
-| Log field | `role`, `totalTools`, `filteredTools` | Plugin logger on listing | `pkg/plugin/plugin.go:750` |
+| Log field | `role`, `totalTools`, `filteredTools` | Plugin logger on listing | `pkg/plugin/plugin.go:749` |
 
 ## Evidence Index
 

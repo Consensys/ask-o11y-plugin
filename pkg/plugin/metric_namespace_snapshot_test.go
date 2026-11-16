@@ -67,7 +67,7 @@ func TestMetricNamespaceSnapshot_CacheHitSkipsFetch(t *testing.T) {
 		msCache: map[string]dsCacheEntry{"1": {snapshot: "cached-snapshot", fetchedAt: time.Now(), ttl: msCacheTTL}},
 	}
 
-	got := p.metricNamespaceSnapshot("1", "Org1", "")
+	got := p.metricNamespaceSnapshot(context.Background(), "1", "Org1", "")
 	if got != "cached-snapshot" {
 		t.Fatalf("expected cached snapshot to be returned directly, got %q", got)
 	}
@@ -144,7 +144,7 @@ func TestMetricNamespaceSnapshot_MissReturnsEmptyThenBackgroundFillsCache(t *tes
 
 	// First call: cache miss. Must return "" immediately (never block on the
 	// slow underlying fetch) and only queue a background refresh.
-	got := p.metricNamespaceSnapshot("1", "Org1", "")
+	got := p.metricNamespaceSnapshot(context.Background(), "1", "Org1", "")
 	if got != "" {
 		t.Fatalf("expected empty snapshot on cache miss, got %q", got)
 	}
@@ -170,7 +170,7 @@ func TestMetricNamespaceSnapshot_MissReturnsEmptyThenBackgroundFillsCache(t *tes
 	}
 
 	// A second call once cached must not trigger another fetch.
-	got2 := p.metricNamespaceSnapshot("1", "Org1", "")
+	got2 := p.metricNamespaceSnapshot(context.Background(), "1", "Org1", "")
 	if got2 != snapshot {
 		t.Fatalf("expected second call to return the cached snapshot, got %q", got2)
 	}
@@ -199,7 +199,7 @@ func TestMetricNamespaceSnapshot_DedupesConcurrentRefreshes(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			p.metricNamespaceSnapshot("1", "Org1", "")
+			p.metricNamespaceSnapshot(context.Background(), "1", "Org1", "")
 		}()
 	}
 	wg.Wait()

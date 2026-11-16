@@ -56,14 +56,14 @@ Every record and tool call is scoped to the org that made the request.
 
 | Tool | Read-only | Evidence |
 |---|---|---|
-| Every tool of the built-in server `mcp-grafana` | inherited from the server | `pkg/plugin/plugin.go:87` |
+| Every tool of the built-in server `mcp-grafana` | inherited from the server | `pkg/plugin/plugin.go:86` |
 
 ## Behaviour Rules
 
 1. `JSONData` is unmarshalled into `PluginSettings`; a parse failure logs and uses empty settings. `VERIFIED` — `pkg/plugin/plugin.go:269`
 2. Secret values are read only from `DecryptedSecureJSONData`. `VERIFIED` — `pkg/plugin/plugin.go:276`
 3. `redisURL` is the only scalar key read from secure data. `VERIFIED` — `pkg/plugin/plugin.go:330`
-4. Per-server headers use the `mcpServerHeader.{serverID}.{headerName}` prefix and match an existing server ID. `VERIFIED` — `pkg/plugin/plugin.go:149`
+4. Per-server headers use the `mcpServerHeader.{serverID}.{headerName}` prefix and match an existing server ID. `VERIFIED` — `pkg/plugin/plugin.go:148`
 5. The parser is tested for matching, unknown, malformed, empty, multiple, and dotted keys. `VERIFIED` — test `TestApplySecureHeaders_DottedHeaderName`
 6. Header keys assume a server ID with no dot; the parser splits the key at the first dot. `VERIFIED` — `pkg/plugin/plugin.go:160`
 7. The service-account token comes from `GrafanaConfig.PluginAppClientSecret`, never from plugin settings. `VERIFIED` — `pkg/plugin/plugin.go:925`
@@ -75,7 +75,7 @@ Every record and tool call is scoped to the org that made the request.
 13. The LLM client never sets `X-Grafana-Org-Id`; the SA token is Org-1 scoped. `VERIFIED` — `pkg/agent/llm_client.go:324`
 14. `getOrgID` reads the server-populated plugin context and defaults to `1` when absent. `VERIFIED` — `pkg/plugin/plugin.go:2332`
 15. When `orgID` is not `1`, the LLM client logs a warning and still sends the token without an org header. `VERIFIED` — `pkg/agent/llm_client.go:326`
-16. MCP calls do send `X-Grafana-Org-Id` with the caller's org. `VERIFIED` — `pkg/mcp/client.go:111`
+16. MCP calls do send `X-Grafana-Org-Id` with the caller's org. `VERIFIED` — `pkg/mcp/client.go:114`
 17. The context-first rule is tested. `VERIFIED` — test `TestGetOrgIDPrefersPluginContext`
 18. `getUserID` hashes the login; no client header can set it. `VERIFIED` — `pkg/plugin/plugin.go:2025`
 19. `useBuiltInMCP` with no SA token removes the built-in server and logs a warning. `VERIFIED` — `pkg/plugin/plugin.go:621`
@@ -88,7 +88,7 @@ Every record and tool call is scoped to the org that made the request.
 26. When Redis is absent, the health message says session sharing will not work across replicas. `VERIFIED` — `pkg/plugin/plugin.go:570`
 27. Settings, sessions, and runs are all keyed by org, so org 2 gets separate records. `VERIFIED` — `pkg/plugin/sessionstore.go:94`
 28. In a non-Org-1 org, the plugin keeps using the Org-1 service-account token for the LLM. The configured LLM app for that org is therefore not selected. `GAP` — `pkg/agent/llm_client.go:326`
-29. The same mismatch applies to the built-in MCP: the Org-1 SA token is paired with the caller's `X-Grafana-Org-Id`. `GAP` — `pkg/mcp/client.go:111`
+29. The same mismatch applies to the built-in MCP: the Org-1 SA token is paired with the caller's `X-Grafana-Org-Id`. `GAP` — `pkg/mcp/client.go:114`
 
 Coverage: `VERIFIED` = code pointer or test; `ASSUMED` = code suggests, no test; `GAP` = missing or contradictory.
 
@@ -122,13 +122,13 @@ Coverage: `VERIFIED` = code pointer or test; `ASSUMED` = code suggests, no test;
 | Signal | Name | Where | Evidence |
 |---|---|---|---|
 | Span | None. Init and dispose emit no span. | — | `pkg/plugin/plugin.go:265` |
-| Metric | None. Init emits no metric. | — | `pkg/plugin/plugin.go:554` |
+| Metric | None. Init emits no metric. | — | `pkg/plugin/plugin.go:553` |
 | Log field | `orgID` | LLM client warning for a non-1 org | `pkg/agent/llm_client.go:326` |
 
 ## Evidence Index
 
 - `pkg/plugin/plugin.go:265` — `NewPlugin`
-- `pkg/mcp/client.go:111` — MCP org header
+- `pkg/mcp/client.go:114` — MCP org header
 - `provisioning/plugins/full.yaml_:18` — built-in MCP absent
 - `pkg/agent/llm_client_test.go` — `TestLLMClient_ChatCompletion` — no org header with SA auth
 

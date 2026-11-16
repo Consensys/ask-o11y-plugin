@@ -110,8 +110,7 @@ func (p *Plugin) handleAddPreset(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body addPresetBody
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		http.Error(w, "invalid body", http.StatusBadRequest)
+	if err := decodeJSONBody(w, r, &body, maxRequestBodyBytes); err != nil {
 		return
 	}
 	preset, ok := oauth.Presets()[body.Preset]
@@ -225,8 +224,7 @@ func (p *Plugin) handleAddGeneric(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body addGenericBody
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		http.Error(w, "invalid body", http.StatusBadRequest)
+	if err := decodeJSONBody(w, r, &body, maxRequestBodyBytes); err != nil {
 		return
 	}
 	if body.ServerID == "" || body.MCPURL == "" || body.Transport == "" {

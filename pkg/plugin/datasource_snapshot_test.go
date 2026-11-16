@@ -39,10 +39,10 @@ func TestRenderDatasourceSnapshot_ObjectWrapper(t *testing.T) {
 
 func TestRenderDatasourceSnapshot_FailOpenCases(t *testing.T) {
 	cases := map[string]string{
-		"empty":         ``,
-		"garbage":       `<html>`,
-		"no datasources":`{}`,
-		"missing uid":   `[{"name":"p","type":"prometheus"}]`,
+		"empty":          ``,
+		"garbage":        `<html>`,
+		"no datasources": `{}`,
+		"missing uid":    `[{"name":"p","type":"prometheus"}]`,
 	}
 	for name, raw := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -241,7 +241,7 @@ func TestDatasourceSnapshot_UsesPrefixedDatasourceTool(t *testing.T) {
 				dsCacheMu: sync.Mutex{},
 			}
 
-			snapshot := p.datasourceSnapshot("1", "Org1", "")
+			snapshot := p.datasourceSnapshot(context.Background(), "1", "Org1", "")
 			if !strings.Contains(snapshot, "uid=abc123") {
 				t.Fatalf("expected datasource UID in snapshot, got:\n%s", snapshot)
 			}

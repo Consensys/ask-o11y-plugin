@@ -82,7 +82,7 @@ Tags: `VERIFIED` (code pointer or test), `ASSUMED` (untested), `GAP` (missing).
 18. A limit above the hard maximum is clamped, not rejected. `VERIFIED` — `pkg/plugin/topology.go:182`
 18. Node truncation and edge truncation each append a warning. `VERIFIED` — `pkg/plugin/topology.go:197`
 19. Edges whose endpoints were truncated away are dropped. `VERIFIED` — `pkg/plugin/topology.go:207`
-20. An empty graph appends a "no facts matched" warning. `VERIFIED` — `pkg/plugin/plugin.go:1990`
+20. An empty graph appends a "no facts matched" warning. `VERIFIED` — `pkg/plugin/plugin.go:1985`
 21. Nil nodes or edges serialise as `[]`, never `null`. `VERIFIED` — `pkg/plugin/topology.go:224`
 22. The route has no cache; every request fans out to Graphiti. `GAP` — `pkg/plugin/plugin.go:1864` (no cache lookup)
 23. The prompt snapshot prefers Tempo service-graph metrics over Graphiti. `VERIFIED` — `pkg/plugin/topology_snapshot.go:264`

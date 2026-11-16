@@ -10,12 +10,15 @@ import (
 	"io"
 	"math/big"
 	"net/http"
+	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/grafana/grafana-plugin-sdk-go/backend/log"
+	"github.com/grafana/grafana-plugin-sdk-go/config"
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -265,7 +268,7 @@ func (c *Client) connectMCP(callerCtx context.Context) error {
 		return fmt.Errorf("failed to connect to MCP server: %w", err)
 	}
 
-	c.logger.Debug("Connected to MCP server", "type", c.config.Type, "url", c.config.URL)
+	c.logger.Debug("Connected to MCP server", "type", c.config.Type, "url", RedactURL(c.config.URL))
 	return nil
 }
 
@@ -463,7 +466,7 @@ func (c *Client) connectMCPWithOrgContext(callerCtx context.Context, orgID strin
 		return fmt.Errorf("failed to connect to MCP server with org context: %w", err)
 	}
 
-	c.logger.Debug("Connected to MCP server with org context", "type", c.config.Type, "url", c.config.URL, "orgID", orgID, "orgName", orgName, "scopeOrgId", scopeOrgId)
+	c.logger.Debug("Connected to MCP server with org context", "type", c.config.Type, "url", RedactURL(c.config.URL), "orgID", orgID, "orgName", orgName, "scopeOrgId", scopeOrgId)
 	return nil
 }
 
@@ -540,12 +543,12 @@ func (c *Client) fetchTools(ctx context.Context) ([]Tool, error) {
 	} else {
 		switch c.config.Type {
 		case "openapi":
-			tools, err = c.listOpenAPITools()
+			tools, err = c.listOpenAPITools(ctx)
 		case "sse", "streamable-http", "http+streamable":
 			tools, err = c.listMCPTools(ctx)
 		default:
 			// Fallback to standard MCP protocol
-			tools, err = c.listStandardTools()
+			tools, err = c.listStandardTools(ctx)
 		}
 	}
 	if err != nil {
@@ -695,12 +698,12 @@ func (c *Client) CallToolWithContext(ctx context.Context, toolName string, argum
 
 	switch c.config.Type {
 	case "openapi":
-		return c.callOpenAPIToolWithContext(originalName, arguments, orgID, orgName, scopeOrgId)
+		return c.callOpenAPIToolWithContext(ctx, originalName, arguments, orgID, orgName, scopeOrgId)
 	case "sse", "streamable-http", "http+streamable":
 		return c.callMCPToolWithContext(ctx, originalName, arguments, orgID, orgName, scopeOrgId)
 	default:
 		// Fallback to standard MCP protocol
-		return c.callStandardTool(originalName, arguments)
+		return c.callStandardTool(ctx, originalName, arguments)
 	}
 }
 
@@ -993,7 +996,7 @@ func audioContentBlock(content *mcpsdk.AudioContent) ContentBlock {
 }
 
 // listOpenAPITools lists tools from an OpenAPI specification
-func (c *Client) listOpenAPITools() ([]Tool, error) {
+func (c *Client) listOpenAPITools(ctx context.Context) ([]Tool, error) {
 	specURL := c.config.URL
 	if !strings.HasSuffix(specURL, "/openapi.json") {
 		if strings.HasSuffix(specURL, "/") {
@@ -1003,7 +1006,7 @@ func (c *Client) listOpenAPITools() ([]Tool, error) {
 		}
 	}
 
-	req, err := http.NewRequest("GET", specURL, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, specURL, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
@@ -1019,12 +1022,12 @@ func (c *Client) listOpenAPITools() ([]Tool, error) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		io.Copy(io.Discard, resp.Body)
+		drainBounded(resp.Body)
 		return nil, fmt.Errorf("failed to fetch OpenAPI spec: status %d", resp.StatusCode)
 	}
 
 	var spec map[string]interface{}
-	if err := json.NewDecoder(resp.Body).Decode(&spec); err != nil {
+	if err := json.NewDecoder(io.LimitReader(resp.Body, effectiveResponseLimit(ctx))).Decode(&spec); err != nil {
 		return nil, fmt.Errorf("failed to decode OpenAPI spec: %w", err)
 	}
 
@@ -1162,7 +1165,7 @@ func (c *Client) buildInputSchema(spec map[string]interface{}, operation map[str
 }
 
 // listStandardTools lists tools from a standard MCP server
-func (c *Client) listStandardTools() ([]Tool, error) {
+func (c *Client) listStandardTools(ctx context.Context) ([]Tool, error) {
 	url := c.config.URL
 	if !strings.HasSuffix(url, "/") {
 		url += "/"
@@ -1181,7 +1184,7 @@ func (c *Client) listStandardTools() ([]Tool, error) {
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
 
-	req, err := http.NewRequest("POST", url, bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
@@ -1198,7 +1201,7 @@ func (c *Client) listStandardTools() ([]Tool, error) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		io.Copy(io.Discard, resp.Body)
+		drainBounded(resp.Body)
 		return nil, fmt.Errorf("failed to list tools: status %d", resp.StatusCode)
 	}
 
@@ -1206,7 +1209,7 @@ func (c *Client) listStandardTools() ([]Tool, error) {
 		Tools []Tool `json:"tools"`
 	}
 
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+	if err := json.NewDecoder(io.LimitReader(resp.Body, effectiveResponseLimit(ctx))).Decode(&result); err != nil {
 		return nil, fmt.Errorf("failed to decode response: %w", err)
 	}
 
@@ -1362,7 +1365,7 @@ func getJSONType(value interface{}) string {
 
 // callOpenAPIToolWithContext calls a tool on an OpenAPI server with additional context (e.g., Org ID, Org Name, Scope Org ID)
 // Org headers are forwarded to all OpenAPI servers - each server can use whichever headers it needs.
-func (c *Client) callOpenAPIToolWithContext(toolName string, arguments map[string]interface{}, orgID string, orgName string, scopeOrgId string) (*CallToolResult, error) {
+func (c *Client) callOpenAPIToolWithContext(ctx context.Context, toolName string, arguments map[string]interface{}, orgID string, orgName string, scopeOrgId string) (*CallToolResult, error) {
 	// Track whether we're using org context
 	useOrgContext := orgID != "" || orgName != "" || scopeOrgId != ""
 
@@ -1405,7 +1408,7 @@ func (c *Client) callOpenAPIToolWithContext(toolName string, arguments map[strin
 		return nil, fmt.Errorf("failed to marshal arguments: %w", err)
 	}
 
-	req, err := http.NewRequest(opMetadata.Method, url, bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, opMetadata.Method, url, bytes.NewReader(body))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
@@ -1437,7 +1440,7 @@ func (c *Client) callOpenAPIToolWithContext(toolName string, arguments map[strin
 	}
 	defer resp.Body.Close()
 
-	respBody, err := io.ReadAll(resp.Body)
+	respBody, err := readBounded(resp.Body, effectiveResponseLimit(ctx))
 	if err != nil {
 		return nil, fmt.Errorf("failed to read response: %w", err)
 	}
@@ -1470,7 +1473,7 @@ func (c *Client) callOpenAPIToolWithContext(toolName string, arguments map[strin
 }
 
 // callStandardTool calls a tool on a standard MCP server
-func (c *Client) callStandardTool(toolName string, arguments map[string]interface{}) (*CallToolResult, error) {
+func (c *Client) callStandardTool(ctx context.Context, toolName string, arguments map[string]interface{}) (*CallToolResult, error) {
 	url := c.config.URL
 	if !strings.HasSuffix(url, "/") {
 		url += "/"
@@ -1499,7 +1502,7 @@ func (c *Client) callStandardTool(toolName string, arguments map[string]interfac
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
 
-	req, err := http.NewRequest("POST", url, bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
@@ -1516,7 +1519,7 @@ func (c *Client) callStandardTool(toolName string, arguments map[string]interfac
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		io.Copy(io.Discard, resp.Body)
+		drainBounded(resp.Body)
 		return &CallToolResult{
 			Content: []ContentBlock{
 				{
@@ -1529,11 +1532,60 @@ func (c *Client) callStandardTool(toolName string, arguments map[string]interfac
 	}
 
 	var result CallToolResult
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+	if err := json.NewDecoder(io.LimitReader(resp.Body, effectiveResponseLimit(ctx))).Decode(&result); err != nil {
 		return nil, fmt.Errorf("failed to decode response: %w", err)
 	}
 
 	return &result, nil
+}
+
+// maxMCPResponseBytes is the hard ceiling for any MCP HTTP response read.
+// Grafana's configured response limit wins when it is set and tighter; when it
+// is unset (0 means "no limit" in the SDK) this ceiling still applies.
+const maxMCPResponseBytes = 32 << 20
+
+// maxMCPErrorDrainBytes bounds the discard drain performed on non-200
+// responses so a hostile or broken server cannot stream forever.
+const maxMCPErrorDrainBytes = 64 << 10
+
+// effectiveResponseLimit resolves the byte limit for one response read. The
+// order matches the SDK middleware: Grafana's per-request config first, then
+// GF_DATAPROXY_RESPONSE_LIMIT, then the hard ceiling.
+func effectiveResponseLimit(ctx context.Context) int64 {
+	var limit int64
+	if cfg := config.GrafanaConfigFromContext(ctx); cfg != nil {
+		limit = cfg.ResponseLimit()
+	}
+	if limit <= 0 {
+		if raw := os.Getenv("GF_DATAPROXY_RESPONSE_LIMIT"); raw != "" {
+			if v, err := strconv.ParseInt(raw, 10, 64); err == nil && v > 0 {
+				limit = v
+			}
+		}
+	}
+	if limit <= 0 || limit > maxMCPResponseBytes {
+		return maxMCPResponseBytes
+	}
+	return limit
+}
+
+// readBounded reads a response body of at most limit bytes and fails when the
+// body is larger.
+func readBounded(r io.Reader, limit int64) ([]byte, error) {
+	data, err := io.ReadAll(io.LimitReader(r, limit+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) > limit {
+		return nil, fmt.Errorf("response body exceeds %d bytes", limit)
+	}
+	return data, nil
+}
+
+// drainBounded discards a bounded amount of a response body. Callers still
+// own the Close.
+func drainBounded(body io.Reader) {
+	io.Copy(io.Discard, io.LimitReader(body, maxMCPErrorDrainBytes))
 }
 
 const maxErrorLen = 512

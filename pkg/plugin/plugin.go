@@ -12,7 +12,6 @@ import (
 	"errors"
 	"fmt"
 	"hash/fnv"
-	"io"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -780,9 +779,8 @@ func (p *Plugin) handleMCPCallTool(w http.ResponseWriter, r *http.Request) {
 		ScopeOrgId string                 `json:"scopeOrgId"`
 	}
 
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := decodeJSONBody(w, r, &req, maxRequestBodyBytes); err != nil {
 		p.logger.Warn("Invalid MCP call-tool request body", "error", err)
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
 		return
 	}
 
@@ -895,9 +893,8 @@ func (p *Plugin) handleAgentRun(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req agent.RunRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := decodeJSONBody(w, r, &req, maxRequestBodyBytes); err != nil {
 		p.logger.Warn("Invalid agent run request body", "error", err)
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
 		return
 	}
 
@@ -955,7 +952,7 @@ func (p *Plugin) handleAgentRun(w http.ResponseWriter, r *http.Request) {
 	toolCtx.Message = req.Message
 	toolCtx.AlertName = strings.TrimSpace(req.AlertName)
 	toolCtx.IsAlertInvestigation = isAlertInvestigation(req.Type, req.Message)
-	toolCtx.DatasourceSnapshot = p.datasourceSnapshot(orgID, req.OrgName, req.ScopeOrgID)
+	toolCtx.DatasourceSnapshot = p.datasourceSnapshot(r.Context(), orgID, req.OrgName, req.ScopeOrgID)
 
 	activation, err := skills.Resolve(p.skillRegistry, req.Message, req.Skills, req.Type)
 	if err != nil {
@@ -976,7 +973,7 @@ func (p *Plugin) handleAgentRun(w http.ResponseWriter, r *http.Request) {
 			alertName = extractAlertNameForSnapshot(req.Message)
 		}
 		if alertName != "" {
-			toolCtx.AlertRuleSnapshot, toolCtx.AlertRuleLookupMissed = p.alertRuleSnapshot(alertName, orgID, req.OrgName, req.ScopeOrgID)
+			toolCtx.AlertRuleSnapshot, toolCtx.AlertRuleLookupMissed = p.alertRuleSnapshot(r.Context(), alertName, orgID, req.OrgName, req.ScopeOrgID)
 			if toolCtx.AlertRuleLookupMissed {
 				toolCtx.AlertRuleLookupName = alertName
 			}
@@ -987,14 +984,14 @@ func (p *Plugin) handleAgentRun(w http.ResponseWriter, r *http.Request) {
 		// (cached, backgrounded) scan of each Prometheus datasource's metric
 		// catalog, not worth the overhead for plain chat. Skipped when the
 		// alert-rule snapshot already provides exact metrics.
-		toolCtx.MetricNamespaceSnapshot = p.metricNamespaceSnapshot(orgID, req.OrgName, req.ScopeOrgID)
+		toolCtx.MetricNamespaceSnapshot = p.metricNamespaceSnapshot(r.Context(), orgID, req.OrgName, req.ScopeOrgID)
 	}
 	if toolCtx.IsAlertInvestigation {
 		// Prefetch the service topology (fail-open, cached per org): scoped
 		// to the alert's service when the rule names one. RCA accuracy work
 		// (arXiv 2601.22208) shows models derive propagation paths poorly
 		// without a dependency map, and raw trace exploration distracts.
-		toolCtx.ServiceTopology = p.topologySnapshot(toolCtx.AlertRuleSnapshot, orgID, req.OrgName, req.ScopeOrgID)
+		toolCtx.ServiceTopology = p.topologySnapshot(r.Context(), toolCtx.AlertRuleSnapshot, orgID, req.OrgName, req.ScopeOrgID)
 	}
 
 	systemPrompt, err := p.promptRegistry.BuildSystemPrompt(toolCtx)
@@ -1472,8 +1469,7 @@ func (p *Plugin) handleAgentApproval(w http.ResponseWriter, r *http.Request, run
 	}
 
 	var req approvalDecisionRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
+	if err := decodeJSONBody(w, r, &req, maxRequestBodyBytes); err != nil {
 		return
 	}
 	decision := normalizeApprovalDecision(req.Decision)
@@ -1844,8 +1840,7 @@ func (p *Plugin) handleAgentEvalRun(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req agentEvalRunRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil && err != io.EOF {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
+	if err := decodeOptionalJSONBody(w, r, &req, maxRequestBodyBytes); err != nil {
 		return
 	}
 
@@ -2399,9 +2394,11 @@ func (p *Plugin) handleCreateShare(w http.ResponseWriter, r *http.Request) {
 		ExpiresInHours *int            `json:"expiresInHours,omitempty"`
 	}
 
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	// The payload carries sessionData, the same transcript a session stores, so
+	// the cap matches the session cap. A 1 MiB cap would reject a session that
+	// saved successfully.
+	if err := decodeJSONBody(w, r, &req, maxSessionBodyBytes); err != nil {
 		p.logger.Warn("Invalid create-share request body", "error", err)
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
 		return
 	}
 
@@ -2592,9 +2589,8 @@ func (p *Plugin) handleSessionsRoot(w http.ResponseWriter, r *http.Request) {
 			Title    string           `json:"title"`
 			Messages []SessionMessage `json:"messages"`
 		}
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		if err := decodeJSONBody(w, r, &req, maxSessionBodyBytes); err != nil {
 			p.logger.Warn("Invalid create-session request body", "error", err)
-			http.Error(w, "Invalid request body", http.StatusBadRequest)
 			return
 		}
 		session, err := p.sessionStore.CreateSession(userID, orgID, req.Title, req.Messages)
@@ -2656,9 +2652,8 @@ func (p *Plugin) handleSessionCurrent(w http.ResponseWriter, r *http.Request) {
 		var req struct {
 			SessionID string `json:"sessionId"`
 		}
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		if err := decodeJSONBody(w, r, &req, maxRequestBodyBytes); err != nil {
 			p.logger.Warn("Invalid set-current-session request body", "error", err)
-			http.Error(w, "Invalid request body", http.StatusBadRequest)
 			return
 		}
 		if req.SessionID == "" {
@@ -2748,9 +2743,8 @@ func (p *Plugin) handleSessionRouter(w http.ResponseWriter, r *http.Request) {
 
 	case http.MethodPut:
 		var update SessionUpdate
-		if err := json.NewDecoder(r.Body).Decode(&update); err != nil {
+		if err := decodeJSONBody(w, r, &update, maxSessionBodyBytes); err != nil {
 			p.logger.Warn("Invalid update-session request body", "error", err)
-			http.Error(w, "Invalid request body", http.StatusBadRequest)
 			return
 		}
 		if update.Model != nil {

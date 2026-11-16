@@ -47,7 +47,7 @@ The agent path has no dedicated route. The direct MCP edge is `POST /api/mcp/cal
 | Tool | Read-only | Evidence |
 |---|---|---|
 | `{serverID}_{toolName}` for external servers | per tool annotation | `pkg/mcp/client.go:560` |
-| `mcp-grafana_*` for the built-in server | per tool annotation | `pkg/plugin/plugin.go:87` |
+| `mcp-grafana_*` for the built-in server | per tool annotation | `pkg/plugin/plugin.go:86` |
 | `search_tools` | yes (internal) | `pkg/agent/search_tools.go:28` |
 | `load_skill` | yes (internal) | `pkg/agent/loop.go:45` |
 ## Behaviour Rules
@@ -108,7 +108,7 @@ The agent path has no dedicated route. The direct MCP edge is `POST /api/mcp/cal
 |---|---|---|
 | Unknown tool name | `tool_call_result` with "Unknown tool", `isError` true | `pkg/agent/loop.go:972` |
 | Viewer calls a write tool | `tool_call_result` with "Access denied", kind `tool` | `pkg/agent/loop.go:975` |
-| Tool disabled in settings | `tool_call_result` with "disabled in MCP server settings" | `pkg/agent/loop.go:978` |
+| Tool disabled in settings | `tool_call_result` with "disabled in MCP server settings" | `pkg/agent/loop.go:1011` |
 | Invalid JSON arguments | `tool_call_result` with "Invalid tool arguments" | `pkg/agent/loop.go:983` |
 | MCP transport error | raw error to the UI; directive to the model, kind `transport` | `pkg/agent/loop.go:645` |
 | MCP protocol error | `tool_call_result` with the error text, kind `protocol` | `pkg/agent/loop.go:994` |
@@ -132,7 +132,7 @@ The agent path has no dedicated route. The direct MCP edge is `POST /api/mcp/cal
 - `pkg/agent/tools.go:7` — `ConvertMCPToolsToOpenAI`
 - `pkg/agent/toolindex.go:145` — `Search`
 - `pkg/agent/search_tools.go:347` — `executeSearchTools`
-- `pkg/agent/loop.go:923` — `batchParallelizable`
+- `pkg/agent/loop.go:956` — `batchParallelizable`
 - `pkg/agent/toolsearch_test.go` — `TestToolIndexRanksByCapability`, `TestToolIndexOnlyReturnsIndexedTools`, `TestToolRuntimeModeSelection`, `TestToolRuntimeActivationAndCaps`, `TestToolRuntimeTokenCapEvicts`, `TestToolRuntimeAlwaysInclude`, `TestAgentLoopToolSearchActivatesTools`
 - `pkg/agent/loop_test.go` — `TestAgentLoop_ParallelToolCallsRunConcurrently`, `TestAgentLoop_ParallelToolCallsPreserveOrder`, `TestAgentLoop_MaxParallelOneSerializes`, `TestAgentLoop_ApprovalGatedBatchStaysSequential`, `TestBatchParallelizable`
 ## Known Gaps

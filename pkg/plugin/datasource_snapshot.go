@@ -46,7 +46,7 @@ type dsCacheEntry struct {
 // cached per-org for dsCacheTTL. Failures always return dsSnapshotFailOpen
 // rather than an empty string — the fail-open text itself reinforces the
 // "call list_datasources" rule in the prompt.
-func (p *Plugin) datasourceSnapshot(orgID, orgName, scopeOrgID string) string {
+func (p *Plugin) datasourceSnapshot(ctx context.Context, orgID, orgName, scopeOrgID string) string {
 	cacheKey := orgID
 	if cacheKey == "" {
 		cacheKey = orgName
@@ -63,14 +63,18 @@ func (p *Plugin) datasourceSnapshot(orgID, orgName, scopeOrgID string) string {
 	// the 2 s budget without blocking the user. If it times out we still cache
 	// the fail-open answer for a shorter window (30 s) so we don't re-hammer
 	// a dead sidecar on every request.
+	// The call is detached from the request deadline (the 2 s budget below
+	// owns it) but keeps the request values, so per-user OAuth tokens still
+	// reach the MCP server.
+	callCtx := context.WithoutCancel(ctx)
 	done := make(chan string, 1)
 	go func() {
-		toolName, ok := p.findDatasourceListTool()
+		toolName, ok := p.findDatasourceListTool(callCtx)
 		if !ok {
 			done <- dsSnapshotFailOpen
 			return
 		}
-		result, err := p.mcpProxy.CallToolWithContext(context.Background(), toolName, map[string]interface{}{}, orgID, orgName, scopeOrgID)
+		result, err := p.mcpProxy.CallToolWithContext(callCtx, toolName, map[string]interface{}{}, orgID, orgName, scopeOrgID)
 		if err != nil {
 			p.logger.Warn("datasourceSnapshot: list_datasources failed", "error", err, "orgID", orgID)
 			done <- dsSnapshotFailOpen
@@ -104,8 +108,8 @@ func (p *Plugin) datasourceSnapshot(orgID, orgName, scopeOrgID string) string {
 // base name (the part after the server-id prefix) is "list_datasources".
 // This makes the snapshot work regardless of what id the Grafana MCP server
 // was provisioned with (e.g. "mcp-grafana", "grafana-ds", etc.).
-func (p *Plugin) findDatasourceListTool() (string, bool) {
-	tools, err := p.mcpProxy.ListTools()
+func (p *Plugin) findDatasourceListTool(ctx context.Context) (string, bool) {
+	tools, err := p.mcpProxy.ListToolsWithContext(ctx)
 	if err != nil {
 		return "", false
 	}
