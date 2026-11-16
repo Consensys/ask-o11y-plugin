@@ -78,6 +78,17 @@ Severity policy: Critical = fix now. Major = fix before commit. Medium = fix bef
 
 **Rationale**: Without tags, a retro-spec becomes a wish list. The tag makes every claim falsifiable.
 
+### VIII. Safe Outbound I/O and Log Hygiene
+
+- Every outbound HTTP request carries the caller's context: `http.NewRequestWithContext`. `http.NewRequest`, `http.Get` and `http.Post` are forbidden in production code. Grafana resolves its response limit and cancellation from that context, so a lost context loses both.
+- Every byte read is bounded. A request body goes through `http.MaxBytesReader`. A response body goes through `io.LimitReader` or a helper that applies one. An unbounded `io.ReadAll` or `io.Copy(io.Discard, resp.Body)` is a defect, not a style choice.
+- A log line and an error string name the HTTP status only. They never embed an upstream response body, a token, a header, a cookie, or a session payload.
+- A logged URL is reduced to `scheme://host/path` through `mcp.RedactURL`. Userinfo and query parameters can hold credentials.
+- A CSS `@keyframes` name carries the `ask-o11y-` prefix. Keyframe names are global even inside a CSS module.
+- Each rule above has a mechanical check: `npm run lint:standards` and `golangci-lint run ./pkg/...`. A rule without a check is not enforceable, and a review finding that returns means the check is missing.
+
+**Rationale**: The 0.3.27 catalog review found five defects of this class after the gates of the time passed. Every one of them was invisible to a compiler, a type checker and a test suite.
+
 ## Specification Policy
 
 ### Directory layout
@@ -119,12 +130,15 @@ An agent loads one retro-spec per task. Never load `specs/retro/README.md` plus 
 | Types | `nvm use 22 && npm run typecheck` |
 | Build | `nvm use 22 && npm run build && npm run build:backend` |
 | OpenAPI | `nvm use 22 && npm run validate:openapi` |
+| House standards | `nvm use 22 && npm run lint:standards` |
+| Go linters | `golangci-lint run ./pkg/...` |
 
 ### Per pull request
 
 | Gate | Command or condition |
 |---|---|
 | Plugin validator | `nvm use 22 && npm run validate` |
+| Standards review | `nvm use 22 && npm run review:diff`, answers in the PR body |
 | E2E | `nvm use 22 && npm run e2e` |
 | RBAC review | Explicit, in the PR body |
 | Spec drift | `node scripts/verify-retro-specs.mjs` |
@@ -146,4 +160,4 @@ Every other validator `warning` or `error` blocks the PR.
 - Amendment requires a dedicated PR with a stated reason and the retro-specs it invalidates.
 - Version follows semantic versioning: patch for a clarification, minor for a new principle, major for a removal or redefinition.
 
-**Version**: 1.0.0 | **Ratified**: 2026-11-04 | **Last Amended**: 2026-11-04
+**Version**: 1.1.0 | **Ratified**: 2026-11-04 | **Last Amended**: 2026-11-16

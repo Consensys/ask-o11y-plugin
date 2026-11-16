@@ -35,6 +35,10 @@ nvm use 22 && npm run test:ci         # Frontend unit tests
 nvm use 22 && npm run lint            # Linting
 nvm use 22 && npm run typecheck       # Type checking
 nvm use 22 && npm run validate:openapi # OpenAPI spec validation
+nvm use 22 && npm run lint:standards  # House standards gate (no bound/context/log/CSS regressions)
+golangci-lint run ./pkg/...           # Go linter gate (same config as CI)
+nvm use 22 && npm run review:diff     # Print the Grafana standards-review prompt for this branch
+nvm use 22 && npm run review:sync     # Diff our copy of the upstream review questions
 nvm use 22 && npm run validate        # Full Grafana plugin validator (build + archive + run)
 nvm use 22 && npm run validate:clean  # Remove validator zip artifacts
 nvm use 22 && npm run e2e             # Playwright E2E tests
@@ -48,14 +52,15 @@ docker compose restart grafana        # Reload after backend rebuild
 2. **OpenAPI spec** — update `pkg/plugin/openapi/openapi.json` and run `validate:openapi` if routes changed
 3. **Code review** — fix critical/major/medium issues
 4. **Clean AI noise** — remove comments that restate code; only keep non-obvious *why* comments
-5. **Tests & lint** — `npm run test:ci`, `go test ./pkg/...`, `npm run lint`, `npm run typecheck`
-6. **Plugin validator** — run `npm run validate` before PR. It builds, archives, and runs `@grafana/plugin-validator`. Expected benign findings: `unsigned plugin` (MANIFEST.txt is produced at CI sign step), the optional sponsor-link recommendation, and the `react-19-dep-jsxRuntimeImport` finding for `@floating-ui/react` (a transitive dependency of `@grafana/ui`/`@grafana/scenes`; Grafana's own migration guide documents this pattern as a common false positive once the jsx-runtime fix is applied — see the global `react/jsx-runtime$`/`react/jsx-dev-runtime$` aliases in `webpack.config.ts`, which are verified by `scripts/validate-react19.js` to keep the literal string out of the compiled `dist/*.js` output). Any other `warning`/`error` must be fixed. Clean up with `npm run validate:clean`.
+5. **Tests & lint** — `npm run test:ci`, `go test ./pkg/...`, `npm run lint`, `npm run typecheck`, `npm run lint:standards`, `golangci-lint run ./pkg/...`
+6. **Standards review** — run `npm run review:diff` and answer every question it prints against your diff, with a file:line citation. The Grafana catalog runs the same question list (`llmreview`); it skips silently when no LLM key is set, so CI never catches what it would have. A "yes" on a blocking question is fixed before the PR opens. Put the answer table in the PR body.
+7. **Plugin validator** — run `npm run validate` before PR. It builds, archives, and runs `@grafana/plugin-validator`. Expected benign findings: `unsigned plugin` (MANIFEST.txt is produced at CI sign step), the optional sponsor-link recommendation, and the `react-19-dep-jsxRuntimeImport` finding for `@floating-ui/react` (a transitive dependency of `@grafana/ui`/`@grafana/scenes`; Grafana's own migration guide documents this pattern as a common false positive once the jsx-runtime fix is applied — see the global `react/jsx-runtime$`/`react/jsx-dev-runtime$` aliases in `webpack.config.ts`, which are verified by `scripts/validate-react19.js` to keep the literal string out of the compiled `dist/*.js` output). Any other `warning`/`error` must be fixed. Clean up with `npm run validate:clean`.
 
 **Severity policy:** Critical = fix now. Major = fix before commit. Medium = fix before PR. Low = optional.
 
 ## Definition of Done
 
-Feature is not done until: tests written, all tests pass, RBAC reviewed, no hardcoded colors.
+Feature is not done until: tests written, all tests pass, RBAC reviewed, no hardcoded colors, standards review answered.
 
 ## Architecture
 
@@ -100,10 +105,25 @@ mcpServers:
 - **No hardcoded colors** — use semantic Tailwind: `bg-background`, `text-primary`, `border-weak`, etc.
 - **No `any`** — use `unknown`
 - **No raw errors in HTTP responses** — log server-side, return generic message to client
+- **Always pass the caller's context** — an outbound HTTP request uses `http.NewRequestWithContext`. `http.NewRequest`, `http.Get` and `http.Post` are banned; `noctx` enforces this. Grafana resolves its response limit and cancellation from the request context, so a lost context loses both.
+- **Bound every byte you read** — request bodies go through `http.MaxBytesReader`, response bodies through `io.LimitReader`. Never `io.ReadAll(resp.Body)` unbounded, never an unbounded `io.Copy(io.Discard, resp.Body)` drain.
+- **Response bodies never reach an error or a log** — an upstream failure reports the HTTP status code only. A provider body can carry a token, a password or a full user record.
+- **Log a URL as `scheme://host/path`** — use `mcp.RedactURL`. Userinfo and query parameters can hold credentials.
+- **Prefix CSS keyframe names with `ask-o11y-`** — `@keyframes` names are global even inside a CSS module. Class names in a CSS module are safe; keyframe names are not.
 - **No `&http.Client{}` direct construction** — always use `github.com/grafana/grafana-plugin-sdk-go/backend/httpclient.New()`. When wrapping for custom headers, copy `.Timeout` from the SDK client into the wrapper. Never create a bare `&http.Client{}` as a fallback — propagate the error instead.
 - Prefer `@grafana/ui` components over custom implementations
 - Catch blocks must handle errors meaningfully — never swallow silently
 - **Fail fast on errors** — never implement fallback/default behavior unless explicitly asked. If a dependency is missing or a call fails, surface the error immediately rather than silently degrading.
+
+## Standards Gates
+
+Three gates exist because one class of defect reached the Grafana catalog review at 0.3.27 and the CI of the time caught none of it:
+
+- `npm run lint:standards` — `scripts/check-standards.mjs`. Fails on a bare `http.NewRequest`, an unbounded body read, a raw URL or a response body in a log line or error string, and an unprefixed `@keyframes` name. The rules are narrow on purpose: each one maps to a finding that already escaped once. Escape hatch: `standards:ignore <reason>` on the same line, so every exemption shows in review.
+- `golangci-lint run ./pkg/...` — config in `.golangci.yml` (govet, ineffassign, unused, noctx, nolintlint). `staticcheck` is absent on purpose: its SA1019 deprecation reports fire on the multi-org SDK APIs that the Multi-Org Constraints section requires.
+- `npm run review:diff` — the standards review, Quality Gates step 6. The question list is `.github/llm-review-questions.json`, a copy of the upstream `llmreview` list plus our own rules. `npm run review:sync` reports upstream drift.
+
+When Grafana reports a finding, add a rule or a documented exception in the same PR. A finding that returns twice means a gate is missing, not that the reviewer was strict.
 
 ## OpenAPI Spec
 

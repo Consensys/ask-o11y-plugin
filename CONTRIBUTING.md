@@ -285,16 +285,31 @@ Rules:
 
 **Style Guide:**
 - Follow standard Go formatting (`gofmt`)
-- Use `golangci-lint` locally (`golangci-lint run`); CI does not run it
+- `golangci-lint run ./pkg/...` uses the committed `.golangci.yml`; CI runs the same config
 - **Naming**: camelCase for private, PascalCase for public
 - **Error Handling**: Always check errors, return early
-- **Context**: Pass `context.Context` as first parameter
+- **Context**: Pass `context.Context` as first parameter, and put it into every outbound request with `http.NewRequestWithContext`
+- **Bounded I/O**: cap request bodies with `http.MaxBytesReader` and response reads with `io.LimitReader`
+- **Log hygiene**: a log line or an error names the HTTP status only. Never a response body, a token, or a header. A URL is logged through `mcp.RedactURL`
 
 **Grafana Plugin Patterns:**
 - Use Grafana Plugin SDK types and interfaces
 - Follow standard plugin architecture
 - Handle plugin context properly
 - Log errors with appropriate severity
+
+### House Standards Gates
+
+Two commands enforce the rules the Grafana catalog review checks by hand:
+
+| Command | Fails on |
+|---|---|
+| `npm run lint:standards` | bare `http.NewRequest`, unbounded body read, raw URL or response body in a log or error, unprefixed `@keyframes` |
+| `golangci-lint run ./pkg/...` | govet, ineffassign, unused, noctx, nolintlint findings |
+
+A rule exists only when it maps to a finding that escaped once. Add one in the same PR that fixes a catalog review finding. Use `standards:ignore <reason>` on the line when an exception is correct.
+
+Before a PR opens, run `npm run review:diff` and answer every question it prints against your diff, with a `file:line` citation. The Grafana catalog asks the same list; our copy lives in `.github/llm-review-questions.json`. `npm run review:sync` reports when upstream changes the list.
 
 ### File Organization
 
@@ -470,9 +485,12 @@ func TestCanAccessTool(t *testing.T) {
 3. **Test Locally**
    ```bash
    npm run lint
+   npm run lint:standards
    npm run typecheck
    npm test
    go test ./pkg/...
+   golangci-lint run ./pkg/...
+   npm run review:diff   # answer every question, with a file:line citation
    ```
 
 4. **Commit Your Changes**
@@ -537,6 +555,7 @@ Relates to #456
 
 ## Checklist
 - [ ] Code follows style guidelines
+- [ ] Standards review answered (`npm run review:diff`)
 - [ ] Self-review completed
 - [ ] Comments added for complex logic
 - [ ] Documentation updated
