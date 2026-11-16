@@ -1,7 +1,7 @@
 import React, { ChangeEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { lastValueFrom } from 'rxjs';
 import { AppPluginMeta, PluginConfigPageProps, PluginMeta } from '@grafana/data';
-import { config, getBackendSrv } from '@grafana/runtime';
+import { config, getBackendSrv, locationService } from '@grafana/runtime';
 import {
   Alert,
   Badge,
@@ -264,9 +264,12 @@ function getInitialSettingsTab(): SettingsTab {
 }
 
 function rememberSettingsTab(tab: SettingsTab) {
-  const nextUrl = `${window.location.pathname}${window.location.search}#${tab}`;
-  if (window.location.hash !== `#${tab}`) {
-    window.history.replaceState(window.history.state, '', nextUrl);
+  // locationService is the sanctioned way to touch the URL; the catalog code
+  // rules reject direct window.location access.
+  const location = locationService.getLocation();
+  if (location.hash !== `#${tab}`) {
+    const search = location.search ?? '';
+    locationService.replace(`${location.pathname}${search}#${tab}`);
   }
 
   try {

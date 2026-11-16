@@ -7,7 +7,7 @@ jest.mock('@grafana/runtime', () => ({
   getBackendSrv: () => ({ fetch: fetchMock }),
 }));
 
-import { disconnectOAuth, getOAuthStatus, onOAuthCallback, startOAuthUrl } from '../oauthClient';
+import { OAUTH_RESULT_KEY, disconnectOAuth, getOAuthStatus, onOAuthCallback, openOAuthPopup, startOAuthUrl } from '../oauthClient';
 
 describe('oauthClient', () => {
   beforeEach(() => {
@@ -49,24 +49,60 @@ describe('oauthClient', () => {
     );
   });
 
+  describe('openOAuthPopup', () => {
+    it('opens the popup without an opener and without a referrer', () => {
+      const spy = jest.spyOn(window, 'open').mockImplementation(() => null);
+
+      openOAuthPopup('atlassian');
+
+      expect(spy).toHaveBeenCalledWith(
+        '/grafana/api/plugins/consensys-asko11y-app/resources/api/oauth/atlassian/start',
+        '_blank',
+        expect.stringMatching(/noopener/)
+      );
+      expect(spy.mock.calls[0][2]).toMatch(/noreferrer/);
+      spy.mockRestore();
+    });
+  });
+
   describe('onOAuthCallback', () => {
-    it('invokes the callback for same-origin oauth messages only', () => {
+    const valid = { source: 'asko11y-oauth', serverID: 'atlassian', success: true };
+
+    function dispatchResult(value: string | null): void {
+      window.dispatchEvent(new StorageEvent('storage', { key: OAUTH_RESULT_KEY, newValue: value }));
+    }
+
+    it('invokes the callback for a well-formed result and clears the key', () => {
       const cb = jest.fn();
       const unsubscribe = onOAuthCallback(cb);
 
-      const valid = { source: 'asko11y-oauth', serverID: 'atlassian', success: true };
-      window.dispatchEvent(new MessageEvent('message', { data: valid, origin: window.location.origin }));
+      dispatchResult(JSON.stringify(valid));
+
       expect(cb).toHaveBeenCalledWith(valid);
-
-      cb.mockClear();
-      // Wrong origin is ignored.
-      window.dispatchEvent(new MessageEvent('message', { data: valid, origin: 'https://evil.example' }));
-      // Wrong shape is ignored.
-      window.dispatchEvent(new MessageEvent('message', { data: { source: 'other' }, origin: window.location.origin }));
-      expect(cb).not.toHaveBeenCalled();
-
+      expect(window.localStorage.getItem(OAUTH_RESULT_KEY)).toBeNull();
       unsubscribe();
-      window.dispatchEvent(new MessageEvent('message', { data: valid, origin: window.location.origin }));
+    });
+
+    it('ignores other keys and malformed or wrong-shape values', () => {
+      const cb = jest.fn();
+      const unsubscribe = onOAuthCallback(cb);
+
+      window.dispatchEvent(new StorageEvent('storage', { key: 'other', newValue: JSON.stringify(valid) }));
+      dispatchResult('not json');
+      dispatchResult(JSON.stringify({ source: 'other' }));
+      dispatchResult(null);
+
+      expect(cb).not.toHaveBeenCalled();
+      unsubscribe();
+    });
+
+    it('stops delivering after unsubscribe', () => {
+      const cb = jest.fn();
+      const unsubscribe = onOAuthCallback(cb);
+      unsubscribe();
+
+      dispatchResult(JSON.stringify(valid));
+
       expect(cb).not.toHaveBeenCalled();
     });
   });

@@ -1,5 +1,5 @@
 {
-  "$comment": "Questions the Grafana plugin catalog LLM review asks about this plugin. `questions` is a verbatim copy of the upstream list — do not edit them here; run `npm run review:sync` after an upstream change. `projectQuestions` are ours, added after the 0.3.27 review. Answer every entry against the PR diff, with a file:line citation, before the PR opens.",
+  "$comment": "Questions the Grafana plugin catalog LLM review asks about this plugin. `questions` is a verbatim copy of the upstream list \u2014 do not edit them here; run `npm run review:sync` after an upstream change. `projectQuestions` are ours, added after the 0.3.27 review. Answer every entry against the PR diff, with a file:line citation, before the PR opens.",
   "source": "https://github.com/grafana/plugin-validator/blob/main/pkg/analysis/passes/llmreview/llmreview.go",
   "syncedAt": null,
   "questions": [
@@ -154,6 +154,12 @@
       "blocking": true,
       "expectedAnswer": "no",
       "question": "Does this code declare a CSS @keyframes name that is not prefixed with ask-o11y-? Keyframe names in a CSS module are global."
+    },
+    {
+      "id": "forbidden-os-access",
+      "blocking": true,
+      "expectedAnswer": "no",
+      "question": "Does this code read the environment, the filesystem or a syscall from the plugin backend (os.Getenv, os.LookupEnv, os.Environ, os.ReadFile, os.Open, os.Stat, syscall)? The catalog code rules reject it. Read Grafana settings through config.GrafanaConfigFromContext(ctx) instead."
     }
   ]
 }

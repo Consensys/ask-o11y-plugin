@@ -37,11 +37,18 @@ export function startOAuthUrl(serverId: string): string {
 }
 
 /**
- * Opens the OAuth flow in a popup. Returns the handle so the caller can
- * detect popup-blocker scenarios and fall back to a same-tab redirect.
+ * Opens the OAuth flow in a popup. `noopener,noreferrer` is required by the
+ * catalog code rules: it stops the provider page from touching this window
+ * through `window.opener`. The handle is therefore always null, and popup
+ * blocking cannot be detected — the result arrives through the storage event
+ * below instead of a postMessage.
  */
-export function openOAuthPopup(serverId: string): Window | null {
-  return window.open(startOAuthUrl(serverId), '_blank', 'width=600,height=750,menubar=no,toolbar=no');
+export function openOAuthPopup(serverId: string): void {
+  window.open(
+    startOAuthUrl(serverId),
+    '_blank',
+    'noopener,noreferrer,width=600,height=750,menubar=no,toolbar=no'
+  );
 }
 
 /** Tells the backend to forget the current user's stored token for a server. */
@@ -73,17 +80,35 @@ function isOAuthCallbackMessage(data: unknown): data is OAuthCallbackMessage {
 }
 
 /**
- * Subscribes to OAuth popup completion events. Only messages from this
- * window's own origin are accepted (the callback page is served by the
- * plugin backend on the Grafana origin). Returns an unsubscribe function.
+ * Key the callback page writes its result to. A storage event is the only
+ * channel left once `noopener` removes `window.opener`: it fires in every
+ * same-origin document except the one that wrote it, which is exactly the
+ * popup-to-opener direction.
+ */
+export const OAUTH_RESULT_KEY = 'asko11y-oauth-result';
+
+/**
+ * Subscribes to OAuth popup completion events. The callback page is served by
+ * the plugin backend on the Grafana origin, so the storage event carries the
+ * same trust boundary as a same-origin message. Returns an unsubscribe
+ * function.
  */
 export function onOAuthCallback(cb: (msg: OAuthCallbackMessage) => void): () => void {
-  const handler = (e: MessageEvent) => {
-    if (e.origin !== window.location.origin || !isOAuthCallbackMessage(e.data)) {
+  const handler = (e: StorageEvent) => {
+    if (e.key !== OAUTH_RESULT_KEY || !e.newValue) {
       return;
     }
-    cb(e.data);
+    try {
+      const payload: unknown = JSON.parse(e.newValue);
+      if (isOAuthCallbackMessage(payload)) {
+        cb(payload);
+      }
+    } catch {
+      // A malformed value is not ours to repair; drop it.
+    } finally {
+      window.localStorage.removeItem(OAUTH_RESULT_KEY);
+    }
   };
-  window.addEventListener('message', handler);
-  return () => window.removeEventListener('message', handler);
+  window.addEventListener('storage', handler);
+  return () => window.removeEventListener('storage', handler);
 }

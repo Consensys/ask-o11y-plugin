@@ -64,9 +64,9 @@ Sessions are scoped by the `X-Grafana-Org-Id` header. No role check exists in th
 20. Shares and stats load when the sidebar opens and when any `updatedAt` changes. `ASSUMED` — `src/components/Chat/components/SessionSidebar/SessionSidebar.tsx:36`
 21. The share button title is "View shares" when shares exist, else "Share". `ASSUMED` — `src/components/Chat/components/SessionSidebar/SessionSidebar.tsx:442`
 22. The sidebar is docked and open by default in the interactive chat. `VERIFIED` — test `should create a new chat session from sidebar`
-23. A click loads the session, and closes the overlay only when it is not docked. `ASSUMED` — `src/components/Chat/components/SessionSidebar/SessionSidebar.tsx:99`
+23. A click loads the session, and closes the overlay only when it is not docked. `ASSUMED` — `src/components/Chat/components/SessionSidebar/SessionSidebar.tsx:100`
 24. Test ids are `session-item`, `session-share-button`, `session-delete-button`, and `session-stats`. `VERIFIED` — test `should create a share link for a session`
-25. `sessionId` must match `/^[a-zA-Z0-9\-_]{1,128}$/`, or it is removed from the URL. `ASSUMED` — `src/hooks/useSessionUrl.ts:11`
+25. `sessionId` must match `/^[a-zA-Z0-9\-_]{1,128}$/`, or it is removed from the URL. `ASSUMED` — `src/hooks/useSessionUrl.ts:12`
 26. A valid `sessionId` is checked with `getSession` before use, and a failure removes it. `ASSUMED` — `src/hooks/useSessionUrl.ts:47`
 27. Writing the session id uses `replaceState`, so it adds no history entry. `ASSUMED` — `src/hooks/useSessionUrl.ts:58`
 28. Home shows a spinner until URL validation finishes. `ASSUMED` — `src/pages/Home.tsx:37`

@@ -13,7 +13,7 @@ import { GrafanaTheme2 } from '@grafana/data';
 import { getHoverButtonStyle } from '../../../../theme';
 import { testIds } from '../../../testIds';
 import { mcpServerStatusService, MCPOAuthStatus, MCPServerStatus } from '../../../../services/mcpServerStatus';
-import { disconnectOAuth, onOAuthCallback, openOAuthPopup, startOAuthUrl } from '../../../../services/oauthClient';
+import { disconnectOAuth, onOAuthCallback, openOAuthPopup } from '../../../../services/oauthClient';
 
 interface OAuthServerRow {
   serverId: string;
@@ -59,11 +59,9 @@ export function McpConnectionsButton(): React.ReactElement | null {
   const disconnectedCount = rows.filter((r) => !r.status.connected).length;
 
   const handleConnect = (serverId: string) => {
-    const popup = openOAuthPopup(serverId);
-    if (!popup) {
-      // Popup blocked: fall back to same-tab navigation.
-      window.location.href = startOAuthUrl(serverId);
-    }
+    // The popup is opened with noopener, so no handle comes back and a blocked
+    // popup cannot be detected. The result arrives through onOAuthCallback.
+    openOAuthPopup(serverId);
   };
 
   const handleDisconnect = async (serverId: string) => {

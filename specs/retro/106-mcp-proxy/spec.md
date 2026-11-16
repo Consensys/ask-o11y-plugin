@@ -85,7 +85,7 @@ The raw JSON-RPC `/mcp` route is removed because it bypassed RBAC. `pkg/plugin/p
 24. `TimeoutSeconds` overrides the call budget. Zero or negative uses 30s. `VERIFIED` — test `TestClient_ToolCallTimeout`
 25. A `streamable-http` client is clamped to the call budget. `VERIFIED` — test `TestClient_TransportHTTPClientTimeout`
 26. An `sse` client gets a zero client timeout, so the stream survives. `VERIFIED` — `pkg/mcp/client.go:339`
-27. An MCP `tools/list` exchange is bounded at 10s. `VERIFIED` — `pkg/mcp/client.go:643`
+27. An MCP `tools/list` exchange is bounded at 10s. `VERIFIED` — `pkg/mcp/client.go:641`
 28. Transport failures retry after 100ms, 300ms, and 700ms, with ±30% jitter. `VERIFIED` — test `TestJitteredDuration_BoundsAreRespected`
 29. Only `ErrKindTransport` is retried. Protocol and cancelled errors return at once. `VERIFIED` — test `TestRetry_ProtocolErrorNotRetried`
 30. An exhausted transport failure returns `*TransportError`. `VERIFIED` — test `TestRetry_PermanentTransportExhausts`
@@ -113,8 +113,8 @@ The raw JSON-RPC `/mcp` route is removed because it bypassed RBAC. `pkg/plugin/p
 51. A refused refresh (rate limit) or a failed re-list returns the original error envelope unchanged, with no hint and no retry. `VERIFIED` — test `TestCallToolRateLimitedProducesNoHint`
 52. A listing triggered by a stale flag or a pending notification never replaces the catalog with a failed or empty result: the reader receives the last known-good slice with no error. `VERIFIED` — test `TestListToolsWithContextKeepsCatalogWhenRefreshFails`
 53. Every hand-rolled MCP HTTP request is created with `http.NewRequestWithContext` and carries the caller's context. `VERIFIED` — `pkg/mcp/client.go:1009`, `pkg/mcp/client.go:1187`, `pkg/mcp/client.go:1411`, `pkg/mcp/client.go:1505`
-54. A successful response body is read through one bound, `effectiveResponseLimit(ctx)`, and an oversized body returns an error that names the limit. `VERIFIED` — `pkg/mcp/client.go:1574`
-55. The bound is Grafana's configured response limit, then `GF_DATAPROXY_RESPONSE_LIMIT`, then a hard 32 MiB ceiling; an unset or unparsable value uses the ceiling. `VERIFIED` — `pkg/mcp/client.go:1554`
+54. A successful response body is read through one bound, `effectiveResponseLimit(ctx)`, and an oversized body returns an error that names the limit. `VERIFIED` — `pkg/mcp/client.go:1564`
+55. The bound is Grafana's configured response limit from `config.GrafanaConfigFromContext(ctx)`, clamped to a hard 32 MiB ceiling; an unset or unparsable value uses the ceiling. The backend never reads the environment. `VERIFIED` — `pkg/mcp/client.go:1555`
 56. A non-200 response body is drained at most 64 KiB before the connection closes. `VERIFIED` — `pkg/mcp/client.go:1587`
 
 ## Invariants

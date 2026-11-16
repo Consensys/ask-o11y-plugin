@@ -237,7 +237,10 @@ func grafanaBaseURL(r *http.Request) string {
 }
 
 // writeCallbackHTML writes a tiny HTML page that notifies the opening window
-// of the flow's outcome and closes itself. The payload is embedded as JSON —
+// of the flow's outcome and closes itself. The popup is opened with
+// `noopener`, so `window.opener` is null and a postMessage cannot reach the
+// app; a storage write is used instead, because the storage event fires in the
+// opener at the same origin. The payload is embedded as JSON —
 // encoding/json escapes <, >, and & as <-style sequences, so untrusted
 // provider-supplied strings (error_description) cannot break out of the
 // script block; visible text is HTML-escaped separately.
@@ -265,9 +268,11 @@ func writeCallbackHTML(w http.ResponseWriter, serverID string, success bool, rea
 <p>%s</p>
 <script>
 try {
-  if (window.opener) {
-    window.opener.postMessage(%s, '*');
-  }
+  var payload = %s;
+  // The timestamp makes every result distinct, so an identical second result
+  // still changes the stored value and still fires the storage event.
+  payload.at = Date.now();
+  localStorage.setItem('asko11y-oauth-result', JSON.stringify(payload));
 } catch (e) {}
 setTimeout(function() { window.close(); }, 500);
 </script>

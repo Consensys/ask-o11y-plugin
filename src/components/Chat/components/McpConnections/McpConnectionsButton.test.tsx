@@ -62,8 +62,7 @@ describe('McpConnectionsButton', () => {
       systemHealth: {},
       oauth: { atlassian: { configured: true, connected: false } },
     });
-    openOAuthPopupMock.mockReturnValue({});
-
+    
     render(<McpConnectionsButton />);
     const button = await screen.findByTestId(testIds.chat.mcpConnectionsButton);
     expect(button).toHaveTextContent('Connections (1)');

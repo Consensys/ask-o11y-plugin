@@ -4,7 +4,7 @@
 
 **Status**: Retrospective
 
-**Last verified**: `ecc29ce`
+**Last verified**: `7e50ade`
 
 **Owner**: Ask O11y maintainers
 
@@ -95,10 +95,13 @@ Routes mount from `pkg/plugin/plugin.go:608`. Paths are published in
 32. One MCP session per server is shared across users; only the header is swapped. `GAP` — `pkg/mcp/types.go:113`
 33. No device-code flow and no client-credentials flow exist. `GAP` — only two grant types are sent (`pkg/plugin/oauth/exchange.go:42`)
 34. Disconnect does not revoke the token at the provider. `GAP` — `pkg/plugin/oauth/handlers.go:194` deletes locally only
-35. The callback `postMessage` uses `targetOrigin: '*'`. `ASSUMED` — `pkg/plugin/oauth/handlers.go:269`
+35. The popup opens with `noopener,noreferrer`, so `window.opener` is null and the callback cannot use `postMessage`. `VERIFIED` — `src/services/oauthClient.ts:50`, `pkg/plugin/oauth/handlers.go:274`
 36. A token exchange failure returns the HTTP status only; the provider response body never enters the error string. `VERIFIED` — `pkg/plugin/oauth/exchange.go:73`, test `TestPostTokenErrorHasStatusOnly`
 37. A dynamic client registration failure returns the HTTP status only; the provider response body never enters the error string. `VERIFIED` — `pkg/plugin/oauth/discovery.go:98`, test `TestRegisterClientErrorHasStatusOnly`
 38. Errors that name a discovery or probe URL carry the redacted form, `scheme://host/path`. `VERIFIED` — `pkg/plugin/oauth/discovery.go:126`, `pkg/plugin/oauth/discovery.go:167`, `pkg/plugin/oauth/discovery.go:175`
+39. The callback page stores the result in `localStorage` under `asko11y-oauth-result`, then closes the popup after 500 ms. `VERIFIED` — `pkg/plugin/oauth/handlers.go:275`, `pkg/plugin/oauth/handlers.go:277`
+40. Each result carries an `at` timestamp, so a second identical result still produces a distinct storage event. `VERIFIED` — `pkg/plugin/oauth/handlers.go:274`
+41. The UI listens for `storage` events on that key only, rejects a malformed or wrong-shape payload, and always removes the key after delivery. `VERIFIED` — `src/services/oauthClient.ts:98`, `src/services/oauthClient.ts:109`
 
 ## Invariants
 

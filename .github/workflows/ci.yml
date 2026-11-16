@@ -167,7 +167,7 @@ jobs:
             -v "$VALIDATOR_SRC:/source" \
             -w /source \
             -v "$PWD/$PLUGIN_ARCHIVE:/archive.zip" \
-            grafana/plugin-validator-cli:v0.51.3 \
+            grafana/plugin-validator-cli:v0.53.9 \
             -config /source/.github/plugin-validator.config.yaml \
             -sourceCodeUri file:///source \
             /archive.zip
