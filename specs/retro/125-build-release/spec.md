@@ -60,10 +60,10 @@ Ship a versioned archive, a container image, and a local stack.
 2. CI detects code changes with `dorny/paths-filter`, and the eleven paths include `.github/workflows/**` and `.github/actions/**`. `VERIFIED` — `.github/workflows/ci.yml:23`, `.github/workflows/ci.yml:36`
 3. E2E and compatibility checks use the same `.github` paths as the build filter, so a workflow-only edit runs them. `VERIFIED` — `.github/workflows/e2e.yml:34`, `.github/workflows/is-compatible.yml:26`
 4. The build job runs when code changed, or on push, or on dispatch. `VERIFIED` — `.github/workflows/ci.yml:43`
-5. A pull request with no code change runs `skip-build`, which reports the same job name. `VERIFIED` — `.github/workflows/ci.yml:162`, `.github/workflows/ci.yml:163`
+5. A pull request with no code change runs `skip-build`, which reports the same job name. `VERIFIED` — `.github/workflows/ci.yml:162`, `.github/workflows/ci.yml:179`
 6. A docs-only pull request therefore satisfies the build gate with a no-op job. `ASSUMED` — `.github/workflows/ci.yml:165`; no test or branch rule states this intent
 7. Required checks and branch protection rules are not stored in the repository. `GAP` — `CODEOWNERS:5` is the only review rule found
-8. The build job runs typecheck, lint, unit tests, frontend build, and React 19 validation in that order. `VERIFIED` — `.github/workflows/ci.yml:73`
+8. The build job runs typecheck, lint, unit tests, frontend build, and React 19 validation in that order. `VERIFIED` — `.github/workflows/ci.yml:77`
 9. The frontend build merges the `@grafana/create-plugin` base config and adds Tailwind CSS rules. `VERIFIED` — `webpack.config.ts:3`
 10. Production builds add a contenthash to chunk filenames. `VERIFIED` — `webpack.config.ts:160`
 11. The build aliases `react/jsx-runtime` and `react/jsx-dev-runtime` to a local shim. `VERIFIED` — `webpack.config.ts:149`

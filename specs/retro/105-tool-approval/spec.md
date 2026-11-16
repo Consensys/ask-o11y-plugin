@@ -19,7 +19,7 @@ A risky tool call pauses until a human approves it. The user can approve once, a
 | Approve or deny a pending call | yes | yes | no | `pkg/plugin/plugin.go:1454` |
 | Approve a tool for the whole session | yes | yes | no | `pkg/plugin/plugin.go:1476` |
 | Decide on another user's run | no | no | no | `pkg/plugin/plugin.go:1446` |
-| Trigger a gated call through the agent | yes | yes | read-only only | `pkg/agent/loop.go:1018` |
+| Trigger a gated call through the agent | yes | yes | read-only only | `pkg/agent/loop.go:1017` |
 | Read the decision in run state | yes | yes | yes | `pkg/plugin/runstore.go:298` |
 A Viewer cannot reach a gated write tool because RBAC removes it first. A Viewer cannot approve because the handler requires Admin or Editor. `VERIFIED` — `pkg/plugin/plugin.go:1454`
 ## Contract
@@ -50,8 +50,8 @@ The decision body is `{"decision":"approved\|rejected","comment":"...","approval
 | name contains `create`, `update`, `write`, `set`, `patch`, `put`, `post`, `deploy`, `restart`, `stop`, `start`, `silence`, `mute`, `unmute`, `pause`, `resume`, `import`, `add`, `apply`, `provision`, `grant`, `revoke` | write | yes, unless annotated read-only | `pkg/mcp/risk.go:107` |
 | `readOnlyHint: true` with no destructive or open-world signal | read | no | `pkg/mcp/risk.go:59` |
 ## Behaviour Rules
-1. Approval applies only when the policy is enabled and the risk requires it. `VERIFIED` — `pkg/agent/loop.go:1018`
-2. The policy is disabled by `""`, `off`, `none`, `never`, or `disabled`. `VERIFIED` — `pkg/agent/loop.go:1137`
+1. Approval applies only when the policy is enabled and the risk requires it. `VERIFIED` — `pkg/agent/loop.go:1017`
+2. The policy is disabled by `""`, `off`, `none`, `never`, or `disabled`. `VERIFIED` — `pkg/agent/loop.go:1136`
 3. The default policy is `approval-gated-writes`. `VERIFIED` — `pkg/plugin/plugin.go:181`
 4. Approval is required for destructive, open-world, or non-read-only write tools. `VERIFIED` — `pkg/mcp/risk.go:59`
 5. A per-tool override can force approval on or off. `VERIFIED` — test `TestClassifyToolRisk_OverrideCanForceApproval`
@@ -77,7 +77,7 @@ The decision body is `{"decision":"approved\|rejected","comment":"...","approval
 25. The wait ends after 30 minutes with decision `rejected` and comment "approval timed out". `VERIFIED` — test `TestApprovalRegistrarTimesOutPendingApproval`
 26. A denial returns a tool result "was not approved by the user" with kind `approval_denied`. `VERIFIED` — `pkg/agent/loop.go:1078`
 27. After a denial the loop continues and the model can choose another action. `VERIFIED` — `pkg/agent/loop.go:1082`
-28. With no registrar, the call fails with "requires approval before execution". `VERIFIED` — `pkg/agent/loop.go:1049`
+28. With no registrar, the call fails with "requires approval before execution". `VERIFIED` — `pkg/agent/loop.go:1048`
 29. A decision accepts `approved`, `approve`, `accepted`, or `accept` for approval, and the mirrored deny forms. `VERIFIED` — `pkg/plugin/plugin.go:2351`
 30. An unrecognised decision returns 400. `VERIFIED` — `pkg/plugin/plugin.go:1464`
 31. A repeated identical decision returns 200 and the stored decision. `VERIFIED` — test `TestHandleAgentApprovalIsIdempotentForDuplicateDecision`
@@ -126,7 +126,7 @@ The decision body is `{"decision":"approved\|rejected","comment":"...","approval
 | Span | `mcp_tool_call` only after approval passes | OTel tracer | `pkg/agent/loop.go:960` |
 ## Evidence Index
 - `pkg/plugin/approval_broker.go:52` — `InMemoryApprovalBroker.Register`
-- `pkg/agent/loop.go:1012` — `executeToolWithApproval`
+- `pkg/agent/loop.go:1011` — `executeToolWithApproval`
 - `pkg/plugin/plugin.go:1526` — `grantToolApproval`
 - `pkg/plugin/plugin_test.go` — `TestHandleAgentApprovalRequiresEditorOrAdmin`, `TestHandleAgentApprovalDeliversDecision`, `TestHandleAgentApprovalApproveAlwaysPersistsToolGrant`, `TestHandleAgentApprovalIsIdempotentForDuplicateDecision`, `TestHandleAgentApprovalRejectsConflictingDuplicateDecision`, `TestHandleAgentApprovalUnknownPendingStillConflicts`, `TestApprovalRegistrarTimesOutPendingApproval`
 - `pkg/plugin/approval_broker_redis_test.go` — `TestRedisApprovalBrokerCrossInstanceResolvesPendingApproval`, `TestRedisApprovalBrokerDuplicateDecisionIsIdempotent`, `TestRedisApprovalBrokerConflictingDuplicateDecisionConflicts`, `TestRedisApprovalBrokerUnknownApprovalIsNotPending`
