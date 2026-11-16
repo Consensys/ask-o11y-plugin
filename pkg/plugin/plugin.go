@@ -2394,7 +2394,10 @@ func (p *Plugin) handleCreateShare(w http.ResponseWriter, r *http.Request) {
 		ExpiresInHours *int            `json:"expiresInHours,omitempty"`
 	}
 
-	if err := decodeJSONBody(w, r, &req, maxRequestBodyBytes); err != nil {
+	// The payload carries sessionData, the same transcript a session stores, so
+	// the cap matches the session cap. A 1 MiB cap would reject a session that
+	// saved successfully.
+	if err := decodeJSONBody(w, r, &req, maxSessionBodyBytes); err != nil {
 		p.logger.Warn("Invalid create-share request body", "error", err)
 		return
 	}

@@ -91,7 +91,7 @@ Coverage: `VERIFIED` = code pointer or test; `ASSUMED` = code suggests, no test;
 25. A running run with no heartbeat for 90 seconds becomes `failed` with `agent run was interrupted before it completed`. `VERIFIED` — `pkg/plugin/runstore_redis.go:266`
 26. The interrupted transition happens once, claimed with `SETNX`. `VERIFIED` — test `TestRedisRunStore_ReconcileIsClaimedOnce`
 27. Nothing prevents two concurrent runs on one session; `ActiveRunID` keeps only the last ID. `GAP` — `pkg/plugin/plugin.go:1103`
-28. A session create or update body is capped at 8 MiB; a larger body answers 413 and no session is written. `VERIFIED` — `pkg/plugin/request.go:19`, `pkg/plugin/request.go:26`
+28. A session create, update or share body is capped at 8 MiB; a larger body answers 413 and nothing is written. `VERIFIED` — `pkg/plugin/request.go:19`, `pkg/plugin/request.go:26`, `pkg/plugin/plugin.go:2400`
 29. Every other control request body is capped at 1 MiB. `VERIFIED` — `pkg/plugin/request.go:16`
 
 ## Invariants
