@@ -1,0 +1,159 @@
+{
+  "$comment": "Questions the Grafana plugin catalog LLM review asks about this plugin. `questions` is a verbatim copy of the upstream list — do not edit them here; run `npm run review:sync` after an upstream change. `projectQuestions` are ours, added after the 0.3.27 review. Answer every entry against the PR diff, with a file:line citation, before the PR opens.",
+  "source": "https://github.com/grafana/plugin-validator/blob/main/pkg/analysis/passes/llmreview/llmreview.go",
+  "syncedAt": null,
+  "questions": [
+    {
+      "id": "filesystem-io",
+      "blocking": true,
+      "expectedAnswer": "no",
+      "question": "Only for go/golang code: Does this code directly read from or write to the file system? (Look for os.Open, os.Create, ioutil.ReadFile, ioutil.WriteFile, etc.)"
+    },
+    {
+      "id": "eval-in-browser",
+      "blocking": true,
+      "expectedAnswer": "no",
+      "question": "Does this code execute user input as code in a browser environment? (Look for eval(), new Function(), document.write() with unescaped content, innerHTML with script tags, etc.)"
+    },
+    {
+      "id": "exec-user-input",
+      "blocking": true,
+      "expectedAnswer": "no",
+      "question": "Only for go/golang code: Does this code execute user input as commands or code in the backend? (Look for exec.Command, syscall.Exec, template.Execute with user data, etc.)"
+    },
+    {
+      "id": "third-party-analytics",
+      "blocking": true,
+      "expectedAnswer": "no",
+      "question": "Does this code introduce third-party analytics or tracking features? (Grafana's reportInteraction from @grafana/runtime is allowed, but external services like Google Analytics, Mixpanel, etc. are not.)"
+    },
+    {
+      "id": "global-window",
+      "blocking": true,
+      "expectedAnswer": "no",
+      "question": "Does this code modify or create properties on the global window object? (Look for direct assignments like window.customVariable = x, window.functionName = function(){}. Exclude standard browser API usage.)"
+    },
+    {
+      "id": "global-css",
+      "blocking": true,
+      "expectedAnswer": "no",
+      "question": "Does this code introduce global CSS not scoped to components? (Emotion CSS and CSS modules are allowed. Look for direct style tags, global class definitions, or document.styleSheets modification.)"
+    },
+    {
+      "id": "external-scripts",
+      "blocking": true,
+      "expectedAnswer": "no",
+      "question": "Does this code dynamically inject external third-party scripts? (Look for createElement('script') with external src, document.write with script tags, or dynamic import() from external sources.)"
+    },
+    {
+      "id": "resources-closed",
+      "blocking": true,
+      "expectedAnswer": "no",
+      "question": "Only for go/golang code: Are there any opened resources (files, connections) NOT properly closed with defer? If there is no backend code, answer No."
+    },
+    {
+      "id": "global-dom-selectors",
+      "blocking": true,
+      "expectedAnswer": "no",
+      "question": "Does this code use global DOM selectors outside of component lifecycle methods? (Look for document.querySelector(), document.getElementById(), etc. not scoped to components. useRef() and this.elementRef are acceptable.)"
+    },
+    {
+      "id": "httpclient-sdk",
+      "blocking": true,
+      "expectedAnswer": "no",
+      "question": "Only for go/golang code: Does this code create HTTP clients without using github.com/grafana/grafana-plugin-sdk-go/backend/httpclient? (Look for direct http.Client{}, http.NewRequest, or third-party client creation that doesn't use or accept the SDK httpclient.)"
+    },
+    {
+      "id": "sensitive-in-logs",
+      "blocking": true,
+      "expectedAnswer": "no",
+      "question": "Does this code log sensitive information (credentials, tokens, passwords, API keys, request/response bodies) at INFO level or higher? (These should use DEBUG level only.)"
+    },
+    {
+      "id": "log-formatting",
+      "blocking": true,
+      "expectedAnswer": "no",
+      "question": "Only for go/golang code: Does this code use incorrect log formatting? (Look for `log.Info(\"message\", err)` instead of `log.Info(\"message\", \"error\", err)` with key-value pairs.)"
+    },
+    {
+      "id": "unsanitized-html",
+      "blocking": true,
+      "expectedAnswer": "no",
+      "question": "Does this code render user-supplied or dynamic content as HTML without sanitization? (Look for dangerouslySetInnerHTML without DOMPurify, innerHTML assignments, or markdown-it with html:true without sanitization.)"
+    },
+    {
+      "id": "panic-for-errors",
+      "blocking": true,
+      "expectedAnswer": "no",
+      "question": "Only for go/golang code: Does this code use panic() for error handling instead of returning errors? (panic should only be used for truly unrecoverable situations.)"
+    },
+    {
+      "id": "storage-key-namespacing",
+      "blocking": true,
+      "expectedAnswer": "no",
+      "question": "Does this code use localStorage or sessionStorage with generic key names not namespaced with the plugin ID?"
+    },
+    {
+      "id": "grafana-dependency-consistency",
+      "blocking": true,
+      "expectedAnswer": "no",
+      "question": "For plugins with multiple plugin.json files: Are the grafanaDependency values inconsistent across them?"
+    },
+    {
+      "id": "nil-check-before-use",
+      "blocking": true,
+      "expectedAnswer": "no",
+      "question": "Only for go/golang code: Does this code access attributes or methods of a returned value before checking if it is nil? (e.g., accessing `req` before checking `if err != nil` or `if req == nil`.)"
+    },
+    {
+      "id": "request-context",
+      "blocking": false,
+      "expectedAnswer": "no",
+      "question": "Only for go/golang code: In QueryData or CheckHealth handlers, does this code create a new context (context.Background() or context.TODO()) instead of using/forwarding the context received from the request? Provide the specific code snippet if found."
+    },
+    {
+      "id": "readme-install-instructions",
+      "blocking": false,
+      "expectedAnswer": "no",
+      "question": "Does the src/README.md file contain installation instructions for the plugin? (Installation instructions should be removed from src/README.md as this information will be included in the Grafana catalog once the plugin is published and may cause confusion). Provide the specific section or content if found."
+    },
+    {
+      "id": "hardcoded-css-values",
+      "blocking": false,
+      "expectedAnswer": "no",
+      "question": "Does this code specify exact pixel values, font sizes, margins, or other hardcoded CSS values instead of using Grafana's emotion theme abstractions? (Rather than specifying exact pixels, font sizes, etc., it's recommended to use the abstractions defined in Grafana's emotion theme which is exposed by `@grafana/data`. This ensures consistency with Grafana's design system and better maintainability). Provide the specific code snippet showing hardcoded CSS values if found."
+    }
+  ],
+  "projectQuestions": [
+    {
+      "id": "response-body-in-error",
+      "blocking": true,
+      "expectedAnswer": "no",
+      "question": "Does this code put an HTTP response body into an error string, or into a log line above DEBUG level? Keep the status code and drop the body."
+    },
+    {
+      "id": "url-in-log",
+      "blocking": true,
+      "expectedAnswer": "no",
+      "question": "Does this code log a URL in full where the URL can carry userinfo or a credential in the query string? Log scheme://host/path only."
+    },
+    {
+      "id": "unbounded-body",
+      "blocking": true,
+      "expectedAnswer": "no",
+      "question": "Does this code decode a request body or read a response body without a byte bound?"
+    },
+    {
+      "id": "hand-rolled-http-without-context",
+      "blocking": true,
+      "expectedAnswer": "no",
+      "question": "Does this code build an HTTP request without the caller's context (http.NewRequest, http.Get, http.Post)? Use http.NewRequestWithContext."
+    },
+    {
+      "id": "unprefixed-keyframes",
+      "blocking": true,
+      "expectedAnswer": "no",
+      "question": "Does this code declare a CSS @keyframes name that is not prefixed with ask-o11y-? Keyframe names in a CSS module are global."
+    }
+  ]
+}
