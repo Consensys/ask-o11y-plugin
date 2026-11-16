@@ -4,7 +4,7 @@
 
 **Status**: Retrospective
 
-**Last verified**: `18e315b`
+**Last verified**: `7e50ade`
 
 **Owner**: Ask O11y maintainers
 
@@ -92,6 +92,7 @@ Ship a versioned archive, a container image, and a local stack.
 34. `full.yaml_` provisions two orgs; `app.yaml` provisions org 1 with the built-in MCP. `VERIFIED` — `provisioning/plugins/full.yaml_:42`, `provisioning/plugins/app.yaml:31`
 35. `npm run dev:stack` runs `scripts/dev.sh` against `docker-compose.dev.yaml`. `VERIFIED` — `package.json:28`
 36. Deployment artifacts are a container image with `dist` in `/package`, the Grafana Helm chart, and the compose stacks, tagged `<prefix>-<suffix or run number>` in ECR. `VERIFIED` — `Dockerfile:3`, `deploy/helm/grafana-values-ask-o11y-ha.yaml:8`, `.github/workflows/docker-release.yml:79`
+37. `npm run lint:standards` mirrors the Grafana `code-rules` semgrep rules for Go and for TS, so a banned environment, filesystem, dialog, window or CSS pattern fails the build job. `VERIFIED` — `scripts/check-standards.mjs:19`, `scripts/check-standards.mjs:100`
 
 ## Invariants
 

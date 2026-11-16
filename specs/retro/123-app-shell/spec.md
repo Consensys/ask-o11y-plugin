@@ -1,7 +1,7 @@
 # Retro-Spec: App Config UI, Shell, and Services
 **Capability ID**: `123-app-shell`
 **Status**: Retrospective
-**Last verified**: `18e315b`
+**Last verified**: `7e50ade`
 **Owner**: Ask O11y maintainers
 **Module**: `src/module.tsx`, `src/components/AppConfig/`, `src/services/`, `src/utils/`
 ---
@@ -95,6 +95,9 @@ Configuration is gated twice: the nav entry requires role `Admin`, and the actio
 46. `PLUGIN_BASE_URL` is `/a/consensys-asko11y-app`, and `prefixRoute` appends a path. `VERIFIED` — test `should prefix route with plugin base URL`
 47. AppConfig test ids carry a literal `data-testid ` prefix. `VERIFIED` — `src/components/testIds.ts:9`
 48. `MCPToolsPage` exists but no route mounts it. `GAP` — `src/pages/MCPTools.tsx:27` has no importer
+49. URL writes go through `locationService.replace`, never `window.location` or `window.history`. `VERIFIED` — `src/hooks/useSessionUrl.ts:32`, `src/components/AppConfig/AppConfig.tsx:272`
+50. The URL is read through `locationService`, never `window.location`. `VERIFIED` — `src/hooks/useSessionUrl.ts:24`, `src/components/AppConfig/AppConfig.tsx:269`
+51. Destructive actions confirm with `@grafana/ui` `ConfirmModal`, never a native `confirm`. `VERIFIED` — `src/components/Chat/components/SessionSidebar/SessionSidebar.tsx:243`
 Coverage tags:
 
 | Tag | Meaning | Review action |
