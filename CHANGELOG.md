@@ -5,6 +5,17 @@ All notable changes to the Ask O11y Grafana plugin will be documented in this fi
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.30](https://github.com/Consensys/ask-o11y-plugin/compare/v0.3.29...v0.3.30) (2026-11-16)
+
+
+### Bug Fixes
+
+* **backend:** clear the Grafana catalog code rules ([#258](https://github.com/Consensys/ask-o11y-plugin/issues/258)) ([b425725](https://github.com/Consensys/ask-o11y-plugin/commit/b42572524be8527c5b078cb53ba31d8b546a0a3e))
+* **mcp:** read the response limit from the Grafana config only ([6538332](https://github.com/Consensys/ask-o11y-plugin/commit/6538332))
+* **oauth:** deliver the callback result through local storage ([e2c11af](https://github.com/Consensys/ask-o11y-plugin/commit/e2c11af))
+* **ui:** read and write the session URL through locationService ([ba97712](https://github.com/Consensys/ask-o11y-plugin/commit/ba97712))
+* **ui:** replace the native confirm with ConfirmModal ([61ebc82](https://github.com/Consensys/ask-o11y-plugin/commit/61ebc82))
+
 ## [0.3.29](https://github.com/Consensys/ask-o11y-plugin/compare/v0.3.28...v0.3.29) (2026-11-16)
 
 
