@@ -88,7 +88,7 @@
 }
 
 /* Modern animations */
-@keyframes fadeIn {
+@keyframes ask-o11y-fadeIn {
   from {
     opacity: 0;
     transform: translateY(-4px);
@@ -99,7 +99,7 @@
   }
 }
 
-@keyframes slideIn {
+@keyframes ask-o11y-slideIn {
   from {
     opacity: 0;
     transform: translateX(-8px);
@@ -110,7 +110,7 @@
   }
 }
 
-@keyframes scaleIn {
+@keyframes ask-o11y-scaleIn {
   from {
     opacity: 0;
     transform: scale(0.95);
@@ -122,20 +122,20 @@
 }
 
 .animate-fadeIn {
-  animation: fadeIn 0.3s ease-out;
+  animation: ask-o11y-fadeIn 0.3s ease-out;
 }
 
 .animate-slideIn {
-  animation: slideIn 0.3s ease-out;
+  animation: ask-o11y-slideIn 0.3s ease-out;
 }
 
 .animate-scaleIn {
-  animation: scaleIn 0.2s ease-out;
+  animation: ask-o11y-scaleIn 0.2s ease-out;
 }
 
 
 /* Sparkle icon animation */
-@keyframes sparkle {
+@keyframes ask-o11y-sparkle {
   0%,
   100% {
     opacity: 1;
@@ -148,7 +148,7 @@
 }
 
 .animate-sparkle {
-  animation: sparkle 2s ease-in-out infinite;
+  animation: ask-o11y-sparkle 2s ease-in-out infinite;
 }
 
 /* Suggestion pill styling */
