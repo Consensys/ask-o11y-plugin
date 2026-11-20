@@ -130,6 +130,10 @@ type PluginSettings struct {
 	MaxParallelToolCalls    int    `json:"maxParallelToolCalls,omitempty"`
 	AgentEvalCaptureEnabled bool   `json:"agentEvalCaptureEnabled,omitempty"`
 
+	// Workflows holds provisioned autonomous workflow entries (see
+	// workflows.go). Pure tenant configuration; the plugin ships none.
+	Workflows []WorkflowEntry `json:"workflows,omitempty"`
+
 	// Context-window management knobs, mapped onto agent.ContextLimits. Zero
 	// values resolve to the defaults inside the agent loop.
 	KeepRecentToolResults                  int  `json:"keepRecentToolResults,omitempty"`
@@ -233,6 +237,11 @@ type Plugin struct {
 	cancel              context.CancelFunc
 	runCancelsMu        sync.Mutex
 	runCancels          map[string]context.CancelFunc
+	// orgIdentity holds the per-org Grafana URL and SA token captured lazily
+	// from inbound requests; the workflow runner reads it (see org_identity.go).
+	orgIdentity *OrgIdentityStore
+	// workflows owns the per-entry schedulers; nil when none are running.
+	workflows *WorkflowManager
 	// oauthManager drives per-user OAuth for external MCP servers; it also
 	// implements mcp.PerUserTokenProvider for the proxy.
 	oauthManager *oauth.Manager
@@ -472,6 +481,7 @@ func NewPlugin(ctx context.Context, settings backend.AppInstanceSettings) (insta
 		oauthManager:       oauthManager,
 		dynamicServerStore: dynamicServerStore,
 		oauthHTTPClient:    oauthHTTPClient,
+		orgIdentity:        NewOrgIdentityStore(),
 	}
 
 	if !usingRedis {
@@ -507,6 +517,12 @@ func NewPlugin(ctx context.Context, settings backend.AppInstanceSettings) (insta
 	p.registerRoutes(mux)
 	p.CallResourceHandler = httpadapter.New(mux)
 
+	// Workflows start after the plugin is fully wired so their ticks can use
+	// every store. Requires Redis (see startWorkflows).
+	if len(pluginSettings.Workflows) > 0 {
+		p.startWorkflows(pluginSettings.Workflows)
+	}
+
 	logger.Info("Plugin initialized",
 		"pluginId", PluginID,
 		"mcpServers", mcpProxy.GetServerCount())
@@ -531,6 +547,12 @@ func (p *Plugin) Dispose() {
 	// Stop the scout before closing the proxy so its in-flight scavenge can finish.
 	if p.scout != nil {
 		p.scout.Stop()
+	}
+
+	// Stop workflow schedulers the same way: an in-flight tick must finish
+	// before the proxy and Redis close under it.
+	if p.workflows != nil {
+		p.workflows.Stop()
 	}
 
 	// Close proxy and Redis before cancelling context so that
@@ -945,6 +967,9 @@ func (p *Plugin) handleAgentRun(w http.ResponseWriter, r *http.Request) {
 	if p.scout != nil {
 		p.scout.SetOrgID(numericOrgID)
 		p.scout.SetGrafanaConfig(grafanaURL, saToken)
+	}
+	if p.orgIdentity != nil {
+		p.orgIdentity.Seed(numericOrgID, grafanaURL, saToken)
 	}
 
 	toolCtx := BuildToolContext(req.OrgName, userRole)

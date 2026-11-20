@@ -28,8 +28,12 @@ type ChatSession struct {
 	MessageCount int              `json:"messageCount"`
 	ActiveRunID  string           `json:"activeRunId,omitempty"`
 	Model        string           `json:"model,omitempty"`
-	UserID       int64            `json:"-"`
-	OrgID        int64            `json:"-"`
+	// ConversationType marks sessions created by the workflow runner as
+	// "workflow"; Workflow names the workflow that created them.
+	ConversationType string `json:"conversationType,omitempty"`
+	Workflow         string `json:"workflow,omitempty"`
+	UserID           int64  `json:"-"`
+	OrgID            int64  `json:"-"`
 
 	// Usage stats, accumulated from each completed agent run's DoneEvent.
 	// Runs are TTL'd out of Redis after RunMaxAge, so these must be
@@ -69,6 +73,10 @@ type SessionUpdate struct {
 	Title    *string          `json:"title,omitempty"`
 	Summary  *string          `json:"summary,omitempty"`
 	Model    *string          `json:"model,omitempty"`
+	// ConversationType and Workflow tag sessions created by the workflow
+	// runner (see workflow_session.go); interactive sessions never set them.
+	ConversationType *string `json:"conversationType,omitempty"`
+	Workflow         *string `json:"workflow,omitempty"`
 }
 
 type SessionStoreInterface interface {
@@ -237,6 +245,12 @@ func (s *SessionStore) UpdateSession(sessionID string, userID, orgID int64, upda
 	}
 	if update.Model != nil {
 		session.Model = *update.Model
+	}
+	if update.ConversationType != nil {
+		session.ConversationType = *update.ConversationType
+	}
+	if update.Workflow != nil {
+		session.Workflow = *update.Workflow
 	}
 	session.UpdatedAt = time.Now()
 

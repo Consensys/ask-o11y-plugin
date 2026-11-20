@@ -115,6 +115,17 @@ type LoopRequest struct {
 	// before the loop runs. Used to hide graphiti write tools from user sessions.
 	ExcludeToolNames []string
 
+	// AllowToolNames, when set, restricts the run to exactly these MCP tool
+	// names, both at listing time and again at execution time. Internal tools
+	// (load_skill, search_tools, InternalTools) are not MCP tools and stay
+	// available regardless. Used by the workflow runner; interactive runs
+	// never set it.
+	AllowToolNames []string
+
+	// InternalTools are plugin-injected tools dispatched in-loop for this run
+	// only (see internal_tools.go). They never appear in any interactive run.
+	InternalTools []InternalTool
+
 	// ToolSearch controls on-demand tool discovery (see search_tools.go). The
 	// zero value is auto mode: discovery turns on when the tool definitions
 	// exceed the token budget.
@@ -172,6 +183,9 @@ func (a *AgentLoop) Run(ctx context.Context, req LoopRequest, eventCh chan<- SSE
 			}
 		}
 		mcpTools = filtered
+	}
+	if len(req.AllowToolNames) > 0 {
+		mcpTools = filterToolsByAllowlist(mcpTools, req.AllowToolNames)
 	}
 	toolRT := newToolRuntime(mcpTools, req.ToolSearch)
 	req.toolRuntime = toolRT
@@ -302,6 +316,9 @@ func (a *AgentLoop) Run(ctx context.Context, req LoopRequest, eventCh chan<- SSE
 		openAITools := toolRT.OpenAITools()
 		if len(req.AvailableSkills) > 0 && req.LoadSkill != nil {
 			openAITools = append(openAITools, loadSkillToolSpec(req.AvailableSkills))
+		}
+		for i := range req.InternalTools {
+			openAITools = append(openAITools, req.InternalTools[i].spec())
 		}
 		// Tools the model can see for THIS request. A call to any other tool
 		// was made on a description alone (search_tools activates definitions
@@ -682,11 +699,13 @@ func (a *AgentLoop) Run(ctx context.Context, req LoopRequest, eventCh chan<- SSE
 			// along in every subsequent prompt until the whole window overflows.
 			llmContent = capToolResultAtIngestion(llmContent, limits.MaxToolResponseTokens)
 			if !isError && !isMetaTool(tc.Function.Name) {
-				// Expose the call id so final-report evidenceIds can cite it.
-				evID := evidenceIDFor(len(evidenceIDs) + 1)
-				evidenceIDs[evID] = true
-				llmContent = evidenceIDHeader(evID) + llmContent
-				successfulToolNames[tc.Function.Name] = true
+				if _, isInternalTool := req.internalTool(tc.Function.Name); !isInternalTool {
+					// Expose the call id so final-report evidenceIds can cite it.
+					evID := evidenceIDFor(len(evidenceIDs) + 1)
+					evidenceIDs[evID] = true
+					llmContent = evidenceIDHeader(evID) + llmContent
+					successfulToolNames[tc.Function.Name] = true
+				}
 			}
 			messages = append(messages, Message{
 				Role:       "tool",
@@ -985,6 +1004,9 @@ func (a *AgentLoop) executeToolCall(ctx context.Context, eventCh chan<- SSEEvent
 	if tc.Function.Name == loadSkillToolName && req.LoadSkill != nil {
 		return a.executeLoadSkill(ctx, tc, req)
 	}
+	if it, ok := req.internalTool(tc.Function.Name); ok {
+		return a.executeInternalTool(ctx, tc, it)
+	}
 	return a.executeToolWithApproval(ctx, eventCh, tc, req)
 }
 
@@ -1002,6 +1024,9 @@ func (a *AgentLoop) executeTool(ctx context.Context, tc ToolCall, req LoopReques
 	tool, found := a.mcpProxy.FindToolByName(tc.Function.Name)
 	if !found {
 		return fmt.Sprintf("Unknown tool: %s", tc.Function.Name), true, "tool"
+	}
+	if len(req.AllowToolNames) > 0 && !req.allowTool(tc.Function.Name) {
+		return fmt.Sprintf("Tool %s is not in this run's tool allowlist", tc.Function.Name), true, "tool"
 	}
 	if !rbac.CanAccessTool(req.UserRole, tool) {
 		return fmt.Sprintf("Access denied: %s role cannot access tool %s", req.UserRole, tc.Function.Name), true, "tool"

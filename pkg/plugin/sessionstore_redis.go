@@ -347,6 +347,12 @@ func (s *RedisSessionStore) UpdateSession(sessionID string, userID, orgID int64,
 		if update.Model != nil {
 			session.Model = *update.Model
 		}
+		if update.ConversationType != nil {
+			session.ConversationType = *update.ConversationType
+		}
+		if update.Workflow != nil {
+			session.Workflow = *update.Workflow
+		}
 		session.UpdatedAt = time.Now()
 	})
 }
