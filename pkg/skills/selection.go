@@ -20,8 +20,8 @@ var TypeSkillNames = map[string]string{
 // user's message verbatim, while the deep-link contract (?type=investigation
 // with alertName) continues to wrap the message with the skill's template.
 type Activation struct {
-	Skills         []*Skill
-	Explicit       []*Skill
+	Skills          []*Skill
+	Explicit        []*Skill
 	UserPromptSkill *Skill
 }
 

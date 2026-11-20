@@ -29,10 +29,10 @@ type OperationMetadata struct {
 
 // Client represents an MCP client for a single server
 type Client struct {
-	config            ServerConfig
-	logger            log.Logger
-	mu                sync.RWMutex
-	tools             []Tool
+	config ServerConfig
+	logger log.Logger
+	mu     sync.RWMutex
+	tools  []Tool
 	// toolsStale records that the published catalog is known to disagree with
 	// the server (an unknown-tool failure, or a list_changed notification).
 	// Readers keep serving tools: the slice is never emptied, because
@@ -58,7 +58,7 @@ type Client struct {
 	lastRefresh time.Time
 	// listTools is a test seam. Nil means "use the real transport dispatch".
 	// Set once before the client is used.
-	listTools func(context.Context) ([]Tool, error)
+	listTools         func(context.Context) ([]Tool, error)
 	mcpClient         *mcpsdk.Client
 	session           *mcpsdk.ClientSession
 	operationMetadata map[string]OperationMetadata

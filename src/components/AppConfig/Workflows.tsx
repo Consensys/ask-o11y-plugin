@@ -155,7 +155,7 @@ export function WorkflowsTab({ savedWorkflows, onSaveWorkflows }: WorkflowsTabPr
                   data-testid={`ac-workflow-enabled-${row.name}`}
                 />
               </td>
-              <td className="p-1">{row.intervalSeconds ?? 300}s</td>
+              <td className="p-1">{row.intervalSeconds || 300}s</td>
               <td className="p-1" title={row.status?.lastError ?? undefined}>
                 {row.status?.lastTickOutcome ? (
                   <Badge

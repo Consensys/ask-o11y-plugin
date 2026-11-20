@@ -54,6 +54,7 @@ func (p *Plugin) startWorkflowSessionWithID(params workflowRunParams, runID stri
 	activation, err := skills.Resolve(p.skillRegistry, params.message, []string{params.skill}, "")
 	if err != nil {
 		workflowSessions.WithLabelValues(workflowLabel(name), "failed").Inc()
+		p.workflowStatus.RecordSession(name, "failed")
 		return "", "", fmt.Errorf("workflow %s: skill activation failed: %w", name, err)
 	}
 
@@ -67,6 +68,7 @@ func (p *Plugin) startWorkflowSessionWithID(params workflowRunParams, runID stri
 	systemPrompt, err := p.promptRegistry.BuildSystemPrompt(toolCtx)
 	if err != nil {
 		workflowSessions.WithLabelValues(workflowLabel(name), "failed").Inc()
+		p.workflowStatus.RecordSession(name, "failed")
 		return "", "", fmt.Errorf("workflow %s: system prompt build failed: %w", name, err)
 	}
 	if p.isGraphitiAvailable() {
@@ -75,6 +77,7 @@ func (p *Plugin) startWorkflowSessionWithID(params workflowRunParams, runID stri
 	userPrompt, err := p.promptRegistry.BuildUserPrompt(workflowConversationType, params.message, toolCtx)
 	if err != nil {
 		workflowSessions.WithLabelValues(workflowLabel(name), "failed").Inc()
+		p.workflowStatus.RecordSession(name, "failed")
 		return "", "", fmt.Errorf("workflow %s: user prompt build failed: %w", name, err)
 	}
 
@@ -88,6 +91,7 @@ func (p *Plugin) startWorkflowSessionWithID(params workflowRunParams, runID stri
 	}})
 	if err != nil {
 		workflowSessions.WithLabelValues(workflowLabel(name), "failed").Inc()
+		p.workflowStatus.RecordSession(name, "failed")
 		return "", "", fmt.Errorf("workflow %s: session creation failed: %w", name, err)
 	}
 	sessionID := session.ID

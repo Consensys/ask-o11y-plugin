@@ -10,7 +10,7 @@ import (
 
 func TestNewPlugin_RedisFallback(t *testing.T) {
 	settings := backend.AppInstanceSettings{
-		JSONData:               []byte(`{"mcpServers":[]}`),
+		JSONData:                []byte(`{"mcpServers":[]}`),
 		DecryptedSecureJSONData: map[string]string{"redisURL": "redis://localhost:9999/0"},
 	}
 
@@ -45,7 +45,7 @@ func TestNewPlugin_RedisSuccess(t *testing.T) {
 	probe.Close()
 
 	settings := backend.AppInstanceSettings{
-		JSONData:               []byte(`{"mcpServers":[]}`),
+		JSONData:                []byte(`{"mcpServers":[]}`),
 		DecryptedSecureJSONData: map[string]string{"redisURL": "redis://localhost:6379/15"},
 	}
 	plugin, err := NewPlugin(context.Background(), settings)

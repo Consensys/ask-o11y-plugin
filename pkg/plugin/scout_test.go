@@ -7,9 +7,9 @@ import (
 
 func TestParseScanInterval(t *testing.T) {
 	tests := []struct {
-		input    string
-		wantDur  time.Duration
-		wantOK   bool
+		input   string
+		wantDur time.Duration
+		wantOK  bool
 	}{
 		{"off", 0, false},
 		{"", 0, false},

@@ -44,6 +44,19 @@ func TestWorkflowStatusStoreRecordsTicksAndSessions(t *testing.T) {
 		t.Fatalf("session outcomes miscounted: %+v", status)
 	}
 
+	// A recovered tick clears the stale error; a session-level failure
+	// keeps the executed tick outcome.
+	store.RecordTickError("wf", "boom")
+	store.RecordTick("wf", "executed")
+	if got := store.Get("wf"); got.LastTickOutcome != "executed" || got.LastError != "" {
+		t.Fatalf("recovered tick must clear the error: %+v", got)
+	}
+	store.RecordTick("wf", "executed")
+	store.RecordSessionError("wf", "session start failed")
+	if got := store.Get("wf"); got.LastTickOutcome != "executed" || got.LastError != "session start failed" {
+		t.Fatalf("session error must not change the tick outcome: %+v", got)
+	}
+
 	// A nil store (white-box test plugins) answers zero, never panics.
 	var nilStore *WorkflowStatusStore
 	nilStore.RecordTick("wf", "executed")
@@ -77,11 +90,14 @@ func TestHandleWorkflowsListAdminSeesEntriesAndStatus(t *testing.T) {
 			IntervalSec: 300, SessionTimeoutSeconds: 420, MaxConcurrentSessions: 5,
 			ToolAllowlist: []string{"irm_list_alert_groups"}, Model: "base",
 		},
+		// Zero numeric fields resolve to defaults: raw disabled entries never
+		// pass prepareWorkflows, and the tab must not render or persist 0s.
 		{Name: "off-wf", Skill: "janitor", ToolAllowlist: []string{"irm_list_alert_groups"}},
 	}
-	p.workflows = &WorkflowManager{schedulers: []*WorkflowScheduler{
-		NewWorkflowScheduler(context.Background(), p, p.settings.Workflows[0]),
-	}}
+	running := NewWorkflowScheduler(context.Background(), p, p.settings.Workflows[0])
+	stopped := NewWorkflowScheduler(context.Background(), p, p.settings.Workflows[1])
+	stopped.cancel() // simulate deferred validation ending it
+	p.workflows = &WorkflowManager{schedulers: []*WorkflowScheduler{running, stopped}}
 	p.workflowStatus = NewWorkflowStatusStore()
 	p.workflowStatus.RecordTick("running-wf", "executed")
 	p.workflowStatus.RecordSession("running-wf", "started")
@@ -106,6 +122,12 @@ func TestHandleWorkflowsListAdminSeesEntriesAndStatus(t *testing.T) {
 	second := rows[1].(map[string]interface{})
 	if second["enabled"] != false || second["running"] != false {
 		t.Fatalf("disabled workflow must not run: %v", second)
+	}
+	if second["intervalSeconds"].(float64) != workflowDefaultIntervalSeconds {
+		t.Fatalf("raw zero interval must resolve to the default, got %v", second["intervalSeconds"])
+	}
+	if second["sessionTimeoutSeconds"].(float64) != workflowDefaultTimeoutSeconds {
+		t.Fatalf("raw zero timeout must resolve to the default, got %v", second["sessionTimeoutSeconds"])
 	}
 	_ = log.DefaultLogger
 }

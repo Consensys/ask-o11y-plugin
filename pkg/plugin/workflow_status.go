@@ -45,7 +45,9 @@ func (s *WorkflowStatusStore) entry(name string) *workflowRuntimeStatus {
 	return e
 }
 
-// RecordTick notes one scheduler tick outcome for a workflow.
+// RecordTick notes one scheduler tick outcome for a workflow. A tick that
+// proceeds clears the previous tick error, so a recovered workflow no longer
+// looks like it is failing.
 func (s *WorkflowStatusStore) RecordTick(name, outcome string) {
 	now := time.Now().UTC()
 	if s == nil {
@@ -56,6 +58,7 @@ func (s *WorkflowStatusStore) RecordTick(name, outcome string) {
 	e := s.entry(name)
 	e.LastTickAt = &now
 	e.LastTickOutcome = outcome
+	e.LastError = ""
 }
 
 // RecordTickError notes a tick that could not proceed and why.
@@ -70,6 +73,18 @@ func (s *WorkflowStatusStore) RecordTickError(name string, errMsg string) {
 	e.LastTickAt = &now
 	e.LastTickOutcome = "skip_error"
 	e.LastError = errMsg
+}
+
+// RecordSessionError records a session-level failure message without
+// changing the tick outcome: a tick that ran but could not start its session
+// still executed.
+func (s *WorkflowStatusStore) RecordSessionError(name string, errMsg string) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.entry(name).LastError = errMsg
 }
 
 // RecordSession counts one session outcome.
@@ -150,12 +165,19 @@ func (p *Plugin) handleWorkflowsList(w http.ResponseWriter, r *http.Request) {
 	running := map[string]bool{}
 	if p.workflows != nil {
 		for _, s := range p.workflows.schedulers {
-			running[s.entry.Name] = true
+			// A scheduler that stopped itself (deferred validation failure)
+			// stays in the manager; report it as not running.
+			running[s.entry.Name] = !s.Stopped()
 		}
 	}
 
 	entries := make([]workflowAPIEntry, 0, len(configured))
-	for _, entry := range configured {
+	for _, raw := range configured {
+		// Resolve defaults on a copy: disabled or never-validated entries can
+		// carry zero intervals in raw settings, and the tab must not render
+		// 0s or persist zeros back through a toggle.
+		entry := raw
+		entry.applyDefaults()
 		entries = append(entries, workflowAPIEntry{
 			Name:                  entry.Name,
 			Enabled:               entry.Enabled,
