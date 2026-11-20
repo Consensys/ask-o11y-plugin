@@ -364,9 +364,9 @@ func TestLLMClient_ChatCompletion_HTTPErrorIncludesSafeDiagnostics(t *testing.T)
 
 	client := NewLLMClient(log.DefaultLogger, &http.Client{Timeout: llmTimeout})
 	_, err := client.ChatCompletion(context.Background(), ChatCompletionRequest{
-		Model:     "large",
-		Messages:  []Message{{Role: "user", Content: "hi"}},
-		Tools:     []OpenAITool{{Type: "function", Function: OpenAIFunction{Name: "query"}}},
+		Model:               "large",
+		Messages:            []Message{{Role: "user", Content: "hi"}},
+		Tools:               []OpenAITool{{Type: "function", Function: OpenAIFunction{Name: "query"}}},
 		MaxCompletionTokens: 2048,
 	}, server.URL, "token", "1")
 

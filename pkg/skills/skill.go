@@ -28,8 +28,8 @@ const (
 
 // Limits mirrored from the Agent Skills specification.
 const (
-	MaxNameLength           = 64
-	MaxDescriptionLength    = 1024
+	MaxNameLength          = 64
+	MaxDescriptionLength   = 1024
 	MaxCompatibilityLength = 500
 )
 

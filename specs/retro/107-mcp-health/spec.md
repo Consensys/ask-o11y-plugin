@@ -22,7 +22,7 @@ a response time, and the server tool list. The AppConfig UI reads that state fro
 
 | Capability | Admin | Editor | Viewer | Evidence |
 |---|---|---|---|---|
-| Read `/api/mcp/servers` | yes | yes | yes | `pkg/plugin/plugin.go:832` |
+| Read `/api/mcp/servers` | yes | yes | yes | `pkg/plugin/plugin.go:836` |
 | Change the poll interval | no | no | no — compile-time constant | `pkg/plugin/config.go:40` |
 | Trigger a health probe | no | no | no — internal only | `pkg/mcp/health.go:141` |
 
@@ -34,7 +34,7 @@ The route has no role check. Any authenticated caller sees every server's status
 
 | Method | Path | Handler | Evidence |
 |---|---|---|---|
-| GET | `/api/mcp/servers` | `handleMCPServers` | `pkg/plugin/plugin.go:832` |
+| GET | `/api/mcp/servers` | `handleMCPServers` | `pkg/plugin/plugin.go:836` |
 
 Response body: `{servers, systemHealth, oauth}`. `pkg/plugin/plugin.go:845`
 
@@ -42,7 +42,7 @@ Response body: `{servers, systemHealth, oauth}`. `pkg/plugin/plugin.go:845`
 
 | Event | Payload fields | Evidence |
 |---|---|---|
-| none | health state is pulled, never pushed | `pkg/plugin/plugin.go:832` |
+| none | health state is pulled, never pushed | `pkg/plugin/plugin.go:836` |
 
 ### Configuration keys
 
@@ -74,7 +74,7 @@ Response body: `{servers, systemHealth, oauth}`. `pkg/plugin/plugin.go:845`
 13. A successful probe resets `consecutiveFailures`, clears `lastError`, and stores `tools` and `toolCount`. `VERIFIED` — `pkg/mcp/health.go:222`
 14. A successful probe slower than 2000ms reports `degraded`. A faster one reports `healthy`. `VERIFIED` — `pkg/mcp/health.go:227`
 15. `successRate` is the share of successful checks across all checks since startup, not a fixed value. `VERIFIED` — `pkg/mcp/health.go:239`
-16. Health reaches the UI as `servers[]` of `ServerHealth`. `VERIFIED` — `pkg/plugin/plugin.go:846`
+16. Health reaches the UI as `servers[]` of `ServerHealth`. `VERIFIED` — `pkg/plugin/plugin.go:850`
 17. `ServerHealth` carries `serverId`, `name`, `url`, `type`, `status`, `lastCheck`, `responseTime`, `successRate`, `errorCount`, `consecutiveFailures`, `lastError`, `tools`, `toolCount`. `VERIFIED` — `pkg/mcp/health.go:22`
 18. `systemHealth` reports `overallStatus` plus per-status counts and `total`. `VERIFIED` — `pkg/mcp/health.go:267`
 19. `overallStatus` is `unhealthy` if any server is `unhealthy` or `disconnected`. `VERIFIED` — `pkg/mcp/health.go:295`

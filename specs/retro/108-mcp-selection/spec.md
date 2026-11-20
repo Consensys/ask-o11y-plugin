@@ -42,7 +42,7 @@ Role names are matched case-sensitively. Any unknown role is treated as Viewer.
 
 | Event | Payload fields | Evidence |
 |---|---|---|
-| none | filtering is silent | `pkg/plugin/plugin.go:747` |
+| none | filtering is silent | `pkg/plugin/plugin.go:751` |
 
 ### Configuration keys
 
@@ -65,7 +65,7 @@ Both meta-tools bypass MCP filtering by design. `pkg/agent/tools.go:26`
 
 ## Behaviour Rules
 
-1. Listing applies the role filter first, then the per-server selection filter. `VERIFIED` — `pkg/plugin/plugin.go:747`
+1. Listing applies the role filter first, then the per-server selection filter. `VERIFIED` — `pkg/plugin/plugin.go:751`
 2. An agent run applies the same two filters in the same order. `VERIFIED` — `pkg/agent/loop.go:161`
 3. Execution re-checks the role and returns 403 on failure. `VERIFIED` — `pkg/plugin/plugin.go:802`
 4. Execution re-checks selection and returns 403 `Tool is not enabled`. `VERIFIED` — `pkg/plugin/plugin.go:830`
@@ -89,7 +89,7 @@ Both meta-tools bypass MCP filtering by design. `pkg/agent/tools.go:26`
 22. Org scoping is skipped when the org ID is empty, the args are nil, or the schema lacks the property. `VERIFIED` — `pkg/mcp/selection.go:63`
 23. A Graphiti tool is detected by `graphiti_` prefix, `_graphiti_` infix, or a base-name suffix. `VERIFIED` — `pkg/mcp/selection.go:85`
 24. Risk classification resolves the server ID by the longest prefix, so a server ID that contains `_` is attributed correctly. `VERIFIED` — `pkg/mcp/risk.go:17`
-25. The exposed tool list is not sorted. `GAP` — `pkg/mcp/proxy.go:137` iterates a map; no sort exists before the response at `pkg/plugin/plugin.go:754`
+25. The exposed tool list is not sorted. `GAP` — `pkg/mcp/proxy.go:137` iterates a map; no sort exists before the response at `pkg/plugin/plugin.go:758`
 26. There is no per-skill tool filtering. `GAP` — `allowed-tools` is parsed (`pkg/skills/skill.go:87`) but nothing reads it
 27. There is no per-agent or per-conversation-type tool allow-list. `GAP` — the only per-run exclusion is `ExcludeToolNames` (`pkg/agent/loop.go:163`)
 28. Excluded tool names are removed after both standard filters. `VERIFIED` — `pkg/agent/loop.go:170`
@@ -108,7 +108,7 @@ Both meta-tools bypass MCP filtering by design. `pkg/agent/tools.go:26`
 | Condition | User-visible result | Evidence |
 |---|---|---|
 | Viewer asks for a write tool | 403 `Access denied: Viewer role cannot access tool ...` | `pkg/plugin/plugin.go:805` |
-| Tool disabled by selection | 403 `Tool is not enabled` | `pkg/plugin/plugin.go:832` |
+| Tool disabled by selection | 403 `Tool is not enabled` | `pkg/plugin/plugin.go:836` |
 | Agent calls a denied tool | Tool result `Access denied: ...` | `pkg/agent/loop.go:975` |
 | Agent calls a disabled tool | Tool result `Tool ... is disabled in MCP server settings` | `pkg/agent/loop.go:1011` |
 

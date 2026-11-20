@@ -173,6 +173,13 @@ func (s *WorkflowScheduler) Start() {
 	}
 }
 
+// Stopped reports whether this scheduler ended itself (deferred validation
+// failure) or was stopped, so status consumers can tell a live scheduler
+// from a dead one still held by the manager.
+func (s *WorkflowScheduler) Stopped() bool {
+	return s.ctx.Err() != nil
+}
+
 // Stop ends the loop and waits for an in-flight tick to finish, so Dispose
 // can close the MCP proxy and Redis safely afterwards.
 func (s *WorkflowScheduler) Stop() {
@@ -202,6 +209,7 @@ func (s *WorkflowScheduler) tick() {
 				"workflow", name, "orgId", s.entry.OrgID)
 		}
 		workflowTicks.WithLabelValues(label, "skip_identity").Inc()
+		s.p.workflowStatus.RecordTick(name, "skip_identity")
 		return
 	}
 
@@ -210,15 +218,18 @@ func (s *WorkflowScheduler) tick() {
 	if err != nil {
 		s.p.logger.Error("Workflow tick skipped: tick lock unavailable", "workflow", name, "error", err)
 		workflowTicks.WithLabelValues(label, "skip_error").Inc()
+		s.p.workflowStatus.RecordTickError(name, "tick lock unavailable")
 		return
 	}
 	if !held {
 		// Another replica owns this tick. Skipping is the healthy path.
 		workflowTicks.WithLabelValues(label, "skip_lock").Inc()
+		s.p.workflowStatus.RecordTick(name, "skip_lock")
 		return
 	}
 
 	workflowTicks.WithLabelValues(label, "executed").Inc()
+	s.p.workflowStatus.RecordTick(name, "executed")
 	if _, _, startErr := s.p.startWorkflowSession(workflowRunParams{
 		entry:       s.entry,
 		skill:       s.entry.Skill,
@@ -232,6 +243,7 @@ func (s *WorkflowScheduler) tick() {
 		// The failed-session metric is incremented inside; log so the tick is
 		// never silently unhealthy.
 		s.p.logger.Error("Workflow tick failed to start its session", "workflow", name, "error", startErr)
+		s.p.workflowStatus.RecordSessionError(name, startErr.Error())
 	}
 }
 
@@ -259,6 +271,7 @@ func (s *WorkflowScheduler) deferredAllowlistValidation() bool {
 		}
 		s.p.logger.Error("Workflow disabled: invalid configuration", "workflow", s.entry.Name, "error", err)
 		workflowTicks.WithLabelValues(workflowLabel(s.entry.Name), "skip_error").Inc()
+		s.p.workflowStatus.RecordTickError(s.entry.Name, err.Error())
 		s.cancel()
 		return false
 	}

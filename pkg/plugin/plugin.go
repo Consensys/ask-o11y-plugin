@@ -242,6 +242,8 @@ type Plugin struct {
 	orgIdentity *OrgIdentityStore
 	// workflows owns the per-entry schedulers; nil when none are running.
 	workflows *WorkflowManager
+	// workflowStatus feeds GET /api/workflows with per-instance runtime state.
+	workflowStatus *WorkflowStatusStore
 	// oauthManager drives per-user OAuth for external MCP servers; it also
 	// implements mcp.PerUserTokenProvider for the proxy.
 	oauthManager *oauth.Manager
@@ -482,6 +484,7 @@ func NewPlugin(ctx context.Context, settings backend.AppInstanceSettings) (insta
 		dynamicServerStore: dynamicServerStore,
 		oauthHTTPClient:    oauthHTTPClient,
 		orgIdentity:        NewOrgIdentityStore(),
+		workflowStatus:     NewWorkflowStatusStore(),
 	}
 
 	if !usingRedis {
@@ -614,6 +617,7 @@ func (p *Plugin) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/agent/topology", p.handleAgentTopology)
 	mux.HandleFunc("/api/prompt-defaults", p.handlePromptDefaults)
 	mux.HandleFunc("/api/skills", p.handleSkills)
+	mux.HandleFunc("/api/workflows", p.handleWorkflowsList)
 	mux.HandleFunc("/api/graphiti/discover", p.handleGraphitiDiscover)
 	mux.HandleFunc("/api/graphiti/status", p.handleGraphitiStatus)
 	mux.HandleFunc("/api/graphiti/ingest-session", p.handleGraphitiIngestSession)

@@ -23,16 +23,17 @@ import { testIds } from '../testIds';
 import { ValidationService } from '../../services/validation';
 import { PromptEditor } from './PromptEditor';
 import { SkillsTab } from './SkillsTab';
+import { WorkflowsTab } from './Workflows';
 import { ManageToolsModal } from './ManageToolsModal';
 import { ExternalMCPs } from './ExternalMCPs';
 import { mcpServerStatusService, type MCPServerStatus, type MCPTool } from '../../services/mcpServerStatus';
-import type { AppPluginSettings, MCPServerConfig, SkillEntry } from '../../types/plugin';
+import type { WorkflowEntryUI, AppPluginSettings, MCPServerConfig, SkillEntry } from '../../types/plugin';
 import { AgentTopologyResponse, getAgentTopology } from '../../services/agentTopologyClient';
 import { ServiceGraphScene } from '../ServiceGraph/ServiceGraphScene';
 import { getPluginStorageKey } from '../../utils/storageKeys';
 
 type ServerStatusKind = MCPServerStatus['status'];
-type SettingsTab = 'general' | 'agent-runtime' | 'mcp' | 'service-graph' | 'skills' | 'prompts';
+type SettingsTab = 'general' | 'agent-runtime' | 'mcp' | 'service-graph' | 'skills' | 'workflows' | 'prompts';
 type MCPServerType = NonNullable<MCPServerConfig['type']>;
 
 const STATUS_LABELS: Record<ServerStatusKind, string> = {
@@ -166,6 +167,7 @@ const SETTINGS_TABS: Array<{ id: SettingsTab; label: string; icon: React.Compone
   { id: 'mcp', label: 'MCP', icon: 'plug' },
   { id: 'service-graph', label: 'Service Graph', icon: 'sitemap' },
   { id: 'skills', label: 'Skills', icon: 'layer-group' },
+  { id: 'workflows', label: 'Workflows', icon: 'rocket' },
   { id: 'prompts', label: 'Prompts', icon: 'comment-alt-message' },
 ];
 
@@ -489,6 +491,8 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
       // Skills save immediately per action (like prompt editors), so the tab
       // itself never carries unsaved state.
       skills: false,
+      // Workflows toggle-and-save immediately through the same reload path.
+      workflows: false,
     };
   }, [deletedSecureKeys, promptDefaults, resetSecureKeys, savedJsonData, state]);
 
@@ -934,6 +938,17 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
       jsonData: {
         ...savedJsonData,
         [field]: value,
+      },
+    });
+  }
+
+  function saveWorkflows(next: WorkflowEntryUI[]) {
+    saveAndReload({
+      enabled,
+      pinned,
+      jsonData: {
+        ...savedJsonData,
+        workflows: next,
       },
     });
   }
@@ -1752,6 +1767,13 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
             savedEntries={savedJsonData.skills?.entries ?? {}}
             onSaveEntries={saveSkillEntries}
             legacyPromptSkills={legacyPromptSkills}
+          />
+        )}
+
+        {activeTab === 'workflows' && (
+          <WorkflowsTab
+            savedWorkflows={savedJsonData.workflows ?? []}
+            onSaveWorkflows={saveWorkflows}
           />
         )}
 

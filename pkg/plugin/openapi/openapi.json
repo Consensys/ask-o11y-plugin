@@ -2421,6 +2421,104 @@
           }
         }
       }
+    },
+    "/api/workflows": {
+      "get": {
+        "summary": "List configured workflows with runtime status",
+        "description": "Returns every provisioned workflow entry (enabled or not) joined with this plugin instance's runtime status: last tick time and outcome, session outcome counters, and the last tick error when a tick could not proceed. Status counters are per instance, not cluster-wide. Requires Admin role.",
+        "operationId": "listWorkflows",
+        "tags": [
+          "Workflows"
+        ],
+        "responses": {
+          "200": {
+            "description": "Workflow entries with status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "workflows": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "name": {
+                            "type": "string"
+                          },
+                          "enabled": {
+                            "type": "boolean"
+                          },
+                          "orgId": {
+                            "type": "integer"
+                          },
+                          "skill": {
+                            "type": "string"
+                          },
+                          "intervalSeconds": {
+                            "type": "integer"
+                          },
+                          "sessionTimeoutSeconds": {
+                            "type": "integer"
+                          },
+                          "maxConcurrentSessions": {
+                            "type": "integer"
+                          },
+                          "toolAllowlist": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "running": {
+                            "type": "boolean"
+                          },
+                          "status": {
+                            "type": "object",
+                            "properties": {
+                              "lastTickAt": {
+                                "type": "string",
+                                "nullable": true
+                              },
+                              "lastTickOutcome": {
+                                "type": "string"
+                              },
+                              "started": {
+                                "type": "integer"
+                              },
+                              "completed": {
+                                "type": "integer"
+                              },
+                              "failed": {
+                                "type": "integer"
+                              },
+                              "cancelled": {
+                                "type": "integer"
+                              },
+                              "timeout": {
+                                "type": "integer"
+                              },
+                              "lastError": {
+                                "type": "string"
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Admin access required"
+          },
+          "405": {
+            "description": "Method not allowed"
+          }
+        }
+      }
     }
   },
   "components": {

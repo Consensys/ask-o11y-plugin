@@ -22,7 +22,7 @@ Graphiti is optional: without it, every other capability still works.
 
 | Capability | Admin | Editor | Viewer | Evidence |
 |---|---|---|---|---|
-| `GET /api/graphiti/status` | yes | yes | yes | `pkg/plugin/plugin.go:2051` (no role check) |
+| `GET /api/graphiti/status` | yes | yes | yes | `pkg/plugin/plugin.go:2055` (no role check) |
 | `POST /api/graphiti/discover` | yes | yes | no (403) | `pkg/plugin/plugin.go:2090` |
 | `POST /api/graphiti/ingest-session` | yes | yes | no (403) | `pkg/plugin/plugin.go:2246` |
 | Automatic session ingest after a run | yes | yes | yes | `pkg/plugin/plugin.go:1278` (no role check) |
@@ -69,7 +69,7 @@ Tags: `VERIFIED` (code pointer or test), `ASSUMED` (untested), `GAP` (missing).
 1. Graphiti counts as available only when `graphiti_add_memory` is in the tool list. `VERIFIED` — `pkg/plugin/graphiti_memory.go:43`
 2. `status` returns `{enabled, connected}` and nothing else. `VERIFIED` — `pkg/plugin/plugin.go:2074`
 3. `connected` is true only when `graphiti_get_status` succeeds. `VERIFIED` — `pkg/plugin/plugin.go:2090`
-4. `status` never fails when Graphiti is absent: it returns `enabled: false`. `VERIFIED` — `pkg/plugin/plugin.go:2062`
+4. `status` never fails when Graphiti is absent: it returns `enabled: false`. `VERIFIED` — `pkg/plugin/plugin.go:2066`
 5. `discover` rejects a Viewer with 403. `VERIFIED` — `pkg/plugin/plugin.go:2090`
 6. `discover` and `ingest-session` return 503 when Graphiti is unavailable. `VERIFIED` — `pkg/plugin/plugin.go:2099`
 7. Both write routes share the agent rate limiter and return 429 when exhausted. `VERIFIED` — `pkg/plugin/plugin.go:2094`
@@ -106,7 +106,7 @@ Tags: `VERIFIED` (code pointer or test), `ASSUMED` (untested), `GAP` (missing).
 
 | Condition | User-visible result | Evidence |
 |---|---|---|
-| Graphiti not registered | `status` reports `enabled: false` | `pkg/plugin/plugin.go:2062` |
+| Graphiti not registered | `status` reports `enabled: false` | `pkg/plugin/plugin.go:2066` |
 | Graphiti registered but unreachable | `status` reports `enabled: true, connected: false` | `pkg/plugin/plugin.go:2090` |
 | Discovery request from Viewer | HTTP 403 `Access denied` | `pkg/plugin/plugin.go:2090` |
 | Ingest body over 1 MiB | HTTP 400 `Invalid request body` | `pkg/plugin/plugin.go:2259` |

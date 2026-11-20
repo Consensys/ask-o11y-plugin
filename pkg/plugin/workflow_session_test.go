@@ -74,6 +74,7 @@ func newWorkflowTestPlugin(t *testing.T, llmHandler http.HandlerFunc) (*Plugin, 
 		promptRegistry: promptRegistry,
 		skillRegistry:  workflowTestRegistry("dispatch", "investigate", "escalate"),
 		orgIdentity:    NewOrgIdentityStore(),
+		workflowStatus: NewWorkflowStatusStore(),
 		settings: PluginSettings{
 			MaxTotalTokens:     agent.DefaultMaxTotalTokens,
 			RecentMessageCount: 10,

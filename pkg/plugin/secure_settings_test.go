@@ -45,11 +45,11 @@ func TestApplySecureHeaders_IgnoresMalformedKeys(t *testing.T) {
 		{ID: "srv1", Name: "Server 1"},
 	}
 	secure := map[string]string{
-		"mcpServerHeader.nodot":    "value",
-		"mcpServerHeader..empty":   "value",
-		"mcpServerHeader.srv1.":    "value",
-		"redisURL":                 "redis://localhost:6379/0",
-		"someOtherKey":             "value",
+		"mcpServerHeader.nodot":  "value",
+		"mcpServerHeader..empty": "value",
+		"mcpServerHeader.srv1.":  "value",
+		"redisURL":               "redis://localhost:6379/0",
+		"someOtherKey":           "value",
 	}
 
 	applySecureHeaders(servers, secure)

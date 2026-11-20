@@ -85,7 +85,7 @@ func TestAgentLoop_LoadSkillAndRunStarted(t *testing.T) {
 		default:
 			t.Errorf("unexpected main-loop LLM call #%d", mainCalls)
 			respondAsStream(w, ChatCompletionResponse{
-				ID:     "extra",
+				ID:      "extra",
 				Choices: []Choice{{Message: Message{Role: "assistant", Content: "unexpected"}, FinishReason: "stop"}},
 			})
 		}

@@ -62,6 +62,21 @@ The Viewer rule is untouched: workflow tools never enter the interactive catalog
 | `npm run e2e` | 46 tests pass |
 | `node scripts/verify-retro-specs.mjs` | pass |
 
+## Review responses (bugbot, all nine findings fixed in 90bdd4d)
+
+| Finding | Severity | Response |
+|---|---|---|
+| Share links omit live investigation | High | Fixed — `handleWorkflowShare` now merges the persisted session with this run's SSE events (streamed assistant content + successful tool results) into the snapshot, so the link carries the investigation as it stood when published (`pkg/plugin/workflow_session.go`, `workflowShareSnapshot` / `workflowRunTranscript`). |
+| Leader replica can skip seeded ticks | High | Fixed — the identity check runs before the tick lock is taken, so an unseeded replica never holds the lock and the seeded one can win it (`workflow_scheduler.go` tick order; covered by `TestWorkflowTickSkipsWhenIdentityUnseeded`). |
+| Partial tool catalog disables workflows | High | Fixed — an unknown allowlist tool now defers instead of disabling until every configured MCP server reports healthy (`errWorkflowUnknownTool` sentinel + `mcpCatalogStable`). Other defects still disable immediately. |
+| Shutdown panics on in-flight tick | High | Fixed — Dispose stops schedulers and scout before clearing the run-cancel registry, and `startWorkflowSessionWithID` guards the nil-map window (covered by `TestWorkflowSessionWithNilRunCancelsDoesNotPanic`). |
+| Spawn cap check is not atomic | Medium | Fixed — admission is one Redis Lua script (prune + count + add), with the real run ID, so overlapping ticks and parallel tool calls cannot both pass the cap. |
+| Watchdog can overwrite successful runs | Medium | Fixed — the run status is read first; a completed run stays completed even if the timer fires in the stop race window. |
+| Spawn count ignores Redis card errors | Medium | Fixed — `ZCard` errors now propagate, so an unavailable check refuses spawns instead of reporting zero. |
+| Tick discards session start failures | Medium | Fixed — the tick logs start errors, and the two uncounted failure paths now increment the `failed` session metric. |
+| Spawn calls can be stall-cached | Medium | Fixed — internal tools are excluded from the duplicate-call replay cache, like `load_skill`, so a retried spawn always executes (`pkg/agent/loop.go` cache-eligibility block). |
+| Share transcript drops Redis events (follow-up review of 90bdd4d) | High | Fixed in d14284c — `workflowRunTranscript` reuses `reconstructAssistantMessage`, which decodes both run-store event encodings; covered by `TestWorkflowShareTranscriptSurvivesRedisRunStore` driving the share through the real Redis run store. |
+
 ## Constitution principles touched
 
 III (RBAC and multi-org — statement above, no invariant changed), IV (fail fast — invalid entries disable themselves with named errors, no-Redis disables all workflows, lock-skip is the single silent skip and is by design), VIII (safe I/O — no new outbound HTTP, bounded Redis contexts, log hygiene).

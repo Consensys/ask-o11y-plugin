@@ -20,7 +20,7 @@ Configuration is gated twice: the nav entry requires role `Admin`, and the actio
 ### HTTP endpoints
 | Method | Path | Handler | Evidence |
 |---|---|---|---|
-| GET | `/api/plugins/consensys-asko11y-app/resources/api/prompt-defaults` | `AppConfig` init | `src/components/AppConfig/AppConfig.tsx:133` |
+| GET | `/api/plugins/consensys-asko11y-app/resources/api/prompt-defaults` | `AppConfig` init | `src/components/AppConfig/AppConfig.tsx:134` |
 | GET | `…/api/graphiti/status` | `AppConfig` mount | `src/components/AppConfig/AppConfig.tsx:832` |
 | POST | `…/api/graphiti/discover` | `onBuildKnowledgeGraph` | `src/components/AppConfig/AppConfig.tsx:904` |
 | GET | `…/api/agent/runs/{runId}` | discovery poll | `src/components/AppConfig/AppConfig.tsx:848` |
@@ -41,7 +41,7 @@ Configuration is gated twice: the nav entry requires role `Admin`, and the actio
 | `mcpServers` | `jsonData` | `[]` | `src/components/AppConfig/AppConfig.tsx:291` |
 | `kioskModeEnabled` | `jsonData` | `true` | `src/components/AppConfig/AppConfig.tsx:301` |
 | `chatPanelPosition` | `jsonData` | `right` | `src/components/AppConfig/AppConfig.tsx:302` |
-| `skills.entries` | `jsonData` | `{}` | `src/components/AppConfig/AppConfig.tsx:944` |
+| `skills.entries` | `jsonData` | `{}` | `src/components/AppConfig/AppConfig.tsx:959` |
 ### MCP tool names
 | Tool | Read-only | Evidence |
 |---|---|---|
@@ -58,7 +58,7 @@ Configuration is gated twice: the nav entry requires role `Admin`, and the actio
 9. `plugin.json` exposes the app at `/a/%PLUGIN_ID%` with action `agent:read`. `VERIFIED` — `src/plugin.json:64`
 10. The Configuration nav entry requires role `Admin` and action `settings:write`. `VERIFIED` — `src/plugin.json:76`
 11. Role grants: Reader to Viewer, Editor, Admin; Operator to Editor, Admin; Administrator to Admin. `VERIFIED` — `src/plugin.json:90`
-12. The config page has six tabs in fixed order: General, Agent Runtime, MCP, Service Graph, Skills, Prompts. `VERIFIED` — `src/components/AppConfig/AppConfig.tsx:163`
+12. The config page has six tabs in fixed order: General, Agent Runtime, MCP, Service Graph, Skills, Prompts. `VERIFIED` — `src/components/AppConfig/AppConfig.tsx:164`
 13. The tab is restored from sessionStorage after a save and reload. `VERIFIED` — test `restores the active settings tab from session storage`
 14. A tab change rewrites the hash with `replaceState` and stores the tab. `ASSUMED` — `src/components/AppConfig/AppConfig.tsx:266`
 15. A dirty tab shows `*` plus an "Unsaved changes" Alert. `VERIFIED` — test `shows unsaved changes notice for edited settings tabs`
@@ -66,13 +66,13 @@ Configuration is gated twice: the nav entry requires role `Admin`, and the actio
 17. The Skills tab never counts as dirty, because it saves on each action. `VERIFIED` — `src/components/AppConfig/AppConfig.tsx:488`
 18. General writes `maxTotalTokens`. `VERIFIED` — `src/components/AppConfig/AppConfig.tsx:982`
 19. `maxTotalTokens` must be 1000..200000; Save is disabled outside it. `VERIFIED` — test `should save valid config and reject invalid token limits`
-20. General also writes `kioskModeEnabled` and `chatPanelPosition`. `VERIFIED` — `src/components/AppConfig/AppConfig.tsx:1826`
+20. General also writes `kioskModeEnabled` and `chatPanelPosition`. `VERIFIED` — `src/components/AppConfig/AppConfig.tsx:1848`
 21. Agent Runtime writes the approval policy, the parallel-call cap, eval capture, four context limits, summarization, and tool search. `VERIFIED` — `src/components/AppConfig/AppConfig.tsx:997`
 22. `maxParallelToolCalls` must be 1..16. `VERIFIED` — `src/components/AppConfig/AppConfig.tsx:396`
 23. Tool search mode is `off`, `auto`, or `on`. `VERIFIED` — `src/components/AppConfig/AppConfig.tsx:153`
 24. Discovery threshold input shows only in `auto` mode and must be 1..100000. `VERIFIED` — `src/components/AppConfig/AppConfig.tsx:1264`
 25. `alwaysInclude` splits on commas, trims each name, and drops empty entries. `VERIFIED` — `src/components/AppConfig/AppConfig.tsx:1010`
-26. MCP writes `mcpServers`, `useBuiltInMCP`, `builtInMCPToolSelections`, `useLocalGrafanaURL`, `localGrafanaPort`, and `trustedMCPServers`. `VERIFIED` — `src/components/AppConfig/AppConfig.tsx:1110`
+26. MCP writes `mcpServers`, `useBuiltInMCP`, `builtInMCPToolSelections`, `useLocalGrafanaURL`, `localGrafanaPort`, and `trustedMCPServers`. `VERIFIED` — `src/components/AppConfig/AppConfig.tsx:1125`
 27. A new server gets id `mcp-<epoch>`, name "New MCP Server", type `openapi`, and enabled state. `VERIFIED` — `src/components/AppConfig/AppConfig.tsx:579`
 28. A blank server name blocks save with "Server name is required". `VERIFIED` — `src/components/AppConfig/AppConfig.tsx:1026`
 29. A non-empty URL must be http or https, or save is blocked. `VERIFIED` — `src/services/validation.ts:82`
@@ -80,9 +80,9 @@ Configuration is gated twice: the nav entry requires role `Admin`, and the actio
 31. Server types are `openapi`, `standard`, `sse`, and `streamable-http`. `VERIFIED` — test `should add, configure, and remove MCP servers`
 32. A server holds at most 10 custom headers. `VERIFIED` — `src/components/AppConfig/AppConfig.tsx:679`
 33. A blank header key disables the Add Header button. `VERIFIED` — test `should disable add-header when incomplete header exists`
-34. Header values save to `secureJsonData` as `mcpServerHeader.<serverId>.<key>`. `VERIFIED` — `src/components/AppConfig/AppConfig.tsx:1079`
+34. Header values save to `secureJsonData` as `mcpServerHeader.<serverId>.<key>`. `VERIFIED` — `src/components/AppConfig/AppConfig.tsx:1094`
 35. A duplicate normalised header key blocks save and shows an error Alert. `VERIFIED` — `src/components/AppConfig/AppConfig.tsx:1056`
-36. The built-in MCP toggle is disabled when `grafana-llm-app` MCP is unavailable. `VERIFIED` — `src/components/AppConfig/AppConfig.tsx:1467`
+36. The built-in MCP toggle is disabled when `grafana-llm-app` MCP is unavailable. `VERIFIED` — `src/components/AppConfig/AppConfig.tsx:1482`
 37. Server status badges poll every 15 s and read "Status unknown" without data. `VERIFIED` — `src/components/AppConfig/AppConfig.tsx:346`
 38. Removing a server stages its stored header secrets for deletion. `ASSUMED` — `src/components/AppConfig/AppConfig.tsx:638`
 39. The Skills tab writes `jsonData.skills.entries` on each action. `VERIFIED` — `src/components/AppConfig/AppConfig.tsx:938`
@@ -122,7 +122,7 @@ Coverage tags:
 | Store | Key or table | TTL | Fallback | Evidence |
 |---|---|---|---|---|
 | Plugin jsonData | all keys above | plugin lifetime | constants above | `src/components/AppConfig/AppConfig.tsx:285` |
-| Plugin secureJsonData | `mcpServerHeader.<serverId>.<key>` | plugin lifetime | empty | `src/components/AppConfig/AppConfig.tsx:1079` |
+| Plugin secureJsonData | `mcpServerHeader.<serverId>.<key>` | plugin lifetime | empty | `src/components/AppConfig/AppConfig.tsx:1094` |
 | sessionStorage | `settings.activeTab` | tab lifetime | `general` | `src/components/AppConfig/AppConfig.tsx:161` |
 ## Observability
 | Signal | Name | Where | Evidence |
@@ -131,7 +131,7 @@ Coverage tags:
 | Log field | none; failed saves surface through the Grafana settings API | — | `GAP` |
 ## Evidence Index
 - `src/module.tsx:32` — plugin registration
-- `src/components/AppConfig/AppConfig.tsx:163` — tab list
+- `src/components/AppConfig/AppConfig.tsx:164` — tab list
 - `src/utils/rbac.ts:22` — client RBAC helper
 - `pkg/rbac/rbac.go:12` — server RBAC rule
 - `tests/appConfig.spec.ts` — `should add, configure, and remove MCP servers` — MCP editor contract
