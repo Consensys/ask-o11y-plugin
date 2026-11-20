@@ -5,6 +5,14 @@ All notable changes to the Ask O11y Grafana plugin will be documented in this fi
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0](https://github.com/Consensys/ask-o11y-plugin/compare/v0.3.30...v0.4.0) (2026-11-20)
+
+
+### Features
+
+* **backend:** add autonomous agent workflows scheduler, sessions, spawn, and watchdog ([#260](https://github.com/Consensys/ask-o11y-plugin/issues/260)) ([d650d40](https://github.com/Consensys/ask-o11y-plugin/commit/d650d4064824a63ca0194a1c9892e3fa9a75a0ea))
+* **backend:** add workflows status api and config ui tab ([#261](https://github.com/Consensys/ask-o11y-plugin/issues/261)) ([91d858f](https://github.com/Consensys/ask-o11y-plugin/commit/91d858fb30329bc0ec4c8f8f2609f9faad9e8697))
+
 ## [0.3.30](https://github.com/Consensys/ask-o11y-plugin/compare/v0.3.29...v0.3.30) (2026-11-16)
 
 
