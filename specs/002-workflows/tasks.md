@@ -115,6 +115,19 @@
 
 ---
 
+## Phase 10: Config UI increment (2026-11-20)
+
+**Purpose**: The Workflows tab in AppConfig and its status API.
+
+- [x] T025 [P] Create `pkg/plugin/workflow_status.go`: per-instance status store (tick outcomes, session counters, last error) and the `GET /api/workflows` handler (Admin only). Unit and handler tests in `pkg/plugin/workflow_status_test.go`.
+- [x] T026 Wire status recording into the scheduler tick and the session runner; register the route; add the OpenAPI entry and pass `validate:openapi`.
+- [x] T027 [P] Add `WorkflowEntryUI` to the plugin types and the `workflows` field to `AppPluginSettings`.
+- [x] T028 Create `src/components/AppConfig/Workflows.tsx`: status table, empty state, retry, enable toggle with immediate save-and-reload through the standard settings path. Component tests in `Workflows.test.tsx`.
+- [x] T029 Wire the tab into `AppConfig.tsx` (tab registry, dirty map, save callback).
+- [x] T030 Amend this spec (User Story 8, FR-019 to FR-021, FR-017 note) in the same PR.
+
+---
+
 ## Dependencies & Execution Order
 
 - **Phase 1** blocks every story. T001 to T004 are parallel; T005 depends on nothing but is consumed by T008.

@@ -65,7 +65,7 @@ Both survive a pod restart when Redis is configured.
 Coverage: `VERIFIED` = code pointer or test; `ASSUMED` = code suggests, no test; `GAP` = missing or contradictory.
 
 1. `GET /api/sessions` returns metadata only, sorted by `UpdatedAt` descending. `VERIFIED` — `pkg/plugin/sessionstore.go:185`
-2. `POST /api/sessions` creates the session, then sets it as current. `VERIFIED` — `pkg/plugin/plugin.go:2616`
+2. `POST /api/sessions` creates the session, then sets it as current. `VERIFIED` — `pkg/plugin/plugin.go:2620`
 3. The store interface holds 14 methods, from `CreateSession` to `CleanupOld`. `VERIFIED` — `pkg/plugin/sessionstore.go:74`
 4. The owner key is `"<userID>:<orgID>"`; every read and write is scoped by it. `VERIFIED` — `pkg/plugin/sessionstore.go:94`
 5. A session owned by another user or org returns `session not found`. `VERIFIED` — `pkg/plugin/sessionstore.go:175`
@@ -108,7 +108,7 @@ Coverage: `VERIFIED` = code pointer or test; `ASSUMED` = code suggests, no test;
 | Condition | User-visible result | Evidence |
 |---|---|---|
 | Session ID is malformed | 400 `Invalid session ID format` | `pkg/plugin/plugin.go:2707` |
-| Session is missing or owned by another user | 404 `Session not found` | `pkg/plugin/plugin.go:2715` |
+| Session is missing or owned by another user | 404 `Session not found` | `pkg/plugin/plugin.go:2719` |
 | Run belongs to another user or org | 403 `Access denied` | `pkg/plugin/plugin.go:1339` |
 | Redis is unreachable at startup | In-memory stores; the health message warns | `pkg/plugin/plugin.go:570` |
 

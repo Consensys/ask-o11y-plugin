@@ -79,7 +79,7 @@ The decision body is `{"decision":"approved\|rejected","comment":"...","approval
 27. After a denial the loop continues and the model can choose another action. `VERIFIED` — `pkg/agent/loop.go:1082`
 28. With no registrar, the call fails with "requires approval before execution". `VERIFIED` — `pkg/agent/loop.go:1048`
 29. A decision accepts `approved`, `approve`, `accepted`, or `accept` for approval, and the mirrored deny forms. `VERIFIED` — `pkg/plugin/plugin.go:2376`
-30. An unrecognised decision returns 400. `VERIFIED` — `pkg/plugin/plugin.go:1489`
+30. An unrecognised decision returns 400. `VERIFIED` — `pkg/plugin/plugin.go:1493`
 31. A repeated identical decision returns 200 and the stored decision. `VERIFIED` — test `TestHandleAgentApprovalIsIdempotentForDuplicateDecision`
 32. A conflicting second decision returns 409. `VERIFIED` — test `TestHandleAgentApprovalRejectsConflictingDuplicateDecision`
 33. An unknown or expired approval returns 409. `VERIFIED` — test `TestHandleAgentApprovalUnknownPendingStillConflicts`
@@ -88,7 +88,7 @@ The decision body is `{"decision":"approved\|rejected","comment":"...","approval
 36. Redis resolution is a Lua compare-and-set, so a duplicate decision cannot overwrite the first. `VERIFIED` — `pkg/plugin/approval_broker.go:278`
 37. The `trusted` server flag is recorded on the risk result but never read by the gate. `GAP` — `pkg/mcp/risk.go:26`
 38. No HTTP route lists or revokes saved grants; the only write path is approve-always. `GAP` — `pkg/plugin/plugin.go:1476`
-39. The in-memory broker is unsafe with more than one Grafana replica; the code only logs a warning. `GAP` — `pkg/plugin/plugin.go:420`
+39. The in-memory broker is unsafe with more than one Grafana replica; the code only logs a warning. `GAP` — `pkg/plugin/plugin.go:422`
 40. Deleting a session also deletes its saved approval grants, and deleting all sessions deletes every grant of that user. `VERIFIED` — `pkg/plugin/plugin.go:2613`, `pkg/plugin/plugin.go:2783`, `pkg/plugin/approval_grants.go:153`
 ## Invariants
 - Only an Admin or Editor can resolve an approval. `VERIFIED` — `pkg/plugin/plugin.go:1455`

@@ -20,9 +20,9 @@ Limits stay correct across replicas when Redis is configured.
 
 | Capability | Admin | Editor | Viewer | Evidence |
 |---|---|---|---|---|
-| Create a share link for own session | yes | yes | yes | `pkg/plugin/plugin.go:2366` |
+| Create a share link for own session | yes | yes | yes | `pkg/plugin/plugin.go:2370` |
 | Read a share link in the same org | yes | yes | yes | `pkg/plugin/plugin.go:2455` |
-| Revoke a share that they created | yes | yes | yes | `pkg/plugin/plugin.go:2543` |
+| Revoke a share that they created | yes | yes | yes | `pkg/plugin/plugin.go:2547` |
 | List shares for own sessions | yes | yes | yes | `pkg/plugin/plugin.go:2774` |
 
 ## Contract
@@ -31,16 +31,16 @@ Limits stay correct across replicas when Redis is configured.
 
 | Method | Path | Handler | Evidence |
 |---|---|---|---|
-| POST | `/api/sessions/share` | `handleCreateShare` | `pkg/plugin/plugin.go:2366` |
+| POST | `/api/sessions/share` | `handleCreateShare` | `pkg/plugin/plugin.go:2370` |
 | GET | `/api/sessions/shared/{shareId}` | `handleGetSharedSession` | `pkg/plugin/plugin.go:2455` |
 | DELETE | `/api/sessions/share/{shareId}` | `handleDeleteShare` | `pkg/plugin/plugin.go:2534` |
-| GET | `/api/sessions/{id}/shares` | `handleGetSessionShares` | `pkg/plugin/plugin.go:2773` |
+| GET | `/api/sessions/{id}/shares` | `handleGetSessionShares` | `pkg/plugin/plugin.go:2777` |
 
 ### SSE events
 
 | Event | Payload fields | Evidence |
 |---|---|---|
-| None. Every share route returns JSON. | — | `pkg/plugin/plugin.go:2451` |
+| None. Every share route returns JSON. | — | `pkg/plugin/plugin.go:2455` |
 
 ### Configuration keys
 
@@ -80,9 +80,9 @@ Limits stay correct across replicas when Redis is configured.
 17. The Redis limiter fails closed: a Redis error denies the request. `VERIFIED` — `pkg/plugin/ratelimit.go:143`
 18. Share keys are `share:{shareID}` with the computed TTL. `VERIFIED` — `pkg/plugin/shares_redis.go:67`
 19. A session index `session:{sessionID}:shares` holds the share IDs and keeps the longest TTL. `VERIFIED` — `pkg/plugin/shares_redis.go:94`
-20. `GET` on a share returns the stored snapshot, plus `isShared: true` and `sharedBy` set to the owner ID as a string. `VERIFIED` — `pkg/plugin/plugin.go:2502`
+20. `GET` on a share returns the stored snapshot, plus `isShared: true` and `sharedBy` set to the owner ID as a string. `VERIFIED` — `pkg/plugin/plugin.go:2506`
 21. A share from another org returns HTTP 403. `VERIFIED` — `pkg/plugin/plugin.go:2490`
-22. Only the creator may revoke a share; another user gets HTTP 403. `VERIFIED` — `pkg/plugin/plugin.go:2543`
+22. Only the creator may revoke a share; another user gets HTTP 403. `VERIFIED` — `pkg/plugin/plugin.go:2547`
 23. The shared payload is the snapshot sent at creation, not a live view of the session. `VERIFIED` — `pkg/plugin/shares.go:79`
 24. Agent runs use a separate limiter with 30 per hour; a denial returns HTTP 429. `VERIFIED` — `pkg/plugin/plugin.go:893`
 25. Direct tool calls use a separate limiter with 120 per hour; a denial returns HTTP 429. `VERIFIED` — `pkg/plugin/plugin.go:794`
@@ -95,7 +95,7 @@ Coverage: `VERIFIED` = code pointer or test; `ASSUMED` = code suggests, no test;
 ## Invariants
 
 - A share is readable only inside the org that created it. `VERIFIED` — `pkg/plugin/plugin.go:2490`
-- A share is revocable only by its creator. `VERIFIED` — `pkg/plugin/plugin.go:2543`
+- A share is revocable only by its creator. `VERIFIED` — `pkg/plugin/plugin.go:2547`
 - The Redis limiter never allows traffic when Redis is down. `VERIFIED` — `pkg/plugin/ratelimit.go:143`
 - The in-memory limiter map never exceeds 10 000 entries. `VERIFIED` — `pkg/plugin/ratelimit.go:61`
 
@@ -106,7 +106,7 @@ Coverage: `VERIFIED` = code pointer or test; `ASSUMED` = code suggests, no test;
 | `id` is missing or does not match `sessionId` | 400 `Session ID mismatch` | `pkg/plugin/plugin.go:2407` |
 | Share limit reached | 429 `Too many share requests. Please try again later.` | `pkg/plugin/plugin.go:2454` |
 | Share ID is unknown or expired | 404 `Share link not found` | `pkg/plugin/plugin.go:2506` |
-| Share belongs to another org | 403 `You don't have access to this shared session` | `pkg/plugin/plugin.go:2516` |
+| Share belongs to another org | 403 `You don't have access to this shared session` | `pkg/plugin/plugin.go:2520` |
 | Another user tries to revoke | 403 `You don't have permission to revoke this share` | `pkg/plugin/plugin.go:2567` |
 
 ## Data and Persistence

@@ -125,6 +125,20 @@ Every workflow emits metrics: ticks executed, ticks skipped, sessions started, c
 1. **Given** a workflow that fails one session in ten ticks, **When** the operator reads the metrics, **Then** started is 10, failed is 1, completed is 9.
 2. **Given** a workflow identity, **When** the operator lists its sessions through the existing sessions API, **Then** workflow sessions are distinguishable from interactive sessions by their conversation type.
 
+### User Story 8 - The admin watches and toggles workflows in the config UI (Priority: P2)
+
+A Grafana admin opens the plugin configuration and sees one Workflows tab: every provisioned entry with its schedule, whether a scheduler runs for it on this instance, the last tick time and outcome, and the session outcome counters. Toggling a workflow enabled saves immediately and restarts the plugin instance, which restarts its schedulers.
+
+**Why this priority**: The feature is unattended; without a surface, an operator reads logs and metrics to answer is it on and is it working. It is P2 because the metrics and the sessions UI already answer the same questions for a patient operator.
+
+**Independent Test**: Configure one running and one disabled workflow; open the tab; assert both rows with status, and assert the toggle persists through the standard settings save.
+
+**Acceptance Scenarios**:
+
+1. **Given** two configured workflows, one running, **When** the admin opens the Workflows tab, **Then** both rows render with per-instance tick and session status.
+2. **Given** a running workflow, **When** the admin switches it off, **Then** the full entry list persists losslessly and the plugin instance reloads without the scheduler.
+3. **Given** a Viewer role request, **When** it calls the workflows API, **Then** it is refused.
+
 ### Edge Cases
 
 - Redis is configured but unreachable. The tick is skipped with an error log. No tick runs without the lock while Redis is configured.
@@ -161,8 +175,11 @@ Every workflow emits metrics: ticks executed, ticks skipped, sessions started, c
 - **FR-014**: A tick MUST skip with a rate-limited warning when the entry's org identity is not seeded. Identity seeding MUST follow the existing Scout pattern: org id and service-account token captured from the first inbound request in that org, token refreshed on later requests.
 - **FR-015**: Workflow runs MUST NOT send `X-Grafana-Org-Id` with service-account auth, and MUST reuse the org-resolution and token path of an interactive run in the same org. No new cross-org surface is introduced.
 - **FR-016**: The system MUST emit per-workflow metrics: ticks executed, ticks skipped (by lock, by identity, by error), sessions started, completed, failed, cancelled, active spawned sessions, and run duration.
-- **FR-017**: No new HTTP route ships in this feature. The OpenAPI spec MUST NOT change.
+- **FR-017**: The original scope shipped no HTTP route. The config-UI increment (2026-11-20, same feature branch) adds exactly one: `GET /api/workflows`. The OpenAPI spec entry ships in the same commit.
 - **FR-018**: Dry-run behaviour MUST be achieved by allowlist composition (omit the write tools), not by a separate mode.
+- **FR-019**: The system MUST expose `GET /api/workflows` (Admin only) returning every configured entry joined with this plugin instance's runtime status: last tick time, last tick outcome, session outcome counters, and the last tick error when a tick could not proceed.
+- **FR-020**: The status counters MUST be per-instance; the API MUST NOT present them as cluster-wide totals.
+- **FR-021**: The AppConfig UI MUST provide a Workflows tab listing every entry with its status and an enable toggle whose save persists the full workflow list losslessly and restarts the plugin instance.
 
 ### Key Entities
 
@@ -192,7 +209,7 @@ Every workflow emits metrics: ticks executed, ticks skipped, sessions started, c
 - Workflow state lives in the tenant's system of record (IRM alert groups, incidents, custom fields). The plugin stores run records only.
 - One org per workflow entry in v1. Multi-org fan-out is out of scope.
 - The synthetic workflow identity is not a real Grafana user; humans reach workflow sessions only through share links.
-- No inbound webhook trigger, no UI tab, and no template gallery in v1.
+- No inbound webhook trigger and no template gallery. The AppConfig Workflows tab, originally deferred, shipped in the config-UI increment.
 - Tenant workflow content, including any porting references, stays out of this repository; it carries tenant identifiers.
 - Existing Redis, session store, run store, skills, and approval machinery are reused without modification to their contracts.
 

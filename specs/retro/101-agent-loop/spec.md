@@ -58,8 +58,8 @@ The run store adds `sequence` to every event (`pkg/plugin/runstore.go:183`). The
 | `load_skill` | yes (internal, never sent to MCP) | `pkg/agent/loop.go:45` |
 | `search_tools` | yes (internal, never sent to MCP) | `pkg/agent/search_tools.go:28` |
 ## Behaviour Rules
-1. The run returns immediately and the loop runs on a detached context. `VERIFIED` — `pkg/plugin/plugin.go:1167`
-2. The loop starts in one goroutine and the event consumer in another. `VERIFIED` — `pkg/plugin/plugin.go:1174`
+1. The run returns immediately and the loop runs on a detached context. `VERIFIED` — `pkg/plugin/plugin.go:1171`
+2. The loop starts in one goroutine and the event consumer in another. `VERIFIED` — `pkg/plugin/plugin.go:1178`
 3. The iteration cap is `LoopRequest.MaxIterations`; zero or less becomes 25. `VERIFIED` — `pkg/agent/loop.go:144`
 4. The plugin sets the cap from the highest skill `maxIterations`, then from `resolveMaxIterations`. `VERIFIED` — `pkg/plugin/plugin.go:1128`
 5. `resolveMaxIterations` returns 50 for chat and 60 for alert investigations. `VERIFIED` — `pkg/plugin/config.go:45`
