@@ -87,4 +87,24 @@ export type AppPluginSettings = {
   approvalPolicy?: string;
   maxParallelToolCalls?: number;
   agentEvalCaptureEnabled?: boolean;
+
+  /** Provisioned autonomous workflow entries (see the plugin README, Workflows). */
+  workflows?: WorkflowEntryUI[];
+};
+
+/** Frontend mirror of pkg/plugin WorkflowEntry (jsonData.workflows). */
+export type WorkflowEntryUI = {
+  name: string;
+  enabled: boolean;
+  orgId: number;
+  skill: string;
+  message?: string;
+  model?: string;
+  intervalSeconds?: number;
+  maxIterations?: number;
+  toolAllowlist: string[];
+  spawnableSkills?: string[];
+  maxConcurrentSessions?: number;
+  sessionTimeoutSeconds?: number;
+  fallbackSkill?: string;
 };
