@@ -2,10 +2,13 @@ package plugin
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"hash/fnv"
 	"sync"
 	"time"
+
+	"consensys-asko11y-app/pkg/mcp"
 
 	"github.com/redis/go-redis/v9"
 )
@@ -63,6 +66,41 @@ func (p *Plugin) workflowActiveSpawnRemove(name, runID string) {
 	p.workflowActiveSpawnRefreshGauge(name)
 }
 
+// workflowSpawnTryAddScript admits one spawned session atomically: prune
+// expired members, count, and only add when below the cap. The check and the
+// add are one round trip so concurrent dispatchers (overlapping ticks,
+// parallel tool calls) cannot both pass the count before either adds.
+var workflowSpawnTryAddScript = redis.NewScript(`
+redis.call("ZREMRANGEBYSCORE", KEYS[1], "-inf", ARGV[1])
+local count = redis.call("ZCARD", KEYS[1])
+if count >= tonumber(ARGV[4]) then
+	return 0
+end
+redis.call("ZADD", KEYS[1], ARGV[2], ARGV[3])
+return 1
+`)
+
+// workflowActiveSpawnTryAdd admits a spawned session under the workflow's
+// cap in one atomic step. Returns false when the cap is reached.
+func (p *Plugin) workflowActiveSpawnTryAdd(name, runID string, deadline time.Time, cap int) (bool, error) {
+	if p.redisClient == nil {
+		return false, fmt.Errorf("redis is not configured")
+	}
+	ctx, cancel := redisContext(p.ctx, RedisOpTimeout)
+	defer cancel()
+	res, err := workflowSpawnTryAddScript.Run(ctx, p.redisClient,
+		[]string{workflowActiveSpawnKey(name)},
+		fmt.Sprintf("%d", time.Now().Unix()),
+		fmt.Sprintf("%d", deadline.Unix()),
+		runID,
+		cap,
+	).Int()
+	if err != nil {
+		return false, err
+	}
+	return res == 1, nil
+}
+
 // workflowActiveSpawnCount prunes expired members and returns the number of
 // active spawned sessions for a workflow.
 func (p *Plugin) workflowActiveSpawnCount(name string) (int, error) {
@@ -75,7 +113,11 @@ func (p *Plugin) workflowActiveSpawnCount(name string) (int, error) {
 	if err := p.redisClient.ZRemRangeByScore(ctx, key, "-inf", fmt.Sprintf("%d", time.Now().Unix())).Err(); err != nil {
 		return 0, err
 	}
-	return int(p.redisClient.ZCard(ctx, key).Val()), nil
+	card, err := p.redisClient.ZCard(ctx, key).Result()
+	if err != nil {
+		return 0, err
+	}
+	return int(card), nil
 }
 
 // workflowActiveSpawnRefreshGauge syncs the metric with the stored count.
@@ -148,6 +190,21 @@ func (s *WorkflowScheduler) tick() {
 		return
 	}
 
+	// Identity before the lock: the org identity is per replica (seeded by
+	// the requests that replica served). An unseeded holder must not take
+	// the tick lock, or the seeded replica would skip the tick as locked and
+	// the workflow would never run under sticky-session routing.
+	grafanaURL, saToken, seeded := s.p.orgIdentity.Get(s.entry.OrgID)
+	if !seeded {
+		if time.Since(s.lastIdentityWarn) >= identityWarnInterval {
+			s.lastIdentityWarn = time.Now()
+			s.p.logger.Warn("Workflow tick skipped: org identity not yet seeded; it seeds from the first user request in this org",
+				"workflow", name, "orgId", s.entry.OrgID)
+		}
+		workflowTicks.WithLabelValues(label, "skip_identity").Inc()
+		return
+	}
+
 	ttl := time.Duration(s.entry.IntervalSec/2) * time.Second
 	held, err := acquireWorkflowTickLock(s.ctx, s.p.redisClient, name, ttl)
 	if err != nil {
@@ -161,19 +218,8 @@ func (s *WorkflowScheduler) tick() {
 		return
 	}
 
-	grafanaURL, saToken, seeded := s.p.orgIdentity.Get(s.entry.OrgID)
-	if !seeded {
-		if time.Since(s.lastIdentityWarn) >= identityWarnInterval {
-			s.lastIdentityWarn = time.Now()
-			s.p.logger.Warn("Workflow tick skipped: org identity not yet seeded; it seeds from the first user request in this org",
-				"workflow", name, "orgId", s.entry.OrgID)
-		}
-		workflowTicks.WithLabelValues(label, "skip_identity").Inc()
-		return
-	}
-
 	workflowTicks.WithLabelValues(label, "executed").Inc()
-	s.p.startWorkflowSession(workflowRunParams{
+	if _, _, startErr := s.p.startWorkflowSession(workflowRunParams{
 		entry:       s.entry,
 		skill:       s.entry.Skill,
 		message:     workflowMessage(s.entry),
@@ -182,13 +228,19 @@ func (s *WorkflowScheduler) tick() {
 		syntheticID: syntheticWorkflowUserID(name),
 		spawned:     false,
 		isFallback:  false,
-	})
+	}); startErr != nil {
+		// The failed-session metric is incremented inside; log so the tick is
+		// never silently unhealthy.
+		s.p.logger.Error("Workflow tick failed to start its session", "workflow", name, "error", startErr)
+	}
 }
 
 // deferredAllowlistValidation re-validates the entry once tools are listable.
 // Returns true when the entry is valid (or already checked); false when this
-// tick must not proceed — including when validation failed and the scheduler
-// stopped itself.
+// tick must not proceed. An unknown allowlist tool only disables the entry
+// once every configured MCP server reports healthy — a partial catalog (one
+// server still connecting) means the tool may simply not be listed yet, so
+// the check retries on later ticks instead of killing the workflow.
 func (s *WorkflowScheduler) deferredAllowlistValidation() bool {
 	tools, err := s.p.mcpProxy.ListTools()
 	if err != nil || len(tools) == 0 {
@@ -200,12 +252,37 @@ func (s *WorkflowScheduler) deferredAllowlistValidation() bool {
 		known[t.Name] = true
 	}
 	if err := validateWorkflowEntry(s.entry, s.p.skillRegistry, known); err != nil {
+		if errors.Is(err, errWorkflowUnknownTool) && !s.mcpCatalogStable() {
+			s.p.logger.Warn("Workflow allowlist validation deferred: MCP catalog not yet stable",
+				"workflow", s.entry.Name, "error", err)
+			return false
+		}
 		s.p.logger.Error("Workflow disabled: invalid configuration", "workflow", s.entry.Name, "error", err)
 		workflowTicks.WithLabelValues(workflowLabel(s.entry.Name), "skip_error").Inc()
 		s.cancel()
 		return false
 	}
 	s.allowlistChecked = true
+	return true
+}
+
+// mcpCatalogStable reports whether every monitored MCP server is healthy.
+// Only then is a tool listing complete enough to trust an unknown-tool
+// verdict; otherwise a missing server could masquerade as a bad allowlist.
+func (s *WorkflowScheduler) mcpCatalogStable() bool {
+	monitor := s.p.mcpProxy.GetHealthMonitor()
+	if monitor == nil {
+		return false
+	}
+	all := monitor.GetAllHealth()
+	if len(all) == 0 {
+		return false
+	}
+	for _, h := range all {
+		if h.Status != mcp.StatusHealthy {
+			return false
+		}
+	}
 	return true
 }
 

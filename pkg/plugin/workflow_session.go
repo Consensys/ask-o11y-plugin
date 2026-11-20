@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strconv"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -26,11 +27,23 @@ type workflowRunParams struct {
 	isFallback  bool
 }
 
-// startWorkflowSession does the synchronous setup for one headless session —
-// skill activation, prompt build, session and run records — then launches the
-// loop and its watchdog in goroutines and returns the identifiers. It never
-// blocks on the LLM.
+// startWorkflowSession does the synchronous setup for one headless session
+// with a freshly generated run ID. See startWorkflowSessionWithID.
 func (p *Plugin) startWorkflowSession(params workflowRunParams) (string, string, error) {
+	runID, err := generateShareID()
+	if err != nil {
+		return "", "", fmt.Errorf("run ID generation failed: %w", err)
+	}
+	return p.startWorkflowSessionWithID(params, runID)
+}
+
+// startWorkflowSessionWithID does the synchronous setup for one headless
+// session under a caller-supplied run ID — skill activation, prompt build,
+// session and run records — then launches the loop and its watchdog in
+// goroutines and returns the identifiers. It never blocks on the LLM. The
+// spawn tool supplies the ID so Redis admission and the run record use the
+// same identifier.
+func (p *Plugin) startWorkflowSessionWithID(params workflowRunParams, runID string) (string, string, error) {
 	entry := params.entry
 	name := entry.Name
 	orgID := entry.OrgID
@@ -65,10 +78,6 @@ func (p *Plugin) startWorkflowSession(params workflowRunParams) (string, string,
 		return "", "", fmt.Errorf("workflow %s: user prompt build failed: %w", name, err)
 	}
 
-	runID, err := generateShareID()
-	if err != nil {
-		return "", "", fmt.Errorf("workflow %s: run ID generation failed: %w", name, err)
-	}
 	title := fmt.Sprintf("Workflow %s: %s", name, params.skill)
 	if params.spawned {
 		title = fmt.Sprintf("Workflow %s (spawned): %s", name, params.skill)
@@ -78,6 +87,7 @@ func (p *Plugin) startWorkflowSession(params workflowRunParams) (string, string,
 		Content: userPrompt,
 	}})
 	if err != nil {
+		workflowSessions.WithLabelValues(workflowLabel(name), "failed").Inc()
 		return "", "", fmt.Errorf("workflow %s: session creation failed: %w", name, err)
 	}
 	sessionID := session.ID
@@ -144,7 +154,7 @@ func (p *Plugin) startWorkflowSession(params workflowRunParams) (string, string,
 		ApprovalPolicy:       "off",
 		MaxParallelToolCalls: p.settings.MaxParallelToolCalls,
 		ToolSearch:           p.settings.ToolSearch,
-		InternalTools:        p.buildWorkflowInternalTools(params, sessionID),
+		InternalTools:        p.buildWorkflowInternalTools(params, sessionID, runID),
 	}
 
 	p.logger.Info("Workflow session started",
@@ -161,7 +171,14 @@ func (p *Plugin) startWorkflowSession(params workflowRunParams) (string, string,
 	runCtx, runCancel := context.WithCancel(p.ctx)
 
 	p.runCancelsMu.Lock()
-	p.runCancels[runID] = runCancel
+	if p.runCancels != nil {
+		p.runCancels[runID] = runCancel
+	} else {
+		// Dispose already cleared the registry: the plugin is shutting down.
+		// Cancel now so this session ends immediately instead of assigning
+		// into a nil map.
+		runCancel()
+	}
 	p.runCancelsMu.Unlock()
 
 	var timedOut atomic.Bool
@@ -183,15 +200,19 @@ func (p *Plugin) startWorkflowSession(params workflowRunParams) (string, string,
 		delete(p.runCancels, runID)
 		p.runCancelsMu.Unlock()
 
+		// The run status is read first: a run that completed right at the
+		// deadline stays completed even if the watchdog timer fired in the
+		// race window between the consumer returning and the timer stopping.
+		run, getErr := p.runStore.GetRun(runID)
 		outcome := "failed"
-		if timedOut.Load() {
+		if getErr == nil && run.Status == RunStatusCompleted {
+			outcome = "completed"
+		} else if timedOut.Load() {
 			p.runStore.FinishRun(runID, RunStatusFailed,
 				fmt.Sprintf("workflow session exceeded its %d second timeout", entry.SessionTimeoutSeconds))
 			outcome = "timeout"
-		} else if run, getErr := p.runStore.GetRun(runID); getErr == nil {
+		} else if getErr == nil {
 			switch run.Status {
-			case RunStatusCompleted:
-				outcome = "completed"
 			case RunStatusCancelled:
 				outcome = "cancelled"
 			}
@@ -242,9 +263,9 @@ func (p *Plugin) maybeRunWorkflowFallback(params workflowRunParams, outcome stri
 // buildWorkflowInternalTools injects the workflow-only tools for one session:
 // share_session always; spawn_session only for a top-level dispatcher session
 // of a workflow that allows spawning. They exist nowhere else.
-func (p *Plugin) buildWorkflowInternalTools(params workflowRunParams, sessionID string) []agent.InternalTool {
+func (p *Plugin) buildWorkflowInternalTools(params workflowRunParams, sessionID, runID string) []agent.InternalTool {
 	entry := params.entry
-	tools := []agent.InternalTool{p.workflowShareTool(params, sessionID)}
+	tools := []agent.InternalTool{p.workflowShareTool(params, sessionID, runID)}
 	if !params.spawned && !params.isFallback && len(entry.SpawnableSkills) > 0 {
 		tools = append(tools, p.workflowSpawnTool(params))
 	}
@@ -303,16 +324,24 @@ func (p *Plugin) handleWorkflowSpawn(params workflowRunParams, arguments string,
 			args.Skill, joinQuoted(allowed)), true
 	}
 
-	count, err := p.workflowActiveSpawnCount(params.entry.Name)
+	// Admission is atomic and uses the real run ID: the count and the add
+	// are one Redis script, so overlapping ticks or parallel tool calls
+	// cannot both pass the cap, and a refused spawn starts no session.
+	runID, err := generateShareID()
+	if err != nil {
+		return fmt.Sprintf("spawn_session failed: %v", err), true
+	}
+	deadline := time.Now().Add(time.Duration(params.entry.SessionTimeoutSeconds) * time.Second)
+	admitted, err := p.workflowActiveSpawnTryAdd(params.entry.Name, runID, deadline, params.entry.MaxConcurrentSessions)
 	if err != nil {
 		return fmt.Sprintf("spawn_session refused: the concurrency check is unavailable (%v); retry on a later run", err), true
 	}
-	if count >= params.entry.MaxConcurrentSessions {
-		return fmt.Sprintf("spawn_session refused: %d of %d sessions are already active. Finish or wait; retry on a later run",
-			count, params.entry.MaxConcurrentSessions), true
+	if !admitted {
+		return fmt.Sprintf("spawn_session refused: the workflow is at its cap of %d active sessions. Finish or wait; retry on a later run",
+			params.entry.MaxConcurrentSessions), true
 	}
 
-	sessionID, runID, err := p.startWorkflowSession(workflowRunParams{
+	sessionID, _, err := p.startWorkflowSessionWithID(workflowRunParams{
 		entry:       params.entry,
 		skill:       args.Skill,
 		message:     args.Message,
@@ -321,16 +350,12 @@ func (p *Plugin) handleWorkflowSpawn(params workflowRunParams, arguments string,
 		syntheticID: params.syntheticID,
 		spawned:     true,
 		isFallback:  false,
-	})
+	}, runID)
 	if err != nil {
+		// Release the admission slot the failed start never occupied with a
+		// running session.
+		p.workflowActiveSpawnRemove(params.entry.Name, runID)
 		return fmt.Sprintf("spawn_session failed: %v", err), true
-	}
-
-	deadline := time.Now().Add(time.Duration(params.entry.SessionTimeoutSeconds) * time.Second)
-	if err := p.workflowActiveSpawnAdd(params.entry.Name, runID, deadline); err != nil {
-		// The session runs and is watchdog-bounded regardless; only the cap
-		// accounting missed it. Surface, never hide.
-		p.logger.Error("Workflow active-set add failed", "workflow", params.entry.Name, "runId", runID, "error", err)
 	}
 	p.workflowActiveSpawnRefreshGauge(params.entry.Name)
 
@@ -338,11 +363,12 @@ func (p *Plugin) handleWorkflowSpawn(params workflowRunParams, arguments string,
 	return string(result), false
 }
 
-func (p *Plugin) workflowShareTool(params workflowRunParams, sessionID string) agent.InternalTool {
+func (p *Plugin) workflowShareTool(params workflowRunParams, sessionID, runID string) agent.InternalTool {
 	return agent.InternalTool{
 		Name: shareSessionToolName,
 		Description: "Creates a share link for this session that a human can open without logging in as you, " +
-			"and returns the full URL. Post that URL whenever you publish findings so humans can read the full investigation.",
+			"and returns the full URL. The link snapshots everything so far, so call it once your investigation " +
+			"and findings are written out, and post that URL wherever you publish the findings.",
 		Parameters: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
@@ -353,14 +379,16 @@ func (p *Plugin) workflowShareTool(params workflowRunParams, sessionID string) a
 			},
 		},
 		Handler: func(ctx context.Context, arguments string) (string, bool) {
-			return p.handleWorkflowShare(params, sessionID, arguments)
+			return p.handleWorkflowShare(params, sessionID, runID, arguments)
 		},
 	}
 }
 
-// handleWorkflowShare executes one share_session call: it snapshots the
-// current session and stores it through the existing share mechanism.
-func (p *Plugin) handleWorkflowShare(params workflowRunParams, sessionID, arguments string) (string, bool) {
+// handleWorkflowShare executes one share_session call. The snapshot is the
+// live investigation, not just the persisted session: assistant messages and
+// tool results only land in the session store after the loop finishes, so
+// the share merges the stored messages with this run's events so far.
+func (p *Plugin) handleWorkflowShare(params workflowRunParams, sessionID, runID, arguments string) (string, bool) {
 	var args struct {
 		ExpiresInDays int `json:"expiresInDays,omitempty"`
 	}
@@ -381,7 +409,18 @@ func (p *Plugin) handleWorkflowShare(params workflowRunParams, sessionID, argume
 	if err != nil {
 		return fmt.Sprintf("share_session failed: session %s could not be read: %v", sessionID, err), true
 	}
-	data, err := json.Marshal(session)
+
+	snapshot := workflowShareSnapshot{
+		ID:               session.ID,
+		Title:            session.Title,
+		ConversationType: session.ConversationType,
+		Workflow:         session.Workflow,
+		CreatedAt:        session.CreatedAt,
+		Messages:         append([]SessionMessage(nil), session.Messages...),
+	}
+	snapshot.Messages = append(snapshot.Messages, workflowRunTranscript(p, runID)...)
+
+	data, err := json.Marshal(snapshot)
 	if err != nil {
 		return fmt.Sprintf("share_session failed: session snapshot could not be encoded: %v", err), true
 	}
@@ -396,6 +435,53 @@ func (p *Plugin) handleWorkflowShare(params workflowRunParams, sessionID, argume
 	}
 	return fmt.Sprintf("Share link (valid %d days): %s/a/%s/shared/%s?orgId=%d",
 		days, params.grafanaURL, PluginID, share.ShareID, params.entry.OrgID), false
+}
+
+// workflowShareSnapshot is the session-shaped payload stored for a workflow
+// share: the same fields the shared-session viewer renders.
+type workflowShareSnapshot struct {
+	ID               string           `json:"id"`
+	Title            string           `json:"title"`
+	ConversationType string           `json:"conversationType,omitempty"`
+	Workflow         string           `json:"workflow,omitempty"`
+	CreatedAt        time.Time        `json:"createdAt"`
+	Messages         []SessionMessage `json:"messages"`
+}
+
+// workflowRunTranscript renders a run's SSE events as readable messages for
+// a share snapshot: streamed assistant content joins into one assistant
+// message, and each successful tool result becomes its own block.
+func workflowRunTranscript(p *Plugin, runID string) []SessionMessage {
+	run, err := p.runStore.GetRun(runID)
+	if err != nil || len(run.Events) == 0 {
+		return nil
+	}
+	var out []SessionMessage
+	var content strings.Builder
+	flush := func() {
+		if content.Len() > 0 {
+			out = append(out, SessionMessage{Role: "assistant", Content: content.String()})
+			content.Reset()
+		}
+	}
+	for _, event := range run.Events {
+		switch event.Type {
+		case "content":
+			if ce, ok := event.Data.(agent.ContentEvent); ok {
+				content.WriteString(ce.Content)
+			}
+		case "tool_call_result":
+			if te, ok := event.Data.(agent.ToolCallResultEvent); ok && !te.IsError {
+				flush()
+				out = append(out, SessionMessage{
+					Role:    "assistant",
+					Content: fmt.Sprintf("Tool %s returned:\n%s", te.Name, te.Content),
+				})
+			}
+		}
+	}
+	flush()
+	return out
 }
 
 // joinQuoted renders a short "a", "b", "c" list for tool descriptions and

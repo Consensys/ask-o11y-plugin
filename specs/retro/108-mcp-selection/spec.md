@@ -36,7 +36,7 @@ Role names are matched case-sensitively. Any unknown role is treated as Viewer.
 | Method | Path | Handler | Evidence |
 |---|---|---|---|
 | GET | `/api/mcp/tools` | `handleMCPTools` | `pkg/plugin/plugin.go:729` |
-| POST | `/api/mcp/call-tool` | `handleMCPCallTool` | `pkg/plugin/plugin.go:761` |
+| POST | `/api/mcp/call-tool` | `handleMCPCallTool` | `pkg/plugin/plugin.go:762` |
 
 ### SSE events
 
@@ -107,7 +107,7 @@ Both meta-tools bypass MCP filtering by design. `pkg/agent/tools.go:26`
 
 | Condition | User-visible result | Evidence |
 |---|---|---|
-| Viewer asks for a write tool | 403 `Access denied: Viewer role cannot access tool ...` | `pkg/plugin/plugin.go:804` |
+| Viewer asks for a write tool | 403 `Access denied: Viewer role cannot access tool ...` | `pkg/plugin/plugin.go:805` |
 | Tool disabled by selection | 403 `Tool is not enabled` | `pkg/plugin/plugin.go:832` |
 | Agent calls a denied tool | Tool result `Access denied: ...` | `pkg/agent/loop.go:975` |
 | Agent calls a disabled tool | Tool result `Tool ... is disabled in MCP server settings` | `pkg/agent/loop.go:1011` |

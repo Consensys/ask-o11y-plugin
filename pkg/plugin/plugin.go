@@ -531,6 +531,18 @@ func NewPlugin(ctx context.Context, settings backend.AppInstanceSettings) (insta
 }
 
 func (p *Plugin) Dispose() {
+	// Stop the scout and the workflow schedulers first: their in-flight work
+	// must finish before anything it depends on goes away, and before the
+	// run-cancel registry is cleared — a tick that is starting a session
+	// assigns into it, and the nil-map guard in startWorkflowSessionWithID
+	// covers only the residual window after this point.
+	if p.scout != nil {
+		p.scout.Stop()
+	}
+	if p.workflows != nil {
+		p.workflows.Stop()
+	}
+
 	p.runCancelsMu.Lock()
 	for _, cancel := range p.runCancels {
 		cancel()
@@ -542,17 +554,6 @@ func (p *Plugin) Dispose() {
 	}
 	if p.approvalGrants != nil {
 		p.approvalGrants.Close()
-	}
-
-	// Stop the scout before closing the proxy so its in-flight scavenge can finish.
-	if p.scout != nil {
-		p.scout.Stop()
-	}
-
-	// Stop workflow schedulers the same way: an in-flight tick must finish
-	// before the proxy and Redis close under it.
-	if p.workflows != nil {
-		p.workflows.Stop()
 	}
 
 	// Close proxy and Redis before cancelling context so that

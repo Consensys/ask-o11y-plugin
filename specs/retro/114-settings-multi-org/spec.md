@@ -31,7 +31,7 @@ Every record and tool call is scoped to the org that made the request.
 | Method | Path | Handler | Evidence |
 |---|---|---|---|
 | GET | `/health` | `handleHealth` | `pkg/plugin/plugin.go:602` |
-| GET | `/openapi.json` | `handleOpenAPISpec` | `pkg/plugin/plugin.go:581` |
+| GET | `/openapi.json` | `handleOpenAPISpec` | `pkg/plugin/plugin.go:582` |
 
 ### SSE events
 
@@ -74,7 +74,7 @@ Every record and tool call is scoped to the org that made the request.
 11. The Grafana URL resolution order is: local loopback, `GrafanaConfig.AppURL`, then the base-URL fallback. `VERIFIED` — `pkg/plugin/plugin.go:54`
 12. All HTTP clients come from `httpclient.New`, with a 30-second timeout for OAuth and 600 seconds for LLM calls. `VERIFIED` — `pkg/plugin/plugin.go:370`
 13. The LLM client never sets `X-Grafana-Org-Id`; the SA token is Org-1 scoped. `VERIFIED` — `pkg/agent/llm_client.go:324`
-14. `getOrgID` reads the server-populated plugin context and defaults to `1` when absent. `VERIFIED` — `pkg/plugin/plugin.go:2332`
+14. `getOrgID` reads the server-populated plugin context and defaults to `1` when absent. `VERIFIED` — `pkg/plugin/plugin.go:2333`
 15. When `orgID` is not `1`, the LLM client logs a warning and still sends the token without an org header. `VERIFIED` — `pkg/agent/llm_client.go:326`
 16. MCP calls do send `X-Grafana-Org-Id` with the caller's org. `VERIFIED` — `pkg/mcp/client.go:112`
 17. The context-first rule is tested. `VERIFIED` — test `TestGetOrgIDPrefersPluginContext`

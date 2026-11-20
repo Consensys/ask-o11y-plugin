@@ -74,7 +74,7 @@ Tags: `VERIFIED` (code pointer or test), `ASSUMED` (untested), `GAP` (missing).
 6. `discover` and `ingest-session` return 503 when Graphiti is unavailable. `VERIFIED` — `pkg/plugin/plugin.go:2099`
 7. Both write routes share the agent rate limiter and return 429 when exhausted. `VERIFIED` — `pkg/plugin/plugin.go:2094`
 8. `discover` starts a hidden agent run: type `discovery`, 50 iterations, `large` model, approvals off. `VERIFIED` — `pkg/plugin/plugin.go:2132`
-9. Discovery excludes every Graphiti write tool from the model. `VERIFIED` — `pkg/plugin/plugin.go:2150`
+9. Discovery excludes every Graphiti write tool from the model. `VERIFIED` — `pkg/plugin/plugin.go:2151`
 10. `discover` returns `{runId, status: "running"}` immediately. `VERIFIED` — `pkg/plugin/plugin.go:2178`
 11. Discovery ingests its synthesis as episode `discovery_synthesis` only when the run ends with `done`. `VERIFIED` — `pkg/plugin/plugin.go:2198`
 12. Discovery synthesis is the concatenated assistant content, truncated to 12,000 chars. `VERIFIED` — `pkg/plugin/graphiti_memory.go:88`
@@ -84,9 +84,9 @@ Tags: `VERIFIED` (code pointer or test), `ASSUMED` (untested), `GAP` (missing).
 16. `ingest-session` rejects an empty message list or one with no non-empty content. `VERIFIED` — `pkg/plugin/plugin.go:2292`
 17. Ingest uses the last 12 turns, 1,200 chars per message, 12,000 chars total. `VERIFIED` — `pkg/plugin/graphiti_memory.go:17`
 18. A manual ingest writes episode `investigation_session` with source `message` and returns `{ingested: n}`. `VERIFIED` — `pkg/plugin/plugin.go:2286`
-19. An ingest failure returns 500 with a generic message; the cause goes to the log. `VERIFIED` — `pkg/plugin/plugin.go:2318`
+19. An ingest failure returns 500 with a generic message; the cause goes to the log. `VERIFIED` — `pkg/plugin/plugin.go:2319`
 20. Every run that ends with `done` auto-saves its session unless disabled. `VERIFIED` — `pkg/plugin/plugin.go:1278`
-21. Auto-save is best-effort: a failure only logs. `VERIFIED` — `pkg/plugin/plugin.go:1315`
+21. Auto-save is best-effort: a failure only logs. `VERIFIED` — `pkg/plugin/plugin.go:1316`
 22. Every Graphiti call is scoped to `group_id = org_<orgID>`. `VERIFIED` — `pkg/plugin/config.go:8`
 23. The agent's Graphiti tool arguments are rewritten to the current org scope, ignoring model input. `VERIFIED` — `pkg/mcp/selection.go:76`
 24. An available graph appends a scoping instruction block to the system prompt. `VERIFIED` — `pkg/plugin/plugin.go:1002`
@@ -98,7 +98,7 @@ Tags: `VERIFIED` (code pointer or test), `ASSUMED` (untested), `GAP` (missing).
 
 ## Invariants
 
-- Write tools never reach the model; Go performs every graph write. `VERIFIED` — `pkg/plugin/plugin.go:2150`
+- Write tools never reach the model; Go performs every graph write. `VERIFIED` — `pkg/plugin/plugin.go:2151`
 - Cross-org reads are impossible: the group ID is derived, never supplied. `VERIFIED` — `pkg/mcp/selection.go:72`
 - A graph outage never fails a chat run. `VERIFIED` — `pkg/plugin/plugin.go:1278`
 
@@ -110,8 +110,8 @@ Tags: `VERIFIED` (code pointer or test), `ASSUMED` (untested), `GAP` (missing).
 | Graphiti registered but unreachable | `status` reports `enabled: true, connected: false` | `pkg/plugin/plugin.go:2090` |
 | Discovery request from Viewer | HTTP 403 `Access denied` | `pkg/plugin/plugin.go:2090` |
 | Ingest body over 1 MiB | HTTP 400 `Invalid request body` | `pkg/plugin/plugin.go:2259` |
-| Ingest write fails | HTTP 500 `Failed to ingest session` | `pkg/plugin/plugin.go:2318` |
-| Auto-save fails | Nothing shown; warning logged | `pkg/plugin/plugin.go:1315` |
+| Ingest write fails | HTTP 500 `Failed to ingest session` | `pkg/plugin/plugin.go:2319` |
+| Auto-save fails | Nothing shown; warning logged | `pkg/plugin/plugin.go:1316` |
 
 ## Data and Persistence
 

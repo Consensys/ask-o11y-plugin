@@ -580,10 +580,12 @@ func (a *AgentLoop) Run(ctx context.Context, req LoopRequest, eventCh chan<- SSE
 				}
 			}
 
-			// Meta-tools are never replayed: search_tools activates tool
-			// definitions and load_skill activates a skill, so a cached reply
-			// would skip the state change the model asked for.
-			if !isMetaTool(tc.Function.Name) {
+			// Meta-tools and injected internal tools are never replayed:
+			// search_tools activates tool definitions, load_skill activates a
+			// skill, and internal tools like spawn_session start state outside
+			// the loop — a cached reply would skip the state change the model
+			// asked for.
+			if _, isInternalToolCall := req.internalTool(tc.Function.Name); !isMetaTool(tc.Function.Name) && !isInternalToolCall {
 				if hit, exact := stall.checkExact(sigs[i]); exact {
 					cachedHits[i] = hit
 					skipped[i] = true

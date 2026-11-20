@@ -22,7 +22,7 @@ Both survive a pod restart when Redis is configured.
 |---|---|---|---|---|
 | Manage own sessions and the current session | yes | yes | yes | `pkg/plugin/plugin.go:2560` |
 | Start, read, cancel, or stream a run | yes | yes | yes | `pkg/plugin/plugin.go:876` |
-| Approve a pending tool call | yes | yes | no | `pkg/plugin/plugin.go:1454` |
+| Approve a pending tool call | yes | yes | no | `pkg/plugin/plugin.go:1455` |
 
 ## Contract
 
@@ -31,7 +31,7 @@ Both survive a pod restart when Redis is configured.
 | Method | Path | Handler | Evidence |
 |---|---|---|---|
 | POST | `/api/agent/run` | `handleAgentRun` | `pkg/plugin/plugin.go:876` |
-| GET | `/api/agent/runs/{id}` | `handleAgentRuns` | `pkg/plugin/plugin.go:1368` |
+| GET | `/api/agent/runs/{id}` | `handleAgentRuns` | `pkg/plugin/plugin.go:1369` |
 | GET | `/api/agent/runs/{id}/events` | `handleAgentRunEvents` | `pkg/plugin/plugin.go:1607` |
 | POST | `/api/agent/runs/{id}/cancel` | `handleCancelRun` | `pkg/plugin/plugin.go:1584` |
 | GET, POST, DELETE | `/api/sessions` | `handleSessionsRoot` | `pkg/plugin/plugin.go:2560` |
@@ -95,7 +95,7 @@ Coverage: `VERIFIED` = code pointer or test; `ASSUMED` = code suggests, no test;
 29. Every other control request body is capped at 1 MiB. `VERIFIED` — `pkg/plugin/request.go:16`
 30. Workflow sessions are created by the workflow runner under a synthetic user ID (FNV of `"workflow:<name>"`), owned like any other session by `"<userID>:<orgID>"`. `VERIFIED` — `pkg/plugin/workflows.go:161`, `pkg/plugin/workflow_session.go:33`
 31. A session record carries optional `conversationType` (workflow sessions set `workflow`) and `workflow` (the workflow name); interactive sessions never set them. `VERIFIED` — `pkg/plugin/sessionstore.go:33`, `pkg/plugin/workflow_session.go:78`
-32. Workflow sessions reuse the run store, stats, assistant-message persistence, and share mechanism unchanged. `VERIFIED` — `pkg/plugin/workflow_session.go:172`, `pkg/plugin/workflow_session.go:270`
+32. Workflow sessions reuse the run store, stats, assistant-message persistence, and share mechanism unchanged. `VERIFIED` — `pkg/plugin/workflow_session.go:189`, `pkg/plugin/workflow_session.go:270`
 
 ## Invariants
 

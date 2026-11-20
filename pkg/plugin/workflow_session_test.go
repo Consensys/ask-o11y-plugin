@@ -248,26 +248,26 @@ func TestBuildWorkflowInternalToolsScoping(t *testing.T) {
 	entry.SpawnableSkills = []string{"investigate"}
 	params := workflowRunParams{entry: entry, syntheticID: 1}
 
-	top := p.buildWorkflowInternalTools(params, "sess-1")
+	top := p.buildWorkflowInternalTools(params, "sess-1", "run-1")
 	if len(top) != 2 {
 		t.Fatalf("top-level dispatcher session must get share and spawn tools, got %d", len(top))
 	}
 
 	spawned := params
 	spawned.spawned = true
-	if got := p.buildWorkflowInternalTools(spawned, "sess-2"); len(got) != 1 {
+	if got := p.buildWorkflowInternalTools(spawned, "sess-2", "run"); len(got) != 1 {
 		t.Fatalf("spawned session must get only the share tool, got %d", len(got))
 	}
 
 	fallback := params
 	fallback.isFallback = true
-	if got := p.buildWorkflowInternalTools(fallback, "sess-3"); len(got) != 1 {
+	if got := p.buildWorkflowInternalTools(fallback, "sess-3", "run"); len(got) != 1 {
 		t.Fatalf("fallback session must never spawn, got %d tools", len(got))
 	}
 
 	noSpawn := params
 	noSpawn.entry.SpawnableSkills = nil
-	if got := p.buildWorkflowInternalTools(noSpawn, "sess-4"); len(got) != 1 {
+	if got := p.buildWorkflowInternalTools(noSpawn, "sess-4", "run"); len(got) != 1 {
 		t.Fatalf("workflow without spawnable skills must not offer spawn, got %d", len(got))
 	}
 }
@@ -369,7 +369,8 @@ func TestWorkflowShareToolCreatesLink(t *testing.T) {
 		syntheticID: syntheticWorkflowUserID("share-wf"),
 	}
 
-	// A session with one message is the minimum valid share payload.
+	// A session with one message plus a run holding streamed content and a
+	// tool result: the share snapshot must carry the live investigation.
 	session, err := p.sessionStore.CreateSession(params.syntheticID, entry.OrgID, "workflow share test", []SessionMessage{{
 		Role:    "user",
 		Content: "findings",
@@ -377,8 +378,16 @@ func TestWorkflowShareToolCreatesLink(t *testing.T) {
 	if err != nil {
 		t.Fatalf("session creation failed: %v", err)
 	}
+	runID := "share-run-1"
+	p.runStore.CreateRun(runID, params.syntheticID, entry.OrgID, session.ID)
+	p.runStore.AppendEvent(runID, agent.SSEEvent{Type: "content", Data: agent.ContentEvent{Content: "Root cause: "}})
+	p.runStore.AppendEvent(runID, agent.SSEEvent{Type: "content", Data: agent.ContentEvent{Content: "disk saturation."}})
+	p.runStore.AppendEvent(runID, agent.SSEEvent{
+		Type: "tool_call_result",
+		Data: agent.ToolCallResultEvent{Name: "query_prometheus", Content: "up 0", IsError: false},
+	})
 
-	content, isErr := p.handleWorkflowShare(params, session.ID, `{}`)
+	content, isErr := p.handleWorkflowShare(params, session.ID, runID, `{}`)
 	if isErr {
 		t.Fatalf("share must succeed: %q", content)
 	}
@@ -389,11 +398,61 @@ func TestWorkflowShareToolCreatesLink(t *testing.T) {
 		t.Fatalf("share must carry the org, got %q", content)
 	}
 
+	// The stored snapshot must include the live run transcript, not only the
+	// persisted user prompt.
+	parts := strings.Split(content, "/shared/")
+	if len(parts) != 2 {
+		t.Fatalf("share URL shape unexpected: %q", content)
+	}
+	shareID := strings.SplitN(parts[1], "?", 2)[0]
+	share, getErr := p.shareStore.GetShare(shareID)
+	if getErr != nil {
+		t.Fatalf("share must be retrievable: %v", getErr)
+	}
+	body := string(share.SessionData)
+	if !strings.Contains(body, "disk saturation.") {
+		t.Fatalf("share snapshot must carry streamed assistant content: %s", body)
+	}
+	if !strings.Contains(body, "query_prometheus") {
+		t.Fatalf("share snapshot must carry tool results: %s", body)
+	}
+
 	// Explicit lifetime is honored and bounded.
-	if content, isErr := p.handleWorkflowShare(params, session.ID, `{"expiresInDays":7}`); isErr || !strings.Contains(content, "7 days") {
+	if content, isErr := p.handleWorkflowShare(params, session.ID, runID, `{"expiresInDays":7}`); isErr || !strings.Contains(content, "7 days") {
 		t.Fatalf("explicit lifetime must be honored, got isErr=%v content=%q", isErr, content)
 	}
-	if _, isErr := p.handleWorkflowShare(params, session.ID, `{"expiresInDays":4000}`); !isErr {
+	if _, isErr := p.handleWorkflowShare(params, session.ID, runID, `{"expiresInDays":4000}`); !isErr {
 		t.Fatal("out-of-range lifetime must be refused")
 	}
+}
+
+// TestWorkflowSessionWithNilRunCancelsDoesNotPanic covers shutdown racing a
+// session start: Dispose clears the run-cancel registry, and a session that
+// starts after that must be cancelled cleanly instead of assigning into the
+// nil map.
+func TestWorkflowSessionWithNilRunCancelsDoesNotPanic(t *testing.T) {
+	p, grafanaURL := newWorkflowTestPlugin(t, stubLLMHanging())
+
+	entry := validWorkflowEntry()
+	entry.Name = "nilcancels-wf"
+	entry.Skill = "dispatch"
+	entry.SessionTimeoutSeconds = 30
+	p.runCancels = nil // simulates the Dispose window
+
+	syntheticID := syntheticWorkflowUserID("nilcancels-wf")
+	_, runID, err := p.startWorkflowSession(workflowRunParams{
+		entry:       entry,
+		skill:       "dispatch",
+		message:     "Sweep.",
+		grafanaURL:  grafanaURL,
+		saToken:     "test-token",
+		syntheticID: syntheticID,
+	})
+	if err != nil {
+		t.Fatalf("session start failed: %v", err)
+	}
+
+	waitForCondition(t, 15*time.Second, "cancelled run", func() bool {
+		return runStatus(p, runID) != RunStatusRunning && runStatus(p, runID) != ""
+	})
 }

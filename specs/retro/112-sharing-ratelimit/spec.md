@@ -61,12 +61,12 @@ Limits stay correct across replicas when Redis is configured.
 
 ## Behaviour Rules
 
-1. A share link is created only when the body validates and the embedded `id` equals `sessionId`. `VERIFIED` — `pkg/plugin/plugin.go:2430`
+1. A share link is created only when the body validates and the embedded `id` equals `sessionId`. `VERIFIED` — `pkg/plugin/plugin.go:2431`
 2. The body must contain `id` and a non-empty `messages` array. `VERIFIED` — `pkg/plugin/shareutil.go:31`
 3. Body validation is tested. `VERIFIED` — test `TestValidateSessionData_MissingID`
 4. The share ID is 32 bytes from `crypto/rand`, base64url encoded without padding, so 43 characters and 256 bits of entropy. `VERIFIED` — `pkg/plugin/shareutil.go:20`
 5. An ID is accepted only when its length equals `EncodedLen(32)` and it decodes. `VERIFIED` — `pkg/plugin/shareutil.go:11`
-6. `expiresInHours` takes precedence over `expiresInDays`; both must be positive. `VERIFIED` — `pkg/plugin/plugin.go:2436`
+6. `expiresInHours` takes precedence over `expiresInDays`; both must be positive. `VERIFIED` — `pkg/plugin/plugin.go:2437`
 7. Explicit expiry sets `ExpiresAt` and a matching TTL. `VERIFIED` — `pkg/plugin/shareutil.go:61`
 8. With no explicit expiry, in-memory `ExpiresAt` is null, so the share never expires there. `VERIFIED` — test `TestShareStore_CreateShare_NoExpiry`
 9. With no explicit expiry, Redis applies `DefaultShareMaxTTL` of 365 days. `VERIFIED` — `pkg/plugin/shareutil.go:68`
@@ -103,11 +103,11 @@ Coverage: `VERIFIED` = code pointer or test; `ASSUMED` = code suggests, no test;
 
 | Condition | User-visible result | Evidence |
 |---|---|---|
-| `id` is missing or does not match `sessionId` | 400 `Session ID mismatch` | `pkg/plugin/plugin.go:2406` |
+| `id` is missing or does not match `sessionId` | 400 `Session ID mismatch` | `pkg/plugin/plugin.go:2407` |
 | Share limit reached | 429 `Too many share requests. Please try again later.` | `pkg/plugin/plugin.go:2454` |
 | Share ID is unknown or expired | 404 `Share link not found` | `pkg/plugin/plugin.go:2506` |
 | Share belongs to another org | 403 `You don't have access to this shared session` | `pkg/plugin/plugin.go:2516` |
-| Another user tries to revoke | 403 `You don't have permission to revoke this share` | `pkg/plugin/plugin.go:2566` |
+| Another user tries to revoke | 403 `You don't have permission to revoke this share` | `pkg/plugin/plugin.go:2567` |
 
 ## Data and Persistence
 

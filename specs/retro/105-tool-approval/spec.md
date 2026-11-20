@@ -16,12 +16,12 @@ A risky tool call pauses until a human approves it. The user can approve once, a
 ## Actors and RBAC
 | Capability | Admin | Editor | Viewer | Evidence |
 |---|---|---|---|---|
-| Approve or deny a pending call | yes | yes | no | `pkg/plugin/plugin.go:1454` |
+| Approve or deny a pending call | yes | yes | no | `pkg/plugin/plugin.go:1455` |
 | Approve a tool for the whole session | yes | yes | no | `pkg/plugin/plugin.go:1476` |
 | Decide on another user's run | no | no | no | `pkg/plugin/plugin.go:1446` |
 | Trigger a gated call through the agent | yes | yes | read-only only | `pkg/agent/loop.go:1017` |
 | Read the decision in run state | yes | yes | yes | `pkg/plugin/runstore.go:298` |
-A Viewer cannot reach a gated write tool because RBAC removes it first. A Viewer cannot approve because the handler requires Admin or Editor. `VERIFIED` — `pkg/plugin/plugin.go:1454`
+A Viewer cannot reach a gated write tool because RBAC removes it first. A Viewer cannot approve because the handler requires Admin or Editor. `VERIFIED` — `pkg/plugin/plugin.go:1455`
 ## Contract
 ### HTTP endpoints
 | Method | Path | Handler | Evidence |
@@ -51,7 +51,7 @@ The decision body is `{"decision":"approved\|rejected","comment":"...","approval
 | `readOnlyHint: true` with no destructive or open-world signal | read | no | `pkg/mcp/risk.go:59` |
 ## Behaviour Rules
 1. Approval applies only when the policy is enabled and the risk requires it. `VERIFIED` — `pkg/agent/loop.go:1017`
-2. The policy is disabled by `""`, `off`, `none`, `never`, or `disabled`. `VERIFIED` — `pkg/agent/loop.go:1136`
+2. The policy is disabled by `""`, `off`, `none`, `never`, or `disabled`. `VERIFIED` — `pkg/agent/loop.go:1138`
 3. The default policy is `approval-gated-writes`. `VERIFIED` — `pkg/plugin/plugin.go:181`
 4. Approval is required for destructive, open-world, or non-read-only write tools. `VERIFIED` — `pkg/mcp/risk.go:59`
 5. A per-tool override can force approval on or off. `VERIFIED` — test `TestClassifyToolRisk_OverrideCanForceApproval`
@@ -68,7 +68,7 @@ The decision body is `{"decision":"approved\|rejected","comment":"...","approval
 16. The in-memory grant store never expires a grant. `VERIFIED` — `pkg/plugin/approval_grants.go:75`
 17. The Redis grant store writes a hash field with no TTL. `VERIFIED` — `pkg/plugin/approval_grants.go:146`
 18. Only an approved decision with scope `always` persists a grant. `VERIFIED` — `pkg/plugin/plugin.go:1476`
-19. A grant failure is logged; the decision still returns 200. `VERIFIED` — `pkg/plugin/plugin.go:1517`
+19. A grant failure is logged; the decision still returns 200. `VERIFIED` — `pkg/plugin/plugin.go:1518`
 20. The grant stores tool name, risk, reason, session id, and creation time from the run trace. `VERIFIED` — `pkg/plugin/plugin.go:1546`
 21. A missing or malformed approval id is rejected at registration. `VERIFIED` — `pkg/plugin/approval_broker.go:53`
 22. `registered` waits; `resolved` returns the earlier decision; `pending` returns an error. `VERIFIED` — `pkg/plugin/approval_broker.go:234`
@@ -89,9 +89,9 @@ The decision body is `{"decision":"approved\|rejected","comment":"...","approval
 37. The `trusted` server flag is recorded on the risk result but never read by the gate. `GAP` — `pkg/mcp/risk.go:26`
 38. No HTTP route lists or revokes saved grants; the only write path is approve-always. `GAP` — `pkg/plugin/plugin.go:1476`
 39. The in-memory broker is unsafe with more than one Grafana replica; the code only logs a warning. `GAP` — `pkg/plugin/plugin.go:420`
-40. Deleting a session also deletes its saved approval grants, and deleting all sessions deletes every grant of that user. `VERIFIED` — `pkg/plugin/plugin.go:2612`, `pkg/plugin/plugin.go:2783`, `pkg/plugin/approval_grants.go:153`
+40. Deleting a session also deletes its saved approval grants, and deleting all sessions deletes every grant of that user. `VERIFIED` — `pkg/plugin/plugin.go:2613`, `pkg/plugin/plugin.go:2783`, `pkg/plugin/approval_grants.go:153`
 ## Invariants
-- Only an Admin or Editor can resolve an approval. `VERIFIED` — `pkg/plugin/plugin.go:1454`
+- Only an Admin or Editor can resolve an approval. `VERIFIED` — `pkg/plugin/plugin.go:1455`
 - Only the run owner in the run org can resolve an approval. `VERIFIED` — `pkg/plugin/plugin.go:1446`
 - A viewed approval carries the tool name, risk, reason, and raw arguments. `VERIFIED` — `pkg/agent/loop.go:1048`
 - A decision resolves at most once; a later different decision conflicts. `VERIFIED` — `pkg/plugin/approval_broker.go:108`

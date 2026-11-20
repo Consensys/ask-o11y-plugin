@@ -18,8 +18,8 @@ The agent sends every completion request through the Grafana LLM app. It picks `
 |---|---|---|---|---|
 | Request `base` or `large` per run | yes | yes | yes | `pkg/plugin/agent_model.go:14` |
 | Reject an unsupported model value | yes | yes | yes | `pkg/plugin/plugin.go:913` |
-| Reject a conflicting session model | yes | yes | yes | `pkg/plugin/plugin.go:1029` |
-| Inherit the model from an active skill | yes | yes | yes | `pkg/plugin/plugin.go:1094` |
+| Reject a conflicting session model | yes | yes | yes | `pkg/plugin/plugin.go:1030` |
+| Inherit the model from an active skill | yes | yes | yes | `pkg/plugin/plugin.go:1095` |
 No role receives a different model. Model choice is not an RBAC boundary. `VERIFIED` — `pkg/plugin/agent_model.go:14`
 ## Contract
 ### HTTP endpoints
@@ -103,7 +103,7 @@ The transport emits no event of its own. A transport failure reaches the client 
 ## Data and Persistence
 | Store | Key or table | TTL | Fallback | Evidence |
 |---|---|---|---|---|
-| Session model | `session.Model` | session TTL | auto selection | `pkg/plugin/plugin.go:1033` |
+| Session model | `session.Model` | session TTL | auto selection | `pkg/plugin/plugin.go:1034` |
 | Token counter | `asko11y_agent_user_tokens_total` | process lifetime | none | `pkg/plugin/metrics.go:19` |
 | Conversation history | in-memory message slice | run lifetime | none | `pkg/agent/loop.go:183` |
 ## Observability

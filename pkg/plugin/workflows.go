@@ -1,6 +1,7 @@
 package plugin
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
@@ -21,6 +22,12 @@ const (
 
 // workflowConversationType marks sessions created by the workflow runner.
 const workflowConversationType = "workflow"
+
+// errWorkflowUnknownTool marks an allowlist entry naming a tool no configured
+// MCP server provides. It is a sentinel because its handling differs from
+// other defects: while the MCP catalog is not yet stable, the tool may simply
+// not be listed yet, so the caller can defer instead of disabling the entry.
+var errWorkflowUnknownTool = errors.New("allowlist names unknown tool")
 
 // WorkflowEntry is one provisioned autonomous workflow. Entries arrive from
 // app instance settings jsonData.workflows (or the equivalent provisioning
@@ -97,7 +104,7 @@ func validateWorkflowEntry(entry WorkflowEntry, registry *skills.Registry, allow
 	if len(allowlistTools) > 0 {
 		for _, tool := range entry.ToolAllowlist {
 			if !allowlistTools[tool] {
-				return fmt.Errorf("workflow %s: allowlist names unknown tool %s", name, tool)
+				return fmt.Errorf("workflow %s: %w %s", name, errWorkflowUnknownTool, tool)
 			}
 		}
 	}

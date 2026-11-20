@@ -74,7 +74,7 @@ Tags: `VERIFIED` (code pointer or test), `ASSUMED` (untested), `GAP` (missing).
 12. POST returns 404 when capture is disabled. `VERIFIED` — `pkg/plugin/plugin.go:1822`
 13. POST rejects a Viewer with 403 and accepts Admin or Editor. `VERIFIED` — `pkg/plugin/plugin.go:1822`
 14. POST with `runId` scores one run after an ownership check. `VERIFIED` — `pkg/plugin/plugin.go:1839`
-15. POST without `runId` scores up to `limit` of the caller's recent runs. `VERIFIED` — `pkg/plugin/plugin.go:1845`
+15. POST without `runId` scores up to `limit` of the caller's recent runs. `VERIFIED` — `pkg/plugin/plugin.go:1846`
 16. POST returns `{status: "completed", results: [...]}`. `VERIFIED` — `pkg/plugin/plugin.go:1859`
 17. Scores are computed per request and never persisted; there is no eval store. `VERIFIED` — `pkg/plugin/agent_eval.go:36`
 18. Scout skips a scavenge until org ID, Grafana URL, and Graphiti tools are known. `VERIFIED` — `pkg/plugin/scout.go:152`

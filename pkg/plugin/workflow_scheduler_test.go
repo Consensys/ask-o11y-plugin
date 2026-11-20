@@ -196,4 +196,12 @@ func TestWorkflowTickSkipsWhenIdentityUnseeded(t *testing.T) {
 	if got := testutil.ToFloat64(workflowTicks.WithLabelValues("idskip-wf", "skip_identity")); got < 1 {
 		t.Fatalf("skip_identity must be counted, got %v", got)
 	}
+	// Identity is checked before the lock: an unseeded replica must not take
+	// the tick lock, or the seeded replica would find it held and skip.
+	lockCtx, lockCancel := redisContext(ctx, RedisOpTimeout)
+	defer lockCancel()
+	held, err := acquireWorkflowTickLock(lockCtx, client, "idskip-wf", time.Minute)
+	if err != nil || !held {
+		t.Fatalf("unseeded tick must leave the lock free: held=%v err=%v", held, err)
+	}
 }

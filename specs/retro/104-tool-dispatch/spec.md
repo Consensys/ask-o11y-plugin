@@ -60,7 +60,7 @@ The agent path has no dedicated route. The direct MCP edge is `POST /api/mcp/cal
 7. Tool definitions are rebuilt every iteration so new activations appear. `VERIFIED` — `pkg/agent/loop.go:303`
 8. Dispatch order is `search_tools`, then `load_skill`, then the approval gate. `VERIFIED` — `pkg/agent/loop.go:948`
 9. `search_tools` runs only when discovery is enabled for the run. `VERIFIED` — `pkg/agent/search_tools.go:349`
-10. Every other call resolves the tool by exact name in the proxy. `VERIFIED` — `pkg/agent/loop.go:970`
+10. Every other call resolves the tool by exact name in the proxy. `VERIFIED` — `pkg/agent/loop.go:972`
 11. An unknown tool returns `Unknown tool: <name>` with `isError` true and kind `tool`. `VERIFIED` — `pkg/agent/loop.go:972`
 12. RBAC is re-checked at execution. `VERIFIED` — `pkg/agent/loop.go:974`
 13. A tool disabled in server settings is rejected. `VERIFIED` — `pkg/agent/loop.go:976`
@@ -132,7 +132,7 @@ The agent path has no dedicated route. The direct MCP edge is `POST /api/mcp/cal
 - `pkg/agent/tools.go:7` — `ConvertMCPToolsToOpenAI`
 - `pkg/agent/toolindex.go:145` — `Search`
 - `pkg/agent/search_tools.go:347` — `executeSearchTools`
-- `pkg/agent/loop.go:956` — `batchParallelizable`
+- `pkg/agent/loop.go:958` — `batchParallelizable`
 - `pkg/agent/toolsearch_test.go` — `TestToolIndexRanksByCapability`, `TestToolIndexOnlyReturnsIndexedTools`, `TestToolRuntimeModeSelection`, `TestToolRuntimeActivationAndCaps`, `TestToolRuntimeTokenCapEvicts`, `TestToolRuntimeAlwaysInclude`, `TestAgentLoopToolSearchActivatesTools`
 - `pkg/agent/loop_test.go` — `TestAgentLoop_ParallelToolCallsRunConcurrently`, `TestAgentLoop_ParallelToolCallsPreserveOrder`, `TestAgentLoop_MaxParallelOneSerializes`, `TestAgentLoop_ApprovalGatedBatchStaysSequential`, `TestBatchParallelizable`
 ## Known Gaps
