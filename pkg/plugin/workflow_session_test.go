@@ -383,8 +383,12 @@ func TestWorkflowShareToolCreatesLink(t *testing.T) {
 	p.runStore.AppendEvent(runID, agent.SSEEvent{Type: "content", Data: agent.ContentEvent{Content: "Root cause: "}})
 	p.runStore.AppendEvent(runID, agent.SSEEvent{Type: "content", Data: agent.ContentEvent{Content: "disk saturation."}})
 	p.runStore.AppendEvent(runID, agent.SSEEvent{
+		Type: "tool_call_start",
+		Data: agent.ToolCallStartEvent{ID: "tc-1", Name: "query_prometheus", Arguments: "{}"},
+	})
+	p.runStore.AppendEvent(runID, agent.SSEEvent{
 		Type: "tool_call_result",
-		Data: agent.ToolCallResultEvent{Name: "query_prometheus", Content: "up 0", IsError: false},
+		Data: agent.ToolCallResultEvent{ID: "tc-1", Name: "query_prometheus", Content: "up 0", IsError: false},
 	})
 
 	content, isErr := p.handleWorkflowShare(params, session.ID, runID, `{}`)
@@ -423,6 +427,63 @@ func TestWorkflowShareToolCreatesLink(t *testing.T) {
 	}
 	if _, isErr := p.handleWorkflowShare(params, session.ID, runID, `{"expiresInDays":4000}`); !isErr {
 		t.Fatal("out-of-range lifetime must be refused")
+	}
+}
+
+// TestWorkflowShareTranscriptSurvivesRedisRunStore reproduces the production
+// encoding path: the Redis run store JSON-unmarshals event Data into maps,
+// not typed structs, so the share transcript must decode both.
+func TestWorkflowShareTranscriptSurvivesRedisRunStore(t *testing.T) {
+	client := workflowRedisTestClient(t)
+	p, grafanaURL := newWorkflowTestPlugin(t, stubLLMFinalAnswer("ok"))
+	p.redisClient = client
+	p.runStore = NewRedisRunStore(p.ctx, client, log.DefaultLogger)
+
+	entry := validWorkflowEntry()
+	entry.OrgID = 1
+	params := workflowRunParams{
+		entry:       entry,
+		grafanaURL:  grafanaURL,
+		saToken:     "test-token",
+		syntheticID: syntheticWorkflowUserID("share-redis-wf"),
+	}
+	session, err := p.sessionStore.CreateSession(params.syntheticID, entry.OrgID, "redis share test", []SessionMessage{{
+		Role:    "user",
+		Content: "findings",
+	}})
+	if err != nil {
+		t.Fatalf("session creation failed: %v", err)
+	}
+	runID := "share-redis-run-1"
+	p.runStore.CreateRun(runID, params.syntheticID, entry.OrgID, session.ID)
+	p.runStore.AppendEvent(runID, agent.SSEEvent{Type: "content", Data: agent.ContentEvent{Content: "Root cause: disk saturation."}})
+	p.runStore.AppendEvent(runID, agent.SSEEvent{
+		Type: "tool_call_start",
+		Data: agent.ToolCallStartEvent{ID: "tc-9", Name: "query_prometheus", Arguments: "{}"},
+	})
+	p.runStore.AppendEvent(runID, agent.SSEEvent{
+		Type: "tool_call_result",
+		Data: agent.ToolCallResultEvent{ID: "tc-9", Name: "query_prometheus", Content: "up 0", IsError: false},
+	})
+
+	content, isErr := p.handleWorkflowShare(params, session.ID, runID, `{}`)
+	if isErr {
+		t.Fatalf("share must succeed: %q", content)
+	}
+	parts := strings.Split(content, "/shared/")
+	if len(parts) != 2 {
+		t.Fatalf("share URL shape unexpected: %q", content)
+	}
+	share, getErr := p.shareStore.GetShare(strings.SplitN(parts[1], "?", 2)[0])
+	if getErr != nil {
+		t.Fatalf("share must be retrievable: %v", getErr)
+	}
+	body := string(share.SessionData)
+	if !strings.Contains(body, "disk saturation.") {
+		t.Fatalf("redis-encoded transcript must carry assistant content: %s", body)
+	}
+	if !strings.Contains(body, "query_prometheus") {
+		t.Fatalf("redis-encoded transcript must carry tool calls: %s", body)
 	}
 }
 

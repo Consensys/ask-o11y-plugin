@@ -448,40 +448,21 @@ type workflowShareSnapshot struct {
 	Messages         []SessionMessage `json:"messages"`
 }
 
-// workflowRunTranscript renders a run's SSE events as readable messages for
-// a share snapshot: streamed assistant content joins into one assistant
-// message, and each successful tool result becomes its own block.
+// workflowRunTranscript renders a run's SSE events as the assistant message
+// a human opening the share link should read. It reuses
+// reconstructAssistantMessage, which already handles both event encodings —
+// typed structs from an in-memory run store and JSON maps from the Redis run
+// store — and merges each tool call with its result.
 func workflowRunTranscript(p *Plugin, runID string) []SessionMessage {
 	run, err := p.runStore.GetRun(runID)
 	if err != nil || len(run.Events) == 0 {
 		return nil
 	}
-	var out []SessionMessage
-	var content strings.Builder
-	flush := func() {
-		if content.Len() > 0 {
-			out = append(out, SessionMessage{Role: "assistant", Content: content.String()})
-			content.Reset()
-		}
+	message := reconstructAssistantMessage(run.Events)
+	if strings.TrimSpace(message.Content) == "" && len(message.ToolCalls) == 0 {
+		return nil
 	}
-	for _, event := range run.Events {
-		switch event.Type {
-		case "content":
-			if ce, ok := event.Data.(agent.ContentEvent); ok {
-				content.WriteString(ce.Content)
-			}
-		case "tool_call_result":
-			if te, ok := event.Data.(agent.ToolCallResultEvent); ok && !te.IsError {
-				flush()
-				out = append(out, SessionMessage{
-					Role:    "assistant",
-					Content: fmt.Sprintf("Tool %s returned:\n%s", te.Name, te.Content),
-				})
-			}
-		}
-	}
-	flush()
-	return out
+	return []SessionMessage{message}
 }
 
 // joinQuoted renders a short "a", "b", "c" list for tool descriptions and
