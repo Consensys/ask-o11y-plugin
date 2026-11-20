@@ -166,6 +166,7 @@ func (p *Plugin) startWorkflowSessionWithID(params workflowRunParams, runID stri
 		"model", runModel,
 	)
 	workflowSessions.WithLabelValues(workflowLabel(name), "started").Inc()
+	p.workflowStatus.RecordSession(name, "started")
 
 	eventCh := make(chan agent.SSEEvent, 16)
 	runCtx, runCancel := context.WithCancel(p.ctx)
@@ -218,6 +219,7 @@ func (p *Plugin) startWorkflowSessionWithID(params workflowRunParams, runID stri
 			}
 		}
 		workflowSessions.WithLabelValues(workflowLabel(name), outcome).Inc()
+		p.workflowStatus.RecordSession(name, outcome)
 		observeWorkflowRunDuration(name, time.Since(started))
 
 		if params.spawned {

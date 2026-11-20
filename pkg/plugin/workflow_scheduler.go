@@ -202,6 +202,7 @@ func (s *WorkflowScheduler) tick() {
 				"workflow", name, "orgId", s.entry.OrgID)
 		}
 		workflowTicks.WithLabelValues(label, "skip_identity").Inc()
+		s.p.workflowStatus.RecordTick(name, "skip_identity")
 		return
 	}
 
@@ -210,15 +211,18 @@ func (s *WorkflowScheduler) tick() {
 	if err != nil {
 		s.p.logger.Error("Workflow tick skipped: tick lock unavailable", "workflow", name, "error", err)
 		workflowTicks.WithLabelValues(label, "skip_error").Inc()
+		s.p.workflowStatus.RecordTickError(name, "tick lock unavailable")
 		return
 	}
 	if !held {
 		// Another replica owns this tick. Skipping is the healthy path.
 		workflowTicks.WithLabelValues(label, "skip_lock").Inc()
+		s.p.workflowStatus.RecordTick(name, "skip_lock")
 		return
 	}
 
 	workflowTicks.WithLabelValues(label, "executed").Inc()
+	s.p.workflowStatus.RecordTick(name, "executed")
 	if _, _, startErr := s.p.startWorkflowSession(workflowRunParams{
 		entry:       s.entry,
 		skill:       s.entry.Skill,
@@ -232,6 +236,7 @@ func (s *WorkflowScheduler) tick() {
 		// The failed-session metric is incremented inside; log so the tick is
 		// never silently unhealthy.
 		s.p.logger.Error("Workflow tick failed to start its session", "workflow", name, "error", startErr)
+		s.p.workflowStatus.RecordTickError(name, startErr.Error())
 	}
 }
 
