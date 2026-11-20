@@ -24,7 +24,7 @@ Every activation is reviewable and role-safe.
 |---|---|---|---|---|
 | List skill metadata | yes | yes | yes | `pkg/plugin/plugin.go:1730` |
 | List content (`?include=content`) | yes | no | no | `pkg/plugin/plugin.go:1724` |
-| Activate a skill on a run | yes | yes | yes | `pkg/plugin/plugin.go:959` |
+| Activate a skill on a run | yes | yes | yes | `pkg/plugin/plugin.go:960` |
 
 ## Contract
 
@@ -32,8 +32,8 @@ Every activation is reviewable and role-safe.
 
 | Method | Path | Handler | Evidence |
 |---|---|---|---|
-| GET | `/api/skills` | `handleSkills` | `pkg/plugin/plugin.go:594` |
-| GET | `/api/prompt-defaults` | `handlePromptDefaults` | `pkg/plugin/plugin.go:1686` |
+| GET | `/api/skills` | `handleSkills` | `pkg/plugin/plugin.go:595` |
+| GET | `/api/prompt-defaults` | `handlePromptDefaults` | `pkg/plugin/plugin.go:1687` |
 
 ### SSE events
 

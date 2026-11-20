@@ -36,7 +36,7 @@ Role names are matched case-sensitively. Any unknown role is treated as Viewer.
 | Method | Path | Handler | Evidence |
 |---|---|---|---|
 | GET | `/api/mcp/tools` | `handleMCPTools` | `pkg/plugin/plugin.go:729` |
-| POST | `/api/mcp/call-tool` | `handleMCPCallTool` | `pkg/plugin/plugin.go:761` |
+| POST | `/api/mcp/call-tool` | `handleMCPCallTool` | `pkg/plugin/plugin.go:762` |
 
 ### SSE events
 
@@ -68,7 +68,7 @@ Both meta-tools bypass MCP filtering by design. `pkg/agent/tools.go:26`
 1. Listing applies the role filter first, then the per-server selection filter. `VERIFIED` — `pkg/plugin/plugin.go:747`
 2. An agent run applies the same two filters in the same order. `VERIFIED` — `pkg/agent/loop.go:161`
 3. Execution re-checks the role and returns 403 on failure. `VERIFIED` — `pkg/plugin/plugin.go:802`
-4. Execution re-checks selection and returns 403 `Tool is not enabled`. `VERIFIED` — `pkg/plugin/plugin.go:808`
+4. Execution re-checks selection and returns 403 `Tool is not enabled`. `VERIFIED` — `pkg/plugin/plugin.go:830`
 5. The agent execution path returns a tool error instead of an HTTP status. `VERIFIED` — `pkg/agent/loop.go:976`
 6. A Viewer gets only tools whose `readOnlyHint` is exactly `true`. `VERIFIED` — test `TestIsReadOnlyTool`
 7. A tool with no annotations is not read-only. `VERIFIED` — `pkg/rbac/rbac.go:6`
@@ -82,7 +82,7 @@ Both meta-tools bypass MCP filtering by design. `pkg/agent/tools.go:26`
 15. Filtering keeps the input order. `ASSUMED` — `pkg/mcp/selection.go:51` appends in order; no test asserts order
 16. The built-in MCP contributes a synthetic config with ID `mcp-grafana` only when `useBuiltInMCP` is true. `VERIFIED` — `pkg/plugin/plugin.go:640`
 17. That synthetic config carries `builtInMCPToolSelections` and the global `riskOverrides`. `VERIFIED` — `pkg/plugin/plugin.go:648`
-18. `settingsForFilter` returns a copy of `mcpServers` plus the built-in overlay. `VERIFIED` — `pkg/plugin/plugin.go:657`
+18. `settingsForFilter` returns a copy of `mcpServers` plus the built-in overlay. `VERIFIED` — `pkg/plugin/plugin.go:679`
 19. Graphiti tools get `group_id` forced to `org_<orgID>` when the schema has that property. `VERIFIED` — test `TestEnsureScopedGraphitiArgs`
 20. Graphiti tools get `group_ids` forced to `["org_<orgID>"]` when the schema has that property. `VERIFIED` — `pkg/mcp/selection.go:80`
 21. An LLM-supplied `group_id` value is always overwritten. `VERIFIED` — `pkg/mcp/selection.go:77`
@@ -100,15 +100,15 @@ Both meta-tools bypass MCP filtering by design. `pkg/agent/tools.go:26`
 ## Invariants
 
 - A Viewer never receives or executes a non-read-only tool. `VERIFIED` — `pkg/rbac/rbac.go:16`
-- Selection is enforced both at listing and at execution. `VERIFIED` — `pkg/plugin/plugin.go:808`
+- Selection is enforced both at listing and at execution. `VERIFIED` — `pkg/plugin/plugin.go:830`
 - Graphiti `group_id` is always the caller's org, never an LLM value. `VERIFIED` — `pkg/mcp/selection.go:76`
 
 ## Failure Modes
 
 | Condition | User-visible result | Evidence |
 |---|---|---|
-| Viewer asks for a write tool | 403 `Access denied: Viewer role cannot access tool ...` | `pkg/plugin/plugin.go:804` |
-| Tool disabled by selection | 403 `Tool is not enabled` | `pkg/plugin/plugin.go:810` |
+| Viewer asks for a write tool | 403 `Access denied: Viewer role cannot access tool ...` | `pkg/plugin/plugin.go:805` |
+| Tool disabled by selection | 403 `Tool is not enabled` | `pkg/plugin/plugin.go:832` |
 | Agent calls a denied tool | Tool result `Access denied: ...` | `pkg/agent/loop.go:975` |
 | Agent calls a disabled tool | Tool result `Tool ... is disabled in MCP server settings` | `pkg/agent/loop.go:1011` |
 
@@ -122,7 +122,7 @@ Both meta-tools bypass MCP filtering by design. `pkg/agent/tools.go:26`
 
 | Signal | Name | Where | Evidence |
 |---|---|---|---|
-| Log field | `tool`, `role` | plugin warn log on denial | `pkg/plugin/plugin.go:803` |
+| Log field | `tool`, `role` | plugin warn log on denial | `pkg/plugin/plugin.go:825` |
 
 ## Evidence Index
 

@@ -22,8 +22,8 @@ Admin and Editor keep full access.
 |---|---|---|---|---|
 | List MCP tools | yes | yes | yes, read-only only | `pkg/plugin/plugin.go:747` |
 | Call a read-only tool | yes | yes | yes | `pkg/rbac/rbac.go:16` |
-| Call a mutating or unannotated tool | yes | yes | no | `pkg/plugin/plugin.go:804` |
-| Approve a pending tool call | yes | yes | no | `pkg/plugin/plugin.go:1454` |
+| Call a mutating or unannotated tool | yes | yes | no | `pkg/plugin/plugin.go:805` |
+| Approve a pending tool call | yes | yes | no | `pkg/plugin/plugin.go:1455` |
 | Read skill content with `?include=content` | yes | no | no | `pkg/plugin/plugin.go:1724` |
 
 ## Contract
@@ -33,7 +33,7 @@ Admin and Editor keep full access.
 | Method | Path | Handler | Evidence |
 |---|---|---|---|
 | any | `/api/mcp/tools` | `handleMCPTools` | `pkg/plugin/plugin.go:729` |
-| POST | `/api/mcp/call-tool` | `handleMCPCallTool` | `pkg/plugin/plugin.go:761` |
+| POST | `/api/mcp/call-tool` | `handleMCPCallTool` | `pkg/plugin/plugin.go:762` |
 
 ### SSE events
 
@@ -73,11 +73,11 @@ Admin and Editor keep full access.
 15. The agent loop applies the same filter when it builds its tool list. `VERIFIED` — `pkg/agent/loop.go:161`
 16. A direct tool call is checked again before dispatch. `VERIFIED` — `pkg/plugin/plugin.go:802`
 17. The agent loop checks again inside `executeTool`. `VERIFIED` — `pkg/agent/loop.go:974`
-18. A Viewer calling a mutating tool gets HTTP 403 with `Access denied: Viewer role cannot access tool <name>`. `VERIFIED` — `pkg/plugin/plugin.go:804`
-19. The denial uses `http.Error`, so the body is plain text and the status is 403. `VERIFIED` — `pkg/plugin/plugin.go:804`
+18. A Viewer calling a mutating tool gets HTTP 403 with `Access denied: Viewer role cannot access tool <name>`. `VERIFIED` — `pkg/plugin/plugin.go:805`
+19. The denial uses `http.Error`, so the body is plain text and the status is 403. `VERIFIED` — `pkg/plugin/plugin.go:805`
 20. Inside the agent loop the denial becomes a tool result with `isError` set and kind `tool`. `VERIFIED` — `pkg/agent/loop.go:975`
 21. An unknown tool name returns 404 before the RBAC check. `VERIFIED` — `pkg/plugin/plugin.go:798`
-22. A disabled tool returns 403 `Tool is not enabled` after the RBAC check. `VERIFIED` — `pkg/plugin/plugin.go:810`
+22. A disabled tool returns 403 `Tool is not enabled` after the RBAC check. `VERIFIED` — `pkg/plugin/plugin.go:832`
 23. `pkg/agent/tools.go` applies no filter; it converts whatever list it receives to OpenAI format. `VERIFIED` — `pkg/agent/tools.go:7`
 24. The conversion therefore relies on the caller filtering first, which `loop.go` does. `VERIFIED` — `pkg/agent/loop.go:161`
 25. The raw JSON-RPC `/mcp` route is not registered, so it cannot bypass RBAC. `VERIFIED` — test `TestRawMCPRouteIsNotRegistered`
@@ -97,12 +97,12 @@ Coverage: `VERIFIED` = code pointer or test; `ASSUMED` = code suggests, no test;
 
 | Condition | User-visible result | Evidence |
 |---|---|---|
-| Viewer calls a mutating tool | 403 `Access denied: Viewer role cannot access tool <name>` | `pkg/plugin/plugin.go:804` |
+| Viewer calls a mutating tool | 403 `Access denied: Viewer role cannot access tool <name>` | `pkg/plugin/plugin.go:805` |
 | Viewer runs an agent that tries a mutating tool | Tool result `Access denied: Viewer role cannot access tool <name>` | `pkg/agent/loop.go:975` |
 | Role is unknown | Treated as Viewer for mutating tools | `pkg/rbac/rbac.go:16` |
 | Role is missing from the context | Resolved as `Viewer` | `pkg/plugin/plugin.go:700` |
 | Tool is unknown | 404 `Unknown tool: <name>` | `pkg/plugin/plugin.go:798` |
-| Tool is disabled by selection | 403 `Tool is not enabled` | `pkg/plugin/plugin.go:810` |
+| Tool is disabled by selection | 403 `Tool is not enabled` | `pkg/plugin/plugin.go:832` |
 
 ## Data and Persistence
 
@@ -115,10 +115,10 @@ Coverage: `VERIFIED` = code pointer or test; `ASSUMED` = code suggests, no test;
 | Signal | Name | Where | Evidence |
 |---|---|---|---|
 | Span | `mcp_tool_call` | Grafana tracing exporter | `pkg/agent/loop.go:960` |
-| Span attribute | `mcp.tool_name`, `mcp.is_error` | `mcp_tool_call` span | `pkg/agent/loop.go:961` |
-| Metric | None. No denial counter exists. | — | `pkg/plugin/plugin.go:803` |
-| Log field | `tool`, `role` | Plugin logger on denial | `pkg/plugin/plugin.go:803` |
-| Log field | `role`, `totalTools`, `filteredTools` | Plugin logger on listing | `pkg/plugin/plugin.go:749` |
+| Span attribute | `mcp.tool_name`, `mcp.is_error` | `mcp_tool_call` span | `pkg/agent/loop.go:963` |
+| Metric | None. No denial counter exists. | — | `pkg/plugin/plugin.go:825` |
+| Log field | `tool`, `role` | Plugin logger on denial | `pkg/plugin/plugin.go:825` |
+| Log field | `role`, `totalTools`, `filteredTools` | Plugin logger on listing | `pkg/plugin/plugin.go:772` |
 
 ## Evidence Index
 

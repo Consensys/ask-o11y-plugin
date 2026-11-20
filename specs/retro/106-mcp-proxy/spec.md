@@ -33,7 +33,7 @@ The proxy holds no role logic. Callers filter before and after it.
 | Method | Path | Handler | Evidence |
 |---|---|---|---|
 | GET | `/api/mcp/tools` | `handleMCPTools` | `pkg/plugin/plugin.go:729` |
-| POST | `/api/mcp/call-tool` | `handleMCPCallTool` | `pkg/plugin/plugin.go:761` |
+| POST | `/api/mcp/call-tool` | `handleMCPCallTool` | `pkg/plugin/plugin.go:762` |
 | GET | `/api/mcp/servers` | `handleMCPServers` | `pkg/plugin/plugin.go:832` |
 
 The raw JSON-RPC `/mcp` route is removed because it bypassed RBAC. `pkg/plugin/plugin.go:582`
@@ -145,7 +145,7 @@ The raw JSON-RPC `/mcp` route is removed because it bypassed RBAC. `pkg/plugin/p
 | Signal | Name | Where | Evidence |
 |---|---|---|---|
 | Span | `mcp_tool_call` | Tempo, via agent | `pkg/agent/loop.go:960` |
-| Span attribute | `mcp.tool_name`, `mcp.error_kind` | Tempo | `pkg/agent/loop.go:961` |
+| Span attribute | `mcp.tool_name`, `mcp.error_kind` | Tempo | `pkg/agent/loop.go:963` |
 
 ## Evidence Index
 

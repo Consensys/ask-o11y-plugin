@@ -94,7 +94,10 @@ jobs:
     needs: [check-changes, build]
     # Skip on fork PRs: secrets (LLM_API_KEY) are unavailable there, so LLM-backed tests always fail
     if: (needs.check-changes.outputs.code == 'true' || github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.event.pull_request.head.repo.fork != true
-    runs-on: ubuntu-latest
+    # Pinned: the pinned Playwright version cannot install Chromium on
+    # ubuntu-26.04 images (runner roll of 2026-11-20); unpin only together
+    # with a Playwright upgrade that supports 26.04.
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     env:
       GRAFANA_VERSION: '13.0.1'

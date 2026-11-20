@@ -208,7 +208,9 @@ func (r *PromptRegistry) BuildUserPrompt(convType, message string, ctx PromptCon
 			ctx.Target = message
 		}
 
-	case "chat", "":
+	case "chat", "", "workflow":
+		// Workflow ticks carry their instruction as the message verbatim;
+		// there is no workflow user-prompt template.
 
 	default:
 		return "", fmt.Errorf("unknown conversation type: %s", convType)

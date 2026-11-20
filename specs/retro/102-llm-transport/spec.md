@@ -18,8 +18,8 @@ The agent sends every completion request through the Grafana LLM app. It picks `
 |---|---|---|---|---|
 | Request `base` or `large` per run | yes | yes | yes | `pkg/plugin/agent_model.go:14` |
 | Reject an unsupported model value | yes | yes | yes | `pkg/plugin/plugin.go:913` |
-| Reject a conflicting session model | yes | yes | yes | `pkg/plugin/plugin.go:1029` |
-| Inherit the model from an active skill | yes | yes | yes | `pkg/plugin/plugin.go:1094` |
+| Reject a conflicting session model | yes | yes | yes | `pkg/plugin/plugin.go:1030` |
+| Inherit the model from an active skill | yes | yes | yes | `pkg/plugin/plugin.go:1095` |
 No role receives a different model. Model choice is not an RBAC boundary. `VERIFIED` — `pkg/plugin/agent_model.go:14`
 ## Contract
 ### HTTP endpoints
@@ -38,7 +38,7 @@ The transport emits no event of its own. A transport failure reaches the client 
 | Key | Location | Default | Evidence |
 |---|---|---|---|
 | `model` | query parameter | empty (auto) | `pkg/plugin/agent_model.go:15` |
-| `model` | session record | empty | `pkg/plugin/plugin.go:1028` |
+| `model` | session record | empty | `pkg/plugin/plugin.go:1053` |
 | `model` | skill front matter | empty | `pkg/skills/selection.go:92` |
 | `maxTotalTokens` | plugin jsonData | 64000 | `pkg/agent/context_window.go:16` |
 | `maxIterations` | skill entry | 0 (unset) | `pkg/skills/registry.go:42` |
@@ -79,7 +79,7 @@ The transport emits no event of its own. A transport failure reaches the client 
 30. Usage is read from `prompt_tokens`, `completion_tokens`, and `total_tokens` on the final usage chunk. `VERIFIED` — `pkg/agent/types.go:65`
 31. Usage accumulates per model and appears on `done` as totals plus `usageByModel`. `VERIFIED` — `pkg/agent/loop.go:363`
 32. The completion budget is `maxTotalTokens / 8`, clamped to 512–4096, and capped at half the total. `VERIFIED` — test `TestCompletionTokenBudget`
-33. The prompt budget is `maxTotalTokens - completionBudget`. `VERIFIED` — `pkg/agent/loop.go:154`
+33. The prompt budget is `maxTotalTokens - completionBudget`. `VERIFIED` — `pkg/agent/loop.go:165`
 34. The iteration budget is the highest skill `maxIterations`, else 50, or 60 for an alert investigation. `VERIFIED` — `pkg/plugin/iteration_budget.go:27`
 35. No bundled skill sets `maxIterations`, so shipped runs use 50 or 60. `ASSUMED` — `pkg/skills/registry.go:42`
 36. A truncated final answer is re-requested once with a 16384-token budget. `VERIFIED` — test `TestAgentLoop_TruncatedFinalAnswerRetriedWithLargerBudget`
@@ -103,7 +103,7 @@ The transport emits no event of its own. A transport failure reaches the client 
 ## Data and Persistence
 | Store | Key or table | TTL | Fallback | Evidence |
 |---|---|---|---|---|
-| Session model | `session.Model` | session TTL | auto selection | `pkg/plugin/plugin.go:1033` |
+| Session model | `session.Model` | session TTL | auto selection | `pkg/plugin/plugin.go:1034` |
 | Token counter | `asko11y_agent_user_tokens_total` | process lifetime | none | `pkg/plugin/metrics.go:19` |
 | Conversation history | in-memory message slice | run lifetime | none | `pkg/agent/loop.go:183` |
 ## Observability

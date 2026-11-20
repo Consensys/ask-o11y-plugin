@@ -71,6 +71,45 @@ Skill metadata can also steer the run: `model: large|base`, `max-iterations: 60`
 
 ---
 
+## Workflows
+
+Workflows run agent skills unattended on a schedule. A workflow entry is pure configuration — a skill, an interval, a model, an iteration budget, a tool allowlist, and a timeout — so the same plugin serves any automation without custom code: NOC alert triage, recurring health reports, or cleanup sweeps. Everything a workflow does goes through your MCP servers, so it acts on the systems those servers reach.
+
+Define workflows in the plugin configuration (`jsonData.workflows`) or the provisioning file:
+
+```yaml
+jsonData:
+  workflows:
+    - name: alert-triage
+      enabled: true
+      orgId: 1
+      skill: investigating-alerts        # an enabled, public skill
+      message: "Check the alert queue and investigate what is due."
+      model: base                         # base | large | unset (skill decides)
+      intervalSeconds: 300                # default 300, minimum 60
+      maxIterations: 25                   # optional, overrides the skill budget
+      sessionTimeoutSeconds: 300          # watchdog, default 300, minimum 60
+      toolAllowlist:                      # exact MCP tools the sessions may call
+        - mcp-grafana_alerting_rules_read
+        - mcp-grafana_list_alert_groups
+        - mcp-grafana_add_activity_to_incident
+      spawnableSkills: [investigating-alerts]   # skills it may start per item
+      maxConcurrentSessions: 5            # cross-replica cap for spawned sessions
+      fallbackSkill: escalate             # optional, runs once after a failure
+```
+
+How it runs:
+
+- The backend starts one scheduler per enabled entry. Each tick elects a single leader across replicas through a Redis lock, so multiple Grafana replicas never double-run a workflow. Redis is required for workflows.
+- A tick starts a headless agent session under a synthetic identity: the skill is active, approvals are off, and only the allowlisted tools are offered and callable.
+- Sessions persist like interactive ones and appear under the synthetic user. A dispatcher session can start bounded sub-sessions with the internal `spawn_session` tool and publish human-readable results with `share_session`, which returns a share link through the standard sharing mechanism.
+- A watchdog cancels any session that exceeds its timeout and can run a fallback skill once. Read-only rollout is an allowlist choice: omit write tools and the workflow can only observe and report.
+- The org identity (URL and service-account token) seeds from the first user request in that org; until then ticks skip with a warning.
+
+Every workflow emits Prometheus metrics (`asko11y_workflow_ticks_total`, `asko11y_workflow_sessions_total`, `asko11y_workflow_active_spawned`, `asko11y_workflow_run_duration_seconds`), all labeled by workflow name, so a dead loop is visible at a glance. Workflow configuration never ships with the plugin; it is tenant content.
+
+---
+
 ## Production High Availability
 
 Ask O11y works with Grafana OSS. In multi-replica Grafana deployments, configure Redis for Ask O11y state or use sticky sessions at the load balancer.

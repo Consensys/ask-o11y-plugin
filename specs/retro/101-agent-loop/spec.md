@@ -13,7 +13,7 @@ A user sends one message and receives a streamed investigation. The loop calls t
 |---|---|---|---|---|
 | Start an agent run | yes | yes | yes | `pkg/plugin/plugin.go:876` |
 | Read or cancel own run | yes | yes | yes | `pkg/plugin/plugin.go:1341` |
-| Approve a gated tool call | yes | yes | no | `pkg/plugin/plugin.go:1454` |
+| Approve a gated tool call | yes | yes | no | `pkg/plugin/plugin.go:1455` |
 | Call a write tool | yes | yes | no | `pkg/rbac/rbac.go:12` |
 | Load a skill (`load_skill`) | yes | yes | yes | `pkg/agent/loop.go:953` |
 A run is readable and cancellable only by its owning user in its owning org. The check compares `run.OrgID` and `run.UserID` with the request identity. `VERIFIED` — `pkg/plugin/plugin.go:1341`
@@ -82,7 +82,7 @@ The run store adds `sequence` to every event (`pkg/plugin/runstore.go:183`). The
 22. An interrupted LLM stream is retried once; a second failure yields code `llm_incomplete_stream`. `VERIFIED` — `pkg/agent/llm_client.go:222`
 23. An HTTP LLM failure yields code `llm_http_<status>` and the upstream status. `VERIFIED` — `pkg/agent/llm_client.go:61`
 24. Exhausting the iteration cap emits `error` with the max-iteration message and no error code. `VERIFIED` — test `TestAgentLoop_MaxIterations`
-25. Cancelling a run calls the stored cancel function; a finished run returns 409. `VERIFIED` — `pkg/plugin/plugin.go:1590`
+25. Cancelling a run calls the stored cancel function; a finished run returns 409. `VERIFIED` — `pkg/plugin/plugin.go:1615`
 26. A cancelled loop returns before any `done` event. `VERIFIED` — test `TestAgentLoop_ContextCancellation`
 27. `load_skill` is intercepted before MCP dispatch and never reaches the proxy or the RBAC check. `VERIFIED` — `pkg/agent/loop.go:953`
 28. `load_skill` is advertised only when the skill catalog and the loader are both present. `VERIFIED` — `pkg/agent/loop.go:179`
@@ -91,7 +91,7 @@ The run store adds `sequence` to every event (`pkg/plugin/runstore.go:183`). The
 31. A truncated tool call is retried once, then aborts with retryable code `llm_truncated_tool_call`. `VERIFIED` — `pkg/agent/loop.go:404`
 32. The SSE endpoint replays the stored list first, then forwards live events. `VERIFIED` — test `TestHandleAgentRunEvents_ForwardsNewEvents`
 33. A live sequence gap closes the stream so the client can replay from storage. `VERIFIED` — test `TestHandleAgentRunEvents_StopsAtLiveSequenceGap`
-34. The SSE endpoint sends a `: keepalive` comment every 15 seconds. `VERIFIED` — `pkg/plugin/plugin.go:1647`
+34. The SSE endpoint sends a `: keepalive` comment every 15 seconds. `VERIFIED` — `pkg/plugin/plugin.go:1672`
 35. A finished run closes the SSE stream after the replay. `VERIFIED` — `pkg/plugin/plugin.go:1640`
 36. The published OpenAPI contract states the iteration cap the loop enforces: 50 for a chat run and 60 for an alert investigation. `VERIFIED` — `pkg/plugin/openapi/openapi.json:499` agrees with `pkg/plugin/config.go:45`
 ## Invariants

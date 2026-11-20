@@ -4,7 +4,7 @@
 
 **Status**: Retrospective
 
-**Last verified**: `ecc29ce`
+**Last verified**: `845dddd`
 
 **Owner**: Ask O11y maintainers
 
@@ -74,8 +74,8 @@ Show token usage and cost in one provisioned dashboard.
 15. All three spans come from `tracing.DefaultTracer()`. The repo never calls `InitDefaultTracer`. `VERIFIED` — `pkg/plugin/plugin.go:882`, `pkg/agent/llm_client.go:134`, `pkg/agent/loop.go:960`
 16. The SDK exports those spans to the OTel endpoint that the Grafana host passes to the plugin. `ASSUMED` — `go.mod:6`; the only address in the repo is `docker-compose.dev.yaml:51`
 17. Production gives the plugin no tracing configuration of its own. Export depends on host settings outside this repo. `GAP` — `deploy/helm/grafana-values-ask-o11y-ha.yaml:12` sets no tracing key
-18. The only plugin metric is `asko11y_agent_user_tokens_total`, a counter vector with labels `user`, `login`, `model`, `type`, `org`, `org_name`. `VERIFIED` — `pkg/plugin/metrics.go:19`
-19. Label `type` is `prompt` or `completion`; label `model` is a usage-map key, that is `base` or `large`. `VERIFIED` — `pkg/plugin/plugin.go:1241`, test `TestAgentLoop_FallbackAttributesUsageToBaseModel`
+18. Plugin metrics are two families: `asko11y_agent_user_tokens_total` (labels `user`, `login`, `model`, `type`, `org`, `org_name`) and the workflow family `asko11y_workflow_ticks_total`, `asko11y_workflow_sessions_total` (labels `workflow`, `outcome`), `asko11y_workflow_active_spawned` (`workflow`), `asko11y_workflow_run_duration_seconds` (`workflow`). `VERIFIED` — `pkg/plugin/metrics.go:19`, `pkg/plugin/workflow_metrics.go:20`
+19. Label `type` is `prompt` or `completion`; label `model` is a usage-map key, that is `base` or `large`. Workflow labels: `outcome` is `executed` or `skip_lock`, `skip_identity`, `skip_error` on ticks, and `started`, `completed`, `failed`, `cancelled`, `timeout` on sessions; the `workflow` label is capped at 64 characters. `VERIFIED` — `pkg/plugin/plugin.go:1241`, `pkg/plugin/workflow_metrics.go:16`, test `TestSanitizeOrgNameLabelTruncatesByRune` (same cap scheme)
 20. The counter increments once per run at the `done` event, per model entry. A run without a usage map falls back to the effective model, then to `base`. `VERIFIED` — `pkg/plugin/plugin.go:1245`, `pkg/plugin/plugin.go:1237`
 21. Startup creates four zero series: `base` and `large`, each `prompt` and `completion`. `VERIFIED` — `pkg/plugin/metrics.go:57`
 22. `org_name` is trimmed, stripped of control characters, capped at 64 runes, and set to `unknown` when empty. `VERIFIED` — test `TestSanitizeOrgNameLabelTruncatesByRune`
@@ -111,6 +111,7 @@ Show token usage and cost in one provisioned dashboard.
 | Store | Key or table | TTL | Fallback | Evidence |
 |---|---|---|---|---|
 | Prometheus default registry | `asko11y_agent_user_tokens_total` | process lifetime | none | `pkg/plugin/metrics.go:17` |
+| Prometheus default registry | `asko11y_workflow_*` (ticks, sessions, active spawned, run duration) | process lifetime | none | `pkg/plugin/workflow_metrics.go:17` |
 | Redis hash | session stats `promptTokens`, `completionTokens`, `totalTokens` | session TTL, default 90 days | in-memory store when Redis is unset | `pkg/plugin/sessionstore_redis.go:487`, `pkg/plugin/plugin.go:367` |
 
 ## Observability
@@ -121,6 +122,7 @@ Show token usage and cost in one provisioned dashboard.
 | Span | `llm_call` | Host OTel pipeline | `pkg/agent/llm_client.go:134` |
 | Span | `mcp_tool_call` | Host OTel pipeline | `pkg/agent/loop.go:960` |
 | Metric | `asko11y_agent_user_tokens_total` | `asko11y-agent-usage` dashboard | `pkg/plugin/metrics.go:19` |
+| Metric | `asko11y_workflow_ticks_total`, `asko11y_workflow_sessions_total`, `asko11y_workflow_active_spawned`, `asko11y_workflow_run_duration_seconds` | Prometheus, labeled by workflow | `pkg/plugin/workflow_metrics.go:20` |
 | Log field | `traceId` | LLM error log | `pkg/agent/llm_client.go:200` |
 
 ## Evidence Index

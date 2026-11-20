@@ -34,7 +34,7 @@ The limits arrive through the run request only. `VERIFIED` — `pkg/plugin/plugi
 | Key | Location | Default | Evidence |
 |---|---|---|---|
 | `maxTotalTokens` | plugin jsonData | 64000 | `pkg/agent/context_window.go:16` |
-| `recentMessageCount` | plugin jsonData | 10 | `pkg/plugin/plugin.go:283` |
+| `recentMessageCount` | plugin jsonData | 10 | `pkg/plugin/plugin.go:292` |
 | `keepRecentToolResults` | plugin jsonData | 8 | `pkg/agent/context_window.go:35` |
 | `maxToolResponseTokens` | plugin jsonData | 8000 | `pkg/agent/context_window.go:24` |
 | `aggressiveToolResponseTokens` | plugin jsonData | 2000 | `pkg/agent/context_window.go:25` |
@@ -79,7 +79,7 @@ The limits arrive through the run request only. `VERIFIED` — `pkg/plugin/plugi
 31. The ingestion cap appends a notice that tells the model to narrow the query. `VERIFIED` — `pkg/agent/context_window.go:397`
 32. The user receives no event when trimming or eviction happens. `GAP` — `pkg/agent/loop.go:307`
 33. The conversation-summary branch is never used in production because the plugin never sets `LoopRequest.Summary`. `GAP` — `pkg/plugin/plugin.go:1133`
-34. Eviction summary tokens are recorded only as `base` model usage, with no dedicated counter. `GAP` — `pkg/agent/loop.go:809`
+34. Eviction summary tokens are recorded only as `base` model usage, with no dedicated counter. `GAP` — `pkg/agent/loop.go:828`
 ## Invariants
 - The system prompt is always the first message when trimming returns. `VERIFIED` — `pkg/agent/context_window.go:166`
 - A retained tail never begins with an orphan `tool` message. `VERIFIED` — `pkg/agent/context_window.go:226`
@@ -100,7 +100,7 @@ The limits arrive through the run request only. `VERIFIED` — `pkg/plugin/plugi
 |---|---|---|---|---|
 | Message history | in-memory slice per run | run lifetime | none | `pkg/agent/loop.go:183` |
 | Pending summaries | `pendingSummaries[toolCallID]` | run lifetime | synchronous summary | `pkg/agent/loop.go:275` |
-| Token usage | `usageByModel["base"]` | run lifetime | none | `pkg/agent/loop.go:809` |
+| Token usage | `usageByModel["base"]` | run lifetime | none | `pkg/agent/loop.go:828` |
 ## Observability
 | Signal | Name | Where | Evidence |
 |---|---|---|---|
