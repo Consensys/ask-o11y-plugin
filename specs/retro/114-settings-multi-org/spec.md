@@ -4,7 +4,7 @@
 
 **Status**: Retrospective
 
-**Last verified**: `18e315b`
+**Last verified**: `845dddd`
 
 **Owner**: Ask O11y maintainers
 
@@ -30,7 +30,7 @@ Every record and tool call is scoped to the org that made the request.
 
 | Method | Path | Handler | Evidence |
 |---|---|---|---|
-| GET | `/health` | `handleHealth` | `pkg/plugin/plugin.go:580` |
+| GET | `/health` | `handleHealth` | `pkg/plugin/plugin.go:602` |
 | GET | `/openapi.json` | `handleOpenAPISpec` | `pkg/plugin/plugin.go:581` |
 
 ### SSE events
@@ -47,10 +47,11 @@ Every record and tool call is scoped to the org that made the request.
 | Prompts | `defaultSystemPrompt`, `investigationPrompt`, `performancePrompt`, `skills` | shipped constants | `pkg/plugin/plugin.go:96` |
 | URL routing | `builtInMCPBaseURL`, `useLocalGrafanaURL`, `localGrafanaPort` | `http://localhost:3000`, off, `0` | `pkg/plugin/plugin.go:107` |
 | Retention | `sessionTTLDays`, `graphitiEpisodeTTLDays` | `90`, `30` | `pkg/plugin/config.go:71` |
-| Context | `keepRecentToolResults`, `maxToolResponseTokens`, `aggressiveToolResponseTokens`, `maxHighVolumeToolResponseTokens`, `aggressiveHighVolumeToolResponseTokens`, `toolCallSummarizationDisabled` | resolved in the loop | `pkg/plugin/plugin.go:136` |
+| Context | `keepRecentToolResults`, `maxToolResponseTokens`, `aggressiveToolResponseTokens`, `maxHighVolumeToolResponseTokens`, `aggressiveHighVolumeToolResponseTokens`, `toolCallSummarizationDisabled` | resolved in the loop | `pkg/plugin/plugin.go:140` |
 | Other | `maxTotalTokens`, `recentMessageCount`, `graphitiScanInterval`, `serviceGraphMaxNodes`, `serviceGraphMaxEdges`, `graphitiAutoSaveSessionsDisabled`, `approvalPolicy`, `maxParallelToolCalls`, `agentEvalCaptureEnabled` | resolved at init or in the loop | `pkg/plugin/plugin.go:104` |
+| Workflows | `workflows` (list of workflow entries: name, enabled, orgId, skill, message, model, intervalSeconds, maxIterations, toolAllowlist, spawnableSkills, maxConcurrentSessions, sessionTimeoutSeconds, fallbackSkill) | empty | `pkg/plugin/plugin.go:135`, `pkg/plugin/workflows.go:38` |
 | Tool search | `toolSearch` | auto | `pkg/plugin/plugin.go:146` |
-| Secure | `redisURL`, `mcpServerHeader.{serverID}.{headerName}` | none | `pkg/plugin/plugin.go:330` |
+| Secure | `redisURL`, `mcpServerHeader.{serverID}.{headerName}` | none | `pkg/plugin/plugin.go:339` |
 
 ### MCP tool names
 
@@ -62,7 +63,7 @@ Every record and tool call is scoped to the org that made the request.
 
 1. `JSONData` is unmarshalled into `PluginSettings`; a parse failure logs and uses empty settings. `VERIFIED` — `pkg/plugin/plugin.go:269`
 2. Secret values are read only from `DecryptedSecureJSONData`. `VERIFIED` — `pkg/plugin/plugin.go:276`
-3. `redisURL` is the only scalar key read from secure data. `VERIFIED` — `pkg/plugin/plugin.go:330`
+3. `redisURL` is the only scalar key read from secure data. `VERIFIED` — `pkg/plugin/plugin.go:339`
 4. Per-server headers use the `mcpServerHeader.{serverID}.{headerName}` prefix and match an existing server ID. `VERIFIED` — `pkg/plugin/plugin.go:148`
 5. The parser is tested for matching, unknown, malformed, empty, multiple, and dotted keys. `VERIFIED` — test `TestApplySecureHeaders_DottedHeaderName`
 6. Header keys assume a server ID with no dot; the parser splits the key at the first dot. `VERIFIED` — `pkg/plugin/plugin.go:160`
@@ -84,7 +85,7 @@ Every record and tool call is scoped to the org that made the request.
 22. An empty `redisURL` still attempts `redis://localhost:6379/0`. `VERIFIED` — `pkg/plugin/plugin.go:75`
 23. Redis is used only when the client builds and answers `PING`; otherwise memory wins. `VERIFIED` — `pkg/plugin/plugin.go:333`
 24. Redis success and fallback are both tested. `VERIFIED` — test `TestNewPlugin_RedisSuccess`
-25. `Dispose` cancels every run, closes brokers, stops the scout, stops health monitoring, closes the proxy and Redis, then cancels the context. `VERIFIED` — `pkg/plugin/plugin.go:519`
+25. `Dispose` cancels every run, closes brokers, stops the scout, stops health monitoring, closes the proxy and Redis, then cancels the context. `VERIFIED` — `pkg/plugin/plugin.go:535`
 26. When Redis is absent, the health message says session sharing will not work across replicas. `VERIFIED` — `pkg/plugin/plugin.go:570`
 27. Settings, sessions, and runs are all keyed by org, so org 2 gets separate records. `VERIFIED` — `pkg/plugin/sessionstore.go:94`
 28. In a non-Org-1 org, the plugin keeps using the Org-1 service-account token for the LLM. The configured LLM app for that org is therefore not selected. `GAP` — `pkg/agent/llm_client.go:326`
@@ -96,7 +97,7 @@ Coverage: `VERIFIED` = code pointer or test; `ASSUMED` = code suggests, no test;
 
 - No secret is read from plain `JSONData`. `VERIFIED` — `pkg/plugin/plugin.go:276`
 - The LLM request never carries `X-Grafana-Org-Id`. `VERIFIED` — `pkg/agent/llm_client.go:324`
-- Org identity comes from the plugin context, never from a client header. `VERIFIED` — `pkg/plugin/plugin.go:2331`
+- Org identity comes from the plugin context, never from a client header. `VERIFIED` — `pkg/plugin/plugin.go:2356`
 - `useBuiltInMCP: true` never appears in `provisioning/plugins/full.yaml_`. `VERIFIED` — `provisioning/plugins/full.yaml_:18`
 
 ## Failure Modes
@@ -105,7 +106,7 @@ Coverage: `VERIFIED` = code pointer or test; `ASSUMED` = code suggests, no test;
 |---|---|---|
 | `builtInMCPBaseURL` is invalid | Error logged; `http://localhost:3000` used | `pkg/plugin/plugin.go:287` |
 | Redis connection fails | Warning; in-memory stores | `pkg/plugin/plugin.go:345` |
-| SA token unavailable | Warning; built-in MCP and SA LLM calls fail | `pkg/plugin/plugin.go:926` |
+| SA token unavailable | Warning; built-in MCP and SA LLM calls fail | `pkg/plugin/plugin.go:948` |
 | `useBuiltInMCP` with no SA token | Built-in server removed; warning | `pkg/plugin/plugin.go:622` |
 | SDK HTTP client fails to build | `NewPlugin` returns an error | `pkg/plugin/plugin.go:431` |
 
@@ -113,7 +114,7 @@ Coverage: `VERIFIED` = code pointer or test; `ASSUMED` = code suggests, no test;
 
 | Store | Key or table | TTL | Fallback | Evidence |
 |---|---|---|---|---|
-| Redis client | `redisURL` from secure data | connection timeout 5s | In-memory stores | `pkg/plugin/plugin.go:330` |
+| Redis client | `redisURL` from secure data | connection timeout 5s | In-memory stores | `pkg/plugin/plugin.go:339` |
 | Redis sessions | `session:{id}` | `sessionTTLDays` | `SessionStore` | `pkg/plugin/sessionstore_redis.go:15` |
 | Redis runs | `run:{id}` | 1 hour | `RunStore` | `pkg/plugin/runstore_redis.go:45` |
 

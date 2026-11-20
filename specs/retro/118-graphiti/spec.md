@@ -58,7 +58,7 @@ Graphiti is optional: without it, every other capability still works.
 |---|---|---|
 | `graphiti_add_memory` (presence probe) | no | `pkg/plugin/graphiti_memory.go:43` |
 | `graphiti_search_memory_facts` | yes | `pkg/plugin/topology.go:598` |
-| `graphiti_get_status` | yes | `pkg/plugin/plugin.go:2065` |
+| `graphiti_get_status` | yes | `pkg/plugin/plugin.go:2090` |
 
 Five write tools are hidden from the model: `graphiti_add_memory`, `graphiti_delete_entity_edge`, `graphiti_delete_episode`, `graphiti_clear_graph`, `graphiti_build_communities`. `VERIFIED` — `pkg/plugin/graphiti_memory.go:35`
 
@@ -68,7 +68,7 @@ Tags: `VERIFIED` (code pointer or test), `ASSUMED` (untested), `GAP` (missing).
 
 1. Graphiti counts as available only when `graphiti_add_memory` is in the tool list. `VERIFIED` — `pkg/plugin/graphiti_memory.go:43`
 2. `status` returns `{enabled, connected}` and nothing else. `VERIFIED` — `pkg/plugin/plugin.go:2074`
-3. `connected` is true only when `graphiti_get_status` succeeds. `VERIFIED` — `pkg/plugin/plugin.go:2065`
+3. `connected` is true only when `graphiti_get_status` succeeds. `VERIFIED` — `pkg/plugin/plugin.go:2090`
 4. `status` never fails when Graphiti is absent: it returns `enabled: false`. `VERIFIED` — `pkg/plugin/plugin.go:2062`
 5. `discover` rejects a Viewer with 403. `VERIFIED` — `pkg/plugin/plugin.go:2090`
 6. `discover` and `ingest-session` return 503 when Graphiti is unavailable. `VERIFIED` — `pkg/plugin/plugin.go:2099`
@@ -81,10 +81,10 @@ Tags: `VERIFIED` (code pointer or test), `ASSUMED` (untested), `GAP` (missing).
 13. A synthesis with no content falls back to a summary built from tool results. `VERIFIED` — test `TestCollectDiscoverySynthesis_FallsBackToToolResults`
 14. `ingest-session` caps the body at 1 MiB. `VERIFIED` — `pkg/plugin/config.go:28`
 15. `ingest-session` rejects more than 500 messages. `VERIFIED` — `pkg/plugin/plugin.go:2271`
-16. `ingest-session` rejects an empty message list or one with no non-empty content. `VERIFIED` — `pkg/plugin/plugin.go:2267`
+16. `ingest-session` rejects an empty message list or one with no non-empty content. `VERIFIED` — `pkg/plugin/plugin.go:2292`
 17. Ingest uses the last 12 turns, 1,200 chars per message, 12,000 chars total. `VERIFIED` — `pkg/plugin/graphiti_memory.go:17`
 18. A manual ingest writes episode `investigation_session` with source `message` and returns `{ingested: n}`. `VERIFIED` — `pkg/plugin/plugin.go:2286`
-19. An ingest failure returns 500 with a generic message; the cause goes to the log. `VERIFIED` — `pkg/plugin/plugin.go:2293`
+19. An ingest failure returns 500 with a generic message; the cause goes to the log. `VERIFIED` — `pkg/plugin/plugin.go:2318`
 20. Every run that ends with `done` auto-saves its session unless disabled. `VERIFIED` — `pkg/plugin/plugin.go:1278`
 21. Auto-save is best-effort: a failure only logs. `VERIFIED` — `pkg/plugin/plugin.go:1315`
 22. Every Graphiti call is scoped to `group_id = org_<orgID>`. `VERIFIED` — `pkg/plugin/config.go:8`
@@ -107,10 +107,10 @@ Tags: `VERIFIED` (code pointer or test), `ASSUMED` (untested), `GAP` (missing).
 | Condition | User-visible result | Evidence |
 |---|---|---|
 | Graphiti not registered | `status` reports `enabled: false` | `pkg/plugin/plugin.go:2062` |
-| Graphiti registered but unreachable | `status` reports `enabled: true, connected: false` | `pkg/plugin/plugin.go:2065` |
+| Graphiti registered but unreachable | `status` reports `enabled: true, connected: false` | `pkg/plugin/plugin.go:2090` |
 | Discovery request from Viewer | HTTP 403 `Access denied` | `pkg/plugin/plugin.go:2090` |
 | Ingest body over 1 MiB | HTTP 400 `Invalid request body` | `pkg/plugin/plugin.go:2259` |
-| Ingest write fails | HTTP 500 `Failed to ingest session` | `pkg/plugin/plugin.go:2293` |
+| Ingest write fails | HTTP 500 `Failed to ingest session` | `pkg/plugin/plugin.go:2318` |
 | Auto-save fails | Nothing shown; warning logged | `pkg/plugin/plugin.go:1315` |
 
 ## Data and Persistence

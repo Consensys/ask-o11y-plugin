@@ -91,7 +91,7 @@ The agent path has no dedicated route. The direct MCP edge is `POST /api/mcp/cal
 38. A batch stays sequential when it has fewer than two calls, contains a meta-tool, or contains an approval-gated call. `VERIFIED` — test `TestBatchParallelizable`
 39. Results are appended in the original call order even when they finish out of order. `VERIFIED` — test `TestAgentLoop_ParallelToolCallsPreserveOrder`
 40. Meta-tools are never served from the stall cache and never count as progress. `VERIFIED` — `pkg/agent/tools.go:26`
-41. `ExcludeToolNames` is not enforced at execution; a direct call to an excluded name can still run. `GAP` — `pkg/agent/loop.go:959`
+41. `ExcludeToolNames` is not enforced at execution; a direct call to an excluded name can still run. `GAP` — `pkg/agent/loop.go:978`
 42. A `limit` outside 1–25 is silently replaced, not rejected. `GAP` — `pkg/agent/toolindex.go:149`
 43. `AlwaysInclude` supports exact names and a trailing `*` only; other glob forms do not match. `GAP` — `pkg/agent/search_tools.go:438`
 44. A tool-call error may name the tools the server now provides, ranked by shared name tokens. `VERIFIED` — test `TestCallToolDoesNotLoopOnPersistentUnknownTool`

@@ -22,7 +22,7 @@ Snapshot prefetch gives the agent exact identifiers before its first query.
 
 | Capability | Admin | Editor | Viewer | Evidence |
 |---|---|---|---|---|
-| List evals (`GET /api/agent/evals`) | yes | yes | yes | `pkg/plugin/plugin.go:1784` (no role check) |
+| List evals (`GET /api/agent/evals`) | yes | yes | yes | `pkg/plugin/plugin.go:1809` (no role check) |
 | Run evals (`POST /api/agent/evals/run`) | yes | yes | no (403) | `pkg/plugin/plugin.go:1822` |
 | Receive snapshot prefetch on a run | yes | yes | yes | `pkg/plugin/plugin.go:957` |
 | Configure the scan interval | yes | no | no | `pkg/plugin/plugin.go:114` (jsonData, Admin AppConfig) |
@@ -70,7 +70,7 @@ Tags: `VERIFIED` (code pointer or test), `ASSUMED` (untested), `GAP` (missing).
 8. Overall averages the five sub-scores and clamps to 0-100. `VERIFIED` — `pkg/plugin/agent_eval.go:67`
 9. GET returns `{enabled: false, evals: []}` when capture is disabled. `VERIFIED` — `pkg/plugin/plugin.go:1789`
 10. GET returns only the caller's runs in the caller's org, newest first. `VERIFIED` — `pkg/plugin/runstore.go:247`
-11. The GET limit defaults to 20 and clamps to 100. `VERIFIED` — `pkg/plugin/plugin.go:2317`
+11. The GET limit defaults to 20 and clamps to 100. `VERIFIED` — `pkg/plugin/plugin.go:2342`
 12. POST returns 404 when capture is disabled. `VERIFIED` — `pkg/plugin/plugin.go:1822`
 13. POST rejects a Viewer with 403 and accepts Admin or Editor. `VERIFIED` — `pkg/plugin/plugin.go:1822`
 14. POST with `runId` scores one run after an ownership check. `VERIFIED` — `pkg/plugin/plugin.go:1839`

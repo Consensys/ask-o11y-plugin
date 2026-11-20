@@ -30,7 +30,7 @@ The UI reads the shipped defaults from one endpoint.
 
 | Method | Path | Handler | Evidence |
 |---|---|---|---|
-| GET | `/api/prompt-defaults` | `handlePromptDefaults` | `pkg/plugin/plugin.go:593` |
+| GET | `/api/prompt-defaults` | `handlePromptDefaults` | `pkg/plugin/plugin.go:615` |
 
 ### SSE events
 
@@ -69,7 +69,7 @@ The UI reads the shipped defaults from one endpoint.
 12. The base prompt always contains the anti-hallucination contract. `VERIFIED` — test `TestBuildSystemPrompt_AntiHallucinationContractAlwaysPresent`
 13. Optional blocks render only when their field is non-empty: datasource, metric namespaces, alert rule, topology. `VERIFIED` — `pkg/plugin/prompt_defaults.go:53`
 14. The datasource block is tested. `VERIFIED` — test `TestBuildSystemPrompt_DatasourceSnapshotSlot`
-15. `CurrentTime` is fixed at run start in UTC and rendered into the time section. `VERIFIED` — `pkg/plugin/prompts.go:316`
+15. `CurrentTime` is fixed at run start in UTC and rendered into the time section. `VERIFIED` — `pkg/plugin/prompts.go:318`
 16. The current-time block is tested. `VERIFIED` — test `TestBuildSystemPrompt_CurrentTimeSlot`
 17. `BuildUserPrompt` for `investigation` extracts the alert name and errors when it is absent. `VERIFIED` — `pkg/plugin/prompts.go:187`
 18. `BuildUserPrompt` for `performance` falls back to the whole message as the target. `VERIFIED` — `pkg/plugin/prompts.go:194`

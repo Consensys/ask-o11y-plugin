@@ -38,7 +38,7 @@ The transport emits no event of its own. A transport failure reaches the client 
 | Key | Location | Default | Evidence |
 |---|---|---|---|
 | `model` | query parameter | empty (auto) | `pkg/plugin/agent_model.go:15` |
-| `model` | session record | empty | `pkg/plugin/plugin.go:1028` |
+| `model` | session record | empty | `pkg/plugin/plugin.go:1053` |
 | `model` | skill front matter | empty | `pkg/skills/selection.go:92` |
 | `maxTotalTokens` | plugin jsonData | 64000 | `pkg/agent/context_window.go:16` |
 | `maxIterations` | skill entry | 0 (unset) | `pkg/skills/registry.go:42` |
@@ -79,7 +79,7 @@ The transport emits no event of its own. A transport failure reaches the client 
 30. Usage is read from `prompt_tokens`, `completion_tokens`, and `total_tokens` on the final usage chunk. `VERIFIED` — `pkg/agent/types.go:65`
 31. Usage accumulates per model and appears on `done` as totals plus `usageByModel`. `VERIFIED` — `pkg/agent/loop.go:363`
 32. The completion budget is `maxTotalTokens / 8`, clamped to 512–4096, and capped at half the total. `VERIFIED` — test `TestCompletionTokenBudget`
-33. The prompt budget is `maxTotalTokens - completionBudget`. `VERIFIED` — `pkg/agent/loop.go:154`
+33. The prompt budget is `maxTotalTokens - completionBudget`. `VERIFIED` — `pkg/agent/loop.go:165`
 34. The iteration budget is the highest skill `maxIterations`, else 50, or 60 for an alert investigation. `VERIFIED` — `pkg/plugin/iteration_budget.go:27`
 35. No bundled skill sets `maxIterations`, so shipped runs use 50 or 60. `ASSUMED` — `pkg/skills/registry.go:42`
 36. A truncated final answer is re-requested once with a 16384-token budget. `VERIFIED` — test `TestAgentLoop_TruncatedFinalAnswerRetriedWithLargerBudget`

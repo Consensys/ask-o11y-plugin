@@ -4,7 +4,7 @@
 
 **Status**: Retrospective
 
-**Last verified**: `ecc29ce`
+**Last verified**: `845dddd`
 
 **Owner**: Ask O11y maintainers
 
@@ -36,7 +36,7 @@ Both survive a pod restart when Redis is configured.
 | POST | `/api/agent/runs/{id}/cancel` | `handleCancelRun` | `pkg/plugin/plugin.go:1584` |
 | GET, POST, DELETE | `/api/sessions` | `handleSessionsRoot` | `pkg/plugin/plugin.go:2560` |
 | GET, PUT, DELETE | `/api/sessions/current` | `handleSessionCurrent` | `pkg/plugin/plugin.go:2613` |
-| GET, PUT, DELETE | `/api/sessions/{id}` | `handleSessionRouter` | `pkg/plugin/plugin.go:2665` |
+| GET, PUT, DELETE | `/api/sessions/{id}` | `handleSessionRouter` | `pkg/plugin/plugin.go:2690` |
 | GET | `/api/sessions/{id}/stats` | `handleGetSessionStats` | `pkg/plugin/plugin.go:2797` |
 
 ### SSE events
@@ -65,14 +65,14 @@ Both survive a pod restart when Redis is configured.
 Coverage: `VERIFIED` = code pointer or test; `ASSUMED` = code suggests, no test; `GAP` = missing or contradictory.
 
 1. `GET /api/sessions` returns metadata only, sorted by `UpdatedAt` descending. `VERIFIED` — `pkg/plugin/sessionstore.go:185`
-2. `POST /api/sessions` creates the session, then sets it as current. `VERIFIED` — `pkg/plugin/plugin.go:2591`
+2. `POST /api/sessions` creates the session, then sets it as current. `VERIFIED` — `pkg/plugin/plugin.go:2616`
 3. The store interface holds 14 methods, from `CreateSession` to `CleanupOld`. `VERIFIED` — `pkg/plugin/sessionstore.go:74`
 4. The owner key is `"<userID>:<orgID>"`; every read and write is scoped by it. `VERIFIED` — `pkg/plugin/sessionstore.go:94`
 5. A session owned by another user or org returns `session not found`. `VERIFIED` — `pkg/plugin/sessionstore.go:175`
 6. Org isolation is tested. `VERIFIED` — test `TestSessionStore_OrgIsolation`
 7. An empty title comes from the first user message, cut at 60 characters plus `...`. `VERIFIED` — `pkg/plugin/sessionstore.go:98`
 8. A session ID is 32 random bytes, base64url encoded without padding. `VERIFIED` — `pkg/plugin/shareutil.go:20`
-9. `SetCurrentSessionID` rejects a session the caller does not own. `VERIFIED` — `pkg/plugin/sessionstore.go:321`
+9. `SetCurrentSessionID` rejects a session the caller does not own. `VERIFIED` — `pkg/plugin/sessionstore.go:335`
 10. Deleting the current session clears the current pointer. `VERIFIED` — test `TestSessionStore_DeleteClearsCurrentSession`
 11. The in-memory store deletes sessions older than the TTL on `CleanupOld`; a TTL of zero disables the sweep. `VERIFIED` — `pkg/plugin/sessionstore.go:395`
 12. The Redis session blob TTL is refreshed on every mutation. `VERIFIED` — `pkg/plugin/sessionstore_redis.go:222`
@@ -80,7 +80,7 @@ Coverage: `VERIFIED` = code pointer or test; `ASSUMED` = code suggests, no test;
 14. Concurrent appends lose no messages. `VERIFIED` — test `TestRedisSessionStore_AppendMessages_ConcurrentNoLostUpdates`
 15. Usage stats live in a separate hash and use `HINCRBY`, so concurrent runs add independently. `VERIFIED` — `pkg/plugin/sessionstore_redis.go:481`
 16. Concurrent increments lose no counts. `VERIFIED` — test `TestRedisSessionStore_IncrementStats_ConcurrentNoLostUpdates`
-17. Stats increment on `done` before the event is stored and streamed. `VERIFIED` — `pkg/plugin/plugin.go:1210`
+17. Stats increment on `done` before the event is stored and streamed. `VERIFIED` — `pkg/plugin/plugin.go:1235`
 18. Stats increment is tested. `VERIFIED` — test `TestConsumeAgentEvents_IncrementsSessionStats`
 19. A run holds status, events, trace, error, and owners; a session holds messages, title, model, and stats. `VERIFIED` — `pkg/plugin/runstore.go:23`
 20. `AppendEvent` assigns an increasing `Sequence` and keeps the newest 500 events. `VERIFIED` — `pkg/plugin/runstore.go:183`
@@ -93,6 +93,9 @@ Coverage: `VERIFIED` = code pointer or test; `ASSUMED` = code suggests, no test;
 27. Nothing prevents two concurrent runs on one session; `ActiveRunID` keeps only the last ID. `GAP` — `pkg/plugin/plugin.go:1103`
 28. A session create, update or share body is capped at 8 MiB; a larger body answers 413 and nothing is written. `VERIFIED` — `pkg/plugin/request.go:19`, `pkg/plugin/request.go:26`, `pkg/plugin/plugin.go:2400`
 29. Every other control request body is capped at 1 MiB. `VERIFIED` — `pkg/plugin/request.go:16`
+30. Workflow sessions are created by the workflow runner under a synthetic user ID (FNV of `"workflow:<name>"`), owned like any other session by `"<userID>:<orgID>"`. `VERIFIED` — `pkg/plugin/workflows.go:161`, `pkg/plugin/workflow_session.go:33`
+31. A session record carries optional `conversationType` (workflow sessions set `workflow`) and `workflow` (the workflow name); interactive sessions never set them. `VERIFIED` — `pkg/plugin/sessionstore.go:33`, `pkg/plugin/workflow_session.go:78`
+32. Workflow sessions reuse the run store, stats, assistant-message persistence, and share mechanism unchanged. `VERIFIED` — `pkg/plugin/workflow_session.go:172`, `pkg/plugin/workflow_session.go:270`
 
 ## Invariants
 
