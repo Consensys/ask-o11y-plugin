@@ -115,7 +115,10 @@ describe('WorkflowsTab', () => {
     // whole list minus the runtime join.
     fireEvent.click(toggles[0]);
 
+    // The save path reloads the page; the component must not refetch status
+    // on its own, which would race the restart.
     await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1));
+    expect(fetchMock).toHaveBeenCalledTimes(1);
     const saved = onSave.mock.calls[0][0] as Array<Record<string, unknown>>;
     expect(saved).toHaveLength(2);
     expect(saved[0]).toMatchObject({ name: 'noc-dispatch', enabled: false });

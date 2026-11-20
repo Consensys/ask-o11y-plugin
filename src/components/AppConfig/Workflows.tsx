@@ -89,8 +89,10 @@ export function WorkflowsTab({ savedWorkflows, onSaveWorkflows }: WorkflowsTabPr
       const { running: _running, status: _status, ...entry } = r;
       return entry.name === row.name ? { ...entry, enabled } : entry;
     });
+    // No refetch here: the save reloads the page (saveAndReload), which
+    // remounts this tab and loads fresh status. A refetch would race the
+    // restart and could snap the switch back to the stale value.
     onSaveWorkflows(next);
-    void load();
   };
 
   if (rows === null && !loadError) {
