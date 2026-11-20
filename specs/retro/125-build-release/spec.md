@@ -45,7 +45,7 @@ Ship a versioned archive, a container image, and a local stack.
 |---|---|---|---|
 | `RELEASE_TOKEN` | repository secret | none | `.github/workflows/release-please.yml:19` |
 | `GRAFANA_ACCESS_POLICY_TOKEN` | repository secret | none | `.github/workflows/release.yml:35` |
-| `LLM_API_KEY` | repository secret | none | `.github/workflows/e2e.yml:131` |
+| `LLM_API_KEY` | repository secret | none | `.github/workflows/e2e.yml:134` |
 | `AWS_ACCOUNT_ID`, `AWS_REGION`, `AWS_IAM_ROLE`, `ECR_REPOSITORY`, `IMAGE_TAG_PREFIX` | repository variables | none | `.github/workflows/docker-release.yml:18` |
 
 ### MCP tool names
@@ -74,7 +74,7 @@ Ship a versioned archive, a container image, and a local stack.
 16. The validator config disables the `version` analyzer, and `govulncheck` runs separately on the pinned Go 1.26.10 toolchain. `VERIFIED` — `.github/plugin-validator.config.yaml:11`, `.github/workflows/ci.yml:103`
 17. Local `npm run validate` pins `@grafana/plugin-validator@0.51.3`, the same version as the CI image. `VERIFIED` — `package.json:35`
 18. Three validator findings are benign: unsigned plugin, sponsor link, and `react-19-dep-jsxRuntimeImport` for `@floating-ui/react`. `VERIFIED` — `CLAUDE.md:42`
-19. E2E skips fork pull requests because secrets are unavailable, and otherwise builds a coverage bundle and runs Playwright. `VERIFIED` — `.github/workflows/e2e.yml:96`, `.github/workflows/e2e.yml:145`
+19. E2E skips fork pull requests because secrets are unavailable, and otherwise builds a coverage bundle and runs Playwright. `VERIFIED` — `.github/workflows/e2e.yml:96`, `.github/workflows/e2e.yml:148`
 20. The artifact workflow builds on every branch push, keeps the zip for 15 days, and passes `create_release: false`, so it never creates a release. `VERIFIED` — `.github/workflows/artifact.yml:42`, `.github/workflows/artifact.yml:34`
 21. The release workflow runs on a push of a `v*` tag. `VERIFIED` — `.github/workflows/release.yml:7`
 22. The release build enables provenance attestation, passes the policy token for signing, and verifies the attestation. `VERIFIED` — `.github/workflows/release.yml:32`, `.github/workflows/release.yml:74`
