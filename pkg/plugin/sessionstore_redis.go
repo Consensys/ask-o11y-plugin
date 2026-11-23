@@ -336,18 +336,6 @@ func (s *RedisSessionStore) ListSessions(userID, orgID int64) ([]SessionMetadata
 	return result, nil
 }
 
-func (s *RedisSessionStore) GetSessionUnscoped(sessionID string) (*ChatSession, error) {
-	rs, err := s.getSessionRaw(sessionID)
-	if err != nil {
-		return nil, err
-	}
-	session := fromRedis(rs)
-	if err := s.loadStats(session); err != nil {
-		s.logger.Warn("Failed to load session stats", "error", err, "sessionId", sessionID)
-	}
-	return session, nil
-}
-
 func (s *RedisSessionStore) UpdateSession(sessionID string, userID, orgID int64, update SessionUpdate) error {
 	return s.mutateSession(sessionID, userID, orgID, func(session *ChatSession) {
 		if update.Messages != nil {

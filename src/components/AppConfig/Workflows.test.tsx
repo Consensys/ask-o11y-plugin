@@ -129,10 +129,13 @@ describe('WorkflowsTab', () => {
     expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument();
   });
 
-  it('expands a workflow, lists its runs, and opens a session', async () => {
+  it('expands a workflow, lists its runs, and opens a share link', async () => {
     fetchMock.mockImplementation(() => ({
-      fetch: (cfg: { url: string }) =>
-        of(
+      fetch: (cfg: { url: string; method?: string }) => {
+        if (cfg.method === 'POST' && cfg.url.includes('/share')) {
+          return of({ data: { shareUrl: '/a/consensys-asko11y-app/shared/abc?orgId=1' } });
+        }
+        return of(
           cfg.url.includes('/runs')
             ? {
                 data: {
@@ -148,7 +151,8 @@ describe('WorkflowsTab', () => {
                 },
               }
             : { data: workflowsResponse() }
-        ),
+        );
+      },
     }));
     const { locationService } = jest.requireMock('@grafana/runtime');
     renderTab();
@@ -157,9 +161,12 @@ describe('WorkflowsTab', () => {
     fireEvent.click(sessionsButtons[0]); // first row: noc-dispatch
 
     expect(await screen.findByText('run-9')).toBeInTheDocument();
-    const open = screen.getByRole('button', { name: 'Open' });
+    const open = await screen.findByRole('button', { name: 'Open' });
     fireEvent.click(open);
-    expect(locationService.push).toHaveBeenCalledWith('/a/consensys-asko11y-app?sessionId=sess-9');
+
+    await waitFor(() =>
+      expect(locationService.push).toHaveBeenCalledWith('/a/consensys-asko11y-app/shared/abc?orgId=1')
+    );
   });
 
   it('opens the editor for a row and saves an edited entry', async () => {

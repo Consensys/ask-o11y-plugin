@@ -2766,17 +2766,6 @@ func (p *Plugin) handleSessionRouter(w http.ResponseWriter, r *http.Request) {
 	case http.MethodGet:
 		session, err := p.sessionStore.GetSession(sessionID, userID, orgID)
 		if err != nil {
-			// Admins may read workflow sessions: the Workflows tab links into
-			// them. Ownership still applies to every interactive session, and
-			// the org boundary always applies.
-			if isAdmin(r) {
-				if wfSession, wfErr := p.sessionStore.GetSessionUnscoped(sessionID); wfErr == nil &&
-					wfSession.ConversationType == workflowConversationType && wfSession.OrgID == orgID {
-					w.Header().Set("Content-Type", "application/json")
-					json.NewEncoder(w).Encode(wfSession)
-					return
-				}
-			}
 			http.Error(w, "Session not found", http.StatusNotFound)
 			return
 		}

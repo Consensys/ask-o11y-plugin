@@ -23,7 +23,7 @@ Limits stay correct across replicas when Redis is configured.
 | Create a share link for own session | yes | yes | yes | `pkg/plugin/plugin.go:2370` |
 | Read a share link in the same org | yes | yes | yes | `pkg/plugin/plugin.go:2455` |
 | Revoke a share that they created | yes | yes | yes | `pkg/plugin/plugin.go:2548` |
-| List shares for own sessions | yes | yes | yes | `pkg/plugin/plugin.go:2774` |
+| List shares for own sessions | yes | yes | yes | `pkg/plugin/plugin.go:2773` |
 
 ## Contract
 

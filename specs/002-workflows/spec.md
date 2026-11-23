@@ -150,8 +150,8 @@ Each workflow row expands into its recent runs: status, start time, terminal err
 **Acceptance Scenarios**:
 
 1. **Given** a workflow with runs, **When** the admin expands its row, **Then** the recent runs list with status and Open links.
-2. **Given** an admin opens a workflow session, **Then** the chat renders it; **Given** a non-admin fetches it, **Then** 404.
-3. **Given** an interactive session of another user, **When** an admin fetches it, **Then** 404 — the admin read covers workflow sessions only.
+2. **Given** an admin clicks Open, **Then** the request creates (or reuses) a share owned by the synthetic user and navigates to the shared-session view; a second click reuses the same share.
+3. **Given** any cross-owner `GET /api/sessions/{id}`, including Admins, **Then** 404 — session reads stay owner-scoped, workflow sessions included.
 
 ---
 
@@ -211,10 +211,10 @@ The tab gains a full editor: every workflow entry field (skill from the enabled-
 - **FR-020**: The status counters MUST be per-instance; the API MUST NOT present them as cluster-wide totals.
 - **FR-021**: The AppConfig UI MUST provide a Workflows tab listing every entry with its status and an enable toggle whose save persists the full workflow list losslessly and restarts the plugin instance.
 - **FR-022**: The system MUST expose `GET /api/workflows/{name}/runs` (Admin only) returning the recent runs of the named workflow, newest first, each with its session id, status, and terminal error.
-- **FR-023**: `GET /api/sessions/{id}` MUST allow Admins to read a session whose conversation type is `workflow` in their own org, and MUST refuse every other cross-owner read, including Admins reading interactive sessions of other users.
+- **FR-023** (revised 2026-11-23): Opening a workflow session from the config UI MUST go through a read-only share link: `POST /api/workflows/{name}/runs/{runId}/share` (Admin only) gets or creates a share owned by the workflow's synthetic user and returns the shared-session URL. No cross-owner session read exists; `GET /api/sessions/{id}` stays fully owner-scoped. An earlier revision added an admin read override for workflow sessions; it was removed in favor of shares.
 - **FR-024**: The Workflows tab MUST offer a full entry editor (create, edit, delete) that persists the whole workflow list through the standard settings save; the entry name MUST be immutable after creation.
 - **FR-025**: The tab MUST link each workflow's skill to the Skills tab editor for that skill.
-- **FR-026**: The chat deep link (`?sessionId=`) MUST open workflow sessions for Admins; sending follow-up messages into a workflow session remains owner-scoped.
+- **FR-026** (revised): The Workflows tab Open action MUST navigate to the shared-session view returned by the share endpoint, never to the owner-scoped chat deep link.
 
 ### Key Entities
 

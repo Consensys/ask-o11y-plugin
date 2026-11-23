@@ -192,9 +192,31 @@ export function WorkflowsTab({ savedWorkflows, onSaveWorkflows, onEditPrompt }: 
     onSaveWorkflows(base.filter((saved) => saved.name !== name));
   };
 
-  const openSession = (run: WorkflowRun) => {
-    if (run.sessionId) {
-      locationService.push(`/a/consensys-asko11y-app?sessionId=${run.sessionId}`);
+  // Opening a workflow session publishes a read-only share link owned by the
+  // workflow's synthetic user — the same mechanism the share_session tool
+  // uses for findings — and navigates to the shared-session view. No
+  // cross-owner session access is involved.
+  const [openingRun, setOpeningRun] = useState<string | null>(null);
+  const openSession = async (workflowName: string, run: WorkflowRun) => {
+    if (openingRun) {
+      return;
+    }
+    setOpeningRun(run.runId);
+    try {
+      const res = await lastValueFrom(
+        getBackendSrv().fetch<{ shareUrl: string }>({
+          url: `${WORKFLOWS_URL}/${encodeURIComponent(workflowName)}/runs/${run.runId}/share`,
+          method: 'POST',
+        })
+      );
+      if (res.data.shareUrl) {
+        locationService.push(res.data.shareUrl);
+      }
+    } catch {
+      // The share endpoint is admin-only and get-or-create; a failure leaves
+      // the user on the tab. surfaced nowhere else.
+    } finally {
+      setOpeningRun(null);
     }
   };
 
@@ -486,8 +508,13 @@ export function WorkflowsTab({ savedWorkflows, onSaveWorkflows, onEditPrompt }: 
                             <span className="text-secondary">{formatTime(run.createdAt)}</span>
                             {run.error && <span className="text-warning">{run.error}</span>}
                             {run.sessionId && (
-                              <Button size="sm" variant="primary" onClick={() => openSession(run)}>
-                                Open
+                              <Button
+                                size="sm"
+                                variant="primary"
+                                disabled={openingRun === run.runId}
+                                onClick={() => void openSession(row.name, run)}
+                              >
+                                {openingRun === run.runId ? 'Opening...' : 'Open'}
                               </Button>
                             )}
                           </div>

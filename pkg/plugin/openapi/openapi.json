@@ -2603,6 +2603,63 @@
           }
         }
       }
+    },
+    "/api/workflows/{name}/runs/{runId}/share": {
+      "post": {
+        "summary": "Get or create a read-only share link for a workflow run's session",
+        "description": "Returns a share link for the named run's session, reusing the newest unexpired share when one exists. The share is owned by the workflow's synthetic user, so no cross-owner session access is involved; the shared-session view renders it read-only for anyone with the link. Requires Admin role.",
+        "operationId": "shareWorkflowRun",
+        "tags": [
+          "Workflows"
+        ],
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Workflow name."
+          },
+          {
+            "name": "runId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Run ID from the runs listing."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Share created or reused",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "shareId": {
+                      "type": "string"
+                    },
+                    "shareUrl": {
+                      "type": "string",
+                      "description": "Path to the shared-session view."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Admin access required"
+          },
+          "404": {
+            "description": "Workflow or run not found"
+          }
+        }
+      }
     }
   },
   "components": {

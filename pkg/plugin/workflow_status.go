@@ -2,6 +2,7 @@ package plugin
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -244,11 +245,111 @@ func (p *Plugin) handleWorkflowsList(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// handleWorkflowRunShare serves POST /api/workflows/{name}/runs/{runId}/share:
+// it gets or creates a read-only share link for one run's session and returns
+// the share path. The share is owned by the workflow's synthetic user (the
+// session owner), so creating it needs no cross-owner read. Admin only — the
+// share grants unauthenticated read access to the session transcript.
+func (p *Plugin) handleWorkflowRunShare(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !isAdmin(r) {
+		http.Error(w, "Admin access required", http.StatusForbidden)
+		return
+	}
+	name, ok := strings.CutPrefix(r.URL.Path, "/api/workflows/")
+	withoutShare, hasShare := strings.CutSuffix(name, "/share")
+	// Path shape: {workflow}/runs/{runId}. The workflow name cannot contain
+	// "/runs/", so the first split is unambiguous.
+	wfName, runAndID, hasRun := strings.Cut(withoutShare, "/runs/")
+	runID := strings.TrimPrefix(runAndID, "/")
+	if !hasRun {
+		http.Error(w, "Invalid path format", http.StatusBadRequest)
+		return
+	}
+	if !ok || !hasShare || wfName == "" || runID == "" {
+		http.Error(w, "Invalid path format", http.StatusBadRequest)
+		return
+	}
+	name = strings.TrimSpace(wfName)
+
+	p.settingsMu.RLock()
+	configured := p.settings.Workflows
+	p.settingsMu.RUnlock()
+	var found bool
+	for _, entry := range configured {
+		if strings.TrimSpace(entry.Name) == name {
+			found = true
+			break
+		}
+	}
+	if !found {
+		http.Error(w, "Workflow not found", http.StatusNotFound)
+		return
+	}
+
+	orgID := getOrgID(r)
+	synthetic := syntheticWorkflowUserID(name)
+	run, err := p.runStore.GetRun(runID)
+	if err != nil || run == nil || run.SessionID == "" || run.UserID != synthetic || run.OrgID != orgID {
+		http.Error(w, "Run not found", http.StatusNotFound)
+		return
+	}
+
+	// Reuse the newest unexpired share for this session when one exists.
+	for _, share := range p.shareStore.GetSharesBySession(run.SessionID) {
+		if share.ExpiresAt == nil || share.ExpiresAt.After(time.Now().UTC()) {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]string{
+				"shareId":  share.ShareID,
+				"shareUrl": fmt.Sprintf("/a/%s/shared/%s?orgId=%d", PluginID, share.ShareID, orgID),
+			})
+			return
+		}
+	}
+
+	// The synthetic user owns the session, so the owner-scoped read works.
+	session, err := p.sessionStore.GetSession(run.SessionID, synthetic, orgID)
+	if err != nil {
+		http.Error(w, "Session not found", http.StatusNotFound)
+		return
+	}
+	data, err := json.Marshal(session)
+	if err != nil {
+		p.logger.Error("Failed to encode workflow session for share", "error", err)
+		http.Error(w, "Failed to create share", http.StatusInternalServerError)
+		return
+	}
+	if err := ValidateSessionData(data); err != nil {
+		http.Error(w, "Failed to create share", http.StatusInternalServerError)
+		return
+	}
+	hours := 30 * 24
+	share, err := p.shareStore.CreateShare(run.SessionID, data, orgID, synthetic, &hours)
+	if err != nil {
+		p.logger.Error("Failed to create workflow session share", "error", err)
+		http.Error(w, "Failed to create share", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{
+		"shareId":  share.ShareID,
+		"shareUrl": fmt.Sprintf("/a/%s/shared/%s?orgId=%d", PluginID, share.ShareID, orgID),
+	})
+}
+
 // handleWorkflowRuns serves GET /api/workflows/{name}/runs: the recent runs
 // of one workflow, newest first, owned by the workflow's synthetic user. The
 // chat deep link (?sessionId=) opens each run's session; the session GET
 // allows Admins to read workflow sessions. Admin only.
 func (p *Plugin) handleWorkflowRuns(w http.ResponseWriter, r *http.Request) {
+	// /api/workflows/{name}/runs/{runId}/share → get-or-create a share link.
+	if strings.HasSuffix(r.URL.Path, "/share") {
+		p.handleWorkflowRunShare(w, r)
+		return
+	}
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return

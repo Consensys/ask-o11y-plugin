@@ -215,48 +215,68 @@ func TestHandleWorkflowRunsListsSyntheticUserRuns(t *testing.T) {
 	}
 }
 
-func TestAdminMayReadWorkflowSessionsOnly(t *testing.T) {
+func TestWorkflowRunShareGetOrCreate(t *testing.T) {
 	p := newAgentRunTestPlugin(t)
+	p.shareStore = NewShareStore(p.logger, NewInMemoryRateLimiter(p.logger))
 	orgID := int64(1)
-	synthetic := syntheticWorkflowUserID("read-wf")
-
-	// A workflow session owned by the synthetic user.
-	wfSession, err := p.sessionStore.CreateSession(synthetic, orgID, "Workflow read-wf: dispatch", []SessionMessage{{Role: "user", Content: "go"}})
+	synthetic := syntheticWorkflowUserID("share-wf")
+	p.settings.Workflows = []WorkflowEntry{
+		{Name: "share-wf", Enabled: true, Skill: "dispatch", ToolAllowlist: []string{"t"}},
+	}
+	wfSession, err := p.sessionStore.CreateSession(synthetic, orgID, "Workflow share-wf: dispatch", []SessionMessage{{Role: "user", Content: "go"}})
 	if err != nil {
 		t.Fatalf("workflow session creation failed: %v", err)
 	}
 	convType := workflowConversationType
-	workflowName := "read-wf"
+	workflowName := "share-wf"
 	if err := p.sessionStore.UpdateSession(wfSession.ID, synthetic, orgID, SessionUpdate{ConversationType: &convType, Workflow: &workflowName}); err != nil {
 		t.Fatalf("workflow tagging failed: %v", err)
 	}
-	// An interactive session owned by someone else.
-	otherSession, err := p.sessionStore.CreateSession(testUserID("user-7"), orgID, "someone else chat", []SessionMessage{{Role: "user", Content: "hi"}})
-	if err != nil {
-		t.Fatalf("interactive session creation failed: %v", err)
-	}
+	runID := "share-run-1"
+	p.runStore.CreateRun(runID, synthetic, orgID, wfSession.ID)
+	p.runStore.FinishRun(runID, RunStatusCompleted, "")
 
-	getSession := func(role, login, sessionID string) int {
-		req := httptest.NewRequest(http.MethodGet, "/api/sessions/"+sessionID, nil)
+	postShare := func(role, login, wf, run string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPost, "/api/workflows/"+wf+"/runs/"+run+"/share", nil)
 		req = withTestIdentity(req, orgID, login, role)
 		rec := httptest.NewRecorder()
-		p.handleSessionRouter(rec, req)
-		return rec.Code
+		p.handleWorkflowRuns(rec, req)
+		return rec
 	}
 
-	// The admin reads the workflow session but not someone else's interactive one.
-	if code := getSession("Admin", "admin-1", wfSession.ID); code != http.StatusOK {
-		t.Fatalf("admin must read workflow sessions, got %d", code)
+	// Non-admin refused; unknown workflow and unknown run 404.
+	if rec := postShare("Viewer", "user-8", "share-wf", runID); rec.Code != http.StatusForbidden {
+		t.Fatalf("viewer must be refused, got %d", rec.Code)
 	}
-	if code := getSession("Admin", "admin-1", otherSession.ID); code != http.StatusNotFound {
-		t.Fatalf("admin must not read interactive sessions of others, got %d", code)
+	if rec := postShare("Admin", "admin-1", "missing", runID); rec.Code != http.StatusNotFound {
+		t.Fatalf("unknown workflow must 404, got %d", rec.Code)
 	}
-	// Non-admins never cross the ownership line.
-	if code := getSession("Viewer", "user-8", wfSession.ID); code != http.StatusNotFound {
-		t.Fatalf("viewer must not read the workflow session, got %d", code)
+	if rec := postShare("Admin", "admin-1", "share-wf", "nope"); rec.Code != http.StatusNotFound {
+		t.Fatalf("unknown run must 404, got %d", rec.Code)
 	}
-	// The org boundary holds for the admin path too: another org is invisible.
-	if code := getSession("Admin", "admin-1", "0000000000000000000000000000000000000000000"); code != http.StatusNotFound {
-		t.Fatalf("unknown session must 404, got %d", code)
+
+	// Admin gets a share URL pointing at the shared-session view.
+	rec := postShare("Admin", "admin-1", "share-wf", runID)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("share creation failed: %d %s", rec.Code, rec.Body.String())
+	}
+	var body struct {
+		ShareID  string `json:"shareId"`
+		ShareURL string `json:"shareUrl"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("invalid share response: %v", err)
+	}
+	if body.ShareID == "" || body.ShareURL != "/a/"+PluginID+"/shared/"+body.ShareID+"?orgId=1" {
+		t.Fatalf("unexpected share payload: %+v", body)
+	}
+
+	// A second call reuses the same share (get-or-create, not one per click).
+	rec2 := postShare("Admin", "admin-1", "share-wf", runID)
+	var body2 struct {
+		ShareID string `json:"shareId"`
+	}
+	if err := json.Unmarshal(rec2.Body.Bytes(), &body2); err != nil || body2.ShareID != body.ShareID {
+		t.Fatalf("second share call must reuse the share: %+v vs %+v", body2, body)
 	}
 }
