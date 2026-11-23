@@ -201,12 +201,12 @@ func (s *WorkflowScheduler) tick() {
 	// the requests that replica served). An unseeded holder must not take
 	// the tick lock, or the seeded replica would skip the tick as locked and
 	// the workflow would never run under sticky-session routing.
-	grafanaURL, saToken, seeded := s.p.orgIdentity.Get(s.entry.OrgID)
+	orgID, grafanaURL, saToken, seeded := s.p.orgIdentity.Get()
 	if !seeded {
 		if time.Since(s.lastIdentityWarn) >= identityWarnInterval {
 			s.lastIdentityWarn = time.Now()
-			s.p.logger.Warn("Workflow tick skipped: org identity not yet seeded; it seeds from the first user request in this org",
-				"workflow", name, "orgId", s.entry.OrgID)
+			s.p.logger.Warn("Workflow tick skipped: org identity not yet seeded; it seeds from the first user request in this instance",
+				"workflow", name)
 		}
 		workflowTicks.WithLabelValues(label, "skip_identity").Inc()
 		s.p.workflowStatus.RecordTick(name, "skip_identity")
@@ -234,6 +234,7 @@ func (s *WorkflowScheduler) tick() {
 		entry:       s.entry,
 		skill:       s.entry.Skill,
 		message:     workflowMessage(s.entry),
+		orgID:       orgID,
 		grafanaURL:  grafanaURL,
 		saToken:     saToken,
 		syntheticID: syntheticWorkflowUserID(name),

@@ -86,7 +86,7 @@ func TestHandleWorkflowsListAdminSeesEntriesAndStatus(t *testing.T) {
 	p := newAgentRunTestPlugin(t)
 	p.settings.Workflows = []WorkflowEntry{
 		{
-			Name: "running-wf", Enabled: true, OrgID: 1, Skill: "dispatch",
+			Name: "running-wf", Enabled: true, Skill: "dispatch",
 			IntervalSec: 300, SessionTimeoutSeconds: 420, MaxConcurrentSessions: 5,
 			ToolAllowlist: []string{"irm_list_alert_groups"}, Model: "base",
 		},
@@ -153,7 +153,7 @@ func TestHandleWorkflowsListRejectsNonAdminAndWrongMethod(t *testing.T) {
 func TestHandleWorkflowRunsListsSyntheticUserRuns(t *testing.T) {
 	p := newAgentRunTestPlugin(t)
 	p.settings.Workflows = []WorkflowEntry{
-		{Name: "runs-wf", Enabled: true, OrgID: 1, Skill: "dispatch", ToolAllowlist: []string{"t"}},
+		{Name: "runs-wf", Enabled: true, Skill: "dispatch", ToolAllowlist: []string{"t"}},
 	}
 	synthetic := syntheticWorkflowUserID("runs-wf")
 	p.runStore.CreateRun("run-1", synthetic, 1, "sess-1")

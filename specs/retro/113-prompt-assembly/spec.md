@@ -77,7 +77,7 @@ The UI reads the shipped defaults from one endpoint.
 20. An unknown conversation type returns an error. `VERIFIED` — test `TestBuildUserPrompt_UnknownTypeErrors`
 21. When `UserPromptSkill` is set, its rendered template replaces the user message; an empty render falls back to the message. `VERIFIED` — `pkg/plugin/prompts.go:217`
 22. The legacy type mapping is tested. `VERIFIED` — test `TestBuildUserPrompt_LegacyTypeRendersSkillTemplate`
-23. `GET /api/prompt-defaults` returns a flat JSON object with exactly `defaultSystemPrompt`, `investigationPrompt`, and `performancePrompt`. `VERIFIED` — `pkg/plugin/plugin.go:1691`
+23. `GET /api/prompt-defaults` returns a flat JSON object with exactly `defaultSystemPrompt`, `investigationPrompt`, and `performancePrompt`. `VERIFIED` — `pkg/plugin/plugin.go:1692`
 24. The response shape is tested. `VERIFIED` — test `TestHandlePromptDefaults`
 25. Any other method returns HTTP 405. `VERIFIED` — `pkg/plugin/plugin.go:1687`
 26. The 405 case is tested. `VERIFIED` — test `TestHandlePromptDefaults`
@@ -85,7 +85,7 @@ The UI reads the shipped defaults from one endpoint.
 28. `defaultSystemPrompt` is the Go constant, not the configured value. `VERIFIED` — `pkg/plugin/plugin.go:1692`
 29. A legacy prompt field applies only when the matching skill has no Skills-tab entry. `VERIFIED` — `pkg/plugin/plugin.go:1775`
 30. Skills-tab precedence is tested. `VERIFIED` — test `TestApplyLegacyPromptOverrides_SkillsTabEntryWins`
-31. A legacy override that fails to apply is logged and does not fail startup. `VERIFIED` — `pkg/plugin/plugin.go:1779`
+31. A legacy override that fails to apply is logged and does not fail startup. `VERIFIED` — `pkg/plugin/plugin.go:1780`
 32. A failed prompt registry build falls back to defaults with an empty settings value. `VERIFIED` — `pkg/plugin/plugin.go:303`
 33. The endpoint has no role check, so a Viewer reads the same payload as an Admin. `VERIFIED` — test `TestHandlePromptDefaults`
 34. No plugin-side check limits who may change the prompt settings; the restriction depends on Grafana app config RBAC. `GAP` — `pkg/plugin/plugin.go:265`
@@ -122,7 +122,7 @@ Coverage: `VERIFIED` = code pointer or test; `ASSUMED` = code suggests, no test;
 |---|---|---|---|
 | Span | None. Prompt assembly emits no span. | — | `pkg/plugin/prompts.go:145` |
 | Metric | None. No prompt metric exists. | — | `pkg/plugin/prompts.go:107` |
-| Log field | `skill`, `error` | Standard logger on legacy override | `pkg/plugin/plugin.go:1779` |
+| Log field | `skill`, `error` | Standard logger on legacy override | `pkg/plugin/plugin.go:1780` |
 | Log field | `[WARN] Invalid <name> template` | Standard logger on parse failure | `pkg/plugin/prompts.go:137` |
 
 ## Evidence Index

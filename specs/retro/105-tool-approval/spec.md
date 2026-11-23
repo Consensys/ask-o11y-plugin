@@ -18,7 +18,7 @@ A risky tool call pauses until a human approves it. The user can approve once, a
 |---|---|---|---|---|
 | Approve or deny a pending call | yes | yes | no | `pkg/plugin/plugin.go:1455` |
 | Approve a tool for the whole session | yes | yes | no | `pkg/plugin/plugin.go:1476` |
-| Decide on another user's run | no | no | no | `pkg/plugin/plugin.go:1446` |
+| Decide on another user's run | no | no | no | `pkg/plugin/plugin.go:1447` |
 | Trigger a gated call through the agent | yes | yes | read-only only | `pkg/agent/loop.go:1017` |
 | Read the decision in run state | yes | yes | yes | `pkg/plugin/runstore.go:298` |
 A Viewer cannot reach a gated write tool because RBAC removes it first. A Viewer cannot approve because the handler requires Admin or Editor. `VERIFIED` — `pkg/plugin/plugin.go:1455`
@@ -92,7 +92,7 @@ The decision body is `{"decision":"approved\|rejected","comment":"...","approval
 40. Deleting a session also deletes its saved approval grants, and deleting all sessions deletes every grant of that user. `VERIFIED` — `pkg/plugin/plugin.go:2613`, `pkg/plugin/plugin.go:2783`, `pkg/plugin/approval_grants.go:153`
 ## Invariants
 - Only an Admin or Editor can resolve an approval. `VERIFIED` — `pkg/plugin/plugin.go:1455`
-- Only the run owner in the run org can resolve an approval. `VERIFIED` — `pkg/plugin/plugin.go:1446`
+- Only the run owner in the run org can resolve an approval. `VERIFIED` — `pkg/plugin/plugin.go:1447`
 - A viewed approval carries the tool name, risk, reason, and raw arguments. `VERIFIED` — `pkg/agent/loop.go:1048`
 - A decision resolves at most once; a later different decision conflicts. `VERIFIED` — `pkg/plugin/approval_broker.go:108`
 - A grant never leaks to another session. `VERIFIED` — test `TestHandleAgentApprovalApproveAlwaysPersistsToolGrant`

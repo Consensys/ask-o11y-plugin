@@ -138,6 +138,16 @@
 
 ---
 
+## Phase 12: Per-org instance semantics (2026-11-23)
+
+**Purpose**: Drop the redundant `orgId` entry field and surface run-listing failures in the tab.
+
+- [x] T034 Backend: `OrgIdentityStore` becomes the single-org instance binding (seeded from the first request to this instance); `WorkflowEntry` drops `orgId`; schedulers, sessions, spawn, fallback, and the status API use the instance org; the runs API row drops `orgId`.
+- [x] T035 Frontend: the editor drops the Org field; the sessions panel shows load failures as errors instead of an empty list.
+- [x] T036 Amend FR-001 and the w3f tenant payload (drop `orgId` from the workflow entries) in the same change.
+
+---
+
 ## Dependencies & Execution Order
 
 - **Phase 1** blocks every story. T001 to T004 are parallel; T005 depends on nothing but is consumed by T008.

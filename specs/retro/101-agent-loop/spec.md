@@ -11,7 +11,7 @@ A user sends one message and receives a streamed investigation. The loop calls t
 ## Actors and RBAC
 | Capability | Admin | Editor | Viewer | Evidence |
 |---|---|---|---|---|
-| Start an agent run | yes | yes | yes | `pkg/plugin/plugin.go:876` |
+| Start an agent run | yes | yes | yes | `pkg/plugin/plugin.go:877` |
 | Read or cancel own run | yes | yes | yes | `pkg/plugin/plugin.go:1341` |
 | Approve a gated tool call | yes | yes | no | `pkg/plugin/plugin.go:1455` |
 | Call a write tool | yes | yes | no | `pkg/rbac/rbac.go:12` |
@@ -92,7 +92,7 @@ The run store adds `sequence` to every event (`pkg/plugin/runstore.go:183`). The
 32. The SSE endpoint replays the stored list first, then forwards live events. `VERIFIED` — test `TestHandleAgentRunEvents_ForwardsNewEvents`
 33. A live sequence gap closes the stream so the client can replay from storage. `VERIFIED` — test `TestHandleAgentRunEvents_StopsAtLiveSequenceGap`
 34. The SSE endpoint sends a `: keepalive` comment every 15 seconds. `VERIFIED` — `pkg/plugin/plugin.go:1672`
-35. A finished run closes the SSE stream after the replay. `VERIFIED` — `pkg/plugin/plugin.go:1640`
+35. A finished run closes the SSE stream after the replay. `VERIFIED` — `pkg/plugin/plugin.go:1641`
 36. The published OpenAPI contract states the iteration cap the loop enforces: 50 for a chat run and 60 for an alert investigation. `VERIFIED` — `pkg/plugin/openapi/openapi.json:499` agrees with `pkg/plugin/config.go:45`
 ## Invariants
 - `Run` closes `eventCh` exactly once, on every return path. `VERIFIED` — `pkg/agent/loop.go:142`
@@ -111,13 +111,13 @@ The run store adds `sequence` to every event (`pkg/plugin/runstore.go:183`). The
 | Tool arguments are truncated and no retry is left | `error`, code `llm_truncated_tool_call`, retryable | `pkg/agent/loop.go:404` |
 | Iteration cap reached | `error` "Agent loop reached maximum iterations (N)" | `pkg/agent/loop.go:774` |
 | MCP tool listing fails | none; the run continues with an empty tool set | `pkg/agent/loop.go:157` |
-| User cancels | no terminal event; run status becomes `cancelled` | `pkg/plugin/plugin.go:1263` |
+| User cancels | no terminal event; run status becomes `cancelled` | `pkg/plugin/plugin.go:1264` |
 ## Data and Persistence
 | Store | Key or table | TTL | Fallback | Evidence |
 |---|---|---|---|---|
 | Run store | `runID` → events, trace, status | 1 hour (`RunMaxAge`) | none | `pkg/plugin/config.go:47` |
 | Event list | per-run slice | capped at 500 events | oldest events dropped | `pkg/plugin/runstore.go:186` |
-| Cancel registry | `p.runCancels[runID]` | deleted when the consumer exits | no cancel | `pkg/plugin/plugin.go:1175` |
+| Cancel registry | `p.runCancels[runID]` | deleted when the consumer exits | no cancel | `pkg/plugin/plugin.go:1176` |
 ## Observability
 | Signal | Name | Where | Evidence |
 |---|---|---|---|

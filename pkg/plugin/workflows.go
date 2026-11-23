@@ -36,7 +36,6 @@ var errWorkflowUnknownTool = errors.New("allowlist names unknown tool")
 type WorkflowEntry struct {
 	Name        string `json:"name"`
 	Enabled     bool   `json:"enabled"`
-	OrgID       int64  `json:"orgId"`
 	Skill       string `json:"skill"`
 	Message     string `json:"message,omitempty"`
 	Model       string `json:"model,omitempty"`
@@ -79,9 +78,6 @@ func validateWorkflowEntry(entry WorkflowEntry, registry *skills.Registry, allow
 	name := strings.TrimSpace(entry.Name)
 	if name == "" {
 		return fmt.Errorf("workflow entry has no name")
-	}
-	if entry.OrgID <= 0 {
-		return fmt.Errorf("workflow %s: orgId must be a positive org number", name)
 	}
 	if entry.IntervalSec < workflowMinIntervalSeconds {
 		return fmt.Errorf("workflow %s: intervalSeconds must be at least %d", name, workflowMinIntervalSeconds)

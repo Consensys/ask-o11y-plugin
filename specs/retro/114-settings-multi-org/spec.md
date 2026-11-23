@@ -49,7 +49,7 @@ Every record and tool call is scoped to the org that made the request.
 | Retention | `sessionTTLDays`, `graphitiEpisodeTTLDays` | `90`, `30` | `pkg/plugin/config.go:71` |
 | Context | `keepRecentToolResults`, `maxToolResponseTokens`, `aggressiveToolResponseTokens`, `maxHighVolumeToolResponseTokens`, `aggressiveHighVolumeToolResponseTokens`, `toolCallSummarizationDisabled` | resolved in the loop | `pkg/plugin/plugin.go:140` |
 | Other | `maxTotalTokens`, `recentMessageCount`, `graphitiScanInterval`, `serviceGraphMaxNodes`, `serviceGraphMaxEdges`, `graphitiAutoSaveSessionsDisabled`, `approvalPolicy`, `maxParallelToolCalls`, `agentEvalCaptureEnabled` | resolved at init or in the loop | `pkg/plugin/plugin.go:104` |
-| Workflows | `workflows` (list of workflow entries: name, enabled, orgId, skill, message, model, intervalSeconds, maxIterations, toolAllowlist, spawnableSkills, maxConcurrentSessions, sessionTimeoutSeconds, fallbackSkill) | empty | `pkg/plugin/plugin.go:135`, `pkg/plugin/workflows.go:38` |
+| Workflows | `workflows` (list of workflow entries: name, enabled, skill, message, model, intervalSeconds, maxIterations, toolAllowlist, spawnableSkills, maxConcurrentSessions, sessionTimeoutSeconds, fallbackSkill — no org field, settings are per org) | empty | `pkg/plugin/plugin.go:135`, `pkg/plugin/workflows.go:38` |
 | Tool search | `toolSearch` | auto | `pkg/plugin/plugin.go:146` |
 | Secure | `redisURL`, `mcpServerHeader.{serverID}.{headerName}` | none | `pkg/plugin/plugin.go:341` |
 

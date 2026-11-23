@@ -25,7 +25,6 @@ func validWorkflowEntry() WorkflowEntry {
 	return WorkflowEntry{
 		Name:                  "noc-dispatch",
 		Enabled:               true,
-		OrgID:                 1,
 		Skill:                 "dispatch",
 		IntervalSec:           120,
 		SessionTimeoutSeconds: 120,
@@ -64,7 +63,6 @@ func TestValidateWorkflowEntryRejectsDefects(t *testing.T) {
 		want   string
 	}{
 		{"no name", func(e *WorkflowEntry) { e.Name = "" }, "no name"},
-		{"bad org", func(e *WorkflowEntry) { e.OrgID = 0 }, "orgId"},
 		{"interval floor", func(e *WorkflowEntry) { e.IntervalSec = 30 }, "intervalSeconds"},
 		{"timeout floor", func(e *WorkflowEntry) { e.SessionTimeoutSeconds = 10 }, "sessionTimeoutSeconds"},
 		{"bad model", func(e *WorkflowEntry) { e.Model = "giant" }, "model"},

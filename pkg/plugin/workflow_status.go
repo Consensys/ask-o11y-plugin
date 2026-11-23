@@ -130,7 +130,6 @@ func (s *WorkflowStatusStore) Get(name string) workflowRuntimeStatus {
 type workflowAPIEntry struct {
 	Name                  string   `json:"name"`
 	Enabled               bool     `json:"enabled"`
-	OrgID                 int64    `json:"orgId"`
 	Skill                 string   `json:"skill"`
 	Message               string   `json:"message,omitempty"`
 	Model                 string   `json:"model,omitempty"`
@@ -183,7 +182,6 @@ func (p *Plugin) handleWorkflowsList(w http.ResponseWriter, r *http.Request) {
 		entries = append(entries, workflowAPIEntry{
 			Name:                  entry.Name,
 			Enabled:               entry.Enabled,
-			OrgID:                 entry.OrgID,
 			Skill:                 entry.Skill,
 			Message:               entry.Message,
 			Model:                 entry.Model,

@@ -22,7 +22,7 @@ Limits stay correct across replicas when Redis is configured.
 |---|---|---|---|---|
 | Create a share link for own session | yes | yes | yes | `pkg/plugin/plugin.go:2370` |
 | Read a share link in the same org | yes | yes | yes | `pkg/plugin/plugin.go:2455` |
-| Revoke a share that they created | yes | yes | yes | `pkg/plugin/plugin.go:2547` |
+| Revoke a share that they created | yes | yes | yes | `pkg/plugin/plugin.go:2548` |
 | List shares for own sessions | yes | yes | yes | `pkg/plugin/plugin.go:2774` |
 
 ## Contract
@@ -82,7 +82,7 @@ Limits stay correct across replicas when Redis is configured.
 19. A session index `session:{sessionID}:shares` holds the share IDs and keeps the longest TTL. `VERIFIED` — `pkg/plugin/shares_redis.go:94`
 20. `GET` on a share returns the stored snapshot, plus `isShared: true` and `sharedBy` set to the owner ID as a string. `VERIFIED` — `pkg/plugin/plugin.go:2506`
 21. A share from another org returns HTTP 403. `VERIFIED` — `pkg/plugin/plugin.go:2490`
-22. Only the creator may revoke a share; another user gets HTTP 403. `VERIFIED` — `pkg/plugin/plugin.go:2547`
+22. Only the creator may revoke a share; another user gets HTTP 403. `VERIFIED` — `pkg/plugin/plugin.go:2548`
 23. The shared payload is the snapshot sent at creation, not a live view of the session. `VERIFIED` — `pkg/plugin/shares.go:79`
 24. Agent runs use a separate limiter with 30 per hour; a denial returns HTTP 429. `VERIFIED` — `pkg/plugin/plugin.go:893`
 25. Direct tool calls use a separate limiter with 120 per hour; a denial returns HTTP 429. `VERIFIED` — `pkg/plugin/plugin.go:794`
@@ -95,7 +95,7 @@ Coverage: `VERIFIED` = code pointer or test; `ASSUMED` = code suggests, no test;
 ## Invariants
 
 - A share is readable only inside the org that created it. `VERIFIED` — `pkg/plugin/plugin.go:2490`
-- A share is revocable only by its creator. `VERIFIED` — `pkg/plugin/plugin.go:2547`
+- A share is revocable only by its creator. `VERIFIED` — `pkg/plugin/plugin.go:2548`
 - The Redis limiter never allows traffic when Redis is down. `VERIFIED` — `pkg/plugin/ratelimit.go:143`
 - The in-memory limiter map never exceeds 10 000 entries. `VERIFIED` — `pkg/plugin/ratelimit.go:61`
 

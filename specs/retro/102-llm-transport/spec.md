@@ -38,7 +38,7 @@ The transport emits no event of its own. A transport failure reaches the client 
 | Key | Location | Default | Evidence |
 |---|---|---|---|
 | `model` | query parameter | empty (auto) | `pkg/plugin/agent_model.go:15` |
-| `model` | session record | empty | `pkg/plugin/plugin.go:1053` |
+| `model` | session record | empty | `pkg/plugin/plugin.go:1054` |
 | `model` | skill front matter | empty | `pkg/skills/selection.go:92` |
 | `maxTotalTokens` | plugin jsonData | 64000 | `pkg/agent/context_window.go:16` |
 | `maxIterations` | skill entry | 0 (unset) | `pkg/skills/registry.go:42` |
@@ -103,7 +103,7 @@ The transport emits no event of its own. A transport failure reaches the client 
 ## Data and Persistence
 | Store | Key or table | TTL | Fallback | Evidence |
 |---|---|---|---|---|
-| Session model | `session.Model` | session TTL | auto selection | `pkg/plugin/plugin.go:1034` |
+| Session model | `session.Model` | session TTL | auto selection | `pkg/plugin/plugin.go:1035` |
 | Token counter | `asko11y_agent_user_tokens_total` | process lifetime | none | `pkg/plugin/metrics.go:19` |
 | Conversation history | in-memory message slice | run lifetime | none | `pkg/agent/loop.go:183` |
 ## Observability

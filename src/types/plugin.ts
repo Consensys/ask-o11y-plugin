@@ -96,7 +96,6 @@ export type AppPluginSettings = {
 export type WorkflowEntryUI = {
   name: string;
   enabled: boolean;
-  orgId: number;
   skill: string;
   message?: string;
   model?: string;

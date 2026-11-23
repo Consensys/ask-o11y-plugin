@@ -21,8 +21,8 @@ calls to the owning client, and caches one slow read-only tool.
 
 | Capability | Admin | Editor | Viewer | Evidence |
 |---|---|---|---|---|
-| List aggregated tools | yes | yes | yes, filtered later | `pkg/plugin/plugin.go:751` |
-| Call a tool | yes | yes | read-only only | `pkg/plugin/plugin.go:802` |
+| List aggregated tools | yes | yes | yes, filtered later | `pkg/plugin/plugin.go:752` |
+| Call a tool | yes | yes | read-only only | `pkg/plugin/plugin.go:803` |
 
 The proxy holds no role logic. Callers filter before and after it.
 
@@ -32,7 +32,7 @@ The proxy holds no role logic. Callers filter before and after it.
 
 | Method | Path | Handler | Evidence |
 |---|---|---|---|
-| GET | `/api/mcp/tools` | `handleMCPTools` | `pkg/plugin/plugin.go:729` |
+| GET | `/api/mcp/tools` | `handleMCPTools` | `pkg/plugin/plugin.go:730` |
 | POST | `/api/mcp/call-tool` | `handleMCPCallTool` | `pkg/plugin/plugin.go:762` |
 | GET | `/api/mcp/servers` | `handleMCPServers` | `pkg/plugin/plugin.go:836` |
 

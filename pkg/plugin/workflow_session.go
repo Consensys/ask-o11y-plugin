@@ -17,9 +17,12 @@ import (
 // The tick path fills it from the entry; the spawn tool fills it from a
 // dispatcher's spawn_session call.
 type workflowRunParams struct {
-	entry       WorkflowEntry
-	skill       string
-	message     string
+	entry   WorkflowEntry
+	skill   string
+	message string
+	// orgID is the owning org of this plugin instance; workflow sessions run
+	// there because Grafana provisions app settings per org.
+	orgID       int64
 	grafanaURL  string
 	saToken     string
 	syntheticID int64
@@ -46,7 +49,7 @@ func (p *Plugin) startWorkflowSession(params workflowRunParams) (string, string,
 func (p *Plugin) startWorkflowSessionWithID(params workflowRunParams, runID string) (string, string, error) {
 	entry := params.entry
 	name := entry.Name
-	orgID := entry.OrgID
+	orgID := params.orgID
 	orgIDStr := strconv.FormatInt(orgID, 10)
 	orgName := "Org" + orgIDStr
 	userRole := "Editor"
@@ -252,6 +255,7 @@ func (p *Plugin) maybeRunWorkflowFallback(params workflowRunParams, outcome stri
 		entry:       entry,
 		skill:       entry.FallbackSkill,
 		message:     fallbackMessage,
+		orgID:       params.orgID,
 		grafanaURL:  params.grafanaURL,
 		saToken:     params.saToken,
 		syntheticID: params.syntheticID,
@@ -351,6 +355,7 @@ func (p *Plugin) handleWorkflowSpawn(params workflowRunParams, arguments string,
 		entry:       params.entry,
 		skill:       args.Skill,
 		message:     args.Message,
+		orgID:       params.orgID,
 		grafanaURL:  params.grafanaURL,
 		saToken:     params.saToken,
 		syntheticID: params.syntheticID,
@@ -411,7 +416,7 @@ func (p *Plugin) handleWorkflowShare(params workflowRunParams, sessionID, runID,
 		days = 30
 	}
 
-	session, err := p.sessionStore.GetSession(sessionID, params.syntheticID, params.entry.OrgID)
+	session, err := p.sessionStore.GetSession(sessionID, params.syntheticID, params.orgID)
 	if err != nil {
 		return fmt.Sprintf("share_session failed: session %s could not be read: %v", sessionID, err), true
 	}
@@ -435,12 +440,12 @@ func (p *Plugin) handleWorkflowShare(params workflowRunParams, sessionID, runID,
 	}
 
 	hours := days * 24
-	share, err := p.shareStore.CreateShare(sessionID, data, params.entry.OrgID, params.syntheticID, &hours)
+	share, err := p.shareStore.CreateShare(sessionID, data, params.orgID, params.syntheticID, &hours)
 	if err != nil {
 		return fmt.Sprintf("share_session failed: %v", err), true
 	}
 	return fmt.Sprintf("Share link (valid %d days): %s/a/%s/shared/%s?orgId=%d",
-		days, params.grafanaURL, PluginID, share.ShareID, params.entry.OrgID), false
+		days, params.grafanaURL, PluginID, share.ShareID, params.orgID), false
 }
 
 // workflowShareSnapshot is the session-shaped payload stored for a workflow

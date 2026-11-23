@@ -66,7 +66,6 @@ const workflowsResponse = () => ({
     {
       name: 'noc-dispatch',
       enabled: true,
-      orgId: 1,
       skill: 'noc-dispatch',
       intervalSeconds: 300,
       sessionTimeoutSeconds: 420,
@@ -86,7 +85,6 @@ const workflowsResponse = () => ({
     {
       name: 'noc-janitor',
       enabled: false,
-      orgId: 1,
       skill: 'noc-janitor',
       intervalSeconds: 300,
       sessionTimeoutSeconds: 240,

@@ -109,6 +109,7 @@ export function WorkflowsTab({ savedWorkflows, onSaveWorkflows, onEditPrompt }: 
   const [refreshing, setRefreshing] = useState(false);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [runs, setRuns] = useState<Record<string, WorkflowRun[]>>({});
+  const [runsError, setRunsError] = useState<Record<string, string | null>>({});
   const [skills, setSkills] = useState<SkillInfo[] | null>(null);
   const [editing, setEditing] = useState<{ original: string | null; entry: WorkflowEntryUI } | null>(null);
 
@@ -133,8 +134,11 @@ export function WorkflowsTab({ savedWorkflows, onSaveWorkflows, onEditPrompt }: 
         getBackendSrv().fetch<{ runs: WorkflowRun[] }>({ url: `${WORKFLOWS_URL}/${name}/runs?limit=20` })
       );
       setRuns((prev) => ({ ...prev, [name]: res.data.runs ?? [] }));
+      setRunsError((prev) => ({ ...prev, [name]: null }));
     } catch {
+      // A failed listing must read as an error, not as an empty history.
       setRuns((prev) => ({ ...prev, [name]: [] }));
+      setRunsError((prev) => ({ ...prev, [name]: 'Failed to load sessions for this workflow.' }));
     }
   }, []);
 
@@ -229,13 +233,6 @@ export function WorkflowsTab({ savedWorkflows, onSaveWorkflows, onEditPrompt }: 
                 value={editing.entry.skill || undefined}
                 onChange={(o) => setEditing({ ...editing, entry: { ...editing.entry, skill: o.value ?? '' } })}
                 width={30}
-              />
-            </Field>
-            <Field label="Org" description="Grafana org id the workflow runs in">
-              <Input
-                type="number"
-                value={editing.entry.orgId}
-                onChange={(e) => setEditing({ ...editing, entry: { ...editing.entry, orgId: Number(e.currentTarget.value) } })}
               />
             </Field>
             <Field label="Model">
@@ -363,7 +360,6 @@ export function WorkflowsTab({ savedWorkflows, onSaveWorkflows, onEditPrompt }: 
               entry: {
                 name: '',
                 enabled: true,
-                orgId: 1,
                 skill: '',
                 toolAllowlist: [],
                 intervalSeconds: 300,
@@ -466,7 +462,9 @@ export function WorkflowsTab({ savedWorkflows, onSaveWorkflows, onEditPrompt }: 
                 {expanded === row.name && (
                   <tr style={border}>
                     <td colSpan={7} className="p-2" data-testid={`ac-workflow-runs-${row.name}`}>
-                      {(runs[row.name] ?? []).length === 0 ? (
+                      {runsError[row.name] ? (
+                        <span className="text-warning">{runsError[row.name]}</span>
+                      ) : (runs[row.name] ?? []).length === 0 ? (
                         <span className="text-secondary">No sessions recorded yet on this instance.</span>
                       ) : (
                         (runs[row.name] ?? []).map((run) => (

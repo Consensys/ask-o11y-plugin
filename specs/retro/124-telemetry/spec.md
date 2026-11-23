@@ -22,7 +22,7 @@ Show token usage and cost in one provisioned dashboard.
 
 | Capability | Admin | Editor | Viewer | Evidence |
 |---|---|---|---|---|
-| Start a run that records tokens | yes | yes | yes | `pkg/plugin/plugin.go:876` (no role gate) |
+| Start a run that records tokens | yes | yes | yes | `pkg/plugin/plugin.go:877` (no role gate) |
 | Read the token dashboard | yes | yes | yes | `provisioning/dashboards/agent-usage.json:560`; Grafana datasource permissions govern |
 
 ## Contract
@@ -31,7 +31,7 @@ Show token usage and cost in one provisioned dashboard.
 
 | Method | Path | Handler | Evidence |
 |---|---|---|---|
-| POST | `/api/plugins/consensys-asko11y-app/resources/api/agent/run` | `handleAgentRun` | `pkg/plugin/plugin.go:876` |
+| POST | `/api/plugins/consensys-asko11y-app/resources/api/agent/run` | `handleAgentRun` | `pkg/plugin/plugin.go:877` |
 | GET | `/metrics` | none. The route is deliberately absent | `pkg/plugin/metrics_test.go:11` |
 
 ### SSE events
