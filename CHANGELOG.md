@@ -5,6 +5,13 @@ All notable changes to the Ask O11y Grafana plugin will be documented in this fi
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.1](https://github.com/Consensys/ask-o11y-plugin/compare/v0.5.0...v0.5.1) (2026-11-23)
+
+
+### Bug Fixes
+
+* **backend:** always sample the agent run trace so API runs export ([#265](https://github.com/Consensys/ask-o11y-plugin/issues/265)) ([13cbbe0](https://github.com/Consensys/ask-o11y-plugin/commit/13cbbe0))
+
 ## [0.5.0](https://github.com/Consensys/ask-o11y-plugin/compare/v0.4.0...v0.5.0) (2026-11-23)
 
 
