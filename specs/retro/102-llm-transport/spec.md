@@ -98,7 +98,7 @@ The transport emits no event of its own. A transport failure reaches the client 
 | 5xx | `error`, code `llm_http_5xx`, retryable | `pkg/agent/llm_client.go:82` |
 | Stream ends early twice | `error`, code `llm_incomplete_stream` | `pkg/agent/loop.go:863` |
 | Request timeout | transport error, then one retry, then `error` | `pkg/agent/llm_client.go:175` |
-| Invalid `model` value | HTTP 400 with the supported values | `pkg/plugin/plugin.go:912` |
+| Invalid `model` value | HTTP 400 with the supported values | `pkg/plugin/plugin.go:976` |
 | Conflicting session model | HTTP 400 "Session model cannot be changed" | `pkg/plugin/plugin.go:1030` |
 ## Data and Persistence
 | Store | Key or table | TTL | Fallback | Evidence |
@@ -112,7 +112,7 @@ The transport emits no event of its own. A transport failure reaches the client 
 | Span | `llm_call` | OTel tracer | `pkg/agent/llm_client.go:134` |
 | Span attribute | `llm.model`, `llm.message_count`, `llm.tool_count`, `llm.http_status` | span | `pkg/agent/llm_client.go:150` |
 | Metric | `asko11y_agent_user_tokens_total` | Prometheus scrape | `pkg/plugin/metrics.go:19` |
-| Log field | `model`, `modelSource`, `requestId`, `attempt` | plugin logger | `pkg/plugin/plugin.go:1116` |
+| Log field | `model`, `modelSource`, `requestId`, `attempt` | plugin logger | `pkg/plugin/plugin.go:1185` |
 ## Evidence Index
 - `pkg/agent/llm_client.go:335` — `parseStream` accumulation
 - `pkg/agent/llm_client.go:244` — `buildHTTPError`

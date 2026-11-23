@@ -2607,7 +2607,7 @@
     "/api/workflows/{name}/runs/{runId}/share": {
       "post": {
         "summary": "Get or create a read-only share link for a workflow run's session",
-        "description": "Returns a share link for the named run's session, reusing the newest unexpired share when one exists. The share is owned by the workflow's synthetic user, so no cross-owner session access is involved; the shared-session view renders it read-only for anyone with the link. Requires Admin role.",
+        "description": "Returns a share link for the named run's session. The stored payload is a snapshot of the session's viewable fields plus the run's transcript, rebuilt from the run events so assistant output and tool results are present even before they reach the session store. An existing share is reused only when the run has reached a terminal state and the newest unexpired share was created at or after that state; a running run, a share without an expiry, and a share older than the terminal state all cause a fresh share to be created. The share is owned by the workflow's synthetic user, so no cross-owner session access is involved; the shared-session view renders it read-only for anyone with the link. Requires Admin role.",
         "operationId": "shareWorkflowRun",
         "tags": [
           "Workflows"

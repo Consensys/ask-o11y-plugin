@@ -20,7 +20,7 @@ The UI reads the shipped defaults from one endpoint.
 
 | Capability | Admin | Editor | Viewer | Evidence |
 |---|---|---|---|---|
-| Read `/api/prompt-defaults` | yes | yes | yes | `VERIFIED` — `pkg/plugin/plugin.go:1687` |
+| Read `/api/prompt-defaults` | yes | yes | yes | `VERIFIED` — `pkg/plugin/plugin.go:1762` |
 | Change the prompt settings | yes | no | no | `ASSUMED` — Grafana app config is Admin-only; no plugin-side check |
 | Override a prompt through the Skills tab | yes | no | no | `ASSUMED` — `pkg/plugin/plugin.go:1724` |
 
@@ -79,7 +79,7 @@ The UI reads the shipped defaults from one endpoint.
 22. The legacy type mapping is tested. `VERIFIED` — test `TestBuildUserPrompt_LegacyTypeRendersSkillTemplate`
 23. `GET /api/prompt-defaults` returns a flat JSON object with exactly `defaultSystemPrompt`, `investigationPrompt`, and `performancePrompt`. `VERIFIED` — `pkg/plugin/plugin.go:1692`
 24. The response shape is tested. `VERIFIED` — test `TestHandlePromptDefaults`
-25. Any other method returns HTTP 405. `VERIFIED` — `pkg/plugin/plugin.go:1687`
+25. Any other method returns HTTP 405. `VERIFIED` — `pkg/plugin/plugin.go:1763`
 26. The 405 case is tested. `VERIFIED` — test `TestHandlePromptDefaults`
 27. `investigationPrompt` and `performancePrompt` are always present and non-empty; a disabled skill falls back to the bundled template. `VERIFIED` — test `TestHandlePromptDefaults_DisabledSkillStillReturnsStableKeys`
 28. `defaultSystemPrompt` is the Go constant, not the configured value. `VERIFIED` — `pkg/plugin/plugin.go:1692`
@@ -129,7 +129,7 @@ Coverage: `VERIFIED` = code pointer or test; `ASSUMED` = code suggests, no test;
 
 - `pkg/plugin/prompts.go:145` — `BuildSystemPrompt`
 - `pkg/plugin/prompts.go:184` — `BuildUserPrompt`
-- `pkg/plugin/plugin.go:1687` — defaults handler
+- `pkg/plugin/plugin.go:1762` — defaults handler
 - `pkg/plugin/plugin.go:1765` — legacy override application
 - `pkg/plugin/prompts_test.go` — `TestApplyLegacyPromptOverrides_SkillsTabEntryWins` — precedence
 - `pkg/plugin/plugin_test.go` — `TestHandlePromptDefaults` — response shape

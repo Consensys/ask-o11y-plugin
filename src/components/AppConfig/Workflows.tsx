@@ -96,6 +96,60 @@ const linesToList = (text: string): string[] =>
 
 const listToLines = (list?: string[]): string => (list ?? []).join('\n');
 
+// The backend bounds a workflow name to 64 bytes: a longer one collides two
+// entries on one truncated metric label.
+const MAX_WORKFLOW_NAME_BYTES = 64;
+
+const utf8ByteLength = (value: string): number => {
+  let bytes = 0;
+  for (const char of value) {
+    const code = char.codePointAt(0) ?? 0;
+    if (code <= 0x7f) {
+      bytes += 1;
+    } else if (code <= 0x7ff) {
+      bytes += 2;
+    } else if (code <= 0xffff) {
+      bytes += 3;
+    } else {
+      bytes += 4;
+    }
+  }
+  return bytes;
+};
+
+const hasControlChar = (value: string): boolean => {
+  for (const char of value) {
+    const code = char.codePointAt(0) ?? 0;
+    if (code <= 0x1f || (code >= 0x7f && code <= 0x9f)) {
+      return true;
+    }
+  }
+  return false;
+};
+
+/**
+ * Mirrors validateWorkflowEntry's name rule: trim, then reject an empty name,
+ * "/", a control character, or more than 64 bytes. Spaces inside the name stay
+ * legal ("Nightly RCA"). The backend keys schedulers, Redis keys, and metric
+ * labels by this name, so an invalid one would be silently dropped there.
+ */
+export const workflowNameError = (rawName: string): string | null => {
+  const name = rawName.trim();
+  if (!name) {
+    return 'Name is required.';
+  }
+  if (name.includes('/')) {
+    return 'Name must not contain "/".';
+  }
+  if (hasControlChar(name)) {
+    return 'Name must not contain control characters.';
+  }
+  if (utf8ByteLength(name) > MAX_WORKFLOW_NAME_BYTES) {
+    return `Name must be at most ${MAX_WORKFLOW_NAME_BYTES} bytes.`;
+  }
+  return null;
+};
+
 const MODEL_OPTIONS: Array<ComboboxOption<string>> = [
   { label: 'Auto (skill decides)', value: '' },
   { label: 'Base', value: 'base' },
@@ -131,8 +185,11 @@ export function WorkflowsTab({ savedWorkflows, onSaveWorkflows, onEditPrompt }: 
 
   const loadRuns = useCallback(async (name: string) => {
     try {
+      // The name may contain spaces; the share POST below encodes it too.
       const res = await lastValueFrom(
-        getBackendSrv().fetch<{ runs: WorkflowRun[] }>({ url: `${WORKFLOWS_URL}/${name}/runs?limit=100` })
+        getBackendSrv().fetch<{ runs: WorkflowRun[] }>({
+          url: `${WORKFLOWS_URL}/${encodeURIComponent(name)}/runs?limit=100`,
+        })
       );
       setRuns((prev) => ({ ...prev, [name]: res.data.runs ?? [] }));
       setRunsError((prev) => ({ ...prev, [name]: null }));
@@ -197,11 +254,13 @@ export function WorkflowsTab({ savedWorkflows, onSaveWorkflows, onEditPrompt }: 
   // uses for findings — and navigates to the shared-session view. No
   // cross-owner session access is involved.
   const [openingRun, setOpeningRun] = useState<string | null>(null);
+  const [shareError, setShareError] = useState<string | null>(null);
   const openSession = async (workflowName: string, run: WorkflowRun) => {
     if (openingRun) {
       return;
     }
     setOpeningRun(run.runId);
+    setShareError(null);
     try {
       const res = await lastValueFrom(
         getBackendSrv().fetch<{ shareUrl: string }>({
@@ -214,7 +273,8 @@ export function WorkflowsTab({ savedWorkflows, onSaveWorkflows, onEditPrompt }: 
       }
     } catch {
       // The share endpoint is admin-only and get-or-create; a failure leaves
-      // the user on the tab. surfaced nowhere else.
+      // the user on the tab, so tell them why nothing opened.
+      setShareError('Failed to open the session: the share link could not be created.');
     } finally {
       setOpeningRun(null);
     }
@@ -241,6 +301,7 @@ export function WorkflowsTab({ savedWorkflows, onSaveWorkflows, onEditPrompt }: 
   }
 
   const border = { borderBottom: `1px solid ${theme.colors.border.weak}` };
+  const nameError = editing ? workflowNameError(editing.entry.name) : null;
 
   return (
     <div>
@@ -254,13 +315,20 @@ export function WorkflowsTab({ savedWorkflows, onSaveWorkflows, onEditPrompt }: 
           <h3 className="text-base mb-2">{editing.original === null ? 'New workflow' : `Edit ${editing.original}`}</h3>
           {skillsError && <p className="text-warning text-sm mb-2">{skillsError}</p>}
           <div className="grid grid-cols-2 gap-2 mb-2">
-            <Field label="Name" description={editing.original === null ? 'Stable identifier; renaming later orphans its sessions' : undefined}>
-              <Input
-                value={editing.entry.name}
-                disabled={editing.original !== null}
-                onChange={(e) => setEditing({ ...editing, entry: { ...editing.entry, name: e.currentTarget.value } })}
-              />
-            </Field>
+            <div>
+              <Field label="Name" description={editing.original === null ? 'Stable identifier; renaming later orphans its sessions' : undefined}>
+                <Input
+                  value={editing.entry.name}
+                  disabled={editing.original !== null}
+                  onChange={(e) => setEditing({ ...editing, entry: { ...editing.entry, name: e.currentTarget.value } })}
+                />
+              </Field>
+              {nameError && (
+                <p className="text-warning text-sm mb-1" data-testid="ac-workflow-name-error">
+                  {nameError}
+                </p>
+              )}
+            </div>
             <Field label="Skill" description="Enabled public skill the sessions run">
               <Combobox<string>
                 options={skillOptions}
@@ -356,7 +424,9 @@ export function WorkflowsTab({ savedWorkflows, onSaveWorkflows, onEditPrompt }: 
           <div className="flex items-center gap-2 mt-2">
             <Button
               variant="primary"
-              disabled={!editing.entry.name.trim() || !editing.entry.skill || editing.entry.toolAllowlist.length === 0}
+              disabled={
+                nameError !== null || !editing.entry.skill || editing.entry.toolAllowlist.length === 0
+              }
               onClick={() => persistEntry(editing.original, editing.entry)}
             >
               Save and reload
@@ -496,6 +566,11 @@ export function WorkflowsTab({ savedWorkflows, onSaveWorkflows, onEditPrompt }: 
                 {expanded === row.name && (
                   <tr style={border}>
                     <td colSpan={7} className="p-2" data-testid={`ac-workflow-runs-${row.name}`}>
+                      {shareError && (
+                        <div className="text-warning py-1" data-testid="ac-workflow-share-error">
+                          {shareError}
+                        </div>
+                      )}
                       {runsError[row.name] ? (
                         <span className="text-warning">{runsError[row.name]}</span>
                       ) : (runs[row.name] ?? []).length === 0 ? (

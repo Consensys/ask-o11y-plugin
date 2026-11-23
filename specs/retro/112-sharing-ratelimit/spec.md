@@ -71,7 +71,7 @@ Limits stay correct across replicas when Redis is configured.
 8. With no explicit expiry, in-memory `ExpiresAt` is null, so the share never expires there. `VERIFIED` — test `TestShareStore_CreateShare_NoExpiry`
 9. With no explicit expiry, Redis applies `DefaultShareMaxTTL` of 365 days. `VERIFIED` — `pkg/plugin/shareutil.go:68`
 10. A share with no explicit expiry expires after `DefaultShareMaxTTL` in both stores. `VERIFIED` — `pkg/plugin/shareutil.go:57`, test `TestShareStore_CreateShare_NoExpiry`
-11. A share over the limit returns HTTP 429 `Too many share requests. Please try again later.` `VERIFIED` — `pkg/plugin/plugin.go:2454`
+11. A share over the limit returns HTTP 429 `Too many share requests. Please try again later.` `VERIFIED` — `pkg/plugin/plugin.go:2506`
 12. The in-memory limiter is a token bucket with burst equal to the limit and one token refilled every `window/limit`. `VERIFIED` — `pkg/plugin/ratelimit.go:78`
 13. The in-memory map is bounded at 10 000 users; on overflow the map resets. `VERIFIED` — `pkg/plugin/ratelimit.go:61`
 14. The bound is tested. `VERIFIED` — test `TestInMemoryRateLimiterBoundsTrackedUsers`
@@ -104,7 +104,7 @@ Coverage: `VERIFIED` = code pointer or test; `ASSUMED` = code suggests, no test;
 | Condition | User-visible result | Evidence |
 |---|---|---|
 | `id` is missing or does not match `sessionId` | 400 `Session ID mismatch` | `pkg/plugin/plugin.go:2407` |
-| Share limit reached | 429 `Too many share requests. Please try again later.` | `pkg/plugin/plugin.go:2454` |
+| Share limit reached | 429 `Too many share requests. Please try again later.` | `pkg/plugin/plugin.go:2506` |
 | Share ID is unknown or expired | 404 `Share link not found` | `pkg/plugin/plugin.go:2506` |
 | Share belongs to another org | 403 `You don't have access to this shared session` | `pkg/plugin/plugin.go:2520` |
 | Another user tries to revoke | 403 `You don't have permission to revoke this share` | `pkg/plugin/plugin.go:2567` |

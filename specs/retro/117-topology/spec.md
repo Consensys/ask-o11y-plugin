@@ -38,7 +38,7 @@ Query parameters: `query` (string), `maxNodes` (default 100, max 500), `maxEdges
 
 ### SSE events
 
-None. The route returns one JSON body. `VERIFIED` — `pkg/plugin/plugin.go:1994`
+None. The route returns one JSON body. `VERIFIED` — `pkg/plugin/plugin.go:2069`
 
 ### Configuration keys
 

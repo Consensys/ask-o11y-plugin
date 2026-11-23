@@ -234,8 +234,10 @@ func (p *Plugin) handleWorkflowsList(w http.ResponseWriter, r *http.Request) {
 			ToolAllowlist:         entry.ToolAllowlist,
 			SpawnableSkills:       entry.SpawnableSkills,
 			FallbackSkill:         entry.FallbackSkill,
-			Running:               running[entry.Name],
-			Status:                p.workflowSessionStatus(entry.Name, getOrgID(r)),
+			// Schedulers are keyed by the trimmed name prepareWorkflows
+			// produced; settings may still hold the raw entry.
+			Running: running[strings.TrimSpace(entry.Name)],
+			Status:  p.workflowSessionStatus(entry.Name, getOrgID(r)),
 		})
 	}
 
@@ -250,6 +252,13 @@ func (p *Plugin) handleWorkflowsList(w http.ResponseWriter, r *http.Request) {
 // the share path. The share is owned by the workflow's synthetic user (the
 // session owner), so creating it needs no cross-owner read. Admin only — the
 // share grants unauthenticated read access to the session transcript.
+//
+// The stored payload is the same snapshot the share_session tool writes (see
+// handleWorkflowShare): the session fields the viewer renders plus this run's
+// events merged in. Assistant output and tool results reach the session store
+// only after the agent loop ends, so a share minted mid-run holds a partial
+// transcript; reusableWorkflowRunShare therefore reuses a share only when the
+// run is terminal and the share postdates that terminal state.
 func (p *Plugin) handleWorkflowRunShare(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -298,25 +307,35 @@ func (p *Plugin) handleWorkflowRunShare(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// Reuse the newest unexpired share for this session when one exists.
-	for _, share := range p.shareStore.GetSharesBySession(run.SessionID) {
-		if share.ExpiresAt == nil || share.ExpiresAt.After(time.Now().UTC()) {
-			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]string{
-				"shareId":  share.ShareID,
-				"shareUrl": fmt.Sprintf("/a/%s/shared/%s?orgId=%d", PluginID, share.ShareID, orgID),
-			})
-			return
-		}
-	}
-
 	// The synthetic user owns the session, so the owner-scoped read works.
+	// It is read before the reuse check because its UpdatedAt marks the
+	// session write that completes the run's transcript.
 	session, err := p.sessionStore.GetSession(run.SessionID, synthetic, orgID)
 	if err != nil {
 		http.Error(w, "Session not found", http.StatusNotFound)
 		return
 	}
-	data, err := json.Marshal(session)
+
+	if share := reusableWorkflowRunShare(run, session, p.shareStore.GetSharesBySession(run.SessionID)); share != nil {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{
+			"shareId":  share.ShareID,
+			"shareUrl": fmt.Sprintf("/a/%s/shared/%s?orgId=%d", PluginID, share.ShareID, orgID),
+		})
+		return
+	}
+
+	snapshot := workflowShareSnapshot{
+		ID:               session.ID,
+		Title:            session.Title,
+		ConversationType: session.ConversationType,
+		Workflow:         session.Workflow,
+		CreatedAt:        session.CreatedAt,
+		Messages:         append([]SessionMessage(nil), session.Messages...),
+	}
+	snapshot.Messages = append(snapshot.Messages, workflowRunTranscript(p, runID)...)
+
+	data, err := json.Marshal(snapshot)
 	if err != nil {
 		p.logger.Error("Failed to encode workflow session for share", "error", err)
 		http.Error(w, "Failed to create share", http.StatusInternalServerError)
@@ -338,6 +357,50 @@ func (p *Plugin) handleWorkflowRunShare(w http.ResponseWriter, r *http.Request) 
 		"shareId":  share.ShareID,
 		"shareUrl": fmt.Sprintf("/a/%s/shared/%s?orgId=%d", PluginID, share.ShareID, orgID),
 	})
+}
+
+// reusableWorkflowRunShare returns the share an admin POST may reuse, or nil
+// when a fresh share must be created. The rule, in order:
+//
+//  1. A running run is never reused: its transcript is still growing, so a
+//     share minted earlier froze a partial transcript.
+//  2. A share with ExpiresAt == nil is never reused (it would live forever);
+//     today every share gets an expiry, but the reuse path does not rely on
+//     that.
+//  3. Only the newest unexpired share is a candidate, and only when it was
+//     created at or after the run reached its terminal state. The terminal
+//     timestamp is the later of the run record's UpdatedAt (stamped by
+//     FinishRun) and the session's UpdatedAt: consumeAgentEvents appends the
+//     assistant message after FinishRun, so only the session write proves
+//     the transcript is complete. A zero terminal timestamp means no reuse.
+//
+// Every other case creates a fresh share instead of handing out a stale one.
+func reusableWorkflowRunShare(run *AgentRun, session *ChatSession, shares []*ShareMetadata) *ShareMetadata {
+	if run == nil || run.Status == RunStatusRunning {
+		return nil
+	}
+	terminal := run.UpdatedAt
+	if session != nil && session.UpdatedAt.After(terminal) {
+		terminal = session.UpdatedAt
+	}
+	if terminal.IsZero() {
+		return nil
+	}
+
+	now := time.Now().UTC()
+	var newest *ShareMetadata
+	for _, share := range shares {
+		if share == nil || share.ExpiresAt == nil || !share.ExpiresAt.After(now) {
+			continue
+		}
+		if newest == nil || share.CreatedAt.After(newest.CreatedAt) {
+			newest = share
+		}
+	}
+	if newest == nil || newest.CreatedAt.Before(terminal) {
+		return nil
+	}
+	return newest
 }
 
 // handleWorkflowRuns serves GET /api/workflows/{name}/runs: the recent runs
@@ -373,7 +436,9 @@ func (p *Plugin) handleWorkflowRuns(w http.ResponseWriter, r *http.Request) {
 	p.settingsMu.RUnlock()
 	var entry *WorkflowEntry
 	for i := range configured {
-		if configured[i].Name == name {
+		// prepareWorkflows trims entry names before schedulers start, so the
+		// stored side is raw only in settings that never went through it.
+		if strings.TrimSpace(configured[i].Name) == name {
 			entry = &configured[i]
 			break
 		}

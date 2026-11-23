@@ -1,6 +1,7 @@
 package plugin
 
 import (
+	"hash/fnv"
 	"strings"
 	"testing"
 
@@ -92,6 +93,53 @@ func TestValidateWorkflowEntryRejectsDefects(t *testing.T) {
 	}
 }
 
+// The workflow name is a route segment, a Redis key fragment, and a metric
+// label value, so its shape is validated: spaces inside stay legal, separators
+// and control characters do not, and the byte cap matches the label cap.
+func TestValidateWorkflowEntryNameShape(t *testing.T) {
+	registry := workflowTestRegistry("dispatch")
+	tools := map[string]bool{"mcp-grafana_list_alert_groups": true}
+
+	cases := []struct {
+		name    string
+		wfName  string
+		wantErr string
+	}{
+		{"plain with a space", "Nightly RCA", ""},
+		{"punctuation", "a-b_c.d", ""},
+		{"surrounding spaces trim", "  Nightly RCA  ", ""},
+		{"unicode", "nächtliche-rca", ""},
+		{"exactly 64 bytes", strings.Repeat("a", 64), ""},
+		{"empty", "", "no name"},
+		{"spaces only", "   ", "no name"},
+		{"route separator", "x/runs/y", "/"},
+		{"single slash", "a/b", "/"},
+		{"nul byte", "a\x00b", "control"},
+		{"newline", "a\nb", "control"},
+		{"65 bytes", strings.Repeat("a", 65), "at most"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			entry := validWorkflowEntry()
+			entry.Name = tc.wfName
+			entry.ToolAllowlist = []string{"mcp-grafana_list_alert_groups"}
+			err := validateWorkflowEntry(entry, registry, tools)
+			if tc.wantErr == "" {
+				if err != nil {
+					t.Fatalf("%q must pass, got %v", tc.wfName, err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatalf("%q must be rejected", tc.wfName)
+			}
+			if !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("%q: error must mention %q, got %q", tc.wfName, tc.wantErr, err.Error())
+			}
+		})
+	}
+}
+
 func TestPrepareWorkflowsDisablesOnlyInvalidEntries(t *testing.T) {
 	registry := workflowTestRegistry("dispatch", "collect")
 	tools := map[string]bool{"t_a": true, "t_b": true}
@@ -165,5 +213,33 @@ func TestSyntheticWorkflowUserIDStableAndDistinct(t *testing.T) {
 	}
 	if a <= 0 {
 		t.Fatal("synthetic user ID must be positive")
+	}
+}
+
+// realLoginUserID replicates getUserID's scheme for a plain Grafana login
+// string, so tests can show the two input domains stay disjoint.
+func realLoginUserID(login string) int64 {
+	h := fnv.New64a()
+	h.Write([]byte(login))
+	return int64(h.Sum64() & 0x7FFFFFFFFFFFFFFF)
+}
+
+func TestSyntheticUserIDHelpersAgree(t *testing.T) {
+	for _, name := range []string{"alpha", "beta", "nightly-sweep", "with space", "ünïcode"} {
+		if got, want := fnvSyntheticUserID(name), syntheticWorkflowUserID(name); got != want {
+			t.Fatalf("helpers disagree for %q: fnv=%d synthetic=%d", name, got, want)
+		}
+	}
+}
+
+func TestSyntheticWorkflowUserIDCannotCollideWithRealLogin(t *testing.T) {
+	for _, name := range []string{"alpha", "beta", "nightly-sweep", "wf"} {
+		synthetic := syntheticWorkflowUserID(name)
+		// A real Grafana login named exactly "workflow:<name>" is the attack:
+		// under the old scheme it hashed to the same ID and owned the
+		// workflow's sessions.
+		if forged := realLoginUserID("workflow:" + name); synthetic == forged {
+			t.Fatalf("synthetic user ID for %q collides with real login %q: %d", name, "workflow:"+name, synthetic)
+		}
 	}
 }

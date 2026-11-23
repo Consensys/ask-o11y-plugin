@@ -33,7 +33,7 @@ Every activation is reviewable and role-safe.
 | Method | Path | Handler | Evidence |
 |---|---|---|---|
 | GET | `/api/skills` | `handleSkills` | `pkg/plugin/plugin.go:595` |
-| GET | `/api/prompt-defaults` | `handlePromptDefaults` | `pkg/plugin/plugin.go:1687` |
+| GET | `/api/prompt-defaults` | `handlePromptDefaults` | `pkg/plugin/plugin.go:1762` |
 
 ### SSE events
 

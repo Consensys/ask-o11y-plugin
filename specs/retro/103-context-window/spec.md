@@ -78,7 +78,7 @@ The limits arrive through the run request only. `VERIFIED` — `pkg/plugin/plugi
 30. A single tool result is capped at ingestion to 8000 tokens. `VERIFIED` — test `TestCapToolResultAtIngestion`
 31. The ingestion cap appends a notice that tells the model to narrow the query. `VERIFIED` — `pkg/agent/context_window.go:397`
 32. The user receives no event when trimming or eviction happens. `GAP` — `pkg/agent/loop.go:307`
-33. The conversation-summary branch is never used in production because the plugin never sets `LoopRequest.Summary`. `GAP` — `pkg/plugin/plugin.go:1133`
+33. The conversation-summary branch is never used in production because the plugin never sets `LoopRequest.Summary`. `GAP` — `pkg/plugin/plugin.go:1210`
 34. Eviction summary tokens are recorded only as `base` model usage, with no dedicated counter. `GAP` — `pkg/agent/loop.go:828`
 ## Invariants
 - The system prompt is always the first message when trimming returns. `VERIFIED` — `pkg/agent/context_window.go:166`

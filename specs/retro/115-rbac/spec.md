@@ -23,7 +23,7 @@ Admin and Editor keep full access.
 | List MCP tools | yes | yes | yes, read-only only | `pkg/plugin/plugin.go:752` |
 | Call a read-only tool | yes | yes | yes | `pkg/rbac/rbac.go:16` |
 | Call a mutating or unannotated tool | yes | yes | no | `pkg/plugin/plugin.go:805` |
-| Approve a pending tool call | yes | yes | no | `pkg/plugin/plugin.go:1455` |
+| Approve a pending tool call | yes | yes | no | `pkg/plugin/plugin.go:1531` |
 | Read skill content with `?include=content` | yes | no | no | `pkg/plugin/plugin.go:1724` |
 
 ## Contract

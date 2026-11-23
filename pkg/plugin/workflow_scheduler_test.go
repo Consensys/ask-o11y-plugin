@@ -167,6 +167,177 @@ func TestStartWorkflowsStartsOnlyValidEntries(t *testing.T) {
 	}
 }
 
+// TestWorkflowTickSurvivesSettingsSave is the refutation for designer-F1: a
+// settings save builds a fresh plugin instance, and its first tick must run
+// because NewPlugin restored the persisted org binding. Before the fix the
+// fresh instance skipped with skip_identity until a human chatted in the org.
+func TestWorkflowTickSurvivesSettingsSave(t *testing.T) {
+	client := workflowRedisTestClient(t)
+	defer client.Close()
+	ctx := context.Background()
+
+	entry := validWorkflowEntry()
+	entry.Name = "save-survive-wf"
+	entry.Skill = "dispatch"
+	entry.IntervalSec = 120
+
+	if err := client.Del(ctx, orgIdentityRedisKey, workflowTickLockKey(entry.Name)).Err(); err != nil {
+		t.Fatalf("cleanup failed: %v", err)
+	}
+	t.Cleanup(func() {
+		client.Del(context.Background(), orgIdentityRedisKey, workflowTickLockKey(entry.Name))
+		// The run store is Redis db 15 indexed under a stable synthetic user
+		// ID, so without this flush a second suite run sees this test's stale
+		// run records and fails its exact-count assertions.
+		client.FlushDB(context.Background())
+	})
+
+	tick := func(p *Plugin) {
+		scheduler := NewWorkflowScheduler(p.ctx, p, entry)
+		// The allowlist check is deferred to ticks with a live tool listing;
+		// an empty proxy lists nothing, so simulate the check having passed.
+		scheduler.allowlistChecked = true
+		scheduler.tick()
+	}
+
+	// First instance: a human request seeds and persists the identity.
+	before, grafanaURL := newWorkflowTestPlugin(t, stubLLMFinalAnswer("tick ok"))
+	before.redisClient = client
+	before.usingRedis = true
+	before.seedOrgIdentity(1, grafanaURL, "sa-token")
+	tick(before)
+
+	syntheticID := syntheticWorkflowUserID(entry.Name)
+	runsBefore, err := before.runStore.ListRuns(syntheticID, 1, 50)
+	if err != nil || len(runsBefore) != 1 {
+		t.Fatalf("seeded tick must start exactly one run: runs=%d err=%v", len(runsBefore), err)
+	}
+
+	// Settings save: NewPlugin builds a fresh instance against the same Redis,
+	// and it must restore the binding before its workflows start. The previous
+	// tick's lock is still held (TTL is half the interval), so clear it as a
+	// later interval would.
+	if err := client.Del(ctx, workflowTickLockKey(entry.Name)).Err(); err != nil {
+		t.Fatalf("lock cleanup failed: %v", err)
+	}
+	instance, err := NewPlugin(ctx, backend.AppInstanceSettings{
+		JSONData: []byte(`{
+			"mcpServers": [],
+			"skills": {"entries": {"dispatch": {"content": "---\nname: dispatch\ndescription: test.\n---\nBody"}}},
+			"workflows": [{"name": "save-survive-wf", "enabled": true, "skill": "dispatch", "intervalSeconds": 120, "toolAllowlist": ["t_a"], "sessionTimeoutSeconds": 60}]
+		}`),
+		DecryptedSecureJSONData: map[string]string{"redisURL": "redis://localhost:6379/15"},
+	})
+	if err != nil {
+		t.Fatalf("NewPlugin after settings save failed: %v", err)
+	}
+	after := instance.(*Plugin)
+	defer after.Dispose()
+
+	if after.usingRedis != true {
+		t.Skip("Redis became unavailable between probe and plugin start")
+	}
+	if orgID, url, token, ok := after.orgIdentity.Get(); !ok || orgID != 1 || url != grafanaURL || token != "sa-token" {
+		t.Fatalf("settings save must restore the persisted identity: %d %q %q %v", orgID, url, token, ok)
+	}
+	if after.workflows == nil || len(after.workflows.schedulers) != 1 {
+		t.Fatalf("the workflow entry must start after a settings save")
+	}
+	// The allowlist check is deferred to ticks with a live tool listing; an
+	// empty proxy lists nothing, so simulate the check having passed.
+	after.workflows.schedulers[0].allowlistChecked = true
+	after.workflows.schedulers[0].tick()
+
+	if got := after.workflowStatus.entry(entry.Name).LastTickOutcome; got != "executed" {
+		t.Fatalf("tick after a settings save must run, not skip: outcome %q", got)
+	}
+	runsAfter, err := after.runStore.ListRuns(syntheticID, 1, 50)
+	if err != nil || len(runsAfter) != 1 {
+		t.Fatalf("tick after a settings save must produce a new run record: runs=%d err=%v", len(runsAfter), err)
+	}
+}
+
+// newTopLevelTickHarness builds a plugin whose tick path is fully wired
+// against dev Redis and whose org identity is already seeded.
+func newTopLevelTickHarness(t *testing.T, name string) (*Plugin, WorkflowEntry, *redis.Client) {
+	t.Helper()
+	client := workflowRedisTestClient(t)
+	t.Cleanup(func() { client.Close() })
+	cleanup := func() {
+		client.Del(context.Background(), workflowTopLevelActiveKey(name), workflowTickLockKey(name), orgIdentityRedisKey)
+	}
+	cleanup()
+	t.Cleanup(cleanup)
+
+	entry := validWorkflowEntry()
+	entry.Name = name
+	entry.Skill = "dispatch"
+	entry.IntervalSec = 120
+	entry.SessionTimeoutSeconds = 60
+
+	p, grafanaURL := newWorkflowTestPlugin(t, stubLLMFinalAnswer("tick ok"))
+	p.redisClient = client
+	p.usingRedis = true
+	p.workflowTopLevel = make(map[string]int)
+	p.seedOrgIdentity(1, grafanaURL, "sa-token")
+	return p, entry, client
+}
+
+// TestTickSkippedWhileTopLevelActive is the refutation for S8: ticks must not
+// pile up a top-level run per tick while an earlier one is still working.
+func TestTickSkippedWhileTopLevelActive(t *testing.T) {
+	const name = "toplevel-busy-wf"
+	p, entry, client := newTopLevelTickHarness(t, name)
+
+	if err := client.Set(context.Background(), workflowTopLevelActiveKey(name),
+		"held-by-earlier-run", time.Minute).Err(); err != nil {
+		t.Fatalf("key setup failed: %v", err)
+	}
+
+	scheduler := NewWorkflowScheduler(p.ctx, p, entry)
+	scheduler.allowlistChecked = true
+	scheduler.tick()
+
+	if got := p.workflowStatus.entry(name).LastTickOutcome; got != "skip_active" {
+		t.Fatalf("tick must skip while a top-level run is active, outcome %q", got)
+	}
+	runs, err := p.runStore.ListRuns(syntheticWorkflowUserID(name), 1, 50)
+	if err != nil {
+		t.Fatalf("listing runs failed: %v", err)
+	}
+	if len(runs) != 0 {
+		t.Fatalf("a skipped tick must start no run, got %d", len(runs))
+	}
+}
+
+// TestTopLevelTTLExpiryAllowsNextTick proves the TTL is the safety net for
+// process death: a holder that never releases cannot deadlock the workflow.
+func TestTopLevelTTLExpiryAllowsNextTick(t *testing.T) {
+	const name = "toplevel-ttl-wf"
+	p, entry, client := newTopLevelTickHarness(t, name)
+
+	if err := client.Set(context.Background(), workflowTopLevelActiveKey(name),
+		"crashed-run", time.Second).Err(); err != nil {
+		t.Fatalf("key setup failed: %v", err)
+	}
+	waitForCondition(t, 5*time.Second, "top-level key expiry", func() bool {
+		n, err := client.Exists(context.Background(), workflowTopLevelActiveKey(name)).Result()
+		return err == nil && n == 0
+	})
+
+	scheduler := NewWorkflowScheduler(p.ctx, p, entry)
+	scheduler.allowlistChecked = true
+	scheduler.tick()
+
+	if got := p.workflowStatus.entry(name).LastTickOutcome; got != "executed" {
+		t.Fatalf("tick after key expiry must run, outcome %q", got)
+	}
+	waitForCondition(t, 10*time.Second, "run record", func() bool {
+		runs, err := p.runStore.ListRuns(syntheticWorkflowUserID(name), 1, 50)
+		return err == nil && len(runs) == 1
+	})
+}
+
 func TestWorkflowTickSkipsWhenIdentityUnseeded(t *testing.T) {
 	client := workflowRedisTestClient(t)
 	defer client.Close()

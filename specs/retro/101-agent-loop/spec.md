@@ -13,7 +13,7 @@ A user sends one message and receives a streamed investigation. The loop calls t
 |---|---|---|---|---|
 | Start an agent run | yes | yes | yes | `pkg/plugin/plugin.go:877` |
 | Read or cancel own run | yes | yes | yes | `pkg/plugin/plugin.go:1341` |
-| Approve a gated tool call | yes | yes | no | `pkg/plugin/plugin.go:1455` |
+| Approve a gated tool call | yes | yes | no | `pkg/plugin/plugin.go:1531` |
 | Call a write tool | yes | yes | no | `pkg/rbac/rbac.go:12` |
 | Load a skill (`load_skill`) | yes | yes | yes | `pkg/agent/loop.go:953` |
 A run is readable and cancellable only by its owning user in its owning org. The check compares `run.OrgID` and `run.UserID` with the request identity. `VERIFIED` — `pkg/plugin/plugin.go:1341`

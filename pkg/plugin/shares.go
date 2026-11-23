@@ -30,6 +30,11 @@ type ShareStoreInterface interface {
 	GetShare(shareID string) (*ShareMetadata, error)
 	DeleteShare(shareID string) error
 	GetSharesBySession(sessionID string) []*ShareMetadata
+	// DeleteSharesByUser removes every share owned by userID, across all
+	// orgs, and reports how many it removed. Workflow ownership is a single
+	// synthetic user per workflow name and workflow configuration is
+	// plugin-wide, so revoking a removed workflow must cover every org.
+	DeleteSharesByUser(userID int64) (int, error)
 	CleanupExpired()
 }
 
@@ -135,6 +140,24 @@ func (s *ShareStore) GetSharesBySession(sessionID string) []*ShareMetadata {
 	}
 
 	return shares
+}
+
+// DeleteSharesByUser removes every share owned by userID, in every org.
+func (s *ShareStore) DeleteSharesByUser(userID int64) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	removed := 0
+	for shareID, share := range s.shares {
+		if share.UserID == userID {
+			delete(s.shares, shareID)
+			removed++
+		}
+	}
+	if removed > 0 {
+		s.logger.Info("Shares deleted for user", "count", removed, "userId", userID)
+	}
+	return removed, nil
 }
 
 // CleanupExpired removes all expired shares

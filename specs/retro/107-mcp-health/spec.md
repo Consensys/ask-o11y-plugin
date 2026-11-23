@@ -74,7 +74,7 @@ Response body: `{servers, systemHealth, oauth}`. `pkg/plugin/plugin.go:846`
 13. A successful probe resets `consecutiveFailures`, clears `lastError`, and stores `tools` and `toolCount`. `VERIFIED` — `pkg/mcp/health.go:222`
 14. A successful probe slower than 2000ms reports `degraded`. A faster one reports `healthy`. `VERIFIED` — `pkg/mcp/health.go:227`
 15. `successRate` is the share of successful checks across all checks since startup, not a fixed value. `VERIFIED` — `pkg/mcp/health.go:239`
-16. Health reaches the UI as `servers[]` of `ServerHealth`. `VERIFIED` — `pkg/plugin/plugin.go:850`
+16. Health reaches the UI as `servers[]` of `ServerHealth`. `VERIFIED` — `pkg/plugin/plugin.go:908`
 17. `ServerHealth` carries `serverId`, `name`, `url`, `type`, `status`, `lastCheck`, `responseTime`, `successRate`, `errorCount`, `consecutiveFailures`, `lastError`, `tools`, `toolCount`. `VERIFIED` — `pkg/mcp/health.go:22`
 18. `systemHealth` reports `overallStatus` plus per-status counts and `total`. `VERIFIED` — `pkg/mcp/health.go:267`
 19. `overallStatus` is `unhealthy` if any server is `unhealthy` or `disconnected`. `VERIFIED` — `pkg/mcp/health.go:295`

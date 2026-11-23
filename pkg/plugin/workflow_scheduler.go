@@ -13,11 +13,18 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-// fnvSyntheticUserID derives a stable non-grafana user ID from a login-like
-// string, using the same scheme as getUserID for interactive users.
-func fnvSyntheticUserID(login string) int64 {
+// syntheticUserIDDomain prefixes every hashed synthetic (non-Grafana) user
+// ID. The leading NUL byte cannot appear in a Grafana login, so a real login
+// can never hash into the synthetic namespace, even a login literally named
+// "workflow:<name>".
+const syntheticUserIDDomain = "\x00workflow:"
+
+// fnvSyntheticUserID derives the stable synthetic user ID for a workflow
+// name. It uses the same FNV64a scheme as getUserID, over an input domain
+// that no real Grafana login can occupy.
+func fnvSyntheticUserID(workflow string) int64 {
 	h := fnv.New64a()
-	h.Write([]byte(login))
+	h.Write([]byte(syntheticUserIDDomain + workflow))
 	return int64(h.Sum64() & 0x7FFFFFFFFFFFFFFF)
 }
 
@@ -28,6 +35,56 @@ func workflowTickLockKey(name string) string { return "workflow:" + name + ":tic
 // across replicas. Members are run IDs; scores are watchdog deadlines, so a
 // member whose deadline passed is pruned on read and never blocks a spawn.
 func workflowActiveSpawnKey(name string) string { return "workflow:" + name + ":active" }
+
+// workflowTopLevelActiveKey is the Redis key electing one in-flight top-level
+// run per workflow. The value is the owning run ID. It is separate from the
+// tick lock (:tick) and the spawned-session set (:active): ticks may fire
+// while a top-level run from an earlier tick is still working, and only this
+// key bounds those runs.
+func workflowTopLevelActiveKey(name string) string { return "workflow:" + name + ":toplevel" }
+
+// workflowTopLevelActiveMargin extends the top-level key TTL past the run's
+// own deadline, so a process that dies mid-run cannot deadlock the workflow:
+// the key expires and the next tick proceeds.
+const workflowTopLevelActiveMargin = 60 * time.Second
+
+// acquireWorkflowTopLevelRun claims the one top-level slot of a workflow for
+// runID. A held key means another top-level run is still in flight; the caller
+// skips the tick instead of piling up a concurrent run.
+func (p *Plugin) acquireWorkflowTopLevelRun(name, runID string, timeoutSeconds int) (bool, error) {
+	if p.redisClient == nil {
+		// No Redis: workflows only run single-instance, and the in-process
+		// tracker already bounds this instance's runs. Nothing to gate.
+		return true, nil
+	}
+	ttl := time.Duration(timeoutSeconds)*time.Second + workflowTopLevelActiveMargin
+	ctx, cancel := redisContext(p.ctx, RedisOpTimeout)
+	defer cancel()
+	return p.redisClient.SetNX(ctx, workflowTopLevelActiveKey(name), runID, ttl).Result()
+}
+
+// workflowTopLevelReleaseScript deletes the key only when this run still owns
+// it, so a run whose TTL already expired cannot free a successor's slot.
+var workflowTopLevelReleaseScript = redis.NewScript(`
+if redis.call("GET", KEYS[1]) == ARGV[1] then
+	return redis.call("DEL", KEYS[1])
+end
+return 0
+`)
+
+// releaseWorkflowTopLevelRun frees the top-level slot and drops the run from
+// the active-sessions gauge. The TTL is the safety net, not the normal path.
+func (p *Plugin) releaseWorkflowTopLevelRun(name, runID string) {
+	if p.redisClient != nil {
+		ctx, cancel := redisContext(p.ctx, RedisOpTimeout)
+		if err := workflowTopLevelReleaseScript.Run(ctx, p.redisClient,
+			[]string{workflowTopLevelActiveKey(name)}, runID).Err(); err != nil {
+			p.logger.Warn("Workflow top-level key release failed", "workflow", name, "error", err)
+		}
+		cancel()
+	}
+	p.workflowTopLevelAdd(name, -1)
+}
 
 // acquireWorkflowTickLock elects this instance for one tick. The TTL is half
 // the interval at most, so a crashed holder cannot starve the survivors.
@@ -120,14 +177,37 @@ func (p *Plugin) workflowActiveSpawnCount(name string) (int, error) {
 	return int(card), nil
 }
 
-// workflowActiveSpawnRefreshGauge syncs the metric with the stored count.
-// Best effort: a Redis hiccup leaves the previous value in place.
+// workflowActiveSpawnRefreshGauge syncs the metric with the stored count plus
+// this instance's in-flight top-level runs. Best effort: a Redis hiccup
+// leaves the previous value in place.
 func (p *Plugin) workflowActiveSpawnRefreshGauge(name string) {
 	count, err := p.workflowActiveSpawnCount(name)
 	if err != nil {
 		return
 	}
-	workflowActiveSpawned.WithLabelValues(workflowLabel(name)).Set(float64(count))
+	workflowActiveSpawned.WithLabelValues(workflowLabel(name)).Set(float64(count + p.workflowTopLevelCount(name)))
+}
+
+// workflowTopLevelAdd adjusts this instance's in-flight top-level run count
+// and re-syncs the active-sessions gauge. Top-level runs are per replica, so
+// they are tracked here rather than in the cross-replica spawn set.
+func (p *Plugin) workflowTopLevelAdd(name string, delta int) {
+	p.workflowTopLevelMu.Lock()
+	if p.workflowTopLevel != nil {
+		p.workflowTopLevel[name] += delta
+		if p.workflowTopLevel[name] <= 0 {
+			delete(p.workflowTopLevel, name)
+		}
+	}
+	p.workflowTopLevelMu.Unlock()
+	p.workflowActiveSpawnRefreshGauge(name)
+}
+
+// workflowTopLevelCount reports this instance's in-flight top-level runs.
+func (p *Plugin) workflowTopLevelCount(name string) int {
+	p.workflowTopLevelMu.Lock()
+	defer p.workflowTopLevelMu.Unlock()
+	return p.workflowTopLevel[name]
 }
 
 // identityWarnInterval bounds how often the unseeded-identity warning fires,
@@ -228,21 +308,52 @@ func (s *WorkflowScheduler) tick() {
 		return
 	}
 
+	// Bound the top-level runs: a tick only starts a session when no earlier
+	// top-level run of this workflow is still in flight. The interval can be
+	// far shorter than the session timeout, so without this gate the runs
+	// would pile up one per tick. The key is TTL'd, so a dead process cannot
+	// deadlock the workflow.
+	runID, idErr := generateShareID()
+	if idErr != nil {
+		s.p.logger.Error("Workflow tick failed to generate a run ID", "workflow", name, "error", idErr)
+		s.p.workflowStatus.RecordSessionError(name, idErr.Error())
+		return
+	}
+	admitted, gateErr := s.p.acquireWorkflowTopLevelRun(name, runID, s.entry.SessionTimeoutSeconds)
+	if gateErr != nil {
+		s.p.logger.Error("Workflow tick skipped: top-level active key unavailable", "workflow", name, "error", gateErr)
+		workflowTicks.WithLabelValues(label, "skip_error").Inc()
+		s.p.workflowStatus.RecordTickError(name, "top-level active key unavailable")
+		return
+	}
+	if !admitted {
+		// A top-level run from an earlier tick still holds the slot. This is
+		// the healthy path when the interval is shorter than the run, so it is
+		// counted and recorded, not warned about.
+		workflowTicks.WithLabelValues(label, "skip_active").Inc()
+		s.p.workflowStatus.RecordTick(name, "skip_active")
+		return
+	}
+	s.p.workflowTopLevelAdd(name, 1)
+
 	workflowTicks.WithLabelValues(label, "executed").Inc()
 	s.p.workflowStatus.RecordTick(name, "executed")
-	if _, _, startErr := s.p.startWorkflowSession(workflowRunParams{
-		entry:       s.entry,
-		skill:       s.entry.Skill,
-		message:     workflowMessage(s.entry),
-		orgID:       orgID,
-		grafanaURL:  grafanaURL,
-		saToken:     saToken,
-		syntheticID: syntheticWorkflowUserID(name),
-		spawned:     false,
-		isFallback:  false,
-	}); startErr != nil {
+	if _, _, startErr := s.p.startWorkflowSessionWithID(workflowRunParams{
+		entry:         s.entry,
+		skill:         s.entry.Skill,
+		message:       workflowMessage(s.entry),
+		orgID:         orgID,
+		grafanaURL:    grafanaURL,
+		saToken:       saToken,
+		syntheticID:   syntheticWorkflowUserID(name),
+		spawned:       false,
+		isFallback:    false,
+		topLevelGated: true,
+	}, runID); startErr != nil {
 		// The failed-session metric is incremented inside; log so the tick is
-		// never silently unhealthy.
+		// never silently unhealthy. The slot the failed start never used is
+		// released here because no finish goroutine will run for it.
+		s.p.releaseWorkflowTopLevelRun(name, runID)
 		s.p.logger.Error("Workflow tick failed to start its session", "workflow", name, "error", startErr)
 		s.p.workflowStatus.RecordSessionError(name, startErr.Error())
 	}

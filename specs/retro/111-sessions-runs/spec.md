@@ -22,7 +22,7 @@ Both survive a pod restart when Redis is configured.
 |---|---|---|---|---|
 | Manage own sessions and the current session | yes | yes | yes | `pkg/plugin/plugin.go:2560` |
 | Start, read, cancel, or stream a run | yes | yes | yes | `pkg/plugin/plugin.go:877` |
-| Approve a pending tool call | yes | yes | no | `pkg/plugin/plugin.go:1455` |
+| Approve a pending tool call | yes | yes | no | `pkg/plugin/plugin.go:1531` |
 
 ## Contract
 
@@ -143,4 +143,4 @@ Coverage: `VERIFIED` = code pointer or test; `ASSUMED` = code suggests, no test;
 
 - Concurrent runs on one session are allowed and uncoordinated. A forward spec should define single-flight or per-session serialisation.
 - The Redis session index has no TTL; it is pruned only on create, so an idle user keeps stale members.
-- `GET /api/sessions/{id}/shares` filters by `UserID` only, not by org (`pkg/plugin/plugin.go:2762`). Cross-org leakage needs a review.
+- `GET /api/sessions/{id}/shares` filters by `UserID` only, not by org (`pkg/plugin/plugin.go:2861`). Cross-org leakage needs a review.

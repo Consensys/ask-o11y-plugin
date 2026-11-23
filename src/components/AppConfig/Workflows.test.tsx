@@ -169,6 +169,47 @@ describe('WorkflowsTab', () => {
     );
   });
 
+  it('surfaces a failed share POST instead of failing silently', async () => {
+    fetchMock.mockImplementation(() => ({
+      fetch: (cfg: { url: string; method?: string }) => {
+        if (cfg.method === 'POST' && cfg.url.includes('/share')) {
+          return throwError(() => new Error('boom'));
+        }
+        return of(
+          cfg.url.includes('/runs')
+            ? {
+                data: {
+                  runs: [
+                    {
+                      runId: 'run-9',
+                      sessionId: 'sess-9',
+                      status: 'completed',
+                      createdAt: '2026-11-20T17:00:00Z',
+                      updatedAt: '2026-11-20T17:01:00Z',
+                    },
+                  ],
+                },
+              }
+            : { data: workflowsResponse() }
+        );
+      },
+    }));
+    const { locationService } = jest.requireMock('@grafana/runtime');
+    locationService.push.mockClear();
+    renderTab();
+
+    const sessionsButtons = await screen.findAllByRole('button', { name: 'Sessions' });
+    fireEvent.click(sessionsButtons[0]);
+
+    const open = await screen.findByRole('button', { name: 'Open' });
+    fireEvent.click(open);
+
+    expect(await screen.findByTestId('ac-workflow-share-error')).toHaveTextContent(
+      /share link could not be created/i
+    );
+    expect(locationService.push).not.toHaveBeenCalled();
+  });
+
   it('opens the editor for a row and saves an edited entry', async () => {
     fetchMock.mockImplementation(() => ({ fetch: () => of({ data: workflowsResponse() }) }));
     const onSave = jest.fn();
@@ -197,6 +238,78 @@ describe('WorkflowsTab', () => {
     const promptButtons = await screen.findAllByRole('button', { name: 'Prompt' });
     fireEvent.click(promptButtons[0]);
     expect(onEditPrompt).toHaveBeenCalledWith('noc-dispatch');
+  });
+
+  it('encodes workflow names with spaces and percent signs in the runs URL', async () => {
+    const urls: string[] = [];
+    const base = workflowsResponse().workflows[0];
+    fetchMock.mockImplementation(() => ({
+      fetch: (cfg: { url: string }) => {
+        urls.push(cfg.url);
+        if (cfg.url.includes('/runs')) {
+          return of({ data: { runs: [] } });
+        }
+        return of({
+          data: {
+            workflows: [
+              { ...base, name: 'Nightly RCA', skill: 'dispatch' },
+              { ...base, name: '50% RCA', skill: 'dispatch' },
+            ],
+          },
+        });
+      },
+    }));
+    renderTab();
+
+    const sessionsButtons = await screen.findAllByRole('button', { name: 'Sessions' });
+    fireEvent.click(sessionsButtons[0]);
+    await waitFor(() =>
+      expect(urls.some((url) => url.endsWith('/Nightly%20RCA/runs?limit=100'))).toBe(true)
+    );
+
+    fireEvent.click(sessionsButtons[1]);
+    await waitFor(() =>
+      expect(urls.some((url) => url.endsWith('/50%25%20RCA/runs?limit=100'))).toBe(true)
+    );
+  });
+
+  it('rejects an invalid workflow name inline and saves the trimmed name', async () => {
+    fetchMock.mockImplementation(() => ({ fetch: () => of({ data: { workflows: [] } }) }));
+    const onSave = jest.fn();
+    renderTab(onSave);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'New workflow' }));
+    const nameInput = screen.getByLabelText('Name');
+    const save = screen.getByRole('button', { name: 'Save and reload' });
+
+    // "/" is a route separator: the runs GET and the share POST would cut the
+    // path at different places.
+    fireEvent.change(nameInput, { target: { value: 'x/runs/y' } });
+    expect(screen.getByTestId('ac-workflow-name-error')).toHaveTextContent('Name must not contain "/".');
+    expect(save).toBeDisabled();
+    expect(onSave).not.toHaveBeenCalled();
+
+    // A control character corrupts Redis keys and log lines.
+    fireEvent.change(nameInput, { target: { value: 'a\u0000b' } });
+    expect(screen.getByTestId('ac-workflow-name-error')).toHaveTextContent('control characters');
+
+    // Spaces inside the name are legal.
+    fireEvent.change(nameInput, { target: { value: '  Nightly RCA  ' } });
+    expect(screen.queryByTestId('ac-workflow-name-error')).not.toBeInTheDocument();
+
+    await waitFor(() =>
+      expect(screen.getByLabelText('Skill').querySelectorAll('option').length).toBeGreaterThan(0)
+    );
+    fireEvent.change(screen.getByLabelText('Skill'), { target: { value: 'investigating-alerts' } });
+    fireEvent.change(screen.getByLabelText('Tool allowlist'), { target: { value: 'irm_list_alert_groups' } });
+
+    expect(save).not.toBeDisabled();
+    fireEvent.click(save);
+    expect(onSave).toHaveBeenCalledTimes(1);
+    expect((onSave.mock.calls[0][0] as Array<Record<string, unknown>>)[0]).toMatchObject({
+      name: 'Nightly RCA',
+      skill: 'investigating-alerts',
+    });
   });
 
   it('toggles a workflow and saves the full entry list', async () => {

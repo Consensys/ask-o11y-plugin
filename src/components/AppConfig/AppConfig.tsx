@@ -950,14 +950,31 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
     });
   }
 
-  function saveWorkflows(next: WorkflowEntryUI[]) {
+  // Read the stored settings at save time: the mount-time snapshot is stale, so
+  // spreading it would revert any jsonData key another admin (or another tab)
+  // wrote since this page loaded. Only the workflows key is replaced.
+  async function saveWorkflows(next: WorkflowEntryUI[]) {
+    let currentJsonData: AppPluginSettings;
+    try {
+      const res = await lastValueFrom(
+        getBackendSrv().fetch<{ jsonData?: AppPluginSettings }>({
+          url: `/api/plugins/${plugin.meta.id}/settings`,
+        })
+      );
+      currentJsonData = res.data?.jsonData ?? savedJsonData;
+    } catch {
+      // A PUT built without a fresh read would revert the other admin's change,
+      // which is the defect this path exists to avoid. Skip the save instead.
+      return;
+    }
+
+    const merged: AppPluginSettings = { ...currentJsonData, workflows: next };
+    // The save reloads the page; keep local state consistent until it does.
+    setSavedJsonData(merged);
     saveAndReload({
       enabled,
       pinned,
-      jsonData: {
-        ...savedJsonData,
-        workflows: next,
-      },
+      jsonData: merged,
     });
   }
 

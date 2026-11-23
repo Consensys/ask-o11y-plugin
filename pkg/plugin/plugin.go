@@ -237,11 +237,23 @@ type Plugin struct {
 	cancel              context.CancelFunc
 	runCancelsMu        sync.Mutex
 	runCancels          map[string]context.CancelFunc
+	// workflowRuns counts in-flight workflow session runs. Dispose does not
+	// cancel them: a settings save builds a fresh instance, and an
+	// investigation must finish its write. Teardown waits for the last run.
+	workflowRuns *workflowRunTracker
+	// workflowTopLevel counts this instance's in-flight top-level workflow
+	// runs per workflow name, so the active-sessions gauge includes them.
+	workflowTopLevelMu sync.Mutex
+	workflowTopLevel   map[string]int
 	// orgIdentity holds the per-org Grafana URL and SA token captured lazily
 	// from inbound requests; the workflow runner reads it (see org_identity.go).
 	orgIdentity *OrgIdentityStore
 	// workflows owns the per-entry schedulers; nil when none are running.
 	workflows *WorkflowManager
+	// appliedWorkflows is the name set of the last applied settings load; it
+	// lets the next load detect a removed entry (see
+	// revokeRemovedWorkflowShares). Guarded by settingsMu.
+	appliedWorkflows map[string]bool
 	// workflowStatus feeds GET /api/workflows with per-instance runtime state.
 	workflowStatus *WorkflowStatusStore
 	// oauthManager drives per-user OAuth for external MCP servers; it also
@@ -479,6 +491,8 @@ func NewPlugin(ctx context.Context, settings backend.AppInstanceSettings) (insta
 		ctx:                 pluginCtx,
 		cancel:              cancel,
 		runCancels:          make(map[string]context.CancelFunc),
+		workflowRuns:        &workflowRunTracker{},
+		workflowTopLevel:    make(map[string]int),
 
 		oauthManager:       oauthManager,
 		dynamicServerStore: dynamicServerStore,
@@ -520,8 +534,17 @@ func NewPlugin(ctx context.Context, settings backend.AppInstanceSettings) (insta
 	p.registerRoutes(mux)
 	p.CallResourceHandler = httpadapter.New(mux)
 
+	// Restore the org binding a previous instance persisted, BEFORE starting
+	// workflows: a settings save constructs this instance afresh, and without
+	// the restore its first tick would skip for lack of identity until a human
+	// chatted in the org again.
+	p.loadPersistedOrgIdentity()
+
 	// Workflows start after the plugin is fully wired so their ticks can use
-	// every store. Requires Redis (see startWorkflows).
+	// every store. Requires Redis (see startWorkflows). Revoke first, and for
+	// every settings load: an entry the applied settings no longer list must
+	// lose its shares even when no workflow remains to start.
+	p.revokeRemovedWorkflowShares(pluginSettings.Workflows)
 	if len(pluginSettings.Workflows) > 0 {
 		p.startWorkflows(pluginSettings.Workflows)
 	}
@@ -534,11 +557,8 @@ func NewPlugin(ctx context.Context, settings backend.AppInstanceSettings) (insta
 }
 
 func (p *Plugin) Dispose() {
-	// Stop the scout and the workflow schedulers first: their in-flight work
-	// must finish before anything it depends on goes away, and before the
-	// run-cancel registry is cleared — a tick that is starting a session
-	// assigns into it, and the nil-map guard in startWorkflowSessionWithID
-	// covers only the residual window after this point.
+	// Stop the scout and the workflow schedulers first: no new tick may start
+	// a session once the instance is shutting down.
 	if p.scout != nil {
 		p.scout.Stop()
 	}
@@ -546,33 +566,49 @@ func (p *Plugin) Dispose() {
 		p.workflows.Stop()
 	}
 
+	// Interactive runs keep the historical cancel-on-Dispose behavior.
+	// Workflow session runs are deliberately absent from this registry: a
+	// settings save disposes this instance, and an in-flight investigation
+	// must survive it and land its run record.
 	p.runCancelsMu.Lock()
 	for _, cancel := range p.runCancels {
 		cancel()
 	}
 	p.runCancels = nil
 	p.runCancelsMu.Unlock()
-	if p.approvalBroker != nil {
-		p.approvalBroker.Close()
-	}
-	if p.approvalGrants != nil {
-		p.approvalGrants.Close()
-	}
 
-	// Close proxy and Redis before cancelling context so that
-	// graceful shutdown I/O can still use the plugin context.
-	p.mcpProxy.StopHealthMonitoring()
-	p.mcpProxy.Close()
-	if p.redisClient != nil {
-		if err := p.redisClient.Close(); err != nil {
-			p.logger.Warn("Failed to close Redis client", "error", err)
+	teardown := sync.OnceFunc(func() {
+		if p.approvalBroker != nil {
+			p.approvalBroker.Close()
 		}
-	}
+		if p.approvalGrants != nil {
+			p.approvalGrants.Close()
+		}
 
-	if p.cancel != nil {
-		p.cancel()
+		// Close proxy and Redis before cancelling context so that
+		// graceful shutdown I/O can still use the plugin context.
+		p.mcpProxy.StopHealthMonitoring()
+		p.mcpProxy.Close()
+		if p.redisClient != nil {
+			if err := p.redisClient.Close(); err != nil {
+				p.logger.Warn("Failed to close Redis client", "error", err)
+			}
+		}
+
+		if p.cancel != nil {
+			p.cancel()
+		}
+		p.logger.Info("Plugin disposed")
+	})
+
+	// A surviving workflow run still needs this instance's Redis client, MCP
+	// proxy and plugin context, so teardown waits for the last one. Each run
+	// carries its own deadline, so the wait is bounded.
+	if p.workflowRuns != nil && !p.workflowRuns.dispose(teardown) {
+		p.logger.Info("Plugin disposed with in-flight workflow sessions; resources close when they finish")
+		return
 	}
-	p.logger.Info("Plugin disposed")
+	teardown()
 }
 
 func (p *Plugin) CheckHealth(ctx context.Context, req *backend.CheckHealthRequest) (*backend.CheckHealthResult, error) {
@@ -974,9 +1010,7 @@ func (p *Plugin) handleAgentRun(w http.ResponseWriter, r *http.Request) {
 		p.scout.SetOrgID(numericOrgID)
 		p.scout.SetGrafanaConfig(grafanaURL, saToken)
 	}
-	if p.orgIdentity != nil {
-		p.orgIdentity.Seed(numericOrgID, grafanaURL, saToken)
-	}
+	p.seedOrgIdentity(numericOrgID, grafanaURL, saToken)
 
 	toolCtx := BuildToolContext(req.OrgName, userRole)
 	toolCtx.ConversationType = req.Type
