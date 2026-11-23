@@ -37,11 +37,6 @@ const workflowConversationType = "workflow"
 // not be listed yet, so the caller can defer instead of disabling the entry.
 var errWorkflowUnknownTool = errors.New("allowlist names unknown tool")
 
-// errWorkflowEntryDisabled is the prepareWorkflowEntries problem for a valid
-// entry the admin switched off. It is a distinct value because the caller logs
-// it at info level, not as a defect.
-var errWorkflowEntryDisabled = errors.New("entry is disabled")
-
 // WorkflowEntry is one provisioned autonomous workflow. Entries arrive from
 // app instance settings jsonData.workflows (or the equivalent provisioning
 // file) and are pure configuration: the plugin ships no entries and no
@@ -165,6 +160,10 @@ type workflowEntryProblem struct {
 // entries are unaffected by a refused one (fail fast per entry, never for the
 // whole plugin).
 //
+// A disabled entry is not a problem: the admin switched it off on purpose, so
+// it is simply left out of the returned entries. Its absence from the applied
+// set stops any scheduler that was running for it.
+//
 // Every returned entry is stamped with defaultOrgID, regardless of what its
 // stored payload held: the org is server-owned and comes from the store key.
 func prepareWorkflowEntries(entries []WorkflowEntry, defaultOrgID int64, registry *skills.Registry, allowlistTools map[string]bool) ([]WorkflowEntry, []workflowEntryProblem) {
@@ -188,8 +187,9 @@ func prepareWorkflowEntries(entries []WorkflowEntry, defaultOrgID int64, registr
 			problems = append(problems, workflowEntryProblem{Name: entry.Name, Error: err.Error()})
 			continue
 		}
+		// The off switch is deliberate: exclude the entry without reporting
+		// it as a defect. Problems are reserved for real validation errors.
 		if !entry.Enabled {
-			problems = append(problems, workflowEntryProblem{Name: entry.Name, Error: errWorkflowEntryDisabled.Error()})
 			continue
 		}
 		valid = append(valid, entry)
@@ -198,14 +198,11 @@ func prepareWorkflowEntries(entries []WorkflowEntry, defaultOrgID int64, registr
 }
 
 // prepareWorkflows logs every refused entry once and returns the valid ones.
-// It is the startup-shaped wrapper over prepareWorkflowEntries.
+// It is the startup-shaped wrapper over prepareWorkflowEntries. A disabled
+// entry is not refused and produces no log line: the off switch is deliberate.
 func prepareWorkflows(entries []WorkflowEntry, defaultOrgID int64, registry *skills.Registry, allowlistTools map[string]bool, logger log.Logger) []WorkflowEntry {
 	valid, problems := prepareWorkflowEntries(entries, defaultOrgID, registry, allowlistTools)
 	for _, problem := range problems {
-		if problem.Error == errWorkflowEntryDisabled.Error() {
-			logger.Info("Workflow entry present but disabled", "workflow", problem.Name)
-			continue
-		}
 		if problem.Error == "duplicate name" {
 			logger.Error("Workflow entry disabled: duplicate name", "workflow", problem.Name)
 			continue

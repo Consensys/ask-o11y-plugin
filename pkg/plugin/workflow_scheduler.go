@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"consensys-asko11y-app/pkg/mcp"
@@ -517,6 +518,11 @@ type WorkflowManager struct {
 	// reconcile loop reports a bad stored entry once instead of every pass.
 	problems map[workflowKey]string
 	stopped  bool
+	// generation counts reconcile passes. A pass claims a number before it
+	// reads the store, and apply refuses to converge for a pass a newer one
+	// has superseded: the stale pass read the list before a hot apply saved
+	// the new one, so applying it would restart the old schedulers.
+	generation atomic.Int64
 }
 
 // newWorkflowManager builds an empty manager whose schedulers inherit parent.
@@ -565,13 +571,27 @@ func (m *WorkflowManager) isRunning(orgID int64, name string) bool {
 	return s != nil && !s.Stopped()
 }
 
+// beginReconcile claims the next generation for one reconcile pass.
+func (m *WorkflowManager) beginReconcile() int64 {
+	return m.generation.Add(1)
+}
+
 // apply converges the live scheduler set onto desired. readOrgs names the orgs
 // whose stored list was read successfully; a scheduler of an org that could
 // not be read is left running, so a Redis hiccup never disables a workflow.
-func (m *WorkflowManager) apply(desired map[workflowKey]WorkflowEntry, readOrgs map[int64]bool, problems map[workflowKey]string, logger log.Logger) {
+//
+// gen is the generation the caller claimed with beginReconcile. When a newer
+// pass has started, this pass read a list the newer pass has superseded, so
+// apply returns without touching a scheduler: the newer pass owns the state.
+// The check runs under the lock, so no newer pass can slip between it and the
+// convergence below.
+func (m *WorkflowManager) apply(gen int64, desired map[workflowKey]WorkflowEntry, readOrgs map[int64]bool, problems map[workflowKey]string, logger log.Logger) {
 	m.mu.Lock()
-	if m.stopped {
+	if m.stopped || m.generation.Load() != gen {
+		latest := m.generation.Load()
 		m.mu.Unlock()
+		logger.Debug("Workflow reconcile superseded by a newer pass; apply skipped",
+			"generation", gen, "latest", latest)
 		return
 	}
 
@@ -677,6 +697,9 @@ func (p *Plugin) workflowReconcileLoop(ctx context.Context) {
 //
 // The org set comes from SCAN over the store prefix. The applied-set keys share
 // that prefix but their suffix is not numeric, so they are skipped.
+//
+// A pass that a newer pass supersedes before it applies converges nothing: the
+// newer pass, which started after this one, applies the fresher list.
 func (p *Plugin) reconcileWorkflows(ctx context.Context) ([]WorkflowEntry, map[int64]bool, bool) {
 	mgr := p.workflows
 	unreadable := map[int64]bool{}
@@ -687,6 +710,11 @@ func (p *Plugin) reconcileWorkflows(ctx context.Context) ([]WorkflowEntry, map[i
 		// Entries live in Redis; without it there is nothing to reconcile.
 		return nil, unreadable, true
 	}
+
+	// Claim this pass before the first store read. A pass that a hot apply
+	// supersedes mid-read must not apply its stale snapshot: the newer pass
+	// applies the list the save persisted.
+	generation := mgr.beginReconcile()
 
 	orgIDs, err := p.workflowStoreOrgs(ctx)
 	if err != nil {
@@ -724,7 +752,7 @@ func (p *Plugin) reconcileWorkflows(ctx context.Context) ([]WorkflowEntry, map[i
 		}
 	}
 
-	mgr.apply(desired, readOrgs, problems, p.logger)
+	mgr.apply(generation, desired, readOrgs, problems, p.logger)
 	return all, unreadable, true
 }
 

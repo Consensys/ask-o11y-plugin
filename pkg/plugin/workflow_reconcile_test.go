@@ -2,7 +2,9 @@ package plugin
 
 import (
 	"context"
+	"fmt"
 	"net/http"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -17,6 +19,15 @@ import (
 // tick without touching the network beyond the stub LLM.
 func newStoreReconcileHarness(t *testing.T, llmHandler http.HandlerFunc) (*Plugin, *redis.Client) {
 	t.Helper()
+	return newStoreReconcileHarnessWithLogger(t, llmHandler, log.DefaultLogger)
+}
+
+// newStoreReconcileHarnessWithLogger is newStoreReconcileHarness with the
+// plugin logger chosen up front. A test must not swap p.logger later: the
+// first reconcile starts a scheduler goroutine that reads it, so a post-start
+// assignment is a data race.
+func newStoreReconcileHarnessWithLogger(t *testing.T, llmHandler http.HandlerFunc, lg log.Logger) (*Plugin, *redis.Client) {
+	t.Helper()
 	client := workflowRedisTestClient(t)
 	t.Cleanup(func() { client.Close() })
 	clearWorkflowStores(t, client, 1, 2)
@@ -29,6 +40,7 @@ func newStoreReconcileHarness(t *testing.T, llmHandler http.HandlerFunc) (*Plugi
 	})
 
 	p, grafanaURL := newWorkflowTestPlugin(t, llmHandler)
+	p.logger = lg
 	p.redisClient = client
 	p.usingRedis = true
 	p.workflows = newWorkflowManager(p, p.ctx)
@@ -368,5 +380,165 @@ func TestReconcileFailedOrgReadKeepsSchedulersRunning(t *testing.T) {
 	}
 	if !p.workflows.isRunning(orgID, name) {
 		t.Fatal("a failed read must leave the org's scheduler running")
+	}
+}
+
+// firstStoreReadBarrier delays the first GET of one workflow store key until
+// release, after that GET already executed. The reconcile that issues it
+// therefore holds the pre-write snapshot: exactly the stale read that a hot
+// apply must supersede.
+type firstStoreReadBarrier struct {
+	key     string
+	reached chan struct{}
+	release chan struct{}
+	once    sync.Once
+}
+
+func (h *firstStoreReadBarrier) DialHook(next redis.DialHook) redis.DialHook { return next }
+
+func (h *firstStoreReadBarrier) ProcessHook(next redis.ProcessHook) redis.ProcessHook {
+	return func(ctx context.Context, cmd redis.Cmder) error {
+		err := next(ctx, cmd)
+		args := cmd.Args()
+		if cmd.Name() == "get" && len(args) > 1 && args[1] == h.key {
+			first := false
+			h.once.Do(func() { first = true })
+			if first {
+				close(h.reached)
+				<-h.release
+			}
+		}
+		return err
+	}
+}
+
+func (h *firstStoreReadBarrier) ProcessPipelineHook(next redis.ProcessPipelineHook) redis.ProcessPipelineHook {
+	return next
+}
+
+// errorCapturingLogger records Error-level lines so a test can prove a
+// deliberate off switch logs no configuration defect.
+type errorCapturingLogger struct {
+	mu    sync.Mutex
+	lines []string
+}
+
+func (l *errorCapturingLogger) Debug(string, ...any) {}
+func (l *errorCapturingLogger) Info(string, ...any)  {}
+func (l *errorCapturingLogger) Warn(string, ...any)  {}
+
+func (l *errorCapturingLogger) Error(msg string, args ...any) {
+	l.mu.Lock()
+	l.lines = append(l.lines, msg+fmt.Sprint(args...))
+	l.mu.Unlock()
+}
+
+func (l *errorCapturingLogger) With(...any) log.Logger                 { return l }
+func (l *errorCapturingLogger) Level() log.Level                       { return log.Error }
+func (l *errorCapturingLogger) FromContext(context.Context) log.Logger { return l }
+
+func (l *errorCapturingLogger) errorLines() []string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return append([]string(nil), l.lines...)
+}
+
+// TestReconcileAbortsWhenNewerReconcileStarted covers the stale-reconcile race:
+// a loop pass reads the old list, a save hot-applies a changed entry, then the
+// stale pass resumes. Its apply must be dropped, so the scheduler the hot apply
+// created still carries the changed entry instead of being restarted with the
+// old one.
+func TestReconcileAbortsWhenNewerReconcileStarted(t *testing.T) {
+	p, client := newStoreReconcileHarness(t, stubLLMFinalAnswer("tick ok"))
+	ctx := context.Background()
+	const name = "recon-race-wf"
+
+	stale := storedReconcileEntry(name)
+	stale.IntervalSec = 120
+	saveReconcileEntries(t, client, stale)
+
+	barrier := &firstStoreReadBarrier{
+		key:     workflowStoreKey(1),
+		reached: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+	client.AddHook(barrier)
+
+	// The loop-shaped pass: it claims a generation, reads the old list, and
+	// then waits inside the hook with that snapshot in hand.
+	loopDone := make(chan struct{})
+	go func() {
+		defer close(loopDone)
+		p.reconcileWorkflows(ctx)
+	}()
+	<-barrier.reached
+
+	// The save hot-applys a changed entry through the real PUT route while the
+	// loop pass is still blocked.
+	body := fmt.Sprintf(`{"workflows":[{"name":%q,"enabled":true,"skill":"dispatch",`+
+		`"intervalSeconds":600,"sessionTimeoutSeconds":120,`+
+		`"toolAllowlist":["mcp-grafana_list_alert_groups"],"maxConcurrentSessions":3}]}`, name)
+	if rec := putWorkflowsRequest(t, p, 1, "Admin", body); rec.Code != http.StatusOK {
+		t.Fatalf("the hot apply save must succeed, got %d: %s", rec.Code, rec.Body.String())
+	}
+	applied := p.workflows.schedulerFor(1, name)
+	if applied == nil {
+		t.Fatal("the hot apply must start the changed entry's scheduler")
+	}
+
+	close(barrier.release)
+	<-loopDone
+
+	if got := p.workflows.schedulerFor(1, name); got != applied {
+		t.Fatal("a stale reconcile must not restart the scheduler the hot apply created")
+	}
+	if applied.Stopped() {
+		t.Fatal("a stale reconcile must not stop the hot-applied scheduler")
+	}
+	p.workflows.mu.Lock()
+	tracked, ok := p.workflows.entries[workflowKey{orgID: 1, name: name}]
+	p.workflows.mu.Unlock()
+	if !ok || tracked.IntervalSec != 600 {
+		t.Fatalf("a stale reconcile must not restore the old entry, got %+v (tracked=%v)", tracked, ok)
+	}
+}
+
+// TestReconcileStoppedDisabledEntryEmitsNoErrorLog: the admin off switch is not
+// a defect. Disabling a running entry stops its scheduler, drops it from the
+// applied set, and logs no "invalid configuration" error.
+func TestReconcileStoppedDisabledEntryEmitsNoErrorLog(t *testing.T) {
+	capture := &errorCapturingLogger{}
+	p, client := newStoreReconcileHarnessWithLogger(t, stubLLMFinalAnswer("tick ok"), capture)
+	ctx := context.Background()
+	const name = "recon-toggle-off-wf"
+
+	entry := storedReconcileEntry(name)
+	saveReconcileEntries(t, client, entry)
+	if _, _, ok := p.reconcileWorkflows(ctx); !ok {
+		t.Fatal("a readable store must report ok")
+	}
+	if p.workflows.schedulerFor(1, name) == nil {
+		t.Fatal("an enabled entry must start a scheduler")
+	}
+
+	disabled := entry
+	disabled.Enabled = false
+	saveReconcileEntries(t, client, disabled)
+	if _, _, ok := p.reconcileWorkflows(ctx); !ok {
+		t.Fatal("a readable store must report ok")
+	}
+	if s := p.workflows.schedulerFor(1, name); s != nil {
+		t.Fatal("disabling an entry must stop its scheduler")
+	}
+	p.workflows.mu.Lock()
+	_, tracked := p.workflows.entries[workflowKey{orgID: 1, name: name}]
+	p.workflows.mu.Unlock()
+	if tracked {
+		t.Fatal("a disabled entry must leave the applied set")
+	}
+	for _, line := range capture.errorLines() {
+		if strings.Contains(line, "invalid configuration") {
+			t.Fatalf("a deliberate off switch must not log a configuration error: %s", line)
+		}
 	}
 }

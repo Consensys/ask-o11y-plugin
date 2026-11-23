@@ -172,6 +172,23 @@ func TestPrepareWorkflowsDisablesOnlyInvalidEntries(t *testing.T) {
 	}
 }
 
+// TestPrepareWorkflowEntriesSkipsDisabledWithoutProblem: a disabled entry is
+// excluded from the applied set, so its scheduler stops, and it is never a
+// problem: the off switch is deliberate, not a configuration defect.
+func TestPrepareWorkflowEntriesSkipsDisabledWithoutProblem(t *testing.T) {
+	registry := workflowTestRegistry("dispatch")
+	entry := validWorkflowEntry()
+	entry.Enabled = false
+
+	valid, problems := prepareWorkflowEntries([]WorkflowEntry{entry}, 3, registry, nil)
+	if len(valid) != 0 {
+		t.Fatalf("a disabled entry must not be applied, got %d", len(valid))
+	}
+	if len(problems) != 0 {
+		t.Fatalf("a disabled entry must not be a problem, got %v", problems)
+	}
+}
+
 func TestPrepareWorkflowsAppliesDefaults(t *testing.T) {
 	registry := workflowTestRegistry("dispatch")
 	entry := validWorkflowEntry()
