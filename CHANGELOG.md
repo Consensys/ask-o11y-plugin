@@ -5,6 +5,13 @@ All notable changes to the Ask O11y Grafana plugin will be documented in this fi
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0](https://github.com/Consensys/ask-o11y-plugin/compare/v0.4.0...v0.5.0) (2026-11-23)
+
+
+### Features
+
+* **ui:** add workflow sessions, editor, and prompt links to the config tab ([#263](https://github.com/Consensys/ask-o11y-plugin/issues/263)) ([e37547e](https://github.com/Consensys/ask-o11y-plugin/commit/e37547e6d1b5a086bff5fb5152cf3388c59adc06))
+
 ## [0.4.0](https://github.com/Consensys/ask-o11y-plugin/compare/v0.3.30...v0.4.0) (2026-11-20)
 
 
