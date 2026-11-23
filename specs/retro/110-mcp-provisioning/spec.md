@@ -72,7 +72,7 @@ at start, adds runtime servers, and sends W3C trace context with each tool call.
 10. `trustedMCPServers` overrides `Trusted`; global `riskOverrides` copy into servers with none. `VERIFIED` — `pkg/plugin/plugin.go:188`
 11. Provisioned servers are attached with `UpdateConfig` at plugin init. `VERIFIED` — `pkg/plugin/plugin.go:320`
 12. Settings are read only in `NewPlugin`; a change needs a new plugin instance. `ASSUMED` — `pkg/plugin/plugin.go:265` is the only writer of `p.settings`
-13. Runtime servers are restored from the dynamic server store after provisioning. `VERIFIED` — `pkg/plugin/plugin.go:398`
+13. Runtime servers are restored from the dynamic server store after provisioning. `VERIFIED` — `pkg/plugin/plugin.go:416`
 14. `EnsureServer` keeps an existing client when URL and headers match. `VERIFIED` — test `TestEnsureServerNoopWhenConfigMatchesExisting`
 15. `EnsureServer` replaces the client when URL or headers differ. `VERIFIED` — test `TestEnsureServerClosesReplacedClientOutsideLock`
 16. Replacing a client for an existing ID logs a warning with the ID and URL. `VERIFIED` — `pkg/mcp/proxy.go:435`

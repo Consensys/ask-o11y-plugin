@@ -49,7 +49,7 @@ Every record and tool call is scoped to the org that made the request.
 | Retention | `sessionTTLDays`, `graphitiEpisodeTTLDays` | `90`, `30` | `pkg/plugin/config.go:71` |
 | Context | `keepRecentToolResults`, `maxToolResponseTokens`, `aggressiveToolResponseTokens`, `maxHighVolumeToolResponseTokens`, `aggressiveHighVolumeToolResponseTokens`, `toolCallSummarizationDisabled` | resolved in the loop | `pkg/plugin/plugin.go:140` |
 | Other | `maxTotalTokens`, `recentMessageCount`, `graphitiScanInterval`, `serviceGraphMaxNodes`, `serviceGraphMaxEdges`, `graphitiAutoSaveSessionsDisabled`, `approvalPolicy`, `maxParallelToolCalls`, `agentEvalCaptureEnabled` | resolved at init or in the loop | `pkg/plugin/plugin.go:104` |
-| Workflows | `workflows` (list of workflow entries: name, enabled, skill, message, model, intervalSeconds, maxIterations, toolAllowlist, spawnableSkills, maxConcurrentSessions, sessionTimeoutSeconds, fallbackSkill — no org field, settings are per org) | empty | `pkg/plugin/plugin.go:135`, `pkg/plugin/workflows.go:38` |
+| Workflows | none: entries live per org in the Redis store `workflows:<orgID>` (fields name, enabled, skill, message, model, intervalSeconds, maxIterations, toolAllowlist, spawnableSkills, maxConcurrentSessions, sessionTimeoutSeconds, fallbackSkill, orgId); a legacy `jsonData.workflows` key is ignored with one warning | empty | `pkg/plugin/workflow_store.go:41`, `pkg/plugin/plugin.go:541` |
 | Tool search | `toolSearch` | auto | `pkg/plugin/plugin.go:146` |
 | Secure | `redisURL`, `mcpServerHeader.{serverID}.{headerName}` | none | `pkg/plugin/plugin.go:341` |
 
@@ -72,7 +72,7 @@ Every record and tool call is scoped to the org that made the request.
 9. An unparsable `builtInMCPBaseURL` is cleared, and the fallback is `http://localhost:3000`. `VERIFIED` — `pkg/plugin/plugin.go:287`
 10. `sessionTTLDays` at or below zero becomes 90 days. `VERIFIED` — `pkg/plugin/config.go:78`
 11. The Grafana URL resolution order is: local loopback, `GrafanaConfig.AppURL`, then the base-URL fallback. `VERIFIED` — `pkg/plugin/plugin.go:54`
-12. All HTTP clients come from `httpclient.New`, with a 30-second timeout for OAuth and 600 seconds for LLM calls. `VERIFIED` — `pkg/plugin/plugin.go:370`
+12. All HTTP clients come from `httpclient.New`, with a 30-second timeout for OAuth and 600 seconds for LLM calls. `VERIFIED` — `pkg/plugin/plugin.go:388`, `pkg/plugin/plugin.go:441`
 13. The LLM client never sets `X-Grafana-Org-Id`; the SA token is Org-1 scoped. `VERIFIED` — `pkg/agent/llm_client.go:324`
 14. `getOrgID` reads the server-populated plugin context and defaults to `1` when absent. `VERIFIED` — `pkg/plugin/plugin.go:2402`
 15. When `orgID` is not `1`, the LLM client logs a warning and still sends the token without an org header. `VERIFIED` — `pkg/agent/llm_client.go:326`
@@ -87,7 +87,7 @@ Every record and tool call is scoped to the org that made the request.
 24. Redis success and fallback are both tested. `VERIFIED` — test `TestNewPlugin_RedisSuccess`
 25. `Dispose` cancels interactive runs only: workflow session runs are absent from the cancel registry, survive instance teardown, and end at their own session deadline or on natural completion. It stops the scout and schedulers, then cancels interactive runs; broker close, health-monitor stop, proxy/Redis close, and context cancel run in teardown, which waits for the last workflow run. `VERIFIED` — `pkg/plugin/plugin.go:569`, `pkg/plugin/plugin.go:607`
 26. When Redis is absent, the health message says session sharing will not work across replicas. `VERIFIED` — `pkg/plugin/plugin.go:570`
-27. Settings, sessions, and runs are all keyed by org, so org 2 gets separate records. `VERIFIED` — `pkg/plugin/sessionstore.go:94`
+27. Settings, sessions, runs, and workflow entries are all keyed by org, so org 2 gets separate records. `VERIFIED` — `pkg/plugin/sessionstore.go:94`, `pkg/plugin/workflow_store.go:41`
 28. In a non-Org-1 org, the plugin keeps using the Org-1 service-account token for the LLM. The configured LLM app for that org is therefore not selected. `GAP` — `pkg/agent/llm_client.go:326`
 29. The same mismatch applies to the built-in MCP: the Org-1 SA token is paired with the caller's `X-Grafana-Org-Id`. `GAP` — `pkg/mcp/client.go:112`
 

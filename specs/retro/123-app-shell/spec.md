@@ -58,13 +58,13 @@ Configuration is gated twice: the nav entry requires role `Admin`, and the actio
 9. `plugin.json` exposes the app at `/a/%PLUGIN_ID%` with action `agent:read`. `VERIFIED` — `src/plugin.json:64`
 10. The Configuration nav entry requires role `Admin` and action `settings:write`. `VERIFIED` — `src/plugin.json:76`
 11. Role grants: Reader to Viewer, Editor, Admin; Operator to Editor, Admin; Administrator to Admin. `VERIFIED` — `src/plugin.json:90`
-12. The config page has six tabs in fixed order: General, Agent Runtime, MCP, Service Graph, Skills, Prompts. `VERIFIED` — `src/components/AppConfig/AppConfig.tsx:164`
+12. The config page has seven tabs in fixed order: General, Agent Runtime, MCP, Service Graph, Skills, Workflows, Prompts. `VERIFIED` — `src/components/AppConfig/AppConfig.tsx:164`
 13. The tab is restored from sessionStorage after a save and reload. `VERIFIED` — test `restores the active settings tab from session storage`
 14. A tab change rewrites the hash with `replaceState` and stores the tab. `ASSUMED` — `src/components/AppConfig/AppConfig.tsx:266`
 15. A dirty tab shows `*` plus an "Unsaved changes" Alert. `VERIFIED` — test `shows unsaved changes notice for edited settings tabs`
 16. Saving reloads the page and returns to the same tab. `VERIFIED` — test `should return to the active settings tab after saving`
 17. The Skills tab never counts as dirty, because it saves on each action. `VERIFIED` — `src/components/AppConfig/AppConfig.tsx:488`
-18. General writes `maxTotalTokens`. `VERIFIED` — `src/components/AppConfig/AppConfig.tsx:982`
+18. General writes `maxTotalTokens`. `VERIFIED` — `src/components/AppConfig/AppConfig.tsx:998`
 19. `maxTotalTokens` must be 1000..200000; Save is disabled outside it. `VERIFIED` — test `should save valid config and reject invalid token limits`
 20. General also writes `kioskModeEnabled` and `chatPanelPosition`. `VERIFIED` — `src/components/AppConfig/AppConfig.tsx:1848`
 21. Agent Runtime writes the approval policy, the parallel-call cap, eval capture, four context limits, summarization, and tool search. `VERIFIED` — `src/components/AppConfig/AppConfig.tsx:997`
@@ -80,7 +80,7 @@ Configuration is gated twice: the nav entry requires role `Admin`, and the actio
 31. Server types are `openapi`, `standard`, `sse`, and `streamable-http`. `VERIFIED` — test `should add, configure, and remove MCP servers`
 32. A server holds at most 10 custom headers. `VERIFIED` — `src/components/AppConfig/AppConfig.tsx:679`
 33. A blank header key disables the Add Header button. `VERIFIED` — test `should disable add-header when incomplete header exists`
-34. Header values save to `secureJsonData` as `mcpServerHeader.<serverId>.<key>`. `VERIFIED` — `src/components/AppConfig/AppConfig.tsx:1102`
+34. Header values save to `secureJsonData` as `mcpServerHeader.<serverId>.<key>`. `VERIFIED` — `src/components/AppConfig/AppConfig.tsx:779`
 35. A duplicate normalised header key blocks save and shows an error Alert. `VERIFIED` — `src/components/AppConfig/AppConfig.tsx:1064`
 36. The built-in MCP toggle is disabled when `grafana-llm-app` MCP is unavailable. `VERIFIED` — `src/components/AppConfig/AppConfig.tsx:1482`
 37. Server status badges poll every 15 s and read "Status unknown" without data. `VERIFIED` — `src/components/AppConfig/AppConfig.tsx:346`
@@ -116,13 +116,13 @@ Coverage tags:
 | MCP name empty | Field error "Server name is required" | `src/components/AppConfig/AppConfig.tsx:1027` |
 | MCP URL invalid | Field error from `validateMCPServerURL` | `src/components/AppConfig/AppConfig.tsx:1035` |
 | Duplicate header key | Save does nothing, no message | `src/components/AppConfig/AppConfig.tsx:1053` |
-| Built-in MCP missing | Warning Alert "Built-in MCP unavailable" | `src/components/AppConfig/AppConfig.tsx:1452` |
+| Built-in MCP missing | Warning Alert "Built-in MCP unavailable" | `src/components/AppConfig/AppConfig.tsx:1460` |
 | Lazy chunk fails | Error boundary "Application Error" | `src/module.tsx:14` |
 ## Data and Persistence
 | Store | Key or table | TTL | Fallback | Evidence |
 |---|---|---|---|---|
 | Plugin jsonData | all keys above | plugin lifetime | constants above | `src/components/AppConfig/AppConfig.tsx:285` |
-| Plugin secureJsonData | `mcpServerHeader.<serverId>.<key>` | plugin lifetime | empty | `src/components/AppConfig/AppConfig.tsx:1102` |
+| Plugin secureJsonData | `mcpServerHeader.<serverId>.<key>` | plugin lifetime | empty | `src/components/AppConfig/AppConfig.tsx:779` |
 | sessionStorage | `settings.activeTab` | tab lifetime | `general` | `src/components/AppConfig/AppConfig.tsx:161` |
 ## Observability
 | Signal | Name | Where | Evidence |

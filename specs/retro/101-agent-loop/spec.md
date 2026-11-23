@@ -51,7 +51,7 @@ The run store adds `sequence` to every event (`pkg/plugin/runstore.go:183`). The
 | `maxTotalTokens` | plugin jsonData | 64000 | `pkg/agent/context_window.go:16` |
 | `maxParallelToolCalls` | plugin jsonData | 4 | `pkg/plugin/plugin.go:184` |
 | `approvalPolicy` | plugin jsonData | `approval-gated-writes` | `pkg/plugin/plugin.go:181` |
-| `recentMessageCount` | plugin jsonData | 10 | `pkg/plugin/plugin.go:282` |
+| `recentMessageCount` | plugin jsonData | 10 | `pkg/plugin/plugin.go:301` |
 ### MCP tool names
 | Tool | Read-only | Evidence |
 |---|---|---|
