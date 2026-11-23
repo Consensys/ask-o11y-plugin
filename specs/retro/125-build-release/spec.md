@@ -43,9 +43,9 @@ Ship a versioned archive, a container image, and a local stack.
 
 | Key | Location | Default | Evidence |
 |---|---|---|---|
-| `RELEASE_TOKEN` | repository secret | none | `.github/workflows/release-please.yml:19` |
-| `GRAFANA_ACCESS_POLICY_TOKEN` | repository secret | none | `.github/workflows/release.yml:35` |
-| `LLM_API_KEY` | repository secret | none | `.github/workflows/e2e.yml:134` |
+| `RELEASE_TOKEN` | repository secret | none | `.github/workflows/release-please.yml:20` |
+| `GRAFANA_ACCESS_POLICY_TOKEN` | repository secret | none | `.github/workflows/release.yml:36` |
+| `LLM_API_KEY` | repository secret | none | `.github/workflows/e2e.yml:163` |
 | `AWS_ACCOUNT_ID`, `AWS_REGION`, `AWS_IAM_ROLE`, `ECR_REPOSITORY`, `IMAGE_TAG_PREFIX` | repository variables | none | `.github/workflows/docker-release.yml:18` |
 
 ### MCP tool names
@@ -57,47 +57,47 @@ Ship a versioned archive, a container image, and a local stack.
 ## Behaviour Rules
 
 1. CI runs on push to main, on every pull request, and on manual dispatch. `VERIFIED` — `.github/workflows/ci.yml:3`
-2. CI detects code changes with `dorny/paths-filter`, and the eleven paths include `.github/workflows/**` and `.github/actions/**`. `VERIFIED` — `.github/workflows/ci.yml:23`, `.github/workflows/ci.yml:36`
-3. E2E and compatibility checks use the same `.github` paths as the build filter, so a workflow-only edit runs them. `VERIFIED` — `.github/workflows/e2e.yml:34`, `.github/workflows/is-compatible.yml:26`
-4. The build job runs when code changed, or on push, or on dispatch. `VERIFIED` — `.github/workflows/ci.yml:43`
-5. A pull request with no code change runs `skip-build`, which reports the same job name. `VERIFIED` — `.github/workflows/ci.yml:162`, `.github/workflows/ci.yml:179`
-6. A docs-only pull request therefore satisfies the build gate with a no-op job. `ASSUMED` — `.github/workflows/ci.yml:165`; no test or branch rule states this intent
+2. CI detects code changes with `dorny/paths-filter`, and the eighteen paths include `.github/workflows/**`, `.github/actions/**`, `package.json`, `package-lock.json`, `.config/eslint.config.mjs`, and the three gate scripts under `scripts/`, not all of `scripts/**`. `VERIFIED` — `.github/workflows/ci.yml:30`, `.github/workflows/ci.yml:48`
+3. E2E and compatibility checks use the same `.github` paths as the build filter, so a workflow-only edit runs them. `VERIFIED` — `.github/workflows/e2e.yml:49`, `.github/workflows/is-compatible.yml:41`
+4. The build is three jobs (`build-frontend`, `build-backend`, `package-validate`) plus a `build` aggregator that keeps the `Build, lint and unit tests` name and asserts all three results; each runs when code changed, or on push, or on dispatch. `VERIFIED` — `.github/workflows/ci.yml:71`, `.github/workflows/ci.yml:292`
+5. A pull request with no code change runs `skip-build`, which reports the same job name. `VERIFIED` — `.github/workflows/ci.yml:322`, `.github/workflows/ci.yml:323`
+6. A docs-only pull request therefore satisfies the build gate with a no-op job. `ASSUMED` — `.github/workflows/ci.yml:329`; no test or branch rule states this intent
 7. Required checks and branch protection rules are not stored in the repository. `GAP` — `CODEOWNERS:5` is the only review rule found
-8. The build job runs typecheck, lint, unit tests, frontend build, and React 19 validation in that order. `VERIFIED` — `.github/workflows/ci.yml:77`
+8. The frontend build job runs typecheck, lint, the house-standards lint, unit tests, frontend build, and React 19 validation in that order. `VERIFIED` — `.github/workflows/ci.yml:90`
 9. The frontend build merges the `@grafana/create-plugin` base config and adds Tailwind CSS rules. `VERIFIED` — `webpack.config.ts:3`
 10. Production builds add a contenthash to chunk filenames. `VERIFIED` — `webpack.config.ts:160`
 11. The build aliases `react/jsx-runtime` and `react/jsx-dev-runtime` to a local shim. `VERIFIED` — `webpack.config.ts:149`
 12. The backend build is `buildAll` from the Grafana SDK build package, and `npm run build` runs it after the production frontend build. `VERIFIED` — `Magefile.go:10`, `package.json:6`
 13. The archive is `dist` renamed to the plugin id, zipped, with a sha1 file beside it. `VERIFIED` — `.github/actions/package-plugin/action.yml:166`
 14. Signing runs only when a policy token is present. `VERIFIED` — `.github/actions/package-plugin/action.yml:141`
-15. CI runs the validator from the pinned image `grafana/plugin-validator-cli:v0.51.3` with the repo config. `VERIFIED` — `.github/workflows/ci.yml:153`
-16. The validator config disables the `version` analyzer, and `govulncheck` runs separately on the pinned Go 1.26.10 toolchain. `VERIFIED` — `.github/plugin-validator.config.yaml:11`, `.github/workflows/ci.yml:103`
-17. Local `npm run validate` pins `@grafana/plugin-validator@0.51.3`, the same version as the CI image. `VERIFIED` — `package.json:35`
+15. CI runs the validator from the pinned image `grafana/plugin-validator-cli:v0.53.9` with the repo config. `VERIFIED` — `.github/workflows/ci.yml:271`
+16. The validator config disables the `version` analyzer, and `govulncheck` runs separately on the pinned Go 1.26.11 toolchain. `VERIFIED` — `.github/plugin-validator.config.yaml:11`, `.github/workflows/ci.yml:147`, `.github/workflows/ci.yml:166`
+17. Local `npm run validate` pins `@grafana/plugin-validator@0.53.9`, the same version as the CI image. `VERIFIED` — `package.json:39`
 18. Three validator findings are benign: unsigned plugin, sponsor link, and `react-19-dep-jsxRuntimeImport` for `@floating-ui/react`. `VERIFIED` — `CLAUDE.md:42`
-19. E2E skips fork pull requests because secrets are unavailable, and otherwise builds a coverage bundle and runs Playwright. `VERIFIED` — `.github/workflows/e2e.yml:96`, `.github/workflows/e2e.yml:148`
-20. The artifact workflow builds on every branch push, keeps the zip for 15 days, and passes `create_release: false`, so it never creates a release. `VERIFIED` — `.github/workflows/artifact.yml:42`, `.github/workflows/artifact.yml:34`
-21. The release workflow runs on a push of a `v*` tag. `VERIFIED` — `.github/workflows/release.yml:7`
-22. The release build enables provenance attestation, passes the policy token for signing, and verifies the attestation. `VERIFIED` — `.github/workflows/release.yml:32`, `.github/workflows/release.yml:74`
+19. E2E skips fork pull requests because secrets are unavailable, and otherwise builds a coverage bundle and runs Playwright. `VERIFIED` — `.github/workflows/e2e.yml:125`, `.github/workflows/e2e.yml:192`
+20. The artifact workflow builds on main-branch pushes and manual dispatch only, keeps the zip for 15 days, and passes `create_release: false`, so it never creates a release. `VERIFIED` — `.github/workflows/artifact.yml:10`, `.github/workflows/artifact.yml:12`, `.github/workflows/artifact.yml:36`, `.github/workflows/artifact.yml:44`
+21. The release workflow runs on a push of a `v*` tag. `VERIFIED` — `.github/workflows/release.yml:8`
+22. The release build enables provenance attestation, passes the policy token for signing, and verifies the attestation. `VERIFIED` — `.github/workflows/release.yml:33`, `.github/workflows/release.yml:36`, `.github/workflows/release.yml:75`
 23. The build action creates a draft GitHub release when `create_release` is true. `VERIFIED` — `.github/actions/build-plugin/action.yml:166`, `.github/actions/build-plugin/action.yml:169`
-24. release-please runs on push to main and authenticates with `RELEASE_TOKEN`. `VERIFIED` — `.github/workflows/release-please.yml:19`
+24. release-please runs on push to main and authenticates with `RELEASE_TOKEN`. `VERIFIED` — `.github/workflows/release-please.yml:6`, `.github/workflows/release-please.yml:20`
 25. release-please owns the version and the changelog; `skip-github-release` is true, so the tag is the hand-off to the release workflow. `VERIFIED` — `.github/release-please-config.json:11`
 26. release-please hides docs, style, refactor, test, build, ci, and chore sections from the changelog. `VERIFIED` — `.github/release-please-config.json:19`
 27. The create-plugin update workflow runs monthly and on dispatch, and opens a pull request. `VERIFIED` — `.github/workflows/cp-update.yml:6`, `.github/actions/create-plugin-update/action.yml:9`
-28. commitlint validates every commit in a pull request against the eleven allowed types. `VERIFIED` — `.github/workflows/commitlint.yml:25`
+28. commitlint validates every commit in a pull request against the eleven allowed types. `VERIFIED` — `.github/workflows/commitlint.yml:73`, `commitlint.config.js:7`
 29. The scope list is a warning only, so a new scope does not block a commit. `VERIFIED` — `commitlint.config.js:10`
-30. The PR title check requires a conventional type and does not require a scope. `VERIFIED` — `.github/workflows/pr-title.yml:44`
+30. The PR title check requires a conventional type and does not require a scope. `VERIFIED` — `.github/workflows/pr-title.yml:17`, `.github/workflows/pr-title.yml:45`
 31. `CONTRIBUTING.md` says commit types are checked by commitlint; scopes are a warning only. `VERIFIED` — `CONTRIBUTING.md:607`, `commitlint.config.js:10`
 32. `CONTRIBUTING.md` states that `golangci-lint` is local only; no workflow runs it. `VERIFIED` — `CONTRIBUTING.md:288`
-33. `npm run server` starts `docker-compose.yaml`; `server:full` swaps in `full.yaml_`, starts the full stack, and restores both files on exit. `VERIFIED` — `package.json:26`, `package.json:27`
+33. `npm run server` starts `docker-compose.yaml`; `server:full` swaps in `full.yaml_`, starts the full stack, and restores both files on exit. `VERIFIED` — `package.json:30`, `package.json:31`
 34. `full.yaml_` provisions two orgs; `app.yaml` provisions org 1 with the built-in MCP. `VERIFIED` — `provisioning/plugins/full.yaml_:42`, `provisioning/plugins/app.yaml:31`
-35. `npm run dev:stack` runs `scripts/dev.sh` against `docker-compose.dev.yaml`. `VERIFIED` — `package.json:28`
-36. Deployment artifacts are a container image with `dist` in `/package`, the Grafana Helm chart, and the compose stacks, tagged `<prefix>-<suffix or run number>` in ECR. `VERIFIED` — `Dockerfile:3`, `deploy/helm/grafana-values-ask-o11y-ha.yaml:8`, `.github/workflows/docker-release.yml:79`
+35. `npm run dev:stack` runs `scripts/dev.sh` against `docker-compose.dev.yaml`. `VERIFIED` — `package.json:32`
+36. Deployment artifacts are a container image with `dist` in `/package`, the Grafana Helm chart, and the compose stacks, tagged `<prefix>-<suffix or run number>` in ECR. `VERIFIED` — `Dockerfile:3`, `deploy/helm/grafana-values-ask-o11y-ha.yaml:8`, `.github/workflows/docker-release.yml:80`
 37. `npm run lint:standards` mirrors the Grafana `code-rules` semgrep rules for Go and for TS, so a banned environment, filesystem, dialog, window or CSS pattern fails the build job. `VERIFIED` — `scripts/check-standards.mjs:19`, `scripts/check-standards.mjs:100`
 
 ## Invariants
 
-- Every GitHub Action and nested action is pinned to a full-length commit SHA. `VERIFIED` — `.github/actions/build-plugin/action.yml:6`, `.github/workflows/ci.yml:17`
-- CI and the release workflow use the same validator image and config. `VERIFIED` — `.github/workflows/ci.yml:153`
+- Every GitHub Action and nested action is pinned to a full-length commit SHA. `VERIFIED` — `.github/actions/build-plugin/action.yml:6`, `.github/workflows/ci.yml:24`
+- CI and the release workflow use the same validator image and config. `VERIFIED` — `.github/workflows/ci.yml:271`, `.github/workflows/release.yml:61`
 - The Docker build uses the frontend and backend output in `dist`. `VERIFIED` — `Dockerfile:3`
 - `full.yaml_` configures `mcpServers` and never sets `useBuiltInMCP`. `VERIFIED` — `provisioning/plugins/full.yaml_:20`
 
@@ -105,33 +105,33 @@ Ship a versioned archive, a container image, and a local stack.
 
 | Condition | User-visible result | Evidence |
 |---|---|---|
-| Fork pull request | E2E is skipped by design; no E2E result for that PR | `.github/workflows/e2e.yml:216` |
-| Validator finds a non-benign warning | CI fails at the validate step | `.github/workflows/ci.yml:148` |
+| Fork pull request | E2E is skipped by design; no E2E result for that PR | `.github/workflows/e2e.yml:264` |
+| Validator finds a non-benign warning | CI fails at the validate step | `.github/workflows/ci.yml:265` |
 | Policy token is missing | Archive is unsigned; validator reports `unsigned plugin` | `.github/actions/package-plugin/action.yml:141` |
 
 ## Data and Persistence
 
 | Store | Key or table | TTL | Fallback | Evidence |
 |---|---|---|---|---|
-| GitHub Actions artifact | zip and sha1, coverage build, Playwright report, server log | 15 days, 5 to 30 days | none | `.github/workflows/artifact.yml:42`, `.github/workflows/e2e.yml:90`, `.github/workflows/e2e.yml:157` |
+| GitHub Actions artifact | zip and sha1, coverage build, Playwright report, server log | 15 days, 5 to 30 days | none | `.github/workflows/artifact.yml:44`, `.github/workflows/e2e.yml:119`, `.github/workflows/e2e.yml:198` |
 
 ## Observability
 
 | Signal | Name | Where | Evidence |
 |---|---|---|---|
-| Check | `Build, lint and unit tests` | CI job | `.github/workflows/ci.yml:41` |
-| Check | `E2E Tests with Coverage` | E2E job | `.github/workflows/e2e.yml:93` |
-| Check | `compatibilitycheck` | Compatibility job | `.github/workflows/is-compatible.yml:30` |
-| Check | `commitlint` and PR title | Message gates | `.github/workflows/commitlint.yml:8` |
+| Check | `Build, lint and unit tests` | CI job | `.github/workflows/ci.yml:293` |
+| Check | `E2E Tests with Coverage` | E2E job | `.github/workflows/e2e.yml:122` |
+| Check | `compatibilitycheck` | Compatibility job | `.github/workflows/is-compatible.yml:57` |
+| Check | `commitlint` and PR title | Message gates | `.github/workflows/commitlint.yml:11` |
 
 ## Evidence Index
 
-- `.github/workflows/ci.yml:23` — the path filter
-- `.github/workflows/ci.yml:153` — pinned validator image
+- `.github/workflows/ci.yml:30` — the path filter
+- `.github/workflows/ci.yml:271` — pinned validator image
 - `.github/actions/package-plugin/action.yml:168` — archive and sha1 creation
-- `.github/workflows/release.yml:7` — tag trigger
+- `.github/workflows/release.yml:8` — tag trigger
 - `.github/release-please-config.json:11` — release ownership hand-off
-- `package.json:27` — multi-org config swap
+- `package.json:31` — multi-org config swap
 
 ## Known Gaps
 

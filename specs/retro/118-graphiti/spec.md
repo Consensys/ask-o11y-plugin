@@ -22,8 +22,8 @@ Graphiti is optional: without it, every other capability still works.
 
 | Capability | Admin | Editor | Viewer | Evidence |
 |---|---|---|---|---|
-| `GET /api/graphiti/status` | yes | yes | yes | `pkg/plugin/plugin.go:2056` (no role check) |
-| `POST /api/graphiti/discover` | yes | yes | no (403) | `pkg/plugin/plugin.go:2090` |
+| `GET /api/graphiti/status` | yes | yes | yes | `pkg/plugin/plugin.go:2135` (no role check) |
+| `POST /api/graphiti/discover` | yes | yes | no (403) | `pkg/plugin/plugin.go:2170` |
 | `POST /api/graphiti/ingest-session` | yes | yes | no (403) | `pkg/plugin/plugin.go:2246` |
 | Automatic session ingest after a run | yes | yes | yes | `pkg/plugin/plugin.go:1278` (no role check) |
 | Read graph facts through the agent | yes | yes | yes, read-only tools only | `pkg/agent/loop.go:161` |
@@ -42,7 +42,7 @@ Graphiti is optional: without it, every other capability still works.
 
 | Event | Payload fields | Evidence |
 |---|---|---|
-| none | Discovery runs through the run store, not an SSE stream | `pkg/plugin/plugin.go:2178` |
+| none | Discovery runs through the run store, not an SSE stream | `pkg/plugin/plugin.go:2214` |
 
 ### Configuration keys
 
@@ -58,7 +58,7 @@ Graphiti is optional: without it, every other capability still works.
 |---|---|---|
 | `graphiti_add_memory` (presence probe) | no | `pkg/plugin/graphiti_memory.go:43` |
 | `graphiti_search_memory_facts` | yes | `pkg/plugin/topology.go:598` |
-| `graphiti_get_status` | yes | `pkg/plugin/plugin.go:2090` |
+| `graphiti_get_status` | yes | `pkg/plugin/plugin.go:2144` |
 
 Five write tools are hidden from the model: `graphiti_add_memory`, `graphiti_delete_entity_edge`, `graphiti_delete_episode`, `graphiti_clear_graph`, `graphiti_build_communities`. `VERIFIED` — `pkg/plugin/graphiti_memory.go:35`
 
@@ -68,12 +68,12 @@ Tags: `VERIFIED` (code pointer or test), `ASSUMED` (untested), `GAP` (missing).
 
 1. Graphiti counts as available only when `graphiti_add_memory` is in the tool list. `VERIFIED` — `pkg/plugin/graphiti_memory.go:43`
 2. `status` returns `{enabled, connected}` and nothing else. `VERIFIED` — `pkg/plugin/plugin.go:2074`
-3. `connected` is true only when `graphiti_get_status` succeeds. `VERIFIED` — `pkg/plugin/plugin.go:2090`
+3. `connected` is true only when `graphiti_get_status` succeeds. `VERIFIED` — `pkg/plugin/plugin.go:2145`
 4. `status` never fails when Graphiti is absent: it returns `enabled: false`. `VERIFIED` — `pkg/plugin/plugin.go:2066`
-5. `discover` rejects a Viewer with 403. `VERIFIED` — `pkg/plugin/plugin.go:2090`
+5. `discover` rejects a Viewer with 403. `VERIFIED` — `pkg/plugin/plugin.go:2170`
 6. `discover` and `ingest-session` return 503 when Graphiti is unavailable. `VERIFIED` — `pkg/plugin/plugin.go:2099`
 7. Both write routes share the agent rate limiter and return 429 when exhausted. `VERIFIED` — `pkg/plugin/plugin.go:2095`
-8. `discover` starts a hidden agent run: type `discovery`, 50 iterations, `large` model, approvals off. `VERIFIED` — `pkg/plugin/plugin.go:2132`
+8. `discover` starts a hidden agent run: type `discovery`, 50 iterations, `large` model, approvals off. `VERIFIED` — `pkg/plugin/plugin.go:2216`
 9. Discovery excludes every Graphiti write tool from the model. `VERIFIED` — `pkg/plugin/plugin.go:2151`
 10. `discover` returns `{runId, status: "running"}` immediately. `VERIFIED` — `pkg/plugin/plugin.go:2178`
 11. Discovery ingests its synthesis as episode `discovery_synthesis` only when the run ends with `done`. `VERIFIED` — `pkg/plugin/plugin.go:2273`
@@ -107,8 +107,8 @@ Tags: `VERIFIED` (code pointer or test), `ASSUMED` (untested), `GAP` (missing).
 | Condition | User-visible result | Evidence |
 |---|---|---|
 | Graphiti not registered | `status` reports `enabled: false` | `pkg/plugin/plugin.go:2066` |
-| Graphiti registered but unreachable | `status` reports `enabled: true, connected: false` | `pkg/plugin/plugin.go:2090` |
-| Discovery request from Viewer | HTTP 403 `Access denied` | `pkg/plugin/plugin.go:2090` |
+| Graphiti registered but unreachable | `status` reports `enabled: true, connected: false` | `pkg/plugin/plugin.go:2145` |
+| Discovery request from Viewer | HTTP 403 `Access denied` | `pkg/plugin/plugin.go:2170` |
 | Ingest body over 1 MiB | HTTP 400 `Invalid request body` | `pkg/plugin/plugin.go:2259` |
 | Ingest write fails | HTTP 500 `Failed to ingest session` | `pkg/plugin/plugin.go:2319` |
 | Auto-save fails | Nothing shown; warning logged | `pkg/plugin/plugin.go:1316` |
