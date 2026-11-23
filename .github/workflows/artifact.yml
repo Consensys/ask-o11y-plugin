@@ -1,13 +1,14 @@
 name: Artifact
 
-# Builds an installable plugin archive (zip) on every commit, without creating
-# a GitHub release. The archive is published as a GitHub Actions artifact
-# (retention: 15 days). Tag pushes are excluded on purpose: they are handled by
-# the Release workflow (.github/workflows/release.yml).
+# Builds an installable plugin archive (zip) on main-branch pushes and manual
+# dispatch, without creating a GitHub release. The archive is published as a
+# GitHub Actions artifact (retention: 15 days). Tag pushes and pull requests are
+# excluded on purpose: tags are handled by the Release workflow
+# (.github/workflows/release.yml).
 on:
   push:
     branches:
-      - '**'
+      - main
   workflow_dispatch:
 
 permissions:
@@ -21,6 +22,7 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:

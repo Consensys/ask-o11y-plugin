@@ -7,10 +7,17 @@ on:
   pull_request:
   workflow_dispatch:
 
+# Cancel superseded runs on the same ref: a new PR push cancels the old run,
+# push runs on main are never cancelled.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   # Detect if code changed (for fast-pass on release-please PRs)
   check-changes:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     outputs:
       code: ${{ steps.filter.outputs.code }}
     steps:
@@ -30,52 +37,69 @@ jobs:
               - 'go.mod'
               - 'go.sum'
               - 'tsconfig.json'
+              # Dependency bumps must run the build too: the monthly cp-update
+              # PRs touch only these two files, and a dependency change can
+              # break the build.
+              - 'package.json'
+              - 'package-lock.json'
               # Changes to the build/validation tooling must run the build too,
               # otherwise e.g. an edit to ci.yml or the validator config would
               # fast-pass and never be exercised.
               - '.github/workflows/**'
               - '.github/actions/**'
               - '.github/plugin-validator.config.yaml'
-              - 'scripts/verify-retro-specs.mjs'
-              # The standards gate and its config: a change here can turn a
-              # passing rule into a failing one, so it must be exercised.
+              # The gates these workflows run, and the lint config: a change
+              # here can turn a passing rule into a failing one, so it must be
+              # exercised. The repo's lint rules live in .config/eslint.config.mjs
+              # (the root eslint.config.* only re-exports it), so both paths are
+              # listed. A newly added CI gate script under scripts/ must be
+              # added to this list (keep it identical in e2e.yml and
+              # is-compatible.yml).
+              - '.config/eslint.config.mjs'
               - '.golangci.yml'
-              - 'scripts/**'
+              - 'scripts/check-standards.mjs'
+              - 'scripts/validate-react19.js'
+              - 'scripts/verify-retro-specs.mjs'
 
-  build:
-    name: Build, lint and unit tests
+  # The build is split into a frontend job, a backend job and a packaging job so
+  # the two toolchains run in parallel. `build` keeps the display name of the old
+  # monolithic job because branch protection requires that check; it only asserts
+  # the three jobs succeeded.
+  build-frontend:
+    name: Build frontend
     needs: check-changes
     if: needs.check-changes.outputs.code == 'true' || github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
       contents: read
-    outputs:
-      plugin-id: ${{ steps.metadata.outputs.plugin-id }}
-      plugin-version: ${{ steps.metadata.outputs.plugin-version }}
-      has-backend: ${{ steps.check-for-backend.outputs.has-backend }}
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
           persist-credentials: false
+
       - name: Setup Node.js environment
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: '22'
           cache: 'npm'
 
-      - name: Setup Go environment
-        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
-        with:
-          go-version: '1.26.11'
-
-      - name: Install Mage
-        run: go install github.com/magefile/mage@latest
-
       - name: Install dependencies
         run: npm ci
 
       - name: Check types
         run: npm run typecheck
+
+      # `npm run lint` runs `eslint --cache .`, so the cache survives between
+      # runs. The key includes the commit sha so every run writes its own entry;
+      # the restore-keys prefix still gives a warm cache when nothing changed.
+      - name: Restore eslint cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: .eslintcache
+          key: eslint-${{ hashFiles('package-lock.json', 'eslint.config.*') }}-${{ github.sha }}
+          restore-keys: eslint-${{ hashFiles('package-lock.json', 'eslint.config.*') }}-
+
       - name: Lint
         run: npm run lint
 
@@ -85,39 +109,116 @@ jobs:
       - name: Lint house standards
         run: npm run lint:standards
 
+      - name: Unit tests
+        run: npm run test:ci
+
+      - name: Build frontend
+        run: npm run build:frontend:prod
+
+      - name: Validate React 19 compatibility
+        run: npm run validate:react19
+
+      # The frontend build owns dist/: module.js, plugin.json (with the version
+      # and build mode substituted), assets and static files.
+      - name: Upload frontend build
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: dist-frontend
+          path: dist
+          if-no-files-found: error
+          retention-days: 1
+
+  build-backend:
+    name: Build backend
+    needs: check-changes
+    if: needs.check-changes.outputs.code == 'true' || github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+
+      - name: Setup Go environment
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version: '1.26.11'
+          cache: true
+
+      - name: Test backend
+        uses: magefile/mage-action@6f50bbb8ea47d56e62dee92392788acbc8192d0b # v3.1.0
+        with:
+          version: v1.15.0
+          args: test
+
       - name: Lint Go
         uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
         with:
           version: v2.13.2
           args: --timeout=5m ./pkg/...
-      - name: Unit tests
-        run: npm run test:ci
-      - name: Build frontend
-        run: npm run build
-      - name: Validate React 19 compatibility
-        run: npm run validate:react19
-
-      - name: Check for backend
-        id: check-for-backend
-        run: |
-          if [ -f "Magefile.go" ]
-          then
-            echo "has-backend=true" >> $GITHUB_OUTPUT
-          fi
-
-      - name: Test backend
-        if: steps.check-for-backend.outputs.has-backend == 'true'
-        uses: magefile/mage-action@6f50bbb8ea47d56e62dee92392788acbc8192d0b # v3.1.0
-        with:
-          version: latest
-          args: test
 
       # The validator's bundled govulncheck is built with Go 1.24.2 and refuses
       # to analyze a module that requires Go 1.26.11, so that analyzer is
       # disabled in .github/plugin-validator.config.yaml and run here on the
       # pinned toolchain instead. This covers the catalog's govulncheck rules.
       - name: govulncheck
-        run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.10.0 ./...
+
+      # The mage build writes the platform binaries and go_plugin_build_manifest
+      # into dist/ and nothing else (it reads src/plugin.json for the executable
+      # name and plugin id). dist/ does not exist in this job, because only the
+      # frontend job runs webpack, and `go build -o dist/...` needs it to exist.
+      - name: Build backend
+        run: |
+          mkdir -p dist
+          npm run build:backend:all
+
+      - name: Upload backend build
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: dist-backend
+          path: dist
+          if-no-files-found: error
+          retention-days: 1
+
+  package-validate:
+    name: Package and validate
+    needs: [check-changes, build-frontend, build-backend]
+    if: needs.check-changes.outputs.code == 'true' || github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    outputs:
+      plugin-id: ${{ steps.metadata.outputs.plugin-id }}
+      plugin-version: ${{ steps.metadata.outputs.plugin-version }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+
+      # Both artifacts unpack into dist/, which reproduces the single dist/ the
+      # old monolithic job built before zipping: the frontend file set first,
+      # then the backend binaries and go_plugin_build_manifest.
+      - name: Download frontend build
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: dist-frontend
+          path: dist
+
+      - name: Download backend build
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: dist-backend
+          path: dist
+
+      # upload/download-artifact does not preserve the mode bits, so restore the
+      # executable bit on the backend binaries before packaging (same fix as
+      # e2e.yml).
+      - name: Set executable permissions on backend binaries
+        run: chmod +x dist/gpx_*
 
       - name: Get plugin metadata
         id: metadata
@@ -175,11 +276,54 @@ jobs:
           PLUGIN_ARCHIVE: ${{ steps.metadata.outputs.archive }}
           VALIDATOR_SRC: ${{ runner.temp }}/validator-src
 
+  # Required status check for branch protection: the display name must stay
+  # `Build, lint and unit tests`. The `if` carries the same code-path gate as the
+  # jobs it asserts, so a docs-only PR still takes the green `skip-build` path
+  # instead of failing here. `!cancelled()` (not `always()`) keeps it from
+  # running during a cancelled superseded run, and makes the job run when a
+  # sub-job failed, which is what lets the assertion report the failure.
+  #
+  # `needs.check-changes.result == 'failure'` is part of the gate on purpose: if
+  # the paths filter itself errors, `outputs.code` is empty, every gated job
+  # skips, and this assertion would also skip — a skipped required check counts
+  # as a pass. Running the assertion instead turns it red, because the skipped
+  # sub-jobs are not 'success'. A docs-only PR (check-changes succeeded with
+  # code == 'false') still skips this job and stays green.
+  build:
+    name: Build, lint and unit tests
+    needs: [check-changes, build-frontend, build-backend, package-validate]
+    if: ${{ !cancelled() && (needs.check-changes.result == 'failure' || needs.check-changes.outputs.code == 'true' || github.event_name == 'push' || github.event_name == 'workflow_dispatch') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Assert every build job succeeded
+        run: |
+          failed=0
+          for entry in \
+            "build-frontend=${{ needs.build-frontend.result }}" \
+            "build-backend=${{ needs.build-backend.result }}" \
+            "package-validate=${{ needs.package-validate.result }}"
+          do
+            job="${entry%%=*}"
+            result="${entry#*=}"
+            if [ "$result" != "success" ]; then
+              echo "::error::${job} finished with '${result}', expected 'success'"
+              failed=1
+            fi
+          done
+          if [ "$failed" -ne 0 ]; then
+            exit 1
+          fi
+          echo "All build jobs succeeded (frontend, backend, package and validate)."
+
   # Fast pass for release-please PRs (no code changes)
   skip-build:
     name: Build, lint and unit tests
     needs: check-changes
     if: needs.check-changes.outputs.code == 'false' && github.event_name == 'pull_request'
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - run: echo "No code changes detected, skipping build (release-please PR)"

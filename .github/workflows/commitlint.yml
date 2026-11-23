@@ -4,22 +4,70 @@ on:
   pull_request:
     branches: [main]
 
+permissions:
+  contents: read
+
 jobs:
   commitlint:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
+      # A full-history clone (fetch-depth: 0) costs minutes on this repo. One
+      # commit is enough to start; the fetches below add exactly the history
+      # commitlint reads: the PR's own commits, the branch point, and the base.
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
-          fetch-depth: 0
+          fetch-depth: 1
           persist-credentials: false
+
+      - name: Fetch commits for the lint range
+        env:
+          PR_COMMITS: ${{ github.event.pull_request.commits }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          # commitlint runs `git merge-base <base> <head>`, which fails when the
+          # two lineages share no fetched ancestor. `--depth=N` keeps only N
+          # commits, so a head depth equal to PR_COMMITS drops the branch point
+          # (the head's oldest parent) and severs the link: fetch PR_COMMITS+1.
+          DEPTH=$(( ${PR_COMMITS:-1} > 0 ? ${PR_COMMITS:-1} + 1 : 2 ))
+          git fetch --no-tags --depth="${DEPTH}" origin "${PR_HEAD_SHA}"
+
+          # The base commit must exist as an object. When the base branch moved
+          # ahead after the PR branched, its tip is not the branch point, so a
+          # fixed depth either misses the link or fetches more than needed.
+          # Deepen the base lineage PR-sized steps at a time until it connects.
+          # Each step adds DEPTH commits (PR commits + 1, so 2 for a 1-commit
+          # PR), and the 10 steps below therefore reach about 20 base commits.
+          git fetch --no-tags --depth=1 origin "${PR_BASE_SHA}"
+          for _ in 1 2 3 4 5 6 7 8 9 10; do
+            if git merge-base "${PR_BASE_SHA}" "${PR_HEAD_SHA}" > /dev/null 2>&1; then
+              break
+            fi
+            git fetch --no-tags --deepen="${DEPTH}" origin "${PR_BASE_SHA}"
+          done
+          # Fallback for a base that moved far ahead of the loop budget: one
+          # generous deepen, so only genuinely disconnected histories fail.
+          if ! git merge-base "${PR_BASE_SHA}" "${PR_HEAD_SHA}" > /dev/null 2>&1; then
+            git fetch --no-tags --deepen=200 origin "${PR_BASE_SHA}"
+          fi
+          # Fail loudly rather than let commitlint lint base-branch commits.
+          git merge-base "${PR_BASE_SHA}" "${PR_HEAD_SHA}" > /dev/null || {
+            echo "::error::No merge base between ${PR_BASE_SHA} and ${PR_HEAD_SHA} after deepening"
+            exit 1
+          }
 
       - name: Setup Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: '22'
+          cache: 'npm'
 
+      # Pinned: @commitlint/cli and @commitlint/config-conventional are not in
+      # package.json or the lockfile (this workflow installs them ad hoc), so
+      # pin them here. Bump both together.
       - name: Install commitlint
-        run: npm install --save-dev @commitlint/cli @commitlint/config-conventional
+        run: npm install --no-save @commitlint/cli@21.2.4 @commitlint/config-conventional@21.2.4
 
       - name: Validate PR commits
         run: npx commitlint --from ${{ github.event.pull_request.base.sha }} --to ${{ github.event.pull_request.head.sha }} --verbose
