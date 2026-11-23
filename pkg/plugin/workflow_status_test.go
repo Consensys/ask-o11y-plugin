@@ -408,6 +408,16 @@ func snapshotContains(snapshot workflowShareSnapshot, want string) bool {
 	return false
 }
 
+func snapshotMessageCount(snapshot workflowShareSnapshot, role, content string) int {
+	count := 0
+	for _, message := range snapshot.Messages {
+		if message.Role == role && message.Content == content {
+			count++
+		}
+	}
+	return count
+}
+
 // A share minted while the run is still executing froze a partial transcript.
 // Once the run completes, the next admin POST must not hand that share out
 // again: it must create one that holds the merged transcript.
@@ -437,7 +447,9 @@ func TestWorkflowRunShareMidRunNotReusedAfterCompletion(t *testing.T) {
 }
 
 // A terminal run's share is built from the run events, so the transcript is
-// present even when the session store was never written.
+// present even when the session store was never written. A run whose loop died
+// before it stored the assistant message is exactly this case: the transcript
+// must appear once, not be lost.
 func TestWorkflowRunShareTerminalRunIncludesTranscript(t *testing.T) {
 	const wfName = "terminal-wf"
 	const runID = "terminal-run-1"
@@ -450,8 +462,36 @@ func TestWorkflowRunShareTerminalRunIncludesTranscript(t *testing.T) {
 
 	shareID := postWorkflowRunShare(t, p, orgID, wfName, runID)
 	snapshot := sharedSnapshot(t, p, shareID)
-	if !snapshotContains(snapshot, "reconstructed answer") {
-		t.Fatalf("share snapshot is missing the reconstructed transcript: %+v", snapshot.Messages)
+	if got := snapshotMessageCount(snapshot, "assistant", "reconstructed answer"); got != 1 {
+		t.Fatalf("share snapshot must carry the reconstructed transcript exactly once, got %d: %+v", got, snapshot.Messages)
+	}
+	if len(snapshot.Messages) != 2 {
+		t.Fatalf("snapshot must hold the user message plus one transcript, got %+v", snapshot.Messages)
+	}
+}
+
+// A completed run's session already stores the final assistant message (written
+// by consumeAgentEvents when the loop ends), and its events reconstruct the
+// same message. The share must not render the investigation twice.
+func TestWorkflowRunShareCompletedRunStoresTranscriptOnce(t *testing.T) {
+	const wfName = "dedupe-wf"
+	const runID = "dedupe-run-1"
+	p, sessionID, synthetic, orgID := workflowShareFixture(t, wfName, runID)
+
+	p.runStore.AppendEvent(runID, agent.SSEEvent{Type: "content", Data: agent.ContentEvent{Content: "the final answer"}})
+	p.runStore.FinishRun(runID, RunStatusCompleted, "")
+	if err := p.sessionStore.AppendMessages(sessionID, synthetic, orgID,
+		[]SessionMessage{{Role: "assistant", Content: "the final answer"}}); err != nil {
+		t.Fatalf("append assistant message failed: %v", err)
+	}
+
+	shareID := postWorkflowRunShare(t, p, orgID, wfName, runID)
+	snapshot := sharedSnapshot(t, p, shareID)
+	if got := snapshotMessageCount(snapshot, "assistant", "the final answer"); got != 1 {
+		t.Fatalf("a completed run must render its transcript exactly once, got %d: %+v", got, snapshot.Messages)
+	}
+	if len(snapshot.Messages) != 2 {
+		t.Fatalf("snapshot must hold the user message plus the stored assistant message, got %+v", snapshot.Messages)
 	}
 }
 

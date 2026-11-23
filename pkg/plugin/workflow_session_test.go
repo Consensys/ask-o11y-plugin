@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -662,6 +663,134 @@ func TestWorkflowRunSelfTerminatesAtDeadline(t *testing.T) {
 	}
 	if got := p.workflowRuns.inFlight(); got != 0 {
 		t.Fatalf("tracker must drain after the deadline, got %d", got)
+	}
+}
+
+// TestWorkflowFallbackStartsWhileInstanceDraining is the refutation for the
+// dispose-window defect: a run that survives Dispose and then times out must
+// still start its configured fallback. The instance resources stay open until
+// both runs drain, then teardown executes; after that no run may begin.
+func TestWorkflowFallbackStartsWhileInstanceDraining(t *testing.T) {
+	var calls atomic.Int32
+	release := make(chan struct{})
+	handler := func(w http.ResponseWriter, r *http.Request) {
+		if calls.Add(1) == 1 {
+			select {
+			case <-r.Context().Done():
+			case <-time.After(5 * time.Second):
+			}
+			return
+		}
+		<-release
+		stubLLMFinalAnswer("fallback recovered")(w, r)
+	}
+	p, grafanaURL := newWorkflowTestPlugin(t, handler)
+
+	entry := validWorkflowEntry()
+	entry.Name = "draining-fallback-wf"
+	entry.Skill = "dispatch"
+	entry.FallbackSkill = "escalate"
+	entry.SessionTimeoutSeconds = 3
+
+	const orgID int64 = 1
+	syntheticID := syntheticWorkflowUserID(entry.Name)
+	_, parentRunID, err := p.startWorkflowSession(workflowRunParams{
+		entry:       entry,
+		orgID:       orgID,
+		skill:       "dispatch",
+		message:     "Sweep.",
+		grafanaURL:  grafanaURL,
+		saToken:     "test-token",
+		syntheticID: syntheticID,
+	})
+	if err != nil {
+		t.Fatalf("session start failed: %v", err)
+	}
+	waitForCondition(t, 5*time.Second, "run started", func() bool {
+		return runStatus(p, parentRunID) == RunStatusRunning
+	})
+
+	// Simulated settings save while the run is in flight.
+	p.Dispose()
+	if p.ctx.Err() != nil {
+		t.Fatal("teardown must wait for the in-flight workflow run")
+	}
+
+	waitForCondition(t, 15*time.Second, "parent run failure", func() bool {
+		return runStatus(p, parentRunID) == RunStatusFailed
+	})
+
+	// The fallback was admitted while draining and is now in flight, keeping
+	// the deferred teardown waiting.
+	waitForCondition(t, 10*time.Second, "fallback session in flight", func() bool {
+		return p.workflowRuns.inFlight() == 1
+	})
+	if p.ctx.Err() != nil {
+		t.Fatal("teardown must wait for the fallback run too")
+	}
+
+	close(release)
+	waitForCondition(t, 15*time.Second, "fallback session completion", func() bool {
+		runs, listErr := p.runStore.ListRuns(syntheticID, orgID, 20)
+		if listErr != nil {
+			return false
+		}
+		for _, run := range runs {
+			if run.RunID == parentRunID || run.Status != RunStatusCompleted {
+				continue
+			}
+			session, getErr := p.sessionStore.GetSession(run.SessionID, syntheticID, orgID)
+			if getErr == nil && strings.Contains(session.Title, entry.FallbackSkill) {
+				return true
+			}
+		}
+		return false
+	})
+
+	waitForCondition(t, 5*time.Second, "deferred teardown after both drain", func() bool {
+		return p.ctx.Err() != nil && p.workflowRuns.inFlight() == 0
+	})
+
+	// After teardown executed, no run may begin against the closed resources.
+	if p.beginWorkflowRun() {
+		t.Fatal("begin must refuse a run after teardown executed")
+	}
+}
+
+// TestWorkflowRunTrackerAdmitsDrainingAndRefusesAfterTeardown pins the tracker
+// state machine: admitted while draining (the failing run is still in flight),
+// refused once the deferred teardown has executed.
+func TestWorkflowRunTrackerAdmitsDrainingAndRefusesAfterTeardown(t *testing.T) {
+	tracker := &workflowRunTracker{}
+	if !tracker.begin() {
+		t.Fatal("the first run must be admitted")
+	}
+
+	teardownRan := false
+	if tracker.dispose(func() { teardownRan = true }) {
+		t.Fatal("dispose must defer teardown while a run is in flight")
+	}
+	if !tracker.begin() {
+		t.Fatal("draining must admit a fallback started by an in-flight run")
+	}
+
+	tracker.end()
+	if teardownRan {
+		t.Fatal("teardown must wait for the fallback run")
+	}
+	if got := tracker.inFlight(); got != 1 {
+		t.Fatalf("the fallback must stay tracked, got %d in flight", got)
+	}
+
+	tracker.end()
+	if !teardownRan {
+		t.Fatal("teardown must run when the last run drains")
+	}
+	if tracker.begin() {
+		t.Fatal("begin must refuse a run after teardown executed")
+	}
+	if got := tracker.inFlight(); got != 0 {
+		t.Fatalf("tracker must be empty, got %d", got)
 	}
 }
 

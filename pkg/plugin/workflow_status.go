@@ -333,7 +333,10 @@ func (p *Plugin) handleWorkflowRunShare(w http.ResponseWriter, r *http.Request) 
 		CreatedAt:        session.CreatedAt,
 		Messages:         append([]SessionMessage(nil), session.Messages...),
 	}
-	snapshot.Messages = append(snapshot.Messages, workflowRunTranscript(p, runID)...)
+	snapshot.Messages = appendRunTranscript(
+		append([]SessionMessage(nil), session.Messages...),
+		workflowRunTranscript(p, runID),
+	)
 
 	data, err := json.Marshal(snapshot)
 	if err != nil {
@@ -357,6 +360,28 @@ func (p *Plugin) handleWorkflowRunShare(w http.ResponseWriter, r *http.Request) 
 		"shareId":  share.ShareID,
 		"shareUrl": fmt.Sprintf("/a/%s/shared/%s?orgId=%d", PluginID, share.ShareID, orgID),
 	})
+}
+
+// appendRunTranscript appends the reconstructed run transcript unless the
+// session already ends with that same assistant message. consumeAgentEvents
+// stores the final assistant message when the loop ends, so a finished run's
+// session already holds it and appending again would render the investigation
+// twice. A mid-run session holds only the user message, so the transcript is
+// still appended there.
+func appendRunTranscript(messages []SessionMessage, transcript []SessionMessage) []SessionMessage {
+	if len(transcript) == 0 {
+		return messages
+	}
+	for i := len(messages) - 1; i >= 0; i-- {
+		if messages[i].Role != "assistant" {
+			continue
+		}
+		if messages[i].Role == transcript[0].Role && messages[i].Content == transcript[0].Content {
+			return messages
+		}
+		break
+	}
+	return append(messages, transcript...)
 }
 
 // reusableWorkflowRunShare returns the share an admin POST may reuse, or nil

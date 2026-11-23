@@ -43,19 +43,27 @@ type workflowRunParams struct {
 // serves requests. Every run is bounded by its own timeout, so the deferred
 // teardown is bounded too.
 type workflowRunTracker struct {
-	mu       sync.Mutex
-	active   int
-	disposed bool
-	onDrain  func()
+	mu     sync.Mutex
+	active int
+	// draining is set by dispose: the instance is shutting down but its
+	// resources stay open until the last in-flight run ends. A fallback that a
+	// failing run starts is admitted while draining, because that run is still
+	// in flight and holds the resources open.
+	draining bool
+	// closed is set when the deferred teardown has executed, or when dispose
+	// found no run to wait for and the caller tears down immediately. No run
+	// may begin afterwards: the stores behind it are closed.
+	closed  bool
+	onDrain func()
 }
 
-// begin registers an in-flight run. It reports false once the plugin is
-// disposed, so a run that would outlive the plugin's resources is refused
-// instead of leaking.
+// begin registers an in-flight run. It reports false once teardown has
+// executed (or is about to, with no run in flight), so a run that would use
+// closed resources is refused instead of leaking.
 func (t *workflowRunTracker) begin() bool {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	if t.disposed {
+	if t.closed {
 		return false
 	}
 	t.active++
@@ -63,16 +71,18 @@ func (t *workflowRunTracker) begin() bool {
 }
 
 // end deregisters a finished run and runs the deferred teardown when it was
-// the last one.
+// the last one. It marks the tracker closed before the teardown body runs, so
+// no new run can begin against resources that are being closed.
 func (t *workflowRunTracker) end() {
 	t.mu.Lock()
 	if t.active > 0 {
 		t.active--
 	}
-	if t.active > 0 || !t.disposed || t.onDrain == nil {
+	if t.active > 0 || !t.draining || t.onDrain == nil || t.closed {
 		t.mu.Unlock()
 		return
 	}
+	t.closed = true
 	onDrain := t.onDrain
 	t.onDrain = nil
 	t.mu.Unlock()
@@ -80,16 +90,21 @@ func (t *workflowRunTracker) end() {
 }
 
 // dispose defers onDrain until the last active run ends. It returns true when
-// no run is active, so the caller tears down immediately. Once disposed, no
-// new run may begin.
+// no run is active, so the caller tears down immediately. The tracker is
+// closed in both cases; while draining, though, a run already in flight may
+// still start the fallback that its failure calls for.
 func (t *workflowRunTracker) dispose(onDrain func()) bool {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	t.disposed = true
+	if t.closed {
+		return false
+	}
+	t.draining = true
 	if t.active > 0 {
 		t.onDrain = onDrain
 		return false
 	}
+	t.closed = true
 	return true
 }
 
