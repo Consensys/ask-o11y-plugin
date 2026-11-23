@@ -100,10 +100,8 @@ func TestHandleWorkflowsListAdminSeesEntriesAndStatus(t *testing.T) {
 	p.workflows = &WorkflowManager{schedulers: []*WorkflowScheduler{running, stopped}}
 	p.workflowStatus = NewWorkflowStatusStore()
 	p.workflowStatus.RecordTick("running-wf", "executed")
-	// Identity seeds the instance org so the durable counters can derive.
-	p.orgIdentity = NewOrgIdentityStore()
-	p.orgIdentity.Seed(1, "http://grafana", "token")
-	// Durable counts come from the run store: two completed, one timeout.
+	// Durable counts come from the run store of the requesting org: two
+	// completed, one timeout. No identity seeding is needed to count.
 	synthetic := syntheticWorkflowUserID("running-wf")
 	p.runStore.CreateRun("r-1", synthetic, 1, "s-1")
 	p.runStore.FinishRun("r-1", RunStatusCompleted, "")

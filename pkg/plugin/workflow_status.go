@@ -148,19 +148,18 @@ type workflowAPIEntry struct {
 
 // workflowSessionStatus joins the in-memory last-tick state with durable
 // session outcome counts derived from the run store, so the row counters and
-// the sessions list always agree: both read the same run records. Timed-out
-// runs are stored as failed with a timeout message; they count as timeout.
-func (p *Plugin) workflowSessionStatus(rawName string) workflowRuntimeStatus {
+// the sessions list always agree: both read the same run records of the
+// requesting org. Both run stores clamp list limits above 100 down to 50, so
+// 100 is the widest window either side can see; the panel fetches the same
+// 100. Timed-out runs are stored as failed with a timeout message; they
+// count as timeout.
+func (p *Plugin) workflowSessionStatus(rawName string, orgID int64) workflowRuntimeStatus {
 	name := strings.TrimSpace(rawName)
 	status := p.workflowStatus.Get(name)
-	orgID := int64(0)
-	if instanceOrg, _, _, seeded := p.orgIdentity.Get(); seeded {
-		orgID = instanceOrg
-	}
-	if orgID == 0 {
+	if orgID <= 0 {
 		return status
 	}
-	runs, err := p.runStore.ListRuns(syntheticWorkflowUserID(name), orgID, 500)
+	runs, err := p.runStore.ListRuns(syntheticWorkflowUserID(name), orgID, 100)
 	if err != nil {
 		// The durable counts are unavailable; the in-memory view still reports.
 		return status
@@ -235,7 +234,7 @@ func (p *Plugin) handleWorkflowsList(w http.ResponseWriter, r *http.Request) {
 			SpawnableSkills:       entry.SpawnableSkills,
 			FallbackSkill:         entry.FallbackSkill,
 			Running:               running[entry.Name],
-			Status:                p.workflowSessionStatus(entry.Name),
+			Status:                p.workflowSessionStatus(entry.Name, getOrgID(r)),
 		})
 	}
 

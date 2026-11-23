@@ -132,7 +132,7 @@ export function WorkflowsTab({ savedWorkflows, onSaveWorkflows, onEditPrompt }: 
   const loadRuns = useCallback(async (name: string) => {
     try {
       const res = await lastValueFrom(
-        getBackendSrv().fetch<{ runs: WorkflowRun[] }>({ url: `${WORKFLOWS_URL}/${name}/runs?limit=20` })
+        getBackendSrv().fetch<{ runs: WorkflowRun[] }>({ url: `${WORKFLOWS_URL}/${name}/runs?limit=100` })
       );
       setRuns((prev) => ({ ...prev, [name]: res.data.runs ?? [] }));
       setRunsError((prev) => ({ ...prev, [name]: null }));
