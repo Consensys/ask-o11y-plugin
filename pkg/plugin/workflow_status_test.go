@@ -563,7 +563,7 @@ func TestRemovedWorkflowEntryRevokesItsShares(t *testing.T) {
 	orgID := int64(1)
 
 	// The settings load that started both workflows.
-	p.revokeRemovedWorkflowShares([]WorkflowEntry{{Name: "gone-wf", OrgID: orgID}, {Name: "kept-wf", OrgID: orgID}})
+	p.revokeRemovedWorkflowShares([]WorkflowEntry{{Name: "gone-wf", OrgID: orgID}, {Name: "kept-wf", OrgID: orgID}}, nil)
 
 	hours := 24
 	payload := []byte(`{"id":"s","messages":[{"role":"user","content":"x"}]}`)
@@ -577,7 +577,7 @@ func TestRemovedWorkflowEntryRevokesItsShares(t *testing.T) {
 	}
 
 	// The next settings load no longer lists gone-wf.
-	p.revokeRemovedWorkflowShares([]WorkflowEntry{{Name: "kept-wf", OrgID: orgID}})
+	p.revokeRemovedWorkflowShares([]WorkflowEntry{{Name: "kept-wf", OrgID: orgID}}, nil)
 
 	if _, err := p.shareStore.GetShare(goneShare.ShareID); err == nil {
 		t.Fatal("a removed workflow's share must be revoked")
@@ -602,7 +602,7 @@ func TestRemovedWorkflowEntryRevokesOnlyItsOrg(t *testing.T) {
 	p.revokeRemovedWorkflowShares([]WorkflowEntry{
 		{Name: name, OrgID: orgA},
 		{Name: name, OrgID: orgB},
-	})
+	}, nil)
 
 	shareA, err := p.shareStore.CreateShare("s-a", payload, orgA, syntheticWorkflowUserID(name, orgA), &hours)
 	if err != nil {
@@ -614,7 +614,7 @@ func TestRemovedWorkflowEntryRevokesOnlyItsOrg(t *testing.T) {
 	}
 
 	// The next settings load no longer lists the workflow for org B only.
-	p.revokeRemovedWorkflowShares([]WorkflowEntry{{Name: name, OrgID: orgA}})
+	p.revokeRemovedWorkflowShares([]WorkflowEntry{{Name: name, OrgID: orgA}}, nil)
 
 	if _, err := p.shareStore.GetShare(shareB.ShareID); err == nil {
 		t.Fatal("the removed org's share must be revoked")

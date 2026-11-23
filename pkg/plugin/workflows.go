@@ -274,7 +274,11 @@ func appliedWorkflowNamesKey(orgID int64) string {
 // The diff is per org: entries are grouped by their owning org, and each org's
 // applied set and synthetic owners are read and deleted separately, so a
 // removal in one org never touches another org's shares.
-func (p *Plugin) revokeRemovedWorkflowShares(entries []WorkflowEntry) {
+//
+// An org in unreadable had no entry list to diff: its stored record failed to
+// read, so it is skipped entirely. Treating a failed read as an empty list
+// would delete that org's shares and persist an empty applied set.
+func (p *Plugin) revokeRemovedWorkflowShares(entries []WorkflowEntry, unreadable map[int64]bool) {
 	current := make(map[int64]map[string]bool)
 	for _, entry := range entries {
 		name := strings.TrimSpace(entry.Name)
@@ -297,6 +301,9 @@ func (p *Plugin) revokeRemovedWorkflowShares(entries []WorkflowEntry) {
 		orgs[orgID] = true
 	}
 	for orgID := range orgs {
+		if unreadable[orgID] {
+			continue
+		}
 		p.revokeRemovedWorkflowSharesForOrg(orgID, current[orgID])
 	}
 }

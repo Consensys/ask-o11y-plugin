@@ -253,9 +253,18 @@ func NewWorkflowScheduler(parent context.Context, p *Plugin, entry WorkflowEntry
 	return &WorkflowScheduler{ctx: ctx, cancel: cancel, p: p, entry: entry}
 }
 
-// Start runs the tick loop. Call in a goroutine.
+// Start runs the tick loop in its own goroutine and returns immediately. The
+// wait-group registration happens before Start returns, so a concurrent Stop
+// cannot reach wg.Wait before the loop is registered: Dispose can rely on Stop
+// having waited for the loop once it returns.
 func (s *WorkflowScheduler) Start() {
 	s.wg.Add(1)
+	go s.run()
+}
+
+// run is the tick loop Start spawns. Every exit path reaches the single
+// wg.Done, so the group count matches the loops that started.
+func (s *WorkflowScheduler) run() {
 	defer s.wg.Done()
 	interval := time.Duration(s.entry.IntervalSec) * time.Second
 	s.p.logger.Info("Workflow scheduler started",
@@ -598,7 +607,7 @@ func (m *WorkflowManager) apply(desired map[workflowKey]WorkflowEntry, readOrgs 
 		logger.Info("Workflow scheduler started",
 			"workflow", entry.Name, "orgId", key.orgID,
 			"intervalSeconds", entry.IntervalSec, "skill", entry.Skill)
-		go scheduler.Start()
+		scheduler.Start()
 	}
 
 	// Report each refused entry once, and report recovery when it returns.
@@ -646,26 +655,31 @@ func (p *Plugin) workflowReconcileLoop(ctx context.Context) {
 }
 
 // reconcileWorkflows converges this instance's schedulers onto the per-org
-// store. It returns every stored entry, and ok=false when the store could not
-// be read at all: the caller must not treat an unreadable store as "no
-// workflows".
+// store. It returns every stored entry, the orgs whose list could not be read,
+// and ok=false when the store could not be read at all: the caller must not
+// treat an unreadable store as "no workflows".
+//
+// An org in unreadable was enumerated but its record failed to decode. Its
+// schedulers are left running and its shares are never diffed for removal: a
+// failed read is not an empty list.
 //
 // The org set comes from SCAN over the store prefix. The applied-set keys share
 // that prefix but their suffix is not numeric, so they are skipped.
-func (p *Plugin) reconcileWorkflows(ctx context.Context) ([]WorkflowEntry, bool) {
+func (p *Plugin) reconcileWorkflows(ctx context.Context) ([]WorkflowEntry, map[int64]bool, bool) {
 	mgr := p.workflows
+	unreadable := map[int64]bool{}
 	if mgr == nil {
-		return nil, false
+		return nil, unreadable, false
 	}
 	if !p.usingRedis || p.redisClient == nil {
 		// Entries live in Redis; without it there is nothing to reconcile.
-		return nil, true
+		return nil, unreadable, true
 	}
 
 	orgIDs, err := p.workflowStoreOrgs(ctx)
 	if err != nil {
 		p.logger.Warn("Workflow reconcile skipped: cannot list orgs", "error", err)
-		return nil, false
+		return nil, unreadable, false
 	}
 
 	allowlistTools := make(map[string]bool)
@@ -684,6 +698,7 @@ func (p *Plugin) reconcileWorkflows(ctx context.Context) ([]WorkflowEntry, bool)
 		if listErr != nil {
 			p.logger.Warn("Workflow reconcile skipped one org: entry list unreadable",
 				"orgId", orgID, "error", listErr)
+			unreadable[orgID] = true
 			continue
 		}
 		readOrgs[orgID] = true
@@ -698,7 +713,7 @@ func (p *Plugin) reconcileWorkflows(ctx context.Context) ([]WorkflowEntry, bool)
 	}
 
 	mgr.apply(desired, readOrgs, problems, p.logger)
-	return all, true
+	return all, unreadable, true
 }
 
 // workflowStoreOrgs lists every org with a stored workflow list.

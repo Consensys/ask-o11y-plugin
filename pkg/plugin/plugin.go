@@ -543,9 +543,10 @@ func NewPlugin(ctx context.Context, settings backend.AppInstanceSettings) (insta
 	}
 	p.workflows = newWorkflowManager(p, pluginCtx)
 	// Initial convergence, and revoke the shares of any entry removed while
-	// this instance was down. An unreadable store changes nothing.
-	if discovered, ok := p.reconcileWorkflows(pluginCtx); ok {
-		p.revokeRemovedWorkflowShares(discovered)
+	// this instance was down. An unreadable store changes nothing, and an org
+	// whose list failed to read keeps its shares and schedulers.
+	if discovered, unreadable, ok := p.reconcileWorkflows(pluginCtx); ok {
+		p.revokeRemovedWorkflowShares(discovered, unreadable)
 	}
 	go p.workflowReconcileLoop(pluginCtx)
 

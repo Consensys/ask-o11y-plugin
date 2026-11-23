@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/redis/go-redis/v9"
@@ -212,4 +213,76 @@ func getWorkflowsRequest(t *testing.T, p *Plugin, orgID int64, role string) *htt
 	rec := httptest.NewRecorder()
 	p.handleWorkflows(rec, req)
 	return rec
+}
+
+// errInjectedReadBack is the fault the hook below reports for a read-back GET.
+var errInjectedReadBack = errors.New("injected read-back failure")
+
+// readBackFailHook fails GET of one workflow store key only after that key's
+// SET succeeded, so a test can exercise a persisted save whose read-back fails.
+type readBackFailHook struct {
+	key   string
+	saved atomic.Bool
+}
+
+func (h *readBackFailHook) DialHook(next redis.DialHook) redis.DialHook { return next }
+
+func (h *readBackFailHook) ProcessHook(next redis.ProcessHook) redis.ProcessHook {
+	return func(ctx context.Context, cmd redis.Cmder) error {
+		args := cmd.Args()
+		key := ""
+		if len(args) > 1 {
+			key, _ = args[1].(string)
+		}
+		if key == h.key {
+			switch cmd.Name() {
+			case "set":
+				if err := next(ctx, cmd); err != nil {
+					return err
+				}
+				h.saved.Store(true)
+				return nil
+			case "get":
+				if h.saved.Load() {
+					return errInjectedReadBack
+				}
+			}
+		}
+		return next(ctx, cmd)
+	}
+}
+
+func (h *readBackFailHook) ProcessPipelineHook(next redis.ProcessPipelineHook) redis.ProcessPipelineHook {
+	return next
+}
+
+// TestHandleWorkflowSaveReadBackFailureReturnsSavedList: the save persisted, so
+// a failed read-back answers 200 with the validated list. Reporting 500 would
+// tell the admin a save failed when it succeeded.
+func TestHandleWorkflowSaveReadBackFailureReturnsSavedList(t *testing.T) {
+	p, client := newRedisBackedWorkflowPlugin(t)
+	hook := &readBackFailHook{key: workflowStoreKey(1)}
+	client.AddHook(hook)
+
+	body := `{"workflows":[{"name":"saved-wf","enabled":true,` +
+		`"skill":"investigating-alerts","intervalSeconds":300,"sessionTimeoutSeconds":420,` +
+		`"toolAllowlist":["t"]}]}`
+	rec := putWorkflowsRequest(t, p, 1, "Admin", body)
+	if !hook.saved.Load() {
+		t.Fatal("the fixture must exercise a persisted save")
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("a persisted save with a failed read-back must answer 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if names := workflowNamesFromGet(t, rec); len(names) != 1 || names[0] != "saved-wf" {
+		t.Fatalf("the response must carry the saved list, got %v", names)
+	}
+
+	// The record really is stored: an unhooked client reads it back.
+	probe := workflowRedisTestClient(t)
+	t.Cleanup(func() { probe.Close() })
+	raw, err := probe.Get(context.Background(), workflowStoreKey(1)).Result()
+	if err != nil || !strings.Contains(raw, "saved-wf") {
+		t.Fatalf("the save must have persisted despite the failed read-back: raw=%q err=%v", raw, err)
+	}
 }

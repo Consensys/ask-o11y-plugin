@@ -19,8 +19,14 @@ func newStoreReconcileHarness(t *testing.T, llmHandler http.HandlerFunc) (*Plugi
 	t.Helper()
 	client := workflowRedisTestClient(t)
 	t.Cleanup(func() { client.Close() })
-	clearWorkflowStores(t, client, 1)
-	t.Cleanup(func() { clearWorkflowStores(t, client, 1) })
+	clearWorkflowStores(t, client, 1, 2)
+	t.Cleanup(func() { clearWorkflowStores(t, client, 1, 2) })
+	clearAppliedWorkflowNames(t, client, 1)
+	clearAppliedWorkflowNames(t, client, 2)
+	t.Cleanup(func() {
+		clearAppliedWorkflowNames(t, client, 1)
+		clearAppliedWorkflowNames(t, client, 2)
+	})
 
 	p, grafanaURL := newWorkflowTestPlugin(t, llmHandler)
 	p.redisClient = client
@@ -46,9 +52,25 @@ func storedReconcileEntry(name string) WorkflowEntry {
 // saveReconcileEntries replaces org 1's stored list in the harness Redis.
 func saveReconcileEntries(t *testing.T, client *redis.Client, entries ...WorkflowEntry) {
 	t.Helper()
+	saveReconcileEntriesForOrg(t, client, 1, entries...)
+}
+
+// saveReconcileEntriesForOrg replaces one org's stored list in the harness
+// Redis.
+func saveReconcileEntriesForOrg(t *testing.T, client *redis.Client, orgID int64, entries ...WorkflowEntry) {
+	t.Helper()
 	if err := NewWorkflowStore(client, context.Background(), log.DefaultLogger).SaveWorkflows(
-		context.Background(), 1, entries); err != nil {
+		context.Background(), orgID, entries); err != nil {
 		t.Fatalf("store save failed: %v", err)
+	}
+}
+
+// clearAppliedWorkflowNames removes one org's persisted applied-set, so a
+// fixture from an earlier test cannot decide a revocation assertion.
+func clearAppliedWorkflowNames(t *testing.T, client *redis.Client, orgID int64) {
+	t.Helper()
+	if err := client.Del(context.Background(), appliedWorkflowNamesKey(orgID)).Err(); err != nil {
+		t.Fatalf("clear applied workflow names failed: %v", err)
 	}
 }
 
@@ -60,7 +82,7 @@ func TestReconcileAddsAndRemovesSchedulers(t *testing.T) {
 	entry := storedReconcileEntry(name)
 
 	saveReconcileEntries(t, client, entry)
-	if _, ok := p.reconcileWorkflows(context.Background()); !ok {
+	if _, _, ok := p.reconcileWorkflows(context.Background()); !ok {
 		t.Fatal("a readable store must report ok")
 	}
 	scheduler := p.workflows.schedulerFor(1, name)
@@ -84,7 +106,7 @@ func TestReconcileAddsAndRemovesSchedulers(t *testing.T) {
 
 	// Removing the entry stops the scheduler and drops it from the manager.
 	saveReconcileEntries(t, client)
-	if _, ok := p.reconcileWorkflows(context.Background()); !ok {
+	if _, _, ok := p.reconcileWorkflows(context.Background()); !ok {
 		t.Fatal("a readable store must report ok")
 	}
 	if !scheduler.Stopped() {
@@ -94,7 +116,7 @@ func TestReconcileAddsAndRemovesSchedulers(t *testing.T) {
 		t.Fatal("a removed entry must leave no scheduler behind")
 	}
 	// A second reconcile is a no-op, not a revival.
-	if _, ok := p.reconcileWorkflows(context.Background()); !ok || p.workflows.schedulerFor(1, name) != nil {
+	if _, _, ok := p.reconcileWorkflows(context.Background()); !ok || p.workflows.schedulerFor(1, name) != nil {
 		t.Fatal("a removed entry must stay removed across reconciles")
 	}
 }
@@ -107,7 +129,7 @@ func TestReconcileRestartsChangedEntry(t *testing.T) {
 	entry := storedReconcileEntry(name)
 
 	saveReconcileEntries(t, client, entry)
-	if _, ok := p.reconcileWorkflows(context.Background()); !ok {
+	if _, _, ok := p.reconcileWorkflows(context.Background()); !ok {
 		t.Fatal("first reconcile must report ok")
 	}
 	first := p.workflows.schedulerFor(1, name)
@@ -119,7 +141,7 @@ func TestReconcileRestartsChangedEntry(t *testing.T) {
 	changed := entry
 	changed.IntervalSec = 300
 	saveReconcileEntries(t, client, changed)
-	if _, ok := p.reconcileWorkflows(context.Background()); !ok {
+	if _, _, ok := p.reconcileWorkflows(context.Background()); !ok {
 		t.Fatal("second reconcile must report ok")
 	}
 	second := p.workflows.schedulerFor(1, name)
@@ -160,7 +182,7 @@ func TestWorkflowRunSurvivesReconcile(t *testing.T) {
 	p, client := newStoreReconcileHarness(t, handler)
 	entry := storedReconcileEntry(name)
 	saveReconcileEntries(t, client, entry)
-	if _, ok := p.reconcileWorkflows(context.Background()); !ok {
+	if _, _, ok := p.reconcileWorkflows(context.Background()); !ok {
 		t.Fatal("reconcile must report ok")
 	}
 	scheduler := p.workflows.schedulerFor(1, name)
@@ -181,7 +203,7 @@ func TestWorkflowRunSurvivesReconcile(t *testing.T) {
 	// Remove the entry mid-run and reconcile: the scheduler stops, the run
 	// does not.
 	saveReconcileEntries(t, client)
-	if _, ok := p.reconcileWorkflows(context.Background()); !ok {
+	if _, _, ok := p.reconcileWorkflows(context.Background()); !ok {
 		t.Fatal("removal reconcile must report ok")
 	}
 	if !scheduler.Stopped() {
@@ -218,7 +240,7 @@ func TestWorkflowTickSkipsRemovedEntryBeforeReconcile(t *testing.T) {
 	p, client := newStoreReconcileHarness(t, counting)
 	entry := storedReconcileEntry(name)
 	saveReconcileEntries(t, client, entry)
-	if _, ok := p.reconcileWorkflows(context.Background()); !ok {
+	if _, _, ok := p.reconcileWorkflows(context.Background()); !ok {
 		t.Fatal("reconcile must report ok")
 	}
 	scheduler := p.workflows.schedulerFor(1, name)
@@ -250,5 +272,101 @@ func TestWorkflowTickSkipsRemovedEntryBeforeReconcile(t *testing.T) {
 	}
 	if got := requests.Load(); got != firstRequests {
 		t.Fatalf("a stale tick must spend no token: requests %d -> %d", firstRequests, got)
+	}
+}
+
+// TestReconcileFailedOrgReadDoesNotRevokeShares is the fail-closed contract at
+// the revocation seam: an org whose stored list cannot be read is not an org
+// with no workflows. The NewPlugin sequence (reconcile, then revoke the removed
+// entries) must leave that org's shares and applied set untouched.
+func TestReconcileFailedOrgReadDoesNotRevokeShares(t *testing.T) {
+	const name = "recon-unreadable-org-wf"
+	const orgID = int64(2)
+	p, client := newStoreReconcileHarness(t, stubLLMFinalAnswer("tick ok"))
+	ctx := context.Background()
+
+	entry := storedReconcileEntry(name)
+	entry.OrgID = orgID
+	saveReconcileEntriesForOrg(t, client, orgID, entry)
+
+	// A previous load recorded org 2's entry, and its synthetic owner holds a
+	// share that only a real removal may revoke.
+	if err := client.SAdd(ctx, appliedWorkflowNamesKey(orgID), name).Err(); err != nil {
+		t.Fatalf("applied-set fixture failed: %v", err)
+	}
+	hours := 24
+	payload := []byte(`{"id":"s","messages":[{"role":"user","content":"x"}]}`)
+	share, err := p.shareStore.CreateShare("s-unreadable-org", payload, orgID,
+		syntheticWorkflowUserID(name, orgID), &hours)
+	if err != nil {
+		t.Fatalf("share creation failed: %v", err)
+	}
+
+	// SCAN still lists org 2, but its record no longer decodes.
+	if err := client.Set(ctx, workflowStoreKey(orgID), "{not-json", 0).Err(); err != nil {
+		t.Fatalf("corrupt fixture failed: %v", err)
+	}
+
+	discovered, unreadable, ok := p.reconcileWorkflows(ctx)
+	if !ok {
+		t.Fatal("one unreadable org must not fail the whole reconcile")
+	}
+	if !unreadable[orgID] {
+		t.Fatalf("org %d's failed read must be reported unreadable", orgID)
+	}
+	p.revokeRemovedWorkflowShares(discovered, unreadable)
+
+	if _, err := p.shareStore.GetShare(share.ShareID); err != nil {
+		t.Fatalf("a failed read for org %d must not revoke its shares: %v", orgID, err)
+	}
+	applied, err := client.SMembers(ctx, appliedWorkflowNamesKey(orgID)).Result()
+	if err != nil {
+		t.Fatalf("read applied set failed: %v", err)
+	}
+	if len(applied) != 1 || applied[0] != name {
+		t.Fatalf("a failed read must not rewrite org %d's applied set, got %v", orgID, applied)
+	}
+}
+
+// TestReconcileFailedOrgReadKeepsSchedulersRunning covers the other half of the
+// same shape: an unreadable org is absent from the desired set, and that
+// absence must not stop its healthy schedulers.
+func TestReconcileFailedOrgReadKeepsSchedulersRunning(t *testing.T) {
+	const name = "recon-unreadable-keeps-scheduler-wf"
+	const orgID = int64(2)
+	p, client := newStoreReconcileHarness(t, stubLLMFinalAnswer("tick ok"))
+	ctx := context.Background()
+
+	entry := storedReconcileEntry(name)
+	entry.OrgID = orgID
+	saveReconcileEntriesForOrg(t, client, orgID, entry)
+
+	if _, _, ok := p.reconcileWorkflows(ctx); !ok {
+		t.Fatal("a readable store must report ok")
+	}
+	scheduler := p.workflows.schedulerFor(orgID, name)
+	if scheduler == nil || !p.workflows.isRunning(orgID, name) {
+		t.Fatal("a stored entry must start a running scheduler")
+	}
+
+	// The record turns unreadable while its scheduler keeps running.
+	if err := client.Set(ctx, workflowStoreKey(orgID), "{not-json", 0).Err(); err != nil {
+		t.Fatalf("corrupt fixture failed: %v", err)
+	}
+	_, unreadable, ok := p.reconcileWorkflows(ctx)
+	if !ok {
+		t.Fatal("one unreadable org must not fail the whole reconcile")
+	}
+	if !unreadable[orgID] {
+		t.Fatalf("org %d's failed read must be reported unreadable", orgID)
+	}
+	if scheduler.Stopped() {
+		t.Fatal("a failed read must not stop that org's scheduler")
+	}
+	if got := p.workflows.schedulerFor(orgID, name); got != scheduler {
+		t.Fatal("a failed read must leave the same scheduler in the manager")
+	}
+	if !p.workflows.isRunning(orgID, name) {
+		t.Fatal("a failed read must leave the org's scheduler running")
 	}
 }

@@ -354,14 +354,16 @@ func (p *Plugin) handleWorkflowSave(w http.ResponseWriter, r *http.Request) {
 		current[strings.TrimSpace(entry.Name)] = true
 	}
 	p.revokeRemovedWorkflowSharesForOrg(orgID, current)
-	_, _ = p.reconcileWorkflows(r.Context())
+	_, _, _ = p.reconcileWorkflows(r.Context())
 	// Answer with a fresh read-back of the stored list, so the body is exactly
-	// what the next GET returns.
+	// what the next GET returns. The save already persisted, so a failed
+	// read-back must not report a failed save: answer with the validated list
+	// this handler holds instead.
 	stored, err := store.ListWorkflows(r.Context(), orgID)
 	if err != nil {
-		p.logger.Error("Failed to read back workflow entries", "orgId", orgID, "error", err)
-		writeWorkflowJSONError(w, http.StatusInternalServerError, "Failed to save workflow entries")
-		return
+		p.logger.Warn("Failed to read back workflow entries; answering with the saved list",
+			"orgId", orgID, "error", err)
+		stored = entries
 	}
 	p.writeWorkflowList(w, orgID, stored)
 }
