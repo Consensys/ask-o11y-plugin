@@ -93,7 +93,7 @@ Coverage: `VERIFIED` = code pointer or test; `ASSUMED` = code suggests, no test;
 27. Nothing prevents two concurrent runs on one session; `ActiveRunID` keeps only the last ID. `GAP` — `pkg/plugin/plugin.go:1103`
 28. A session create, update or share body is capped at 8 MiB; a larger body answers 413 and nothing is written. `VERIFIED` — `pkg/plugin/request.go:19`, `pkg/plugin/request.go:26`, `pkg/plugin/plugin.go:2400`
 29. Every other control request body is capped at 1 MiB. `VERIFIED` — `pkg/plugin/request.go:16`
-30. Workflow sessions are created by the workflow runner under a synthetic user ID (FNV of `"workflow:<name>"`), owned like any other session by `"<userID>:<orgID>"`. `VERIFIED` — `pkg/plugin/workflows.go:161`, `pkg/plugin/workflow_session.go:33`
+30. Workflow sessions are created by the workflow runner under a synthetic user ID (FNV of `"\x00workflow:<orgID>:<name>"`, so the same name in two orgs gets two identities), owned like any other session by `"<userID>:<orgID>"`. `VERIFIED` — `pkg/plugin/workflow_scheduler.go:32`, `pkg/plugin/workflows.go:250`, `pkg/plugin/workflow_session.go:33`
 31. A session record carries optional `conversationType` (workflow sessions set `workflow`) and `workflow` (the workflow name); interactive sessions never set them. `VERIFIED` — `pkg/plugin/sessionstore.go:33`, `pkg/plugin/workflow_session.go:78`
 32. Workflow sessions reuse the run store, stats, assistant-message persistence, and share mechanism unchanged. `VERIFIED` — `pkg/plugin/workflow_session.go:189`, `pkg/plugin/workflow_session.go:270`
 33. Workflow sessions are opened from the config UI through share links owned by the workflow's synthetic user (`POST /api/workflows/{name}/runs/{runId}/share`, get-or-create); every `GET /api/sessions/{id}` stays owner-scoped, Admins included. An admin-read override for workflow sessions existed briefly (2026-11-23) and was removed the same day in favor of shares. `VERIFIED` — test `TestWorkflowRunShareGetOrCreate`
@@ -130,7 +130,7 @@ Coverage: `VERIFIED` = code pointer or test; `ASSUMED` = code suggests, no test;
 
 | Signal | Name | Where | Evidence |
 |---|---|---|---|
-| Span | `agent_run`, with `org_id`, `user_role`, `session_id` | Grafana tracing exporter | `pkg/plugin/plugin.go:882` |
+| Span | `agent_run`, with `org_id`, `user_role`, `session_id` | Grafana tracing exporter | `pkg/plugin/plugin.go:883` |
 | Log field | `runId`, `status` | Plugin logger on run finish | `pkg/plugin/runstore.go:216` |
 
 ## Evidence Index
@@ -143,4 +143,4 @@ Coverage: `VERIFIED` = code pointer or test; `ASSUMED` = code suggests, no test;
 
 - Concurrent runs on one session are allowed and uncoordinated. A forward spec should define single-flight or per-session serialisation.
 - The Redis session index has no TTL; it is pruned only on create, so an idle user keeps stale members.
-- `GET /api/sessions/{id}/shares` filters by `UserID` only, not by org (`pkg/plugin/plugin.go:2861`). Cross-org leakage needs a review.
+- `GET /api/sessions/{id}/shares` filters by `UserID` only, not by org (`pkg/plugin/plugin.go:2862`). Cross-org leakage needs a review.

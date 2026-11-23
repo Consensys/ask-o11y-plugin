@@ -99,7 +99,7 @@ Workflow sessions run with approvals off, an Editor-role synthetic identity, and
 
 ### User Story 6 - The workflow starts only from valid, seeded config (Priority: P2)
 
-Workflow entries load from app instance settings and provisioning. An invalid entry (unknown skill, empty allowlist, interval below the floor) disables that entry at startup with an error log that names it; other entries run. A workflow whose org identity is not yet seeded skips ticks with a rate-limited warning until the first inbound request in that org seeds the service-account token.
+Workflow entries load from the per-org Redis store (revised 2026-11-23). An invalid entry (unknown skill, empty allowlist, interval below the floor) disables that entry when its list is applied, with an error log that names it; other entries run. A workflow whose org identity is not yet seeded skips ticks with a rate-limited warning until the first inbound request in that org seeds the service-account token.
 
 **Why this priority**: Fail fast on bad config, and a defined behaviour for the lazy identity bootstrap. It is P2 because it hardens stories 1 to 3 rather than adding capability.
 
@@ -107,7 +107,7 @@ Workflow entries load from app instance settings and provisioning. An invalid en
 
 **Acceptance Scenarios**:
 
-1. **Given** a workflow entry with an unknown skill name, **When** the plugin starts, **Then** that entry is disabled with one error log naming it, and every other entry starts.
+1. **Given** a workflow entry with an unknown skill name, **When** its org's list is applied, **Then** that entry is disabled with one error log naming it, and every other entry starts.
 2. **Given** a workflow whose org has no seeded service-account token, **When** a tick fires, **Then** the tick is skipped with a rate-limited warning, and the workflow starts on the next tick after seeding.
 
 ---
@@ -127,16 +127,16 @@ Every workflow emits metrics: ticks executed, ticks skipped, sessions started, c
 
 ### User Story 8 - The admin watches and toggles workflows in the config UI (Priority: P2)
 
-A Grafana admin opens the plugin configuration and sees one Workflows tab: every provisioned entry with its schedule, whether a scheduler runs for it on this instance, the last tick time and outcome, and the session outcome counters. Toggling a workflow enabled saves immediately and restarts the plugin instance, which restarts its schedulers.
+A Grafana admin opens the plugin configuration and sees one Workflows tab: every stored entry of the org with its schedule, whether a scheduler runs for it on this instance, the last tick time and outcome, and the session outcome counters. Toggling a workflow enabled saves immediately through `PUT /api/workflows` and hot-applies the list; no plugin instance restart is needed (revised 2026-11-23).
 
 **Why this priority**: The feature is unattended; without a surface, an operator reads logs and metrics to answer is it on and is it working. It is P2 because the metrics and the sessions UI already answer the same questions for a patient operator.
 
-**Independent Test**: Configure one running and one disabled workflow; open the tab; assert both rows with status, and assert the toggle persists through the standard settings save.
+**Independent Test**: Configure one running and one disabled workflow; open the tab; assert both rows with status, and assert the toggle persists through the workflows route.
 
 **Acceptance Scenarios**:
 
 1. **Given** two configured workflows, one running, **When** the admin opens the Workflows tab, **Then** both rows render with per-instance tick and session status.
-2. **Given** a running workflow, **When** the admin switches it off, **Then** the full entry list persists losslessly and the plugin instance reloads without the scheduler.
+2. **Given** a running workflow, **When** the admin switches it off, **Then** the full entry list persists losslessly and the scheduler stops without a plugin instance reload.
 3. **Given** a Viewer role request, **When** it calls the workflows API, **Then** it is refused.
 
 ### User Story 9 - The admin opens workflow sessions from the config UI (Priority: P2)
@@ -157,15 +157,15 @@ Each workflow row expands into its recent runs: status, start time, terminal err
 
 ### User Story 10 - The admin edits workflow configs and prompts in the config UI (Priority: P2)
 
-The tab gains a full editor: every workflow entry field (skill from the enabled-skill list, message, model, interval, timeout, cap, iteration budget, allowlist, spawnable skills, fallback, org), create, and delete. The name is immutable after creation — renaming would orphan the synthetic user's sessions. Edit prompt jumps to the Skills tab with that skill's editor open, so the workflow behavior (the skill body) is editable in place.
+The tab gains a full editor: every workflow entry field (skill from the enabled-skill list, message, model, interval, timeout, cap, iteration budget, allowlist, spawnable skills, fallback), create, and delete. The entry's org is stamped server-side and is not an editor field. The name is immutable after creation — renaming would orphan the synthetic user's sessions. Edit prompt jumps to the Skills tab with that skill's editor open, so the workflow behavior (the skill body) is editable in place.
 
 **Why this priority**: Provisioning-only editing keeps the loop in the platform team; the UI hands it to the NOC owners.
 
-**Independent Test**: Edit a field, save — the settings persist losslessly, the instance reloads, the change takes effect on the next tick.
+**Independent Test**: Edit a field, save — the list persists losslessly, the change hot-applies without an instance reload, and it takes effect on the next tick.
 
 **Acceptance Scenarios**:
 
-1. **Given** an existing workflow, **When** the admin edits its interval and saves, **Then** the full list persists and the scheduler restarts with the new interval.
+1. **Given** an existing workflow, **When** the admin edits its interval and saves, **Then** the full list persists and the scheduler applies the new interval on the next reconcile.
 2. **Given** the editor, **When** the admin clicks Edit prompt, **Then** the Skills tab opens with that skill's editor loaded.
 3. **Given** a new workflow form with a missing name, skill, or allowlist, **When** the admin saves, **Then** the save is refused client-side.
 
@@ -182,19 +182,19 @@ The tab gains a full editor: every workflow entry field (skill from the enabled-
 - A workflow session tries to spawn from a spawned session. Allowed only if the spawned session's workflow config permits nesting; v1 forbids nesting, the tool refuses.
 - Two workflows name the same skill. Both run it independently with their own allowlists and caps.
 - A Viewer opens the sessions list. Workflow sessions belong to the synthetic workflow identity, not the Viewer. A human reaches a workflow session only through a share link created by `share_session`.
-- The allowlist names a tool that no configured server provides. The entry is invalid at startup, per User Story 6.
-- The interval is set below the 60-second floor. The entry is invalid at startup.
+- The allowlist names a tool that no configured server provides. The entry is refused on save, or disabled on apply when the MCP catalog is not yet ready, per User Story 6.
+- The interval is set below the 60-second floor. The entry is refused on save or disabled on apply.
 
 ## Requirements *(mandatory)*
 
 ### Functional Requirements
 
-- **FR-001**: The system MUST load workflow entries from app instance settings `jsonData.workflows` and from the equivalent provisioning file, with fields: `name`, `enabled`, `intervalSeconds` (default 300, floor 60), `skill`, `model`, `maxIterations`, `toolAllowlist`, `spawnableSkills`, `maxConcurrentSessions`, `sessionTimeoutSeconds`, and `fallbackSkill` (optional). Entries carry no org field: Grafana provisions app settings per org, so a workflow always runs in the org that owns its settings, and the instance identity (org, Grafana URL, service-account token) seeds from that org's requests. An earlier revision carried `orgId`; it was removed as redundant (2026-11-23).
-- **FR-002**: At startup the system MUST validate every entry. An invalid entry (unknown skill, empty allowlist, allowlist naming no known tool, interval below the floor, missing name, duplicate name) MUST disable that entry with one error log naming it. Valid entries MUST start. The plugin MUST NOT refuse to start because one entry is invalid.
+- **FR-001** (revised 2026-11-23): The system MUST load workflow entries from the per-org plugin Redis store at `workflows:<orgID>`, with fields: `name`, `enabled`, `intervalSeconds` (default 300, floor 60), `skill`, `model`, `maxIterations`, `toolAllowlist`, `spawnableSkills`, `maxConcurrentSessions`, `sessionTimeoutSeconds`, `fallbackSkill` (optional), and `orgId`. The server MUST stamp `orgId` from the requesting org and MUST ignore a client-supplied value. One org's list MUST hold at most 100 entries, and the save request body MUST be at most 256 KiB. An earlier revision loaded entries from app instance settings `jsonData.workflows` and the equivalent provisioning file, and it removed `orgId` as redundant; the multi-org redesign reversed both: entries left app settings, and ownership became explicit and server-stamped.
+- **FR-002** (revised 2026-11-23): On every apply of an org's list, and on save, the system MUST validate every entry. An invalid entry (unknown skill, empty allowlist, allowlist naming no known tool, interval below the floor, missing name, duplicate name) MUST disable that entry with one error log naming it. Valid entries MUST start. The plugin MUST NOT refuse to start because one entry is invalid.
 - **FR-003**: The system MUST run one scheduler per enabled entry, ticking at the entry's interval.
-- **FR-004**: When Redis is configured, a tick MUST acquire a per-workflow lock (`workflow:<name>:tick`, SETNX, TTL no longer than half the interval) before it executes. A tick that cannot take the lock MUST skip silently. A tick that cannot reach Redis MUST skip with an error log.
+- **FR-004**: When Redis is configured, a tick MUST acquire a per-workflow, per-org lock (`workflow:<orgID>:<name>:tick`, SETNX, TTL no longer than half the interval) before it executes. A tick that cannot take the lock MUST skip silently. A tick that cannot reach Redis MUST skip with an error log.
 - **FR-005**: When no Redis URL is configured, the system MUST disable all workflows at startup with one error log stating the requirement.
-- **FR-006**: A tick MUST execute one headless agent session for the entry's skill, built on the existing `agent.LoopRequest` path, with: the skill rendered into the system prompt through the existing skill mechanism, the entry's model, the entry's `maxIterations`, approval policy `off`, synthetic user and role `Editor`, and the entry's `orgId`.
+- **FR-006**: A tick MUST execute one headless agent session for the entry's skill, built on the existing `agent.LoopRequest` path, with: the skill rendered into the system prompt through the existing skill mechanism, the entry's model, the entry's `maxIterations`, approval policy `off`, synthetic user and role `Editor`, and the identity of the org that owns the entry (that org's Grafana URL and service-account token). No client-supplied org value reaches the run.
 - **FR-007**: The session's advertised and callable tool set MUST be exactly: the allowlisted tools, the internal tools `load_skill` and `search_tools`, and the internal workflow tools `spawn_session` and `share_session`. Tool filtering MUST reuse the existing selection and RBAC filters, at listing and at execution.
 - **FR-008**: Workflow sessions MUST create session and run records through the existing stores, with a `workflow` conversation type and the workflow name as metadata. They MUST be readable through the existing sessions and runs APIs under the synthetic identity.
 - **FR-009**: The `spawn_session` tool MUST accept a skill name and a payload message, start a headless session per FR-006/FR-007 rules for that skill, and return its session and run identifiers.
@@ -202,25 +202,25 @@ The tab gains a full editor: every workflow entry field (skill from the enabled-
 - **FR-011**: The `share_session` tool MUST create a share link for the current session through the existing share mechanism and return the share URL.
 - **FR-012**: `spawn_session` and `share_session` MUST NOT appear in the tool catalog of any interactive run, in any role.
 - **FR-013**: Every workflow session, top-level or spawned, MUST be bounded by `sessionTimeoutSeconds`. On timeout the system MUST cancel the run through the existing cancel path, mark it failed, increment the failure metric, and run `fallbackSkill` once if configured.
-- **FR-014**: A tick MUST skip with a rate-limited warning when the entry's org identity is not seeded. Identity seeding MUST follow the existing Scout pattern: org id and service-account token captured from the first inbound request in that org, token refreshed on later requests.
+- **FR-014** (revised 2026-11-23): Each org's identity MUST persist in its own Redis record at `org_identity:<orgID>`, holding the org ID, Grafana URL, and service-account token. Identity seeding MUST follow the existing Scout pattern: org id and token captured from the first inbound request in that org, token refreshed on later requests. A cold plugin instance MUST read a persisted record through, and a tick MUST skip with a rate-limited warning only when its own org is still unseeded. A seed for one org MUST never touch another org's record.
 - **FR-015**: Workflow runs MUST NOT send `X-Grafana-Org-Id` with service-account auth, and MUST reuse the org-resolution and token path of an interactive run in the same org. No new cross-org surface is introduced.
-- **FR-016**: The system MUST emit per-workflow metrics: ticks executed, ticks skipped (by lock, by identity, by error), sessions started, completed, failed, cancelled, active spawned sessions, and run duration.
-- **FR-017**: The original scope shipped no HTTP route. The config-UI increment (2026-11-20, same feature branch) adds exactly one: `GET /api/workflows`. The OpenAPI spec entry ships in the same commit.
+- **FR-016** (revised 2026-11-23): The system MUST emit per-workflow metrics: ticks executed, ticks skipped (by lock, by identity, by error), sessions started, completed, failed, cancelled, active spawned sessions, and run duration. Each metric's workflow label MUST carry the owning org, so the same workflow name in two orgs reports as two series.
+- **FR-017** (revised 2026-11-23): The original scope shipped no HTTP route. The config-UI increment (2026-11-20, same feature branch) added `GET /api/workflows`. The multi-org revision adds `PUT /api/workflows`, so the pair serves one org's entry list for both read and write. `pkg/plugin/openapi/openapi.json` MUST carry both operations, the PUT included.
 - **FR-018**: Dry-run behaviour MUST be achieved by allowlist composition (omit the write tools), not by a separate mode.
-- **FR-019**: The system MUST expose `GET /api/workflows` (Admin only) returning every configured entry joined with this plugin instance's runtime status: last tick time, last tick outcome, session outcome counters, and the last tick error when a tick could not proceed.
+- **FR-019** (revised 2026-11-23): The system MUST expose `GET /api/workflows` (Admin only) returning only the requesting org's entries, joined with this plugin instance's runtime status: last tick time, last tick outcome, session outcome counters, and the last tick error when a tick could not proceed. It MUST also expose `PUT /api/workflows` (Admin only), which replaces the requesting org's whole list and nothing else. Validation MUST be all-or-nothing: one invalid entry rejects the request with `400` and `{"errors":[{"name","error"}]}`, a body over 256 KiB answers `413`, and nothing is written on either failure.
 - **FR-020**: The status counters MUST be per-instance; the API MUST NOT present them as cluster-wide totals.
-- **FR-021**: The AppConfig UI MUST provide a Workflows tab listing every entry with its status and an enable toggle whose save persists the full workflow list losslessly and restarts the plugin instance.
+- **FR-021** (revised 2026-11-23): The AppConfig UI MUST provide a Workflows tab that self-sources its rows from `GET /api/workflows`. It MUST list every entry of the requesting org with its status and provide an enable toggle whose save persists the full list losslessly through `PUT /api/workflows`. The save MUST hot-apply: it is not an app-settings save, and it MUST NOT reload the page or rebuild the plugin instance.
 - **FR-022**: The system MUST expose `GET /api/workflows/{name}/runs` (Admin only) returning the recent runs of the named workflow, newest first, each with its session id, status, and terminal error.
 - **FR-023** (revised 2026-11-23): Opening a workflow session from the config UI MUST go through a read-only share link: `POST /api/workflows/{name}/runs/{runId}/share` (Admin only) gets or creates a share owned by the workflow's synthetic user and returns the shared-session URL. No cross-owner session read exists; `GET /api/sessions/{id}` stays fully owner-scoped. An earlier revision added an admin read override for workflow sessions; it was removed in favor of shares.
-- **FR-024**: The Workflows tab MUST offer a full entry editor (create, edit, delete) that persists the whole workflow list through the standard settings save; the entry name MUST be immutable after creation.
+- **FR-024** (revised 2026-11-23): The Workflows tab MUST offer a full entry editor (create, edit, delete) that persists the whole workflow list through `PUT /api/workflows`, not through a settings save. Inline route errors MUST surface in the tab. The entry name MUST be immutable after creation, and the entry's org is server-stamped, so the editor never sends `orgId`.
 - **FR-025**: The tab MUST link each workflow's skill to the Skills tab editor for that skill.
 - **FR-026** (revised): The Workflows tab Open action MUST navigate to the shared-session view returned by the share endpoint, never to the owner-scoped chat deep link.
 
 ### Key Entities
 
-- **Workflow entry**: The provisioned configuration: identity (name), schedule (interval), behaviour (skill, model, budget), containment (allowlist, spawnable skills, caps, timeout, fallback), and scope (org).
+- **Workflow entry**: The provisioned configuration: identity (name), schedule (interval), behaviour (skill, model, budget), containment (allowlist, spawnable skills, caps, timeout, fallback), and ownership (the org, stamped by the server from the requesting org).
 - **Workflow scheduler**: One in-process ticker per enabled entry, executing a tick.
-- **Tick lock**: The per-workflow Redis lock that elects one leader among replicas for one tick.
+- **Tick lock**: The per-org, per-workflow Redis lock (`workflow:<orgID>:<name>:tick`) that elects one leader among replicas for one tick.
 - **Workflow session**: A headless agent session under the synthetic workflow identity, persisted in the session and run stores, carrying the `workflow` conversation type.
 - **Spawn request**: A `spawn_session` call: target skill plus payload, bounded by caps and the spawnable list.
 - **Internal workflow tools**: `spawn_session` and `share_session`, injected only into workflow sessions.
@@ -242,7 +242,7 @@ The tab gains a full editor: every workflow entry field (skill from the enabled-
 - Tenant skills arrive as admin custom skills through the existing skills mechanism; the plugin ships no skills for this feature.
 - The tenant provisions and authenticates the external mcp-grafana server per org; the plugin only filters its tools through the allowlist.
 - Workflow state lives in the tenant's system of record (IRM alert groups, incidents, custom fields). The plugin stores run records only.
-- One org per workflow entry in v1. Multi-org fan-out is out of scope.
+- A workflow belongs to exactly one org, stamped server-side. Multi-org fan-out of one entry is out of scope.
 - The synthetic workflow identity is not a real Grafana user; humans reach workflow sessions only through share links.
 - No inbound webhook trigger and no template gallery. The AppConfig Workflows tab, originally deferred, shipped in the config-UI increment.
 - Tenant workflow content, including any porting references, stays out of this repository; it carries tenant identifiers.
@@ -256,7 +256,7 @@ The tab gains a full editor: every workflow entry field (skill from the enabled-
 
 | Action | Admin | Editor | Viewer | Enforcement |
 |---|---|---|---|---|
-| Define a workflow entry (settings, provisioning) | yes | no | no | Grafana app settings, `settings:write` |
+| Define a workflow entry (Workflows tab, `PUT /api/workflows`) | yes | no | no | Admin-only route; org stamped server-side |
 | Workflow session runs with unattended write tools | n/a (synthetic Editor identity, allowlist-bounded) | n/a | n/a | per-run allowlist, `pkg/mcp/selection.go`, `pkg/rbac/rbac.go` |
 | See `spawn_session` / `share_session` in an interactive run | no | no | no | internal tools, not registered in the interactive catalog |
 | Read a workflow session through the API | only under the synthetic identity, or via share link | same | same | existing session store and share contract |
@@ -274,9 +274,9 @@ The Viewer rule (read-only tools only) is untouched: workflow tools never enter 
 
 ### Contract Changes
 
-No route changes. `pkg/plugin/openapi/openapi.json` does not change (FR-017).
+`pkg/plugin/openapi/openapi.json` gains the `PUT /api/workflows` operation (FR-017), and the existing `GET` description states this-org's-entries semantics.
 
-New observable contracts: the `workflows` settings section, the `workflow` conversation type on sessions, the two internal tools, and the per-workflow metrics.
+New observable contracts: the per-org `workflows:<orgID>` store, the `workflow` conversation type on sessions, the two internal tools, and the per-workflow metrics.
 
 ### Existing Contracts
 
@@ -285,7 +285,7 @@ New observable contracts: the `workflows` settings section, the `workflow` conve
 - `specs/retro/108-mcp-selection/spec.md` — the allowlist reuses tool selection; listing and execution filters unchanged.
 - `specs/retro/111-sessions-runs/spec.md` — workflow sessions and runs use the stores; new conversation type; share links reused.
 - `specs/retro/113-prompt-assembly/spec.md` — skill rendering into the system prompt is reused unchanged.
-- `specs/retro/114-settings-multi-org/spec.md` — new `workflows` settings section; the Org-1 SA-token invariant is restated in FR-015.
+- `specs/retro/114-settings-multi-org/spec.md` — the per-org `workflows:<orgID>` entry store replaces the settings section; the SA-auth org-header rule is restated in FR-015.
 - `specs/retro/115-rbac/spec.md` — no role change; internal tools never listed.
 - `specs/retro/116-skills/spec.md` — explicit skill activation reused; skills stay tenant content.
 - `specs/retro/119-evals-scout/spec.md` — the lazy identity capture generalizes Scout's pattern; Scout itself unchanged.

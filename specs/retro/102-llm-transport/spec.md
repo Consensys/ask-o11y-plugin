@@ -17,7 +17,7 @@ The agent sends every completion request through the Grafana LLM app. It picks `
 | Capability | Admin | Editor | Viewer | Evidence |
 |---|---|---|---|---|
 | Request `base` or `large` per run | yes | yes | yes | `pkg/plugin/agent_model.go:14` |
-| Reject an unsupported model value | yes | yes | yes | `pkg/plugin/plugin.go:913` |
+| Reject an unsupported model value | yes | yes | yes | `pkg/plugin/plugin.go:914` |
 | Reject a conflicting session model | yes | yes | yes | `pkg/plugin/plugin.go:1030` |
 | Inherit the model from an active skill | yes | yes | yes | `pkg/plugin/plugin.go:1095` |
 No role receives a different model. Model choice is not an RBAC boundary. `VERIFIED` — `pkg/plugin/agent_model.go:14`
@@ -25,8 +25,8 @@ No role receives a different model. Model choice is not an RBAC boundary. `VERIF
 ### HTTP endpoints
 | Method | Path | Handler | Evidence |
 |---|---|---|---|
-| POST | `/api/agent/run?model=base\|large` | `handleAgentRun` | `pkg/plugin/plugin.go:588` |
-| GET | `/api/agent/runs/{runId}` | `handleAgentRuns` | `pkg/plugin/plugin.go:1430` |
+| POST | `/api/agent/run?model=base\|large` | `handleAgentRun` | `pkg/plugin/plugin.go:589` |
+| GET | `/api/agent/runs/{runId}` | `handleAgentRuns` | `pkg/plugin/plugin.go:1431` |
 The run response carries `model` and `modelSource` (`auto`, `request`, `session`, or `skill`). `VERIFIED` — `pkg/plugin/plugin.go:1269`
 ### SSE events
 | Event | Payload fields | Evidence |
@@ -118,7 +118,7 @@ The transport emits no event of its own. A transport failure reaches the client 
 - `pkg/agent/llm_client.go:244` — `buildHTTPError`
 - `pkg/agent/loop.go:828` — `chatCompletionWithFallback`
 - `pkg/plugin/agent_model.go:28` — `selectAgentModelForTask`
-- `pkg/plugin/plugin.go:1092` — effective model resolution
+- `pkg/plugin/plugin.go:1093` — effective model resolution
 - `pkg/plugin/iteration_budget.go:26` — `resolveMaxIterations`
 - `pkg/agent/llm_client_test.go` — `TestLLMClient_ChatCompletion`, `TestLLMClient_ChatCompletion_FallbackToToken`, `TestLLMClient_ChatCompletion_RetriesTransientStatus`, `TestLLMClient_ChatCompletion_IncompleteStreamRetriesThenSucceeds`, `TestLLMClient_ChatCompletion_HTTPErrorIncludesSafeDiagnostics`
 - `pkg/plugin/agent_model_test.go` — `TestParseAgentModelParam`, `TestSelectAgentModelForTask`

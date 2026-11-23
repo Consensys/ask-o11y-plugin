@@ -1,8 +1,10 @@
 package plugin
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"unicode"
 
@@ -40,7 +42,11 @@ var errWorkflowUnknownTool = errors.New("allowlist names unknown tool")
 // file) and are pure configuration: the plugin ships no entries and no
 // workflow behaviour of its own.
 type WorkflowEntry struct {
-	Name        string `json:"name"`
+	Name string `json:"name"`
+	// OrgID is the org that owns this entry. The server stamps it; a value
+	// from client settings is never trusted. It scopes the entry's Redis
+	// keys, synthetic owner, applied-set membership, and metrics.
+	OrgID       int64  `json:"orgId"`
 	Enabled     bool   `json:"enabled"`
 	Skill       string `json:"skill"`
 	Message     string `json:"message,omitempty"`
@@ -141,18 +147,35 @@ func validateWorkflowEntry(entry WorkflowEntry, registry *skills.Registry, allow
 	return nil
 }
 
-// prepareWorkflows validates every configured entry and returns the valid,
-// default-filled, enabled ones. An invalid entry is dropped with one error
-// log naming it; valid entries are unaffected (fail fast per entry, never
-// for the whole plugin).
-func prepareWorkflows(entries []WorkflowEntry, registry *skills.Registry, allowlistTools map[string]bool, logger log.Logger) []WorkflowEntry {
+// workflowEntryProblem names one stored entry that prepareWorkflowEntries
+// refused, and why. Reconcile keeps the last problem per entry so a 30 second
+// loop logs a defect once, not on every pass.
+type workflowEntryProblem struct {
+	Name  string
+	Error string
+}
+
+// prepareWorkflowEntries validates every stored entry and returns the valid,
+// default-filled, enabled ones plus one problem per refused entry. Valid
+// entries are unaffected by a refused one (fail fast per entry, never for the
+// whole plugin).
+//
+// A disabled entry is not a problem: the admin switched it off on purpose, so
+// it is simply left out of the returned entries. Its absence from the applied
+// set stops any scheduler that was running for it.
+//
+// Every returned entry is stamped with defaultOrgID, regardless of what its
+// stored payload held: the org is server-owned and comes from the store key.
+func prepareWorkflowEntries(entries []WorkflowEntry, defaultOrgID int64, registry *skills.Registry, allowlistTools map[string]bool) ([]WorkflowEntry, []workflowEntryProblem) {
 	seen := map[string]bool{}
 	valid := make([]WorkflowEntry, 0, len(entries))
+	problems := make([]workflowEntryProblem, 0)
 	for _, raw := range entries {
 		entry := raw
+		entry.OrgID = defaultOrgID
 		entry.Name = strings.TrimSpace(entry.Name)
 		if seen[entry.Name] {
-			logger.Error("Workflow entry disabled: duplicate name", "workflow", entry.Name)
+			problems = append(problems, workflowEntryProblem{Name: entry.Name, Error: "duplicate name"})
 			continue
 		}
 		seen[entry.Name] = true
@@ -161,16 +184,54 @@ func prepareWorkflows(entries []WorkflowEntry, registry *skills.Registry, allowl
 		// a floor violation.
 		entry.applyDefaults()
 		if err := validateWorkflowEntry(entry, registry, allowlistTools); err != nil {
-			logger.Error("Workflow entry disabled: invalid configuration", "error", err.Error())
+			problems = append(problems, workflowEntryProblem{Name: entry.Name, Error: err.Error()})
 			continue
 		}
+		// The off switch is deliberate: exclude the entry without reporting
+		// it as a defect. Problems are reserved for real validation errors.
 		if !entry.Enabled {
-			logger.Info("Workflow entry present but disabled", "workflow", entry.Name)
 			continue
 		}
 		valid = append(valid, entry)
 	}
+	return valid, problems
+}
+
+// prepareWorkflows logs every refused entry once and returns the valid ones.
+// It is the startup-shaped wrapper over prepareWorkflowEntries. A disabled
+// entry is not refused and produces no log line: the off switch is deliberate.
+func prepareWorkflows(entries []WorkflowEntry, defaultOrgID int64, registry *skills.Registry, allowlistTools map[string]bool, logger log.Logger) []WorkflowEntry {
+	valid, problems := prepareWorkflowEntries(entries, defaultOrgID, registry, allowlistTools)
+	for _, problem := range problems {
+		if problem.Error == "duplicate name" {
+			logger.Error("Workflow entry disabled: duplicate name", "workflow", problem.Name)
+			continue
+		}
+		logger.Error("Workflow entry disabled: invalid configuration", "workflow", problem.Name, "error", problem.Error)
+	}
 	return valid
+}
+
+// legacyWorkflowEntryCount reports the entry count of a legacy
+// jsonData.workflows setting and whether the key is present at all. Entries
+// live in the per-org Redis store now; the settings key is read only to warn
+// once per instance load, never to start a scheduler.
+func legacyWorkflowEntryCount(jsonData []byte) (int, bool) {
+	var envelope struct {
+		Workflows json.RawMessage `json:"workflows"`
+	}
+	if err := json.Unmarshal(jsonData, &envelope); err != nil {
+		return 0, false
+	}
+	if len(envelope.Workflows) == 0 || string(envelope.Workflows) == "null" {
+		return 0, false
+	}
+	var entries []WorkflowEntry
+	if err := json.Unmarshal(envelope.Workflows, &entries); err != nil {
+		// A malformed value still proves the setting exists; report zero.
+		return 0, true
+	}
+	return len(entries), true
 }
 
 // workflowMessage returns the first user message for a tick of this entry.
@@ -181,79 +242,155 @@ func workflowMessage(entry WorkflowEntry) string {
 	return fmt.Sprintf("Run the %s workflow now.", entry.Skill)
 }
 
-// syntheticWorkflowUserID derives the stable synthetic user ID for a
-// workflow, using the same FNV-of-login scheme as interactive user IDs but
+// syntheticWorkflowUserID derives the stable synthetic user ID for a workflow
+// in one org, using the same FNV-of-login scheme as interactive user IDs but
 // over the NUL-prefixed synthetic domain. The ID owns the workflow's sessions;
-// it never maps to a real Grafana user.
-func syntheticWorkflowUserID(workflow string) int64 {
-	return fnvSyntheticUserID(workflow)
+// it never maps to a real Grafana user, and the same name in two orgs gets two
+// different IDs, so neither org's shares or runs reach the other.
+func syntheticWorkflowUserID(workflow string, orgID int64) int64 {
+	return fnvSyntheticUserID(workflow, orgID)
 }
 
+// appliedWorkflowNamesKeyPrefix scopes the applied-set of each org: the set
+// records the workflow names of the last settings load for that org only.
+const appliedWorkflowNamesKeyPrefix = "workflows:applied:"
+
 // appliedWorkflowNamesKey is the Redis set of workflow names recorded by the
-// last settings load. Settings changes take effect by restarting the plugin
-// process, so the previous set must outlive the process for a removed entry
-// to be detected.
-const appliedWorkflowNamesKey = "workflows:applied"
+// last settings load of one org. Settings changes take effect by restarting
+// the plugin process, so the previous set must outlive the process for a
+// removed entry to be detected.
+func appliedWorkflowNamesKey(orgID int64) string {
+	return appliedWorkflowNamesKeyPrefix + strconv.FormatInt(orgID, 10)
+}
 
 // revokeRemovedWorkflowShares deletes the shares of every workflow whose entry
 // the applied settings no longer list, so no unauthenticated share URL for a
 // removed workflow keeps working. It is called at the settings-apply seam
 // (NewPlugin, before startWorkflows) and records the current entry names.
-func (p *Plugin) revokeRemovedWorkflowShares(entries []WorkflowEntry) {
-	current := make(map[string]bool, len(entries))
+//
+// The diff is per org: entries are grouped by their owning org, and each org's
+// applied set and synthetic owners are read and deleted separately, so a
+// removal in one org never touches another org's shares.
+//
+// An org in unreadable had no entry list to diff: its stored record failed to
+// read, so it is skipped entirely. Treating a failed read as an empty list
+// would delete that org's shares and persist an empty applied set.
+func (p *Plugin) revokeRemovedWorkflowShares(entries []WorkflowEntry, unreadable map[int64]bool) {
+	current := make(map[int64]map[string]bool)
 	for _, entry := range entries {
-		if name := strings.TrimSpace(entry.Name); name != "" {
-			current[name] = true
+		name := strings.TrimSpace(entry.Name)
+		if name == "" {
+			continue
 		}
+		if current[entry.OrgID] == nil {
+			current[entry.OrgID] = map[string]bool{}
+		}
+		current[entry.OrgID][name] = true
 	}
 
-	previous := p.recordAppliedWorkflowNames(current)
+	orgs := make(map[int64]bool, len(current))
+	for orgID := range current {
+		orgs[orgID] = true
+	}
+	// Orgs whose last entry disappeared have no current group; their persisted
+	// applied sets still name the removed entries.
+	for orgID := range p.appliedWorkflowOrgs() {
+		orgs[orgID] = true
+	}
+	for orgID := range orgs {
+		if unreadable[orgID] {
+			continue
+		}
+		p.revokeRemovedWorkflowSharesForOrg(orgID, current[orgID])
+	}
+}
+
+// revokeRemovedWorkflowSharesForOrg revokes one org's removed entries.
+func (p *Plugin) revokeRemovedWorkflowSharesForOrg(orgID int64, current map[string]bool) {
+	previous := p.recordAppliedWorkflowNames(orgID, current)
 	for name := range previous {
 		if current[name] {
 			continue
 		}
-		removed, err := p.shareStore.DeleteSharesByUser(syntheticWorkflowUserID(name))
+		removed, err := p.shareStore.DeleteSharesByUser(syntheticWorkflowUserID(name, orgID))
 		if err != nil {
-			p.logger.Warn("Failed to revoke shares for removed workflow", "workflow", name, "error", err)
+			p.logger.Warn("Failed to revoke shares for removed workflow",
+				"workflow", name, "orgId", orgID, "error", err)
 			continue
 		}
 		if removed > 0 {
-			p.logger.Info("Revoked shares for removed workflow", "workflow", name, "shareCount", removed)
+			p.logger.Info("Revoked shares for removed workflow",
+				"workflow", name, "orgId", orgID, "shareCount", removed)
 		}
 	}
 }
 
-// recordAppliedWorkflowNames returns the workflow names applied by the previous
-// settings load and records current as the new set. Redis holds the set across
-// restarts; the in-memory copy covers a reapply inside one process and the
-// configuration where no workflow ever ran because Redis is absent.
-func (p *Plugin) recordAppliedWorkflowNames(current map[string]bool) map[string]bool {
+// appliedWorkflowOrgs lists the orgs with an applied set, in memory or Redis,
+// so an org that lost its last workflow entry is still diffed.
+func (p *Plugin) appliedWorkflowOrgs() map[int64]bool {
+	orgs := map[int64]bool{}
+	p.settingsMu.RLock()
+	for orgID := range p.appliedWorkflows {
+		orgs[orgID] = true
+	}
+	p.settingsMu.RUnlock()
+
+	if !p.usingRedis || p.redisClient == nil {
+		return orgs
+	}
+	ctx, cancel := redisContext(p.ctx, RedisBulkOpTimeout)
+	defer cancel()
+	iter := p.redisClient.Scan(ctx, 0, appliedWorkflowNamesKeyPrefix+"*", 100).Iterator()
+	for iter.Next(ctx) {
+		suffix, ok := strings.CutPrefix(iter.Val(), appliedWorkflowNamesKeyPrefix)
+		if !ok {
+			continue
+		}
+		if orgID, err := strconv.ParseInt(suffix, 10, 64); err == nil {
+			orgs[orgID] = true
+		}
+	}
+	if err := iter.Err(); err != nil {
+		p.logger.Warn("Failed to list applied workflow orgs", "error", err)
+	}
+	return orgs
+}
+
+// recordAppliedWorkflowNames returns the workflow names applied by the
+// previous settings load of one org and records current as the new set. Redis
+// holds the set across restarts; the in-memory copy covers a reapply inside
+// one process and the configuration where no workflow ever ran because Redis
+// is absent.
+func (p *Plugin) recordAppliedWorkflowNames(orgID int64, current map[string]bool) map[string]bool {
 	p.settingsMu.Lock()
-	previous := p.appliedWorkflows
-	p.appliedWorkflows = current
+	if p.appliedWorkflows == nil {
+		p.appliedWorkflows = make(map[int64]map[string]bool)
+	}
+	previous := p.appliedWorkflows[orgID]
+	p.appliedWorkflows[orgID] = current
 	p.settingsMu.Unlock()
 
 	if !p.usingRedis || p.redisClient == nil {
 		return previous
 	}
-	for name := range p.readAppliedWorkflowNames() {
+	for name := range p.readAppliedWorkflowNames(orgID) {
 		if previous == nil {
 			previous = map[string]bool{}
 		}
 		previous[name] = true
 	}
-	p.writeAppliedWorkflowNames(current)
+	p.writeAppliedWorkflowNames(orgID, current)
 	return previous
 }
 
-// readAppliedWorkflowNames returns the persisted name set, or nil when Redis
-// cannot answer.
-func (p *Plugin) readAppliedWorkflowNames() map[string]bool {
+// readAppliedWorkflowNames returns one org's persisted name set, or nil when
+// Redis cannot answer.
+func (p *Plugin) readAppliedWorkflowNames(orgID int64) map[string]bool {
 	ctx, cancel := redisContext(p.ctx, RedisBulkOpTimeout)
 	defer cancel()
-	names, err := p.redisClient.SMembers(ctx, appliedWorkflowNamesKey).Result()
+	names, err := p.redisClient.SMembers(ctx, appliedWorkflowNamesKey(orgID)).Result()
 	if err != nil {
-		p.logger.Warn("Failed to read applied workflow names", "error", err)
+		p.logger.Warn("Failed to read applied workflow names", "orgId", orgID, "error", err)
 		return nil
 	}
 	set := make(map[string]bool, len(names))
@@ -263,16 +400,17 @@ func (p *Plugin) readAppliedWorkflowNames() map[string]bool {
 	return set
 }
 
-// writeAppliedWorkflowNames replaces the persisted name set.
-func (p *Plugin) writeAppliedWorkflowNames(names map[string]bool) {
+// writeAppliedWorkflowNames replaces one org's persisted name set.
+func (p *Plugin) writeAppliedWorkflowNames(orgID int64, names map[string]bool) {
 	ctx, cancel := redisContext(p.ctx, RedisOpTimeout)
 	defer cancel()
+	key := appliedWorkflowNamesKey(orgID)
 	pipe := p.redisClient.TxPipeline()
-	pipe.Del(ctx, appliedWorkflowNamesKey)
+	pipe.Del(ctx, key)
 	for name := range names {
-		pipe.SAdd(ctx, appliedWorkflowNamesKey, name)
+		pipe.SAdd(ctx, key, name)
 	}
 	if _, err := pipe.Exec(ctx); err != nil {
-		p.logger.Warn("Failed to persist applied workflow names", "error", err)
+		p.logger.Warn("Failed to persist applied workflow names", "orgId", orgID, "error", err)
 	}
 }

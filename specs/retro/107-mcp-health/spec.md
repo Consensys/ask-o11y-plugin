@@ -36,7 +36,7 @@ The route has no role check. Any authenticated caller sees every server's status
 |---|---|---|---|
 | GET | `/api/mcp/servers` | `handleMCPServers` | `pkg/plugin/plugin.go:836` |
 
-Response body: `{servers, systemHealth, oauth}`. `pkg/plugin/plugin.go:846`
+Response body: `{servers, systemHealth, oauth}`. `pkg/plugin/plugin.go:847`
 
 ### SSE events
 

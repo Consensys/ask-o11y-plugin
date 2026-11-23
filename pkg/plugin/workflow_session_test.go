@@ -120,7 +120,7 @@ func TestWorkflowSessionRunsPersistsAndCompletes(t *testing.T) {
 	entry.Skill = "dispatch"
 	entry.SessionTimeoutSeconds = 60
 
-	syntheticID := syntheticWorkflowUserID("happy-wf")
+	syntheticID := syntheticWorkflowUserID("happy-wf", 1)
 	sessionID, runID, err := p.startWorkflowSession(workflowRunParams{
 		entry:       entry,
 		orgID:       1,
@@ -152,10 +152,10 @@ func TestWorkflowSessionRunsPersistsAndCompletes(t *testing.T) {
 		t.Fatalf("expected the user message and the assistant answer, got %d", len(session.Messages))
 	}
 
-	if got := testutil.ToFloat64(workflowSessions.WithLabelValues("happy-wf", "completed")); got < 1 {
+	if got := testutil.ToFloat64(workflowSessions.WithLabelValues(workflowLabel(1, "happy-wf"), "completed")); got < 1 {
 		t.Fatalf("completed metric not counted: %v", got)
 	}
-	if got := testutil.ToFloat64(workflowSessions.WithLabelValues("happy-wf", "started")); got < 1 {
+	if got := testutil.ToFloat64(workflowSessions.WithLabelValues(workflowLabel(1, "happy-wf"), "started")); got < 1 {
 		t.Fatalf("started metric not counted: %v", got)
 	}
 }
@@ -171,7 +171,7 @@ func TestWorkflowSessionWatchdogCancelsHungSession(t *testing.T) {
 	entry.Skill = "dispatch"
 	entry.SessionTimeoutSeconds = 1 // below the config floor on purpose: direct construction
 
-	syntheticID := syntheticWorkflowUserID("hung-wf")
+	syntheticID := syntheticWorkflowUserID("hung-wf", 1)
 	_, runID, err := p.startWorkflowSession(workflowRunParams{
 		entry:       entry,
 		orgID:       1,
@@ -195,7 +195,7 @@ func TestWorkflowSessionWatchdogCancelsHungSession(t *testing.T) {
 	if !strings.Contains(run.Error, "timeout") {
 		t.Fatalf("failure must name the timeout, got %q", run.Error)
 	}
-	if got := testutil.ToFloat64(workflowSessions.WithLabelValues("hung-wf", "timeout")); got < 1 {
+	if got := testutil.ToFloat64(workflowSessions.WithLabelValues(workflowLabel(1, "hung-wf"), "timeout")); got < 1 {
 		t.Fatalf("timeout metric not counted: %v", got)
 	}
 }
@@ -211,7 +211,7 @@ func TestWorkflowFallbackRunsOnceAfterTimeout(t *testing.T) {
 	entry.SessionTimeoutSeconds = 1
 	entry.FallbackSkill = "escalate"
 
-	syntheticID := syntheticWorkflowUserID("fallback-wf")
+	syntheticID := syntheticWorkflowUserID("fallback-wf", 1)
 	_, _, err := p.startWorkflowSession(workflowRunParams{
 		entry:       entry,
 		orgID:       1,
@@ -292,7 +292,7 @@ func TestWorkflowSpawnRefusals(t *testing.T) {
 		orgID:       1,
 		grafanaURL:  grafanaURL,
 		saToken:     "test-token",
-		syntheticID: syntheticWorkflowUserID("spawn-wf"),
+		syntheticID: syntheticWorkflowUserID("spawn-wf", 1),
 	}
 
 	cases := []struct {
@@ -339,10 +339,10 @@ func TestWorkflowSpawnRespectsCapAndStartsSession(t *testing.T) {
 		orgID:       1,
 		grafanaURL:  grafanaURL,
 		saToken:     "test-token",
-		syntheticID: syntheticWorkflowUserID("cap-wf"),
+		syntheticID: syntheticWorkflowUserID("cap-wf", 1),
 	}
 
-	if err := client.Del(p.ctx, workflowActiveSpawnKey("cap-wf")).Err(); err != nil {
+	if err := client.Del(p.ctx, workflowActiveSpawnKey(1, "cap-wf")).Err(); err != nil {
 		t.Fatalf("cleanup failed: %v", err)
 	}
 
@@ -369,7 +369,7 @@ func TestWorkflowSpawnRespectsCapAndStartsSession(t *testing.T) {
 	var count int
 	var err error
 	waitForCondition(t, 5*time.Second, "active spawn set to drain", func() bool {
-		count, err = p.workflowActiveSpawnCount("cap-wf")
+		count, err = p.workflowActiveSpawnCount(1, "cap-wf")
 		return err == nil && count == 0
 	})
 }
@@ -381,7 +381,7 @@ func TestWorkflowShareToolCreatesLink(t *testing.T) {
 	params := workflowRunParams{
 		entry:       entry,
 		orgID:       1,
-		syntheticID: syntheticWorkflowUserID("share-wf"),
+		syntheticID: syntheticWorkflowUserID("share-wf", 1),
 	}
 
 	// A session with one message plus a run holding streamed content and a
@@ -460,7 +460,7 @@ func TestWorkflowShareTranscriptSurvivesRedisRunStore(t *testing.T) {
 		orgID:       1,
 		grafanaURL:  grafanaURL,
 		saToken:     "test-token",
-		syntheticID: syntheticWorkflowUserID("share-redis-wf"),
+		syntheticID: syntheticWorkflowUserID("share-redis-wf", 1),
 	}
 	session, err := p.sessionStore.CreateSession(params.syntheticID, int64(1), "redis share test", []SessionMessage{{
 		Role:    "user",
@@ -515,7 +515,7 @@ func TestWorkflowRunNeverEntersInteractiveCancelRegistry(t *testing.T) {
 	entry.Skill = "dispatch"
 	entry.SessionTimeoutSeconds = 30
 
-	syntheticID := syntheticWorkflowUserID("nocancelreg-wf")
+	syntheticID := syntheticWorkflowUserID("nocancelreg-wf", 1)
 	_, runID, err := p.startWorkflowSession(workflowRunParams{
 		entry:       entry,
 		orgID:       1,
@@ -574,7 +574,7 @@ func TestWorkflowRunSurvivesInstanceTeardown(t *testing.T) {
 	p.runCancels["interactive-run"] = interactiveCancel
 	p.runCancelsMu.Unlock()
 
-	syntheticID := syntheticWorkflowUserID(entry.Name)
+	syntheticID := syntheticWorkflowUserID(entry.Name, 1)
 	_, runID, err := p.startWorkflowSession(workflowRunParams{
 		entry:       entry,
 		orgID:       1,
@@ -633,8 +633,8 @@ func TestWorkflowRunSelfTerminatesAtDeadline(t *testing.T) {
 	entry.Skill = "dispatch"
 	entry.SessionTimeoutSeconds = 2
 
-	before := testutil.ToFloat64(workflowSessions.WithLabelValues("deadline-wf", "timeout"))
-	syntheticID := syntheticWorkflowUserID(entry.Name)
+	before := testutil.ToFloat64(workflowSessions.WithLabelValues(workflowLabel(1, "deadline-wf"), "timeout"))
+	syntheticID := syntheticWorkflowUserID(entry.Name, 1)
 	_, runID, err := p.startWorkflowSession(workflowRunParams{
 		entry:       entry,
 		orgID:       1,
@@ -658,7 +658,7 @@ func TestWorkflowRunSelfTerminatesAtDeadline(t *testing.T) {
 	if !strings.Contains(run.Error, "timeout") {
 		t.Fatalf("failure must name the timeout, got %q", run.Error)
 	}
-	if got := testutil.ToFloat64(workflowSessions.WithLabelValues("deadline-wf", "timeout")); got <= before {
+	if got := testutil.ToFloat64(workflowSessions.WithLabelValues(workflowLabel(1, "deadline-wf"), "timeout")); got <= before {
 		t.Fatalf("the deadline must classify as timeout, counter stayed at %v", got)
 	}
 	if got := p.workflowRuns.inFlight(); got != 0 {
@@ -693,7 +693,7 @@ func TestWorkflowFallbackStartsWhileInstanceDraining(t *testing.T) {
 	entry.SessionTimeoutSeconds = 3
 
 	const orgID int64 = 1
-	syntheticID := syntheticWorkflowUserID(entry.Name)
+	syntheticID := syntheticWorkflowUserID(entry.Name, 1)
 	_, parentRunID, err := p.startWorkflowSession(workflowRunParams{
 		entry:       entry,
 		orgID:       orgID,

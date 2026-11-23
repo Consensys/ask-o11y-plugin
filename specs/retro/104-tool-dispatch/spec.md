@@ -26,7 +26,7 @@ RBAC applies at listing and again at execution. The index is built from the alre
 ### HTTP endpoints
 | Method | Path | Handler | Evidence |
 |---|---|---|---|
-| POST | `/api/agent/run` | `handleAgentRun` (dispatch happens inside the loop) | `pkg/plugin/plugin.go:588` |
+| POST | `/api/agent/run` | `handleAgentRun` (dispatch happens inside the loop) | `pkg/plugin/plugin.go:589` |
 The agent path has no dedicated route. The direct MCP edge is `POST /api/mcp/call-tool`. `VERIFIED` — `pkg/plugin/plugin.go:586`
 ### SSE events
 | Event | Payload fields | Evidence |

@@ -21,8 +21,8 @@ A run is readable and cancellable only by its owning user in its owning org. The
 ### HTTP endpoints
 | Method | Path | Handler | Evidence |
 |---|---|---|---|
-| POST | `/api/agent/run` | `handleAgentRun` | `pkg/plugin/plugin.go:588` |
-| GET | `/api/agent/runs/{runId}` | `handleAgentRuns` | `pkg/plugin/plugin.go:1430` |
+| POST | `/api/agent/run` | `handleAgentRun` | `pkg/plugin/plugin.go:589` |
+| GET | `/api/agent/runs/{runId}` | `handleAgentRuns` | `pkg/plugin/plugin.go:1431` |
 | GET | `/api/agent/runs/{runId}/events` | `handleAgentRunEvents` | `pkg/plugin/plugin.go:1607` |
 | POST | `/api/agent/runs/{runId}/cancel` | `handleCancelRun` | `pkg/plugin/plugin.go:1584` |
 | POST | `/api/agent/runs/{runId}/approvals/{approvalId}` | `handleAgentApproval` | `pkg/plugin/plugin.go:1448` |
@@ -51,7 +51,7 @@ The run store adds `sequence` to every event (`pkg/plugin/runstore.go:183`). The
 | `maxTotalTokens` | plugin jsonData | 64000 | `pkg/agent/context_window.go:16` |
 | `maxParallelToolCalls` | plugin jsonData | 4 | `pkg/plugin/plugin.go:184` |
 | `approvalPolicy` | plugin jsonData | `approval-gated-writes` | `pkg/plugin/plugin.go:181` |
-| `recentMessageCount` | plugin jsonData | 10 | `pkg/plugin/plugin.go:282` |
+| `recentMessageCount` | plugin jsonData | 10 | `pkg/plugin/plugin.go:301` |
 ### MCP tool names
 | Tool | Read-only | Evidence |
 |---|---|---|
@@ -111,7 +111,7 @@ The run store adds `sequence` to every event (`pkg/plugin/runstore.go:183`). The
 | Tool arguments are truncated and no retry is left | `error`, code `llm_truncated_tool_call`, retryable | `pkg/agent/loop.go:404` |
 | Iteration cap reached | `error` "Agent loop reached maximum iterations (N)" | `pkg/agent/loop.go:774` |
 | MCP tool listing fails | none; the run continues with an empty tool set | `pkg/agent/loop.go:157` |
-| User cancels | no terminal event; run status becomes `cancelled` | `pkg/plugin/plugin.go:1264` |
+| User cancels | no terminal event; run status becomes `cancelled` | `pkg/plugin/plugin.go:1265` |
 ## Data and Persistence
 | Store | Key or table | TTL | Fallback | Evidence |
 |---|---|---|---|---|
@@ -121,7 +121,7 @@ The run store adds `sequence` to every event (`pkg/plugin/runstore.go:183`). The
 ## Observability
 | Signal | Name | Where | Evidence |
 |---|---|---|---|
-| Span | `agent_run` | OTel tracer | `pkg/plugin/plugin.go:882` |
+| Span | `agent_run` | OTel tracer | `pkg/plugin/plugin.go:883` |
 | Span | `llm_call` | OTel tracer | `pkg/agent/llm_client.go:134` |
 | Span | `mcp_tool_call` | OTel tracer | `pkg/agent/loop.go:960` |
 | Metric | `asko11y_agent_user_tokens_total` | Prometheus scrape | `pkg/plugin/metrics.go:19` |

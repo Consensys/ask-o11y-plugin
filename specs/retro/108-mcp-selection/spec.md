@@ -67,8 +67,8 @@ Both meta-tools bypass MCP filtering by design. `pkg/agent/tools.go:26`
 
 1. Listing applies the role filter first, then the per-server selection filter. `VERIFIED` — `pkg/plugin/plugin.go:752`
 2. An agent run applies the same two filters in the same order. `VERIFIED` — `pkg/agent/loop.go:161`
-3. Execution re-checks the role and returns 403 on failure. `VERIFIED` — `pkg/plugin/plugin.go:803`
-4. Execution re-checks selection and returns 403 `Tool is not enabled`. `VERIFIED` — `pkg/plugin/plugin.go:830`
+3. Execution re-checks the role and returns 403 on failure. `VERIFIED` — `pkg/plugin/plugin.go:804`
+4. Execution re-checks selection and returns 403 `Tool is not enabled`. `VERIFIED` — `pkg/plugin/plugin.go:831`
 5. The agent execution path returns a tool error instead of an HTTP status. `VERIFIED` — `pkg/agent/loop.go:976`
 6. A Viewer gets only tools whose `readOnlyHint` is exactly `true`. `VERIFIED` — test `TestIsReadOnlyTool`
 7. A tool with no annotations is not read-only. `VERIFIED` — `pkg/rbac/rbac.go:6`
@@ -100,7 +100,7 @@ Both meta-tools bypass MCP filtering by design. `pkg/agent/tools.go:26`
 ## Invariants
 
 - A Viewer never receives or executes a non-read-only tool. `VERIFIED` — `pkg/rbac/rbac.go:16`
-- Selection is enforced both at listing and at execution. `VERIFIED` — `pkg/plugin/plugin.go:830`
+- Selection is enforced both at listing and at execution. `VERIFIED` — `pkg/plugin/plugin.go:831`
 - Graphiti `group_id` is always the caller's org, never an LLM value. `VERIFIED` — `pkg/mcp/selection.go:76`
 
 ## Failure Modes

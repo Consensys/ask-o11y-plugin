@@ -87,12 +87,13 @@ export type AppPluginSettings = {
   approvalPolicy?: string;
   maxParallelToolCalls?: number;
   agentEvalCaptureEnabled?: boolean;
-
-  /** Provisioned autonomous workflow entries (see the plugin README, Workflows). */
-  workflows?: WorkflowEntryUI[];
 };
 
-/** Frontend mirror of pkg/plugin WorkflowEntry (jsonData.workflows). */
+/**
+ * Keyless workflow entry exchanged with the admin routes. The org is stamped
+ * server-side and runtime status (running, counters) is joined only by GET, so
+ * neither ever travels in a save payload.
+ */
 export type WorkflowEntryUI = {
   name: string;
   enabled: boolean;

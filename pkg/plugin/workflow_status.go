@@ -27,52 +27,56 @@ type workflowRuntimeStatus struct {
 // WorkflowStatusStore tracks per-workflow runtime state in memory. The
 // Prometheus metrics remain the aggregated source of truth; this store gives
 // the config UI a cheap per-entry snapshot without scraping.
+//
+// Entries are keyed by (org, name): the same workflow name may run in two
+// orgs on one instance, and each org must read only its own tick state.
 type WorkflowStatusStore struct {
 	mu      sync.RWMutex
-	entries map[string]*workflowRuntimeStatus
+	entries map[workflowKey]*workflowRuntimeStatus
 }
 
 func NewWorkflowStatusStore() *WorkflowStatusStore {
-	return &WorkflowStatusStore{entries: map[string]*workflowRuntimeStatus{}}
+	return &WorkflowStatusStore{entries: map[workflowKey]*workflowRuntimeStatus{}}
 }
 
-func (s *WorkflowStatusStore) entry(name string) *workflowRuntimeStatus {
+func (s *WorkflowStatusStore) entry(orgID int64, name string) *workflowRuntimeStatus {
 	if s == nil {
 		return &workflowRuntimeStatus{}
 	}
-	e, ok := s.entries[name]
+	key := workflowKey{orgID: orgID, name: name}
+	e, ok := s.entries[key]
 	if !ok {
 		e = &workflowRuntimeStatus{}
-		s.entries[name] = e
+		s.entries[key] = e
 	}
 	return e
 }
 
-// RecordTick notes one scheduler tick outcome for a workflow. A tick that
-// proceeds clears the previous tick error, so a recovered workflow no longer
-// looks like it is failing.
-func (s *WorkflowStatusStore) RecordTick(name, outcome string) {
+// RecordTick notes one scheduler tick outcome for a workflow in one org. A
+// tick that proceeds clears the previous tick error, so a recovered workflow
+// no longer looks like it is failing.
+func (s *WorkflowStatusStore) RecordTick(orgID int64, name, outcome string) {
 	now := time.Now().UTC()
 	if s == nil {
 		return
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	e := s.entry(name)
+	e := s.entry(orgID, name)
 	e.LastTickAt = &now
 	e.LastTickOutcome = outcome
 	e.LastError = ""
 }
 
 // RecordTickError notes a tick that could not proceed and why.
-func (s *WorkflowStatusStore) RecordTickError(name string, errMsg string) {
+func (s *WorkflowStatusStore) RecordTickError(orgID int64, name string, errMsg string) {
 	now := time.Now().UTC()
 	if s == nil {
 		return
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	e := s.entry(name)
+	e := s.entry(orgID, name)
 	e.LastTickAt = &now
 	e.LastTickOutcome = "skip_error"
 	e.LastError = errMsg
@@ -81,23 +85,23 @@ func (s *WorkflowStatusStore) RecordTickError(name string, errMsg string) {
 // RecordSessionError records a session-level failure message without
 // changing the tick outcome: a tick that ran but could not start its session
 // still executed.
-func (s *WorkflowStatusStore) RecordSessionError(name string, errMsg string) {
+func (s *WorkflowStatusStore) RecordSessionError(orgID int64, name string, errMsg string) {
 	if s == nil {
 		return
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.entry(name).LastError = errMsg
+	s.entry(orgID, name).LastError = errMsg
 }
 
 // RecordSession counts one session outcome.
-func (s *WorkflowStatusStore) RecordSession(name, outcome string) {
+func (s *WorkflowStatusStore) RecordSession(orgID int64, name, outcome string) {
 	if s == nil {
 		return
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	e := s.entry(name)
+	e := s.entry(orgID, name)
 	switch outcome {
 	case "started":
 		e.Started++
@@ -112,15 +116,15 @@ func (s *WorkflowStatusStore) RecordSession(name, outcome string) {
 	}
 }
 
-// Get returns a copy of one workflow's status; the zero value when the
+// Get returns a copy of one org's workflow status; the zero value when the
 // workflow never ticked on this instance.
-func (s *WorkflowStatusStore) Get(name string) workflowRuntimeStatus {
+func (s *WorkflowStatusStore) Get(orgID int64, name string) workflowRuntimeStatus {
 	if s == nil {
 		return workflowRuntimeStatus{}
 	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	if e, ok := s.entries[name]; ok {
+	if e, ok := s.entries[workflowKey{orgID: orgID, name: name}]; ok {
 		return *e
 	}
 	return workflowRuntimeStatus{}
@@ -156,11 +160,13 @@ type workflowAPIEntry struct {
 // count as timeout.
 func (p *Plugin) workflowSessionStatus(rawName string, orgID int64) workflowRuntimeStatus {
 	name := strings.TrimSpace(rawName)
-	status := p.workflowStatus.Get(name)
+	// In-memory tick state is per org: two orgs running the same workflow
+	// name must never read each other's last tick or error.
+	status := p.workflowStatus.Get(orgID, name)
 	if orgID <= 0 {
 		return status
 	}
-	runs, err := p.runStore.ListRuns(syntheticWorkflowUserID(name), orgID, 100)
+	runs, err := p.runStore.ListRuns(syntheticWorkflowUserID(name, orgID), orgID, 100)
 	if err != nil {
 		// The durable counts are unavailable; the in-memory view still reports.
 		return status
@@ -188,9 +194,25 @@ func (p *Plugin) workflowSessionStatus(rawName string, orgID int64) workflowRunt
 	return status
 }
 
-// handleWorkflowsList serves GET /api/workflows: every configured workflow
-// entry with this instance's runtime status. Admin only, like the rest of
-// the AppConfig data routes.
+// handleWorkflows serves /api/workflows: GET lists this org's entries, PUT
+// replaces them. Both operations are admin-only, like the rest of the
+// AppConfig data routes.
+func (p *Plugin) handleWorkflows(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		p.handleWorkflowsList(w, r)
+	case http.MethodPut:
+		p.handleWorkflowSave(w, r)
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+// handleWorkflowsList serves GET /api/workflows: this org's stored workflow
+// entries with this instance's runtime status. The org comes from the server
+// plugin context, never from the request body, query, or headers. A store
+// failure is a 503: an unreadable list must never look like an org with no
+// workflows.
 func (p *Plugin) handleWorkflowsList(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -201,24 +223,42 @@ func (p *Plugin) handleWorkflowsList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	p.settingsMu.RLock()
-	configured := p.settings.Workflows
-	p.settingsMu.RUnlock()
-
-	running := map[string]bool{}
-	if p.workflows != nil {
-		for _, s := range p.workflows.schedulers {
-			// A scheduler that stopped itself (deferred validation failure)
-			// stays in the manager; report it as not running.
-			running[s.entry.Name] = !s.Stopped()
-		}
+	orgID := getOrgID(r)
+	configured, err := p.workflowEntryStore().ListWorkflows(r.Context(), orgID)
+	if err != nil {
+		p.logger.Error("Failed to read workflow entries", "orgId", orgID, "error", err)
+		writeWorkflowJSONError(w, http.StatusServiceUnavailable, "Workflow entries are unavailable")
+		return
 	}
+	p.writeWorkflowList(w, orgID, configured)
+}
 
+// workflowEntryValidationError names one rejected entry and why. The name is
+// empty only when the defect is the list as a whole (the entry cap).
+type workflowEntryValidationError struct {
+	Name  string `json:"name"`
+	Error string `json:"error"`
+}
+
+// writeWorkflowJSONError writes a small JSON error body so API clients can
+// parse every failure, not only the success responses.
+func writeWorkflowJSONError(w http.ResponseWriter, status int, message string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	if err := json.NewEncoder(w).Encode(map[string]string{"error": message}); err != nil {
+		return
+	}
+}
+
+// writeWorkflowList renders one org's entries joined with this instance's
+// runtime status. It is shared by GET and the PUT read-back so both answer the
+// same shape.
+func (p *Plugin) writeWorkflowList(w http.ResponseWriter, orgID int64, configured []WorkflowEntry) {
 	entries := make([]workflowAPIEntry, 0, len(configured))
 	for _, raw := range configured {
-		// Resolve defaults on a copy: disabled or never-validated entries can
-		// carry zero intervals in raw settings, and the tab must not render
-		// 0s or persist zeros back through a toggle.
+		// Resolve defaults on a copy: a stored entry may omit numeric fields,
+		// and the tab must not render 0s or persist zeros back through a
+		// toggle.
 		entry := raw
 		entry.applyDefaults()
 		entries = append(entries, workflowAPIEntry{
@@ -234,16 +274,115 @@ func (p *Plugin) handleWorkflowsList(w http.ResponseWriter, r *http.Request) {
 			ToolAllowlist:         entry.ToolAllowlist,
 			SpawnableSkills:       entry.SpawnableSkills,
 			FallbackSkill:         entry.FallbackSkill,
-			// Schedulers are keyed by the trimmed name prepareWorkflows
-			// produced; settings may still hold the raw entry.
-			Running: running[strings.TrimSpace(entry.Name)],
-			Status:  p.workflowSessionStatus(entry.Name, getOrgID(r)),
+			// Schedulers are keyed by the trimmed name prepareWorkflowEntries
+			// produced; a stored entry may still carry surrounding spaces.
+			// Only this org's schedulers count: the same name may run for
+			// another org.
+			Running: p.workflows.isRunning(orgID, strings.TrimSpace(entry.Name)),
+			Status:  p.workflowSessionStatus(entry.Name, orgID),
 		})
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(map[string]interface{}{"workflows": entries}); err != nil {
 		p.logger.Error("Failed to encode workflows list", "error", err)
+	}
+}
+
+// handleWorkflowSave serves PUT /api/workflows: it replaces this org's whole
+// entry list. The org is stamped server-side on every entry, so a client
+// cannot write into another org by supplying orgId in the body. Validation is
+// all-or-nothing: one bad entry rejects the request and nothing is written.
+func (p *Plugin) handleWorkflowSave(w http.ResponseWriter, r *http.Request) {
+	if !isAdmin(r) {
+		http.Error(w, "Admin access required", http.StatusForbidden)
+		return
+	}
+	orgID := getOrgID(r)
+
+	var body struct {
+		Workflows []WorkflowEntry `json:"workflows"`
+	}
+	if err := decodeJSONBody(w, r, &body, maxWorkflowSaveBodyBytes); err != nil {
+		return
+	}
+
+	entries := make([]WorkflowEntry, 0, len(body.Workflows))
+	if len(body.Workflows) > maxWorkflowEntriesPerOrg {
+		writeWorkflowValidationErrors(w, []workflowEntryValidationError{{
+			Error: fmt.Sprintf("at most %d workflow entries per org", maxWorkflowEntriesPerOrg),
+		}})
+		return
+	}
+
+	seen := map[string]bool{}
+	problems := make([]workflowEntryValidationError, 0)
+	for _, raw := range body.Workflows {
+		entry := raw
+		entry.OrgID = orgID
+		entry.Name = strings.TrimSpace(entry.Name)
+		// Defaults first, then validation, exactly as prepareWorkflows does:
+		// an omitted interval means "use the default", not a floor violation.
+		entry.applyDefaults()
+		// The MCP catalog may still be connecting at route time, so unknown
+		// tools are deferred to the first tick, as prepareWorkflows does when
+		// its catalog is empty.
+		if err := validateWorkflowEntry(entry, p.skillRegistry, nil); err != nil {
+			problems = append(problems, workflowEntryValidationError{Name: entry.Name, Error: err.Error()})
+			continue
+		}
+		if seen[entry.Name] {
+			problems = append(problems, workflowEntryValidationError{
+				Name:  entry.Name,
+				Error: "duplicate workflow name",
+			})
+			continue
+		}
+		seen[entry.Name] = true
+		entries = append(entries, entry)
+	}
+	if len(problems) > 0 {
+		writeWorkflowValidationErrors(w, problems)
+		return
+	}
+
+	store := p.workflowEntryStore()
+	if err := store.SaveWorkflows(r.Context(), orgID, entries); err != nil {
+		p.logger.Error("Failed to save workflow entries", "orgId", orgID, "error", err)
+		// The only realistic cause is store unavailability, so answer 503 like
+		// GET: an unreadable or unwritable store is not a client error.
+		writeWorkflowJSONError(w, http.StatusServiceUnavailable, "Workflow entries are unavailable")
+		return
+	}
+	// A save is the hot-apply seam: shares of a removed entry are revoked for
+	// this org, then the live scheduler set converges at once. No instance
+	// rebuild is involved.
+	current := make(map[string]bool, len(entries))
+	for _, entry := range entries {
+		current[strings.TrimSpace(entry.Name)] = true
+	}
+	p.revokeRemovedWorkflowSharesForOrg(orgID, current)
+	_, _, _ = p.reconcileWorkflows(r.Context())
+	// Answer with a fresh read-back of the stored list, so the body is exactly
+	// what the next GET returns. The save already persisted, so a failed
+	// read-back must not report a failed save: answer with the validated list
+	// this handler holds instead.
+	stored, err := store.ListWorkflows(r.Context(), orgID)
+	if err != nil {
+		p.logger.Warn("Failed to read back workflow entries; answering with the saved list",
+			"orgId", orgID, "error", err)
+		stored = entries
+	}
+	p.writeWorkflowList(w, orgID, stored)
+}
+
+// writeWorkflowValidationErrors writes the 400 body listing every rejected
+// entry. Nothing is persisted when it is called.
+func writeWorkflowValidationErrors(w http.ResponseWriter, problems []workflowEntryValidationError) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusBadRequest)
+	if err := json.NewEncoder(w).Encode(map[string]interface{}{"errors": problems}); err != nil {
+		return
 	}
 }
 
@@ -284,11 +423,15 @@ func (p *Plugin) handleWorkflowRunShare(w http.ResponseWriter, r *http.Request) 
 	}
 	name = strings.TrimSpace(wfName)
 
-	p.settingsMu.RLock()
-	configured := p.settings.Workflows
-	p.settingsMu.RUnlock()
+	orgID := getOrgID(r)
+	entries, err := p.workflowEntryStore().ListWorkflows(r.Context(), orgID)
+	if err != nil {
+		p.logger.Error("Failed to read workflow entries", "orgId", orgID, "error", err)
+		http.Error(w, "Workflow entries are unavailable", http.StatusServiceUnavailable)
+		return
+	}
 	var found bool
-	for _, entry := range configured {
+	for _, entry := range entries {
 		if strings.TrimSpace(entry.Name) == name {
 			found = true
 			break
@@ -299,8 +442,7 @@ func (p *Plugin) handleWorkflowRunShare(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	orgID := getOrgID(r)
-	synthetic := syntheticWorkflowUserID(name)
+	synthetic := syntheticWorkflowUserID(name, orgID)
 	run, err := p.runStore.GetRun(runID)
 	if err != nil || run == nil || run.SessionID == "" || run.UserID != synthetic || run.OrgID != orgID {
 		http.Error(w, "Run not found", http.StatusNotFound)
@@ -452,19 +594,23 @@ func (p *Plugin) handleWorkflowRuns(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Invalid path format", http.StatusBadRequest)
 		return
 	}
-	// prepareWorkflows trims entry names before schedulers start, so session
-	// owners are keyed by the trimmed name; trim here to match.
+	// prepareWorkflowEntries trims entry names before schedulers start, so
+	// session owners are keyed by the trimmed name; trim here to match.
 	name = strings.TrimSpace(runIDPart)
 
-	p.settingsMu.RLock()
-	configured := p.settings.Workflows
-	p.settingsMu.RUnlock()
+	orgID := getOrgID(r)
+	entries, err := p.workflowEntryStore().ListWorkflows(r.Context(), orgID)
+	if err != nil {
+		p.logger.Error("Failed to read workflow entries", "workflow", name, "orgId", orgID, "error", err)
+		http.Error(w, "Workflow entries are unavailable", http.StatusServiceUnavailable)
+		return
+	}
 	var entry *WorkflowEntry
-	for i := range configured {
-		// prepareWorkflows trims entry names before schedulers start, so the
-		// stored side is raw only in settings that never went through it.
-		if strings.TrimSpace(configured[i].Name) == name {
-			entry = &configured[i]
+	for i := range entries {
+		// The stored payload may still carry surrounding spaces from a
+		// hand-edited record, so compare on the trimmed name.
+		if strings.TrimSpace(entries[i].Name) == name {
+			entry = &entries[i]
 			break
 		}
 	}
@@ -480,8 +626,7 @@ func (p *Plugin) handleWorkflowRuns(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	orgID := getOrgID(r)
-	runs, err := p.runStore.ListRuns(syntheticWorkflowUserID(name), orgID, limit)
+	runs, err := p.runStore.ListRuns(syntheticWorkflowUserID(name, orgID), orgID, limit)
 	if err != nil {
 		p.logger.Error("Failed to list workflow runs", "workflow", name, "error", err)
 		http.Error(w, "Failed to list runs", http.StatusInternalServerError)

@@ -2425,7 +2425,7 @@
     "/api/workflows": {
       "get": {
         "summary": "List configured workflows with runtime status",
-        "description": "Returns every provisioned workflow entry (enabled or not) joined with this plugin instance's runtime status: last tick time and outcome, session outcome counters, and the last tick error when a tick could not proceed. Status counters are per instance, not cluster-wide. Requires Admin role.",
+        "description": "GET /api/workflows returns only the requesting Grafana org's workflow entries (enabled or not), joined with this plugin instance's runtime status: last tick time and outcome, session outcome counters, and the last tick error when a tick could not proceed. The org is derived server-side from the plugin context and is never taken from the request body, query string, or headers. Each org's entries live under their own store key, so one org never sees another org's workflows. Status counters are per instance, not cluster-wide. Requires Admin role.",
         "operationId": "listWorkflows",
         "tags": [
           "Workflows"
@@ -2516,6 +2516,136 @@
           },
           "405": {
             "description": "Method not allowed"
+          }
+        }
+      },
+      "put": {
+        "summary": "Replace this org's workflow entries",
+        "description": "PUT /api/workflows replaces the whole workflow entry list of the requesting Grafana org. The org is stamped server-side on every entry from the plugin context; a client-supplied orgId is ignored, so an admin of one org can never write another org's entries. Validation is all-or-nothing: every entry is validated and a duplicate name within the org or more than 100 entries rejects the whole request. On any validation failure nothing is written and the response lists every rejected entry. On success the response is the same shape as GET, read back from the org's store after the save. Requires Admin role.",
+        "operationId": "replaceWorkflows",
+        "tags": [
+          "Workflows"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "workflows": {
+                    "type": "array",
+                    "maxItems": 100,
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "name": {
+                          "type": "string",
+                          "description": "Workflow name; unique within the org."
+                        },
+                        "orgId": {
+                          "type": "integer",
+                          "readOnly": true,
+                          "description": "Server-owned. Any client value is ignored and replaced with the requesting org."
+                        },
+                        "enabled": {
+                          "type": "boolean"
+                        },
+                        "skill": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "model": {
+                          "type": "string",
+                          "description": "Empty, base, or large."
+                        },
+                        "intervalSeconds": {
+                          "type": "integer",
+                          "description": "At least 60 when set; omitted means the default."
+                        },
+                        "maxIterations": {
+                          "type": "integer"
+                        },
+                        "toolAllowlist": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          },
+                          "description": "Must name at least one tool."
+                        },
+                        "spawnableSkills": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "maxConcurrentSessions": {
+                          "type": "integer"
+                        },
+                        "sessionTimeoutSeconds": {
+                          "type": "integer",
+                          "description": "At least 60 when set; omitted means the default."
+                        },
+                        "fallbackSkill": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "name",
+                        "skill",
+                        "toolAllowlist"
+                      ]
+                    }
+                  }
+                },
+                "required": [
+                  "workflows"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "$ref": "#/paths/~1api~1workflows/get/responses/200"
+          },
+          "400": {
+            "description": "Validation failed; nothing was written",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "errors": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "name": {
+                            "type": "string",
+                            "description": "Rejected entry name; empty when the defect is the list as a whole."
+                          },
+                          "error": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Caller is not a Grafana Admin (plugin-context role check)"
+          },
+          "413": {
+            "description": "Request body exceeds 262144 bytes"
+          },
+          "503": {
+            "description": "Workflow entry store unavailable"
           }
         }
       }

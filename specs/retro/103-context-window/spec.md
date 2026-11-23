@@ -24,8 +24,8 @@ No role sees different context rules. The limits are plugin-wide. `VERIFIED` —
 ### HTTP endpoints
 | Method | Path | Handler | Evidence |
 |---|---|---|---|
-| POST | `/api/agent/run` | `handleAgentRun` (passes limits into the loop) | `pkg/plugin/plugin.go:1138` |
-The limits arrive through the run request only. `VERIFIED` — `pkg/plugin/plugin.go:1138`
+| POST | `/api/agent/run` | `handleAgentRun` (passes limits into the loop) | `pkg/plugin/plugin.go:1139` |
+The limits arrive through the run request only. `VERIFIED` — `pkg/plugin/plugin.go:1139`
 ### SSE events
 | Event | Payload fields | Evidence |
 |---|---|---|

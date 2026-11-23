@@ -22,7 +22,7 @@ calls to the owning client, and caches one slow read-only tool.
 | Capability | Admin | Editor | Viewer | Evidence |
 |---|---|---|---|---|
 | List aggregated tools | yes | yes | yes, filtered later | `pkg/plugin/plugin.go:752` |
-| Call a tool | yes | yes | read-only only | `pkg/plugin/plugin.go:803` |
+| Call a tool | yes | yes | read-only only | `pkg/plugin/plugin.go:804` |
 
 The proxy holds no role logic. Callers filter before and after it.
 

@@ -72,7 +72,7 @@ at start, adds runtime servers, and sends W3C trace context with each tool call.
 10. `trustedMCPServers` overrides `Trusted`; global `riskOverrides` copy into servers with none. `VERIFIED` — `pkg/plugin/plugin.go:188`
 11. Provisioned servers are attached with `UpdateConfig` at plugin init. `VERIFIED` — `pkg/plugin/plugin.go:320`
 12. Settings are read only in `NewPlugin`; a change needs a new plugin instance. `ASSUMED` — `pkg/plugin/plugin.go:265` is the only writer of `p.settings`
-13. Runtime servers are restored from the dynamic server store after provisioning. `VERIFIED` — `pkg/plugin/plugin.go:398`
+13. Runtime servers are restored from the dynamic server store after provisioning. `VERIFIED` — `pkg/plugin/plugin.go:416`
 14. `EnsureServer` keeps an existing client when URL and headers match. `VERIFIED` — test `TestEnsureServerNoopWhenConfigMatchesExisting`
 15. `EnsureServer` replaces the client when URL or headers differ. `VERIFIED` — test `TestEnsureServerClosesReplacedClientOutsideLock`
 16. Replacing a client for an existing ID logs a warning with the ID and URL. `VERIFIED` — `pkg/mcp/proxy.go:435`
@@ -81,10 +81,10 @@ at start, adds runtime servers, and sends W3C trace context with each tool call.
 19. A runtime server transport must be `streamable-http` or `sse`. `VERIFIED` — `pkg/plugin/mcp_provisioner.go:240`
 20. Presets are `github-read`, `github-write`, and `atlassian`. `VERIFIED` — `pkg/plugin/oauth/presets.go:38`
 21. The built-in MCP registers as server ID `mcp-grafana`. `VERIFIED` — `pkg/plugin/plugin.go:86`
-22. The built-in URL is `{grafanaURL}/api/plugins/grafana-llm-app/resources/mcp/grafana` and it authenticates with the service-account bearer. `VERIFIED` — `pkg/plugin/plugin.go:629`, `pkg/plugin/plugin.go:634`
-23. With no service-account token the plugin removes the built-in client instead of failing. `VERIFIED` — `pkg/plugin/plugin.go:621`
+22. The built-in URL is `{grafanaURL}/api/plugins/grafana-llm-app/resources/mcp/grafana` and it authenticates with the service-account bearer. `VERIFIED` — `pkg/plugin/plugin.go:629`, `pkg/plugin/plugin.go:635`
+23. With no service-account token the plugin removes the built-in client instead of failing. `VERIFIED` — `pkg/plugin/plugin.go:622`
 24. The service-account token is Org 1 only, so `useBuiltInMCP` must not appear in `full.yaml_`. `ASSUMED` — documentation only: `CLAUDE.md:69`
-25. No code checks the org before registering the built-in MCP. `GAP` — `pkg/plugin/plugin.go:617` takes no org argument
+25. No code checks the org before registering the built-in MCP. `GAP` — `pkg/plugin/plugin.go:618` takes no org argument
 26. `full.yaml_` provisions servers for Org 1 and Org 2 and never sets `useBuiltInMCP`. `VERIFIED` — `provisioning/plugins/full.yaml_:17`, `provisioning/plugins/full.yaml_:54`
 27. A provisioned `timeoutSeconds: 90` is honoured for the Grafana sidecar. `VERIFIED` — `provisioning/plugins/full.yaml_:38`
 28. Trace context is propagated outbound only: from asko11y to the MCP server. `VERIFIED` — `pkg/mcp/trace_propagation.go:77`
@@ -98,7 +98,7 @@ at start, adds runtime servers, and sends W3C trace context with each tool call.
 ## Invariants
 
 - `useBuiltInMCP: true` never appears in `full.yaml_`. `VERIFIED` — `provisioning/plugins/full.yaml_:16`
-- The service-account bearer is sent only to the built-in MCP URL. `VERIFIED` — `pkg/plugin/plugin.go:634`
+- The service-account bearer is sent only to the built-in MCP URL. `VERIFIED` — `pkg/plugin/plugin.go:635`
 - Outbound trace injection never mutates the caller request. `VERIFIED` — `pkg/mcp/trace_propagation.go:74`
 
 ## Failure Modes

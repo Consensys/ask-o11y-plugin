@@ -27,7 +27,7 @@ A Viewer cannot reach a gated write tool because RBAC removes it first. A Viewer
 | Method | Path | Handler | Evidence |
 |---|---|---|---|
 | POST | `/api/agent/runs/{runId}/approvals/{approvalId}` | `handleAgentApproval` | `pkg/plugin/plugin.go:1448` |
-| GET | `/api/agent/runs/{runId}` | `handleAgentRuns` (returns the approval trace) | `pkg/plugin/plugin.go:1430` |
+| GET | `/api/agent/runs/{runId}` | `handleAgentRuns` (returns the approval trace) | `pkg/plugin/plugin.go:1431` |
 The decision body is `{"decision":"approved\|rejected","comment":"...","approvalScope":"once\|always"}`. `VERIFIED` — `pkg/plugin/plugin.go:1442`
 ### SSE events
 | Event | Payload fields | Evidence |
@@ -78,7 +78,7 @@ The decision body is `{"decision":"approved\|rejected","comment":"...","approval
 26. A denial returns a tool result "was not approved by the user" with kind `approval_denied`. `VERIFIED` — `pkg/agent/loop.go:1078`
 27. After a denial the loop continues and the model can choose another action. `VERIFIED` — `pkg/agent/loop.go:1082`
 28. With no registrar, the call fails with "requires approval before execution". `VERIFIED` — `pkg/agent/loop.go:1048`
-29. A decision accepts `approved`, `approve`, `accepted`, or `accept` for approval, and the mirrored deny forms. `VERIFIED` — `pkg/plugin/plugin.go:2376`
+29. A decision accepts `approved`, `approve`, `accepted`, or `accept` for approval, and the mirrored deny forms. `VERIFIED` — `pkg/plugin/plugin.go:2377`
 30. An unrecognised decision returns 400. `VERIFIED` — `pkg/plugin/plugin.go:1542`
 31. A repeated identical decision returns 200 and the stored decision. `VERIFIED` — test `TestHandleAgentApprovalIsIdempotentForDuplicateDecision`
 32. A conflicting second decision returns 409. `VERIFIED` — test `TestHandleAgentApprovalRejectsConflictingDuplicateDecision`
@@ -89,7 +89,7 @@ The decision body is `{"decision":"approved\|rejected","comment":"...","approval
 37. The `trusted` server flag is recorded on the risk result but never read by the gate. `GAP` — `pkg/mcp/risk.go:26`
 38. No HTTP route lists or revokes saved grants; the only write path is approve-always. `GAP` — `pkg/plugin/plugin.go:1476`
 39. The in-memory broker is unsafe with more than one Grafana replica; the code only logs a warning. `GAP` — `pkg/plugin/plugin.go:422`
-40. Deleting a session also deletes its saved approval grants, and deleting all sessions deletes every grant of that user. `VERIFIED` — `pkg/plugin/plugin.go:2613`, `pkg/plugin/plugin.go:2783`, `pkg/plugin/approval_grants.go:153`
+40. Deleting a session also deletes its saved approval grants, and deleting all sessions deletes every grant of that user. `VERIFIED` — `pkg/plugin/plugin.go:2613`, `pkg/plugin/plugin.go:2784`, `pkg/plugin/approval_grants.go:153`
 ## Invariants
 - Only an Admin or Editor can resolve an approval. `VERIFIED` — `pkg/plugin/plugin.go:1531`
 - Only the run owner in the run org can resolve an approval. `VERIFIED` — `pkg/plugin/plugin.go:1526`
@@ -101,7 +101,7 @@ The decision body is `{"decision":"approved\|rejected","comment":"...","approval
 |---|---|---|
 | Viewer posts a decision | HTTP 403 "Access denied" | `pkg/plugin/plugin.go:1531` |
 | Decision body is invalid | HTTP 400 "Invalid request body" | `pkg/plugin/plugin.go:1537` |
-| Decision value is unknown | HTTP 400 "Invalid approval decision" | `pkg/plugin/plugin.go:1466` |
+| Decision value is unknown | HTTP 400 "Invalid approval decision" | `pkg/plugin/plugin.go:1467` |
 | Approval already resolved differently | HTTP 409 "Approval already resolved as X" | `pkg/plugin/plugin.go:1492` |
 | Approval is not pending or expired | HTTP 409 "Approval is not pending or has expired" | `pkg/plugin/plugin.go:1580` |
 | Broker delivery fails | HTTP 504 "Approval delivery failed" | `pkg/plugin/plugin.go:1588` |

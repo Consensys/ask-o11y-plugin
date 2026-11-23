@@ -130,10 +130,6 @@ type PluginSettings struct {
 	MaxParallelToolCalls    int    `json:"maxParallelToolCalls,omitempty"`
 	AgentEvalCaptureEnabled bool   `json:"agentEvalCaptureEnabled,omitempty"`
 
-	// Workflows holds provisioned autonomous workflow entries (see
-	// workflows.go). Pure tenant configuration; the plugin ships none.
-	Workflows []WorkflowEntry `json:"workflows,omitempty"`
-
 	// Context-window management knobs, mapped onto agent.ContextLimits. Zero
 	// values resolve to the defaults inside the agent loop.
 	KeepRecentToolResults                  int  `json:"keepRecentToolResults,omitempty"`
@@ -250,10 +246,10 @@ type Plugin struct {
 	orgIdentity *OrgIdentityStore
 	// workflows owns the per-entry schedulers; nil when none are running.
 	workflows *WorkflowManager
-	// appliedWorkflows is the name set of the last applied settings load; it
-	// lets the next load detect a removed entry (see
+	// appliedWorkflows is the per-org name set of the last applied settings
+	// load; it lets the next load detect a removed entry (see
 	// revokeRemovedWorkflowShares). Guarded by settingsMu.
-	appliedWorkflows map[string]bool
+	appliedWorkflows map[int64]map[string]bool
 	// workflowStatus feeds GET /api/workflows with per-instance runtime state.
 	workflowStatus *WorkflowStatusStore
 	// oauthManager drives per-user OAuth for external MCP servers; it also
@@ -500,6 +496,9 @@ func NewPlugin(ctx context.Context, settings backend.AppInstanceSettings) (insta
 		orgIdentity:        NewOrgIdentityStore(),
 		workflowStatus:     NewWorkflowStatusStore(),
 	}
+	// Every org's identity is persisted and read back through Redis under its
+	// own key; without Redis the store stays in memory only.
+	p.orgIdentity.attachRedis(redisClient, pluginCtx, logger)
 
 	if !usingRedis {
 		go func() {
@@ -534,20 +533,22 @@ func NewPlugin(ctx context.Context, settings backend.AppInstanceSettings) (insta
 	p.registerRoutes(mux)
 	p.CallResourceHandler = httpadapter.New(mux)
 
-	// Restore the org binding a previous instance persisted, BEFORE starting
-	// workflows: a settings save constructs this instance afresh, and without
-	// the restore its first tick would skip for lack of identity until a human
-	// chatted in the org again.
-	p.loadPersistedOrgIdentity()
-
-	// Workflows start after the plugin is fully wired so their ticks can use
-	// every store. Requires Redis (see startWorkflows). Revoke first, and for
-	// every settings load: an entry the applied settings no longer list must
-	// lose its shares even when no workflow remains to start.
-	p.revokeRemovedWorkflowShares(pluginSettings.Workflows)
-	if len(pluginSettings.Workflows) > 0 {
-		p.startWorkflows(pluginSettings.Workflows)
+	// Workflows live in the per-org Redis store, not in app settings: the
+	// scheduler set converges from the store on every instance and every
+	// 30 seconds. A legacy jsonData.workflows value is ignored completely;
+	// it is reported once so an operator knows where the entries moved.
+	if count, present := legacyWorkflowEntryCount(settings.JSONData); present {
+		logger.Warn("Ignoring jsonData.workflows: workflow entries are stored per org now; move them to the Workflows config tab",
+			"entries", count)
 	}
+	p.workflows = newWorkflowManager(p, pluginCtx)
+	// Initial convergence, and revoke the shares of any entry removed while
+	// this instance was down. An unreadable store changes nothing, and an org
+	// whose list failed to read keeps its shares and schedulers.
+	if discovered, unreadable, ok := p.reconcileWorkflows(pluginCtx); ok {
+		p.revokeRemovedWorkflowShares(discovered, unreadable)
+	}
+	go p.workflowReconcileLoop(pluginCtx)
 
 	logger.Info("Plugin initialized",
 		"pluginId", PluginID,
@@ -653,7 +654,7 @@ func (p *Plugin) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/agent/topology", p.handleAgentTopology)
 	mux.HandleFunc("/api/prompt-defaults", p.handlePromptDefaults)
 	mux.HandleFunc("/api/skills", p.handleSkills)
-	mux.HandleFunc("/api/workflows", p.handleWorkflowsList)
+	mux.HandleFunc("/api/workflows", p.handleWorkflows)
 	mux.HandleFunc("/api/workflows/", p.handleWorkflowRuns)
 	mux.HandleFunc("/api/graphiti/discover", p.handleGraphitiDiscover)
 	mux.HandleFunc("/api/graphiti/status", p.handleGraphitiStatus)

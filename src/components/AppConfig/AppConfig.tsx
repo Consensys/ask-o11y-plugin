@@ -27,7 +27,7 @@ import { WorkflowsTab } from './Workflows';
 import { ManageToolsModal } from './ManageToolsModal';
 import { ExternalMCPs } from './ExternalMCPs';
 import { mcpServerStatusService, type MCPServerStatus, type MCPTool } from '../../services/mcpServerStatus';
-import type { WorkflowEntryUI, AppPluginSettings, MCPServerConfig, SkillEntry } from '../../types/plugin';
+import type { AppPluginSettings, MCPServerConfig, SkillEntry } from '../../types/plugin';
 import { AgentTopologyResponse, getAgentTopology } from '../../services/agentTopologyClient';
 import { ServiceGraphScene } from '../ServiceGraph/ServiceGraphScene';
 import { getPluginStorageKey } from '../../utils/storageKeys';
@@ -499,7 +499,8 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
       // Skills save immediately per action (like prompt editors), so the tab
       // itself never carries unsaved state.
       skills: false,
-      // Workflows toggle-and-save immediately through the same reload path.
+      // Workflows save themselves through their own admin routes, one PUT per
+      // action, so the tab never carries unsaved state.
       workflows: false,
     };
   }, [deletedSecureKeys, promptDefaults, resetSecureKeys, savedJsonData, state]);
@@ -947,34 +948,6 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
         ...savedJsonData,
         [field]: value,
       },
-    });
-  }
-
-  // Read the stored settings at save time: the mount-time snapshot is stale, so
-  // spreading it would revert any jsonData key another admin (or another tab)
-  // wrote since this page loaded. Only the workflows key is replaced.
-  async function saveWorkflows(next: WorkflowEntryUI[]) {
-    let currentJsonData: AppPluginSettings;
-    try {
-      const res = await lastValueFrom(
-        getBackendSrv().fetch<{ jsonData?: AppPluginSettings }>({
-          url: `/api/plugins/${plugin.meta.id}/settings`,
-        })
-      );
-      currentJsonData = res.data?.jsonData ?? savedJsonData;
-    } catch {
-      // A PUT built without a fresh read would revert the other admin's change,
-      // which is the defect this path exists to avoid. Skip the save instead.
-      return;
-    }
-
-    const merged: AppPluginSettings = { ...currentJsonData, workflows: next };
-    // The save reloads the page; keep local state consistent until it does.
-    setSavedJsonData(merged);
-    saveAndReload({
-      enabled,
-      pinned,
-      jsonData: merged,
     });
   }
 
@@ -1797,13 +1770,7 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
           />
         )}
 
-        {activeTab === 'workflows' && (
-          <WorkflowsTab
-            savedWorkflows={savedJsonData.workflows ?? []}
-            onSaveWorkflows={saveWorkflows}
-            onEditPrompt={handleEditPrompt}
-          />
-        )}
+        {activeTab === 'workflows' && <WorkflowsTab onEditPrompt={handleEditPrompt} />}
 
         {activeTab === 'prompts' && promptDefaults && (
           <FieldSet label="Prompt Templates">

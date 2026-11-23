@@ -22,7 +22,7 @@ Both paths fail open: a missing graph never blocks an investigation.
 
 | Capability | Admin | Editor | Viewer | Evidence |
 |---|---|---|---|---|
-| Read `GET /api/agent/topology` | yes | yes | yes | `pkg/plugin/plugin.go:1864` (no role check) |
+| Read `GET /api/agent/topology` | yes | yes | yes | `pkg/plugin/plugin.go:1865` (no role check) |
 | Receive the prefetched topology block on an RCA run | yes | yes | yes | `pkg/plugin/plugin.go:992` |
 | Open the AppConfig service-graph panel | yes | no | no | `GAP` — no route-level check; Grafana gates the config page |
 
@@ -65,7 +65,7 @@ Tags: `VERIFIED` (code pointer or test), `ASSUMED` (untested), `GAP` (missing).
 1. The response carries `enabled`, `source`, `nodes`, `edges`, `rawFactCount`, and `warnings`. `VERIFIED` — `pkg/plugin/topology.go:25`
 2. A node is `{id, label, type}`; an edge is `{id, source, target, label}`. `VERIFIED` — `pkg/plugin/topology.go:12`
 3. `source` is always `graphiti` on this route. `VERIFIED` — `pkg/plugin/plugin.go:1983`
-4. `enabled: false` and empty arrays return when `graphiti_add_memory` is absent. `VERIFIED` — `pkg/plugin/plugin.go:1878`
+4. `enabled: false` and empty arrays return when `graphiti_add_memory` is absent. `VERIFIED` — `pkg/plugin/plugin.go:1879`
 5. A missing facts tool returns `enabled: true`, empty arrays, and a warning. `VERIFIED` — `pkg/plugin/plugin.go:1975`
 6. The default fact query covers topology, dependencies, deployment, and signals. `VERIFIED` — `pkg/plugin/topology.go:708`
 7. Node type derives from Graphiti labels: service, namespace, cluster, database, queue. `VERIFIED` — `pkg/plugin/topology.go:388`
@@ -84,7 +84,7 @@ Tags: `VERIFIED` (code pointer or test), `ASSUMED` (untested), `GAP` (missing).
 19. Edges whose endpoints were truncated away are dropped. `VERIFIED` — `pkg/plugin/topology.go:207`
 20. An empty graph appends a "no facts matched" warning. `VERIFIED` — `pkg/plugin/plugin.go:1985`
 21. Nil nodes or edges serialise as `[]`, never `null`. `VERIFIED` — `pkg/plugin/topology.go:224`
-22. The route has no cache; every request fans out to Graphiti. `GAP` — `pkg/plugin/plugin.go:1864` (no cache lookup)
+22. The route has no cache; every request fans out to Graphiti. `GAP` — `pkg/plugin/plugin.go:1865` (no cache lookup)
 23. The prompt snapshot prefers Tempo service-graph metrics over Graphiti. `VERIFIED` — `pkg/plugin/topology_snapshot.go:264`
 24. The snapshot budget is 3 seconds for the whole prefetch. `VERIFIED` — `pkg/plugin/topology_snapshot.go:27`
 25. A successful snapshot caches for 5 minutes; a miss caches for 1 minute. `VERIFIED` — test `TestTopologySnapshot_ServiceGraphPrimaryAndCached`
@@ -99,7 +99,7 @@ Tags: `VERIFIED` (code pointer or test), `ASSUMED` (untested), `GAP` (missing).
 
 ## Invariants
 
-- The route always answers JSON, even when the graph is absent. `VERIFIED` — `pkg/plugin/plugin.go:1878`
+- The route always answers JSON, even when the graph is absent. `VERIFIED` — `pkg/plugin/plugin.go:1879`
 - A topology failure never blocks a run: the snapshot is best-effort. `VERIFIED` — `pkg/plugin/topology_snapshot.go:20`
 - Graphiti queries always carry the org `group_id`, never a caller-supplied one. `VERIFIED` — `pkg/plugin/topology.go:646`
 
@@ -108,8 +108,8 @@ Tags: `VERIFIED` (code pointer or test), `ASSUMED` (untested), `GAP` (missing).
 | Condition | User-visible result | Evidence |
 |---|---|---|
 | Tool listing fails | 500 `Failed to load topology tools` | `pkg/plugin/plugin.go:1875` |
-| Facts call fails | 500 `Failed to load topology` | `pkg/plugin/plugin.go:1916` |
-| Graphiti not registered | 200 with `enabled: false` | `pkg/plugin/plugin.go:1878` |
+| Facts call fails | 500 `Failed to load topology` | `pkg/plugin/plugin.go:1917` |
+| Graphiti not registered | 200 with `enabled: false` | `pkg/plugin/plugin.go:1879` |
 | Nodes tool missing | 200, text-only graph, warning | `pkg/plugin/plugin.go:1926` |
 | Prompt snapshot empty | No topology block in the prompt | `pkg/plugin/prompt_defaults.go:85` |
 
