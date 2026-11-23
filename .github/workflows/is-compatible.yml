@@ -1,10 +1,16 @@
 name: Latest Grafana API compatibility check
 on: [pull_request]
 
+# Cancel superseded runs on the same ref: a new PR push cancels the old run.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   # Detect if code changed (for fast-pass on release-please PRs)
   check-changes:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     outputs:
       code: ${{ steps.filter.outputs.code }}
     steps:
@@ -24,13 +30,35 @@ jobs:
               - 'go.mod'
               - 'go.sum'
               - 'tsconfig.json'
+              # Dependency bumps must run the build too: the monthly cp-update
+              # PRs touch only these two files, and a dependency change can
+              # break the build.
+              - 'package.json'
+              - 'package-lock.json'
+              # Changes to the build/validation tooling must run the build too,
+              # otherwise e.g. an edit to ci.yml or the validator config would
+              # fast-pass and never be exercised.
               - '.github/workflows/**'
               - '.github/actions/**'
+              - '.github/plugin-validator.config.yaml'
+              # The gates these workflows run, and the lint config: a change
+              # here can turn a passing rule into a failing one, so it must be
+              # exercised. The repo's lint rules live in .config/eslint.config.mjs
+              # (the root eslint.config.* only re-exports it), so both paths are
+              # listed. A newly added CI gate script under scripts/ must be
+              # added to this list (keep it identical in e2e.yml and
+              # is-compatible.yml).
+              - '.config/eslint.config.mjs'
+              - '.golangci.yml'
+              - 'scripts/check-standards.mjs'
+              - 'scripts/validate-react19.js'
+              - 'scripts/verify-retro-specs.mjs'
 
   compatibilitycheck:
     needs: check-changes
     if: needs.check-changes.outputs.code == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     permissions:
       contents: read
     steps:
@@ -48,18 +76,22 @@ jobs:
         uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version: '1.26.11'
+          cache: true
 
       - name: Install Mage
-        run: go install github.com/magefile/mage@latest
+        run: go install github.com/magefile/mage@v1.15.0
 
-      - name: Clear npm cache
-        run: npm cache clean --force
-
+      # Install the exact @swc versions from the lockfile. The versions are read
+      # before the delete, because the delete removes both packages. The rm -rf
+      # forces a fresh install of the platform-specific @swc/core binary;
+      # --force keeps that reinstall non-interactive with the pins in place.
       - name: Install dependencies
         run: |
           npm ci
+          SWC_CORE=$(node -p "require('./node_modules/@swc/core/package.json').version")
+          SWC_HELPERS=$(node -p "require('./node_modules/@swc/helpers/package.json').version")
           rm -rf node_modules/@swc
-          npm install @swc/core @swc/helpers
+          npm install --force --no-save "@swc/core@${SWC_CORE}" "@swc/helpers@${SWC_HELPERS}"
 
       - name: Build plugin
         run: npm run build
@@ -88,5 +120,6 @@ jobs:
     needs: check-changes
     if: needs.check-changes.outputs.code == 'false'
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - run: echo "No code changes detected, skipping compatibility check (release-please PR)"

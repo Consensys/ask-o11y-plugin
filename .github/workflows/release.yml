@@ -16,6 +16,7 @@ jobs:
       id-token: write # Required for provenance attestation
       attestations: write # Required for provenance attestation
     runs-on: ubuntu-latest
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
@@ -42,7 +43,7 @@ jobs:
       # to analyze a module that requires Go 1.26.11, so that analyzer is
       # disabled in the config and run here on the build's Go toolchain.
       - name: govulncheck
-        run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.10.0 ./...
 
       - name: Export clean source for validation
         run: |
@@ -57,7 +58,7 @@ jobs:
             -v "$VALIDATOR_SRC:/source" \
             -w /source \
             -v "$PWD/$PLUGIN_ARCHIVE:/archive.zip" \
-            grafana/plugin-validator-cli:v0.51.3 \
+            grafana/plugin-validator-cli:v0.53.9 \
             -config /source/.github/plugin-validator.config.yaml \
             -sourceCodeUri file:///source \
             /archive.zip
