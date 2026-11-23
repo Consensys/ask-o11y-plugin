@@ -22,8 +22,8 @@ Every activation is reviewable and role-safe.
 
 | Capability | Admin | Editor | Viewer | Evidence |
 |---|---|---|---|---|
-| List skill metadata | yes | yes | yes | `pkg/plugin/plugin.go:1730` |
-| List content (`?include=content`) | yes | no | no | `pkg/plugin/plugin.go:1724` |
+| List skill metadata | yes | yes | yes | `pkg/plugin/plugin.go:1731` |
+| List content (`?include=content`) | yes | no | no | `pkg/plugin/plugin.go:1725` |
 | Activate a skill on a run | yes | yes | yes | `pkg/plugin/plugin.go:960` |
 
 ## Contract

@@ -79,13 +79,13 @@ Every record and tool call is scoped to the org that made the request.
 16. MCP calls do send `X-Grafana-Org-Id` with the caller's org. `VERIFIED` — `pkg/mcp/client.go:112`
 17. The context-first rule is tested. `VERIFIED` — test `TestGetOrgIDPrefersPluginContext`
 18. `getUserID` hashes the login; no client header can set it. `VERIFIED` — `pkg/plugin/plugin.go:2025`
-19. `useBuiltInMCP` with no SA token removes the built-in server and logs a warning. `VERIFIED` — `pkg/plugin/plugin.go:621`
+19. `useBuiltInMCP` with no SA token removes the built-in server and logs a warning. `VERIFIED` — `pkg/plugin/plugin.go:622`
 20. `full.yaml_` never enables `useBuiltInMCP`. `VERIFIED` — `provisioning/plugins/full.yaml_:18`
 21. `app.yaml` enables `useBuiltInMCP` for org 1. `VERIFIED` — `provisioning/plugins/app.yaml:31`
 22. An empty `redisURL` still attempts `redis://localhost:6379/0`. `VERIFIED` — `pkg/plugin/plugin.go:75`
 23. Redis is used only when the client builds and answers `PING`; otherwise memory wins. `VERIFIED` — `pkg/plugin/plugin.go:357`
 24. Redis success and fallback are both tested. `VERIFIED` — test `TestNewPlugin_RedisSuccess`
-25. `Dispose` cancels interactive runs only: workflow session runs are absent from the cancel registry, survive instance teardown, and end at their own session deadline or on natural completion. It stops the scout and schedulers, then cancels interactive runs; broker close, health-monitor stop, proxy/Redis close, and context cancel run in teardown, which waits for the last workflow run. `VERIFIED` — `pkg/plugin/plugin.go:569`, `pkg/plugin/plugin.go:607`
+25. `Dispose` cancels interactive runs only: workflow session runs are absent from the cancel registry, survive instance teardown, and end at their own session deadline or on natural completion. It stops the scout and schedulers, then cancels interactive runs; broker close, health-monitor stop, proxy/Redis close, and context cancel run in teardown, which waits for the last workflow run. `VERIFIED` — `pkg/plugin/plugin.go:570`, `pkg/plugin/plugin.go:607`
 26. When Redis is absent, the health message says session sharing will not work across replicas. `VERIFIED` — `pkg/plugin/plugin.go:570`
 27. Settings, sessions, runs, and workflow entries are all keyed by org, so org 2 gets separate records. `VERIFIED` — `pkg/plugin/sessionstore.go:94`, `pkg/plugin/workflow_store.go:41`
 28. In a non-Org-1 org, the plugin keeps using the Org-1 service-account token for the LLM. The configured LLM app for that org is therefore not selected. `GAP` — `pkg/agent/llm_client.go:326`

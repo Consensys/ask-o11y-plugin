@@ -24,7 +24,7 @@ Admin and Editor keep full access.
 | Call a read-only tool | yes | yes | yes | `pkg/rbac/rbac.go:16` |
 | Call a mutating or unannotated tool | yes | yes | no | `pkg/plugin/plugin.go:805` |
 | Approve a pending tool call | yes | yes | no | `pkg/plugin/plugin.go:1531` |
-| Read skill content with `?include=content` | yes | no | no | `pkg/plugin/plugin.go:1724` |
+| Read skill content with `?include=content` | yes | no | no | `pkg/plugin/plugin.go:1725` |
 
 ## Contract
 
@@ -57,7 +57,7 @@ Admin and Editor keep full access.
 ## Behaviour Rules
 
 1. The role model is exactly `Admin`, `Editor`, and `Viewer`, taken from the SDK plugin context. `VERIFIED` — `pkg/plugin/plugin.go:692`
-2. When the context has no user, the role is `Viewer`, the least privileged value. `VERIFIED` — `pkg/plugin/plugin.go:700`
+2. When the context has no user, the role is `Viewer`, the least privileged value. `VERIFIED` — `pkg/plugin/plugin.go:701`
 3. Client headers cannot set the role. `VERIFIED` — test `TestGetUserRoleIgnoresHeaders`
 4. `IsReadOnlyTool` is true only when annotations exist and `ReadOnlyHint` is true. `VERIFIED` — `pkg/rbac/rbac.go:6`
 5. A tool with no annotations is treated as mutating, so a Viewer cannot see it. `VERIFIED` — `pkg/rbac/rbac.go:7`
@@ -71,12 +71,12 @@ Admin and Editor keep full access.
 13. `GET /api/mcp/tools` filters the list after it is fetched. `VERIFIED` — `pkg/plugin/plugin.go:752`
 14. Tool selection filtering runs after the RBAC filter, so selection cannot widen access. `VERIFIED` — `pkg/plugin/plugin.go:752`
 15. The agent loop applies the same filter when it builds its tool list. `VERIFIED` — `pkg/agent/loop.go:161`
-16. A direct tool call is checked again before dispatch. `VERIFIED` — `pkg/plugin/plugin.go:803`
+16. A direct tool call is checked again before dispatch. `VERIFIED` — `pkg/plugin/plugin.go:804`
 17. The agent loop checks again inside `executeTool`. `VERIFIED` — `pkg/agent/loop.go:974`
 18. A Viewer calling a mutating tool gets HTTP 403 with `Access denied: Viewer role cannot access tool <name>`. `VERIFIED` — `pkg/plugin/plugin.go:805`
 19. The denial uses `http.Error`, so the body is plain text and the status is 403. `VERIFIED` — `pkg/plugin/plugin.go:805`
 20. Inside the agent loop the denial becomes a tool result with `isError` set and kind `tool`. `VERIFIED` — `pkg/agent/loop.go:975`
-21. An unknown tool name returns 404 before the RBAC check. `VERIFIED` — `pkg/plugin/plugin.go:798`
+21. An unknown tool name returns 404 before the RBAC check. `VERIFIED` — `pkg/plugin/plugin.go:799`
 22. A disabled tool returns 403 `Tool is not enabled` after the RBAC check. `VERIFIED` — `pkg/plugin/plugin.go:836`
 23. `pkg/agent/tools.go` applies no filter; it converts whatever list it receives to OpenAI format. `VERIFIED` — `pkg/agent/tools.go:7`
 24. The conversion therefore relies on the caller filtering first, which `loop.go` does. `VERIFIED` — `pkg/agent/loop.go:161`
@@ -100,15 +100,15 @@ Coverage: `VERIFIED` = code pointer or test; `ASSUMED` = code suggests, no test;
 | Viewer calls a mutating tool | 403 `Access denied: Viewer role cannot access tool <name>` | `pkg/plugin/plugin.go:805` |
 | Viewer runs an agent that tries a mutating tool | Tool result `Access denied: Viewer role cannot access tool <name>` | `pkg/agent/loop.go:975` |
 | Role is unknown | Treated as Viewer for mutating tools | `pkg/rbac/rbac.go:16` |
-| Role is missing from the context | Resolved as `Viewer` | `pkg/plugin/plugin.go:700` |
-| Tool is unknown | 404 `Unknown tool: <name>` | `pkg/plugin/plugin.go:798` |
+| Role is missing from the context | Resolved as `Viewer` | `pkg/plugin/plugin.go:701` |
+| Tool is unknown | 404 `Unknown tool: <name>` | `pkg/plugin/plugin.go:799` |
 | Tool is disabled by selection | 403 `Tool is not enabled` | `pkg/plugin/plugin.go:836` |
 
 ## Data and Persistence
 
 | Store | Key or table | TTL | Fallback | Evidence |
 |---|---|---|---|---|
-| None. RBAC is evaluated per request from the plugin context. | — | — | `Viewer` | `pkg/plugin/plugin.go:700` |
+| None. RBAC is evaluated per request from the plugin context. | — | — | `Viewer` | `pkg/plugin/plugin.go:701` |
 
 ## Observability
 
@@ -126,7 +126,7 @@ Coverage: `VERIFIED` = code pointer or test; `ASSUMED` = code suggests, no test;
 - `pkg/rbac/rbac.go:12` — access predicate
 - `pkg/rbac/rbac.go:19` — list filter
 - `pkg/plugin/plugin.go:752` — listing filter call site
-- `pkg/plugin/plugin.go:803` — execution check call site
+- `pkg/plugin/plugin.go:804` — execution check call site
 - `pkg/agent/loop.go:161` — agent list filter
 - `pkg/agent/loop.go:974` — agent execution check
 - `pkg/rbac/rbac_test.go` — `TestCanAccessTool` — 11-case matrix

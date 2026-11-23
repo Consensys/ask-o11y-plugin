@@ -57,9 +57,9 @@ Show token usage and cost in one provisioned dashboard.
 
 ## Behaviour Rules
 
-1. The `agent_run` span starts at the run handler entry and ends when the handler returns. `VERIFIED` — `pkg/plugin/plugin.go:882`
-2. The `agent_run` span carries `org_id`, `user_role`, and `session_id`. `VERIFIED` — `pkg/plugin/plugin.go:1201`
-3. The `agent_run` span carries no `run_id` and no model attribute. `GAP` — `pkg/plugin/plugin.go:1201` sets only three attributes
+1. The `agent_run` span starts at the run handler entry and ends when the handler returns. `VERIFIED` — `pkg/plugin/plugin.go:883`
+2. The `agent_run` span carries `org_id`, `user_role`, and `session_id`. `VERIFIED` — `pkg/plugin/plugin.go:1202`
+3. The `agent_run` span carries no `run_id` and no model attribute. `GAP` — `pkg/plugin/plugin.go:1202` sets only three attributes
 4. The `llm_call` span starts per LLM request and records `llm.model`, `llm.message_count`, `llm.tool_count`, `llm.max_completion_tokens`, `llm.request_bytes`. `VERIFIED` — `pkg/agent/llm_client.go:150`
 5. `llm_call` records `llm.http_status`, `llm.request_id`, `llm.retryable` on a non-OK status. `VERIFIED` — `pkg/agent/llm_client.go:192`
 6. `llm_call` records `llm.prompt_tokens` and `llm.completion_tokens` when usage is present. `VERIFIED` — `pkg/agent/llm_client.go:235`
@@ -71,7 +71,7 @@ Show token usage and cost in one provisioned dashboard.
 12. The transport wraps the MCP SDK HTTP client. `VERIFIED` — `pkg/mcp/client.go:324`
 13. A caller span survives `mergeUserCtx`, and the context is enriched for inner middleware. `VERIFIED` — tests `TestTracePropagationTransport_MergedContextCallerSpan`, `TestTracePropagationTransport_EnrichesContextForInnerMiddleware`
 14. A request with no span passes through unmodified. `VERIFIED` — test `TestTracePropagationTransport_NoSpan`
-15. All three spans come from `tracing.DefaultTracer()`. The repo never calls `InitDefaultTracer`. `VERIFIED` — `pkg/plugin/plugin.go:882`, `pkg/agent/llm_client.go:134`, `pkg/agent/loop.go:960`
+15. All three spans come from `tracing.DefaultTracer()`. The repo never calls `InitDefaultTracer`. `VERIFIED` — `pkg/plugin/plugin.go:883`, `pkg/agent/llm_client.go:134`, `pkg/agent/loop.go:960`
 16. The SDK exports those spans to the OTel endpoint that the Grafana host passes to the plugin. `ASSUMED` — `go.mod:6`; the only address in the repo is `docker-compose.dev.yaml:51`
 17. Production gives the plugin no tracing configuration of its own. Export depends on host settings outside this repo. `GAP` — `deploy/helm/grafana-values-ask-o11y-ha.yaml:12` sets no tracing key
 18. Plugin metrics are two families: `asko11y_agent_user_tokens_total` (labels `user`, `login`, `model`, `type`, `org`, `org_name`) and the workflow family `asko11y_workflow_ticks_total`, `asko11y_workflow_sessions_total` (labels `workflow`, `outcome`), `asko11y_workflow_active_spawned` (`workflow`), `asko11y_workflow_run_duration_seconds` (`workflow`); the `workflow` label value carries the owning org as `org<orgID>:<name>`, so the same name in two orgs gets two series. `VERIFIED` — `pkg/plugin/metrics.go:19`, `pkg/plugin/workflow_metrics.go:20`, `pkg/plugin/workflow_metrics.go:70`
@@ -92,7 +92,7 @@ Show token usage and cost in one provisioned dashboard.
 
 ## Invariants
 
-- Every span comes from the SDK default tracer, never from a private provider. `VERIFIED` — `pkg/plugin/plugin.go:882`
+- Every span comes from the SDK default tracer, never from a private provider. `VERIFIED` — `pkg/plugin/plugin.go:883`
 - An MCP request carries the caller span context when one exists. `VERIFIED` — `pkg/mcp/trace_propagation_test.go:88`
 - `org_name` is never longer than 64 runes and never carries control characters. `VERIFIED` — `pkg/plugin/metrics_test.go:30`
 - The plugin exposes no Prometheus scrape route. `VERIFIED` — `pkg/plugin/metrics_test.go:23`
@@ -118,7 +118,7 @@ Show token usage and cost in one provisioned dashboard.
 
 | Signal | Name | Where | Evidence |
 |---|---|---|---|
-| Span | `agent_run` | Host OTel pipeline | `pkg/plugin/plugin.go:882` |
+| Span | `agent_run` | Host OTel pipeline | `pkg/plugin/plugin.go:883` |
 | Span | `llm_call` | Host OTel pipeline | `pkg/agent/llm_client.go:134` |
 | Span | `mcp_tool_call` | Host OTel pipeline | `pkg/agent/loop.go:960` |
 | Metric | `asko11y_agent_user_tokens_total` | `asko11y-agent-usage` dashboard | `pkg/plugin/metrics.go:19` |
@@ -127,8 +127,8 @@ Show token usage and cost in one provisioned dashboard.
 
 ## Evidence Index
 
-- `pkg/plugin/plugin.go:882` — the `agent_run` span start
-- `pkg/plugin/plugin.go:1201` — `agent_run` attributes
+- `pkg/plugin/plugin.go:883` — the `agent_run` span start
+- `pkg/plugin/plugin.go:1202` — `agent_run` attributes
 - `pkg/agent/loop.go:960` — `mcp_tool_call` span start
 - `pkg/mcp/trace_propagation.go:77` — W3C header injection
 - `pkg/plugin/metrics.go:22` — counter label set

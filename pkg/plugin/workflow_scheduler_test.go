@@ -202,8 +202,18 @@ func TestReconcileStartsOnlyValidEntries(t *testing.T) {
 // earlier instance persisted for that org.
 func TestWorkflowTickSurvivesSettingsSave(t *testing.T) {
 	client := workflowRedisTestClient(t)
-	defer client.Close()
 	ctx := context.Background()
+	// Registered before the flush cleanup below, so LIFO order flushes first
+	// and closes second (a deferred Close would run before t.Cleanup and make
+	// the flush fail silently).
+	t.Cleanup(func() { client.Close() })
+
+	// Self-contained: the post-save instance reads run records from Redis db
+	// 15, so start from a clean database instead of relying on an earlier test
+	// having flushed it.
+	if err := client.FlushDB(ctx).Err(); err != nil {
+		t.Fatalf("flush failed: %v", err)
+	}
 
 	entry := validWorkflowEntry()
 	entry.Name = "save-survive-wf"

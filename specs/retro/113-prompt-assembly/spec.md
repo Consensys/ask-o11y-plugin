@@ -22,7 +22,7 @@ The UI reads the shipped defaults from one endpoint.
 |---|---|---|---|---|
 | Read `/api/prompt-defaults` | yes | yes | yes | `VERIFIED` — `pkg/plugin/plugin.go:1762` |
 | Change the prompt settings | yes | no | no | `ASSUMED` — Grafana app config is Admin-only; no plugin-side check |
-| Override a prompt through the Skills tab | yes | no | no | `ASSUMED` — `pkg/plugin/plugin.go:1724` |
+| Override a prompt through the Skills tab | yes | no | no | `ASSUMED` — `pkg/plugin/plugin.go:1725` |
 
 ## Contract
 
@@ -77,12 +77,12 @@ The UI reads the shipped defaults from one endpoint.
 20. An unknown conversation type returns an error. `VERIFIED` — test `TestBuildUserPrompt_UnknownTypeErrors`
 21. When `UserPromptSkill` is set, its rendered template replaces the user message; an empty render falls back to the message. `VERIFIED` — `pkg/plugin/prompts.go:217`
 22. The legacy type mapping is tested. `VERIFIED` — test `TestBuildUserPrompt_LegacyTypeRendersSkillTemplate`
-23. `GET /api/prompt-defaults` returns a flat JSON object with exactly `defaultSystemPrompt`, `investigationPrompt`, and `performancePrompt`. `VERIFIED` — `pkg/plugin/plugin.go:1692`
+23. `GET /api/prompt-defaults` returns a flat JSON object with exactly `defaultSystemPrompt`, `investigationPrompt`, and `performancePrompt`. `VERIFIED` — `pkg/plugin/plugin.go:1693`
 24. The response shape is tested. `VERIFIED` — test `TestHandlePromptDefaults`
 25. Any other method returns HTTP 405. `VERIFIED` — `pkg/plugin/plugin.go:1763`
 26. The 405 case is tested. `VERIFIED` — test `TestHandlePromptDefaults`
 27. `investigationPrompt` and `performancePrompt` are always present and non-empty; a disabled skill falls back to the bundled template. `VERIFIED` — test `TestHandlePromptDefaults_DisabledSkillStillReturnsStableKeys`
-28. `defaultSystemPrompt` is the Go constant, not the configured value. `VERIFIED` — `pkg/plugin/plugin.go:1692`
+28. `defaultSystemPrompt` is the Go constant, not the configured value. `VERIFIED` — `pkg/plugin/plugin.go:1693`
 29. A legacy prompt field applies only when the matching skill has no Skills-tab entry. `VERIFIED` — `pkg/plugin/plugin.go:1775`
 30. Skills-tab precedence is tested. `VERIFIED` — test `TestApplyLegacyPromptOverrides_SkillsTabEntryWins`
 31. A legacy override that fails to apply is logged and does not fail startup. `VERIFIED` — `pkg/plugin/plugin.go:1780`

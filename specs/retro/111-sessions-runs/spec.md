@@ -130,7 +130,7 @@ Coverage: `VERIFIED` = code pointer or test; `ASSUMED` = code suggests, no test;
 
 | Signal | Name | Where | Evidence |
 |---|---|---|---|
-| Span | `agent_run`, with `org_id`, `user_role`, `session_id` | Grafana tracing exporter | `pkg/plugin/plugin.go:882` |
+| Span | `agent_run`, with `org_id`, `user_role`, `session_id` | Grafana tracing exporter | `pkg/plugin/plugin.go:883` |
 | Log field | `runId`, `status` | Plugin logger on run finish | `pkg/plugin/runstore.go:216` |
 
 ## Evidence Index
@@ -143,4 +143,4 @@ Coverage: `VERIFIED` = code pointer or test; `ASSUMED` = code suggests, no test;
 
 - Concurrent runs on one session are allowed and uncoordinated. A forward spec should define single-flight or per-session serialisation.
 - The Redis session index has no TTL; it is pruned only on create, so an idle user keeps stale members.
-- `GET /api/sessions/{id}/shares` filters by `UserID` only, not by org (`pkg/plugin/plugin.go:2861`). Cross-org leakage needs a review.
+- `GET /api/sessions/{id}/shares` filters by `UserID` only, not by org (`pkg/plugin/plugin.go:2862`). Cross-org leakage needs a review.
