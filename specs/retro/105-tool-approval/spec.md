@@ -104,7 +104,7 @@ The decision body is `{"decision":"approved\|rejected","comment":"...","approval
 | Decision value is unknown | HTTP 400 "Invalid approval decision" | `pkg/plugin/plugin.go:1466` |
 | Approval already resolved differently | HTTP 409 "Approval already resolved as X" | `pkg/plugin/plugin.go:1492` |
 | Approval is not pending or expired | HTTP 409 "Approval is not pending or has expired" | `pkg/plugin/plugin.go:1580` |
-| Broker delivery fails | HTTP 504 "Approval delivery failed" | `pkg/plugin/plugin.go:1508` |
+| Broker delivery fails | HTTP 504 "Approval delivery failed" | `pkg/plugin/plugin.go:1588` |
 | Approval registration fails | tool result "Failed to prepare approval for tool X" | `pkg/agent/loop.go:1078` |
 | User denies | model sees "was not approved by the user"; no SSE error | `pkg/agent/loop.go:1078` |
 | Approval times out | `approval_resolved` with decision `rejected` and timeout comment | `pkg/plugin/approval_broker.go:92` |

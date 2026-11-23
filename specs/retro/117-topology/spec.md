@@ -66,7 +66,7 @@ Tags: `VERIFIED` (code pointer or test), `ASSUMED` (untested), `GAP` (missing).
 2. A node is `{id, label, type}`; an edge is `{id, source, target, label}`. `VERIFIED` — `pkg/plugin/topology.go:12`
 3. `source` is always `graphiti` on this route. `VERIFIED` — `pkg/plugin/plugin.go:1983`
 4. `enabled: false` and empty arrays return when `graphiti_add_memory` is absent. `VERIFIED` — `pkg/plugin/plugin.go:1878`
-5. A missing facts tool returns `enabled: true`, empty arrays, and a warning. `VERIFIED` — `pkg/plugin/plugin.go:1895`
+5. A missing facts tool returns `enabled: true`, empty arrays, and a warning. `VERIFIED` — `pkg/plugin/plugin.go:1975`
 6. The default fact query covers topology, dependencies, deployment, and signals. `VERIFIED` — `pkg/plugin/topology.go:708`
 7. Node type derives from Graphiti labels: service, namespace, cluster, database, queue. `VERIFIED` — `pkg/plugin/topology.go:388`
 8. Known infrastructure names are dropped from the graph. `VERIFIED` — `pkg/plugin/topology.go:82`

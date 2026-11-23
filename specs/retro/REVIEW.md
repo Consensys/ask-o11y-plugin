@@ -228,7 +228,7 @@ Totals: 60 ASSUMED, 42 GAP, 815 VERIFIED (no review needed).
 
 ## 124-telemetry
 
-- **GAP** 3. The `agent_run` span carries no `run_id` and no model attribute. `GAP` — `pkg/plugin/plugin.go:1120` sets only three attributes
+- **GAP** 3. The `agent_run` span carries no `run_id` and no model attribute. `GAP` — `pkg/plugin/plugin.go:1201` sets only three attributes
 
 - **GAP** 9. The `mcp_tool_call` span is not the parent of the MCP request. `executeTool` discards the span context, so the HTTP span parents onto `agent_run`. `GAP` — `pkg/agent/loop.go:960` drops the context that `pkg/agent/loop.go:987` passes on
 
@@ -248,6 +248,6 @@ Totals: 60 ASSUMED, 42 GAP, 815 VERIFIED (no review needed).
 
 ## 125-build-release
 
-- **ASSUMED** 6. A docs-only pull request therefore satisfies the build gate with a no-op job. `ASSUMED` — `.github/workflows/ci.yml:165`; no test or branch rule states this intent
+- **ASSUMED** 6. A docs-only pull request therefore satisfies the build gate with a no-op job. `ASSUMED` — `.github/workflows/ci.yml:329`; no test or branch rule states this intent
 
 - **GAP** 7. Required checks and branch protection rules are not stored in the repository. `GAP` — `CODEOWNERS:5` is the only review rule found

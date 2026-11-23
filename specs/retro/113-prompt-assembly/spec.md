@@ -130,7 +130,7 @@ Coverage: `VERIFIED` = code pointer or test; `ASSUMED` = code suggests, no test;
 - `pkg/plugin/prompts.go:145` — `BuildSystemPrompt`
 - `pkg/plugin/prompts.go:184` — `BuildUserPrompt`
 - `pkg/plugin/plugin.go:1762` — defaults handler
-- `pkg/plugin/plugin.go:1765` — legacy override application
+- `pkg/plugin/plugin.go:1845` — legacy override application
 - `pkg/plugin/prompts_test.go` — `TestApplyLegacyPromptOverrides_SkillsTabEntryWins` — precedence
 - `pkg/plugin/plugin_test.go` — `TestHandlePromptDefaults` — response shape
 

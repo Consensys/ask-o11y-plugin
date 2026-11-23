@@ -27,7 +27,7 @@ No role receives a different model. Model choice is not an RBAC boundary. `VERIF
 |---|---|---|---|
 | POST | `/api/agent/run?model=base\|large` | `handleAgentRun` | `pkg/plugin/plugin.go:588` |
 | GET | `/api/agent/runs/{runId}` | `handleAgentRuns` | `pkg/plugin/plugin.go:1430` |
-The run response carries `model` and `modelSource` (`auto`, `request`, `session`, or `skill`). `VERIFIED` — `pkg/plugin/plugin.go:1188`
+The run response carries `model` and `modelSource` (`auto`, `request`, `session`, or `skill`). `VERIFIED` — `pkg/plugin/plugin.go:1269`
 ### SSE events
 | Event | Payload fields | Evidence |
 |---|---|---|

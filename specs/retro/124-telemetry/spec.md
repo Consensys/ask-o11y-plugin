@@ -58,8 +58,8 @@ Show token usage and cost in one provisioned dashboard.
 ## Behaviour Rules
 
 1. The `agent_run` span starts at the run handler entry and ends when the handler returns. `VERIFIED` — `pkg/plugin/plugin.go:882`
-2. The `agent_run` span carries `org_id`, `user_role`, and `session_id`. `VERIFIED` — `pkg/plugin/plugin.go:1120`
-3. The `agent_run` span carries no `run_id` and no model attribute. `GAP` — `pkg/plugin/plugin.go:1120` sets only three attributes
+2. The `agent_run` span carries `org_id`, `user_role`, and `session_id`. `VERIFIED` — `pkg/plugin/plugin.go:1201`
+3. The `agent_run` span carries no `run_id` and no model attribute. `GAP` — `pkg/plugin/plugin.go:1201` sets only three attributes
 4. The `llm_call` span starts per LLM request and records `llm.model`, `llm.message_count`, `llm.tool_count`, `llm.max_completion_tokens`, `llm.request_bytes`. `VERIFIED` — `pkg/agent/llm_client.go:150`
 5. `llm_call` records `llm.http_status`, `llm.request_id`, `llm.retryable` on a non-OK status. `VERIFIED` — `pkg/agent/llm_client.go:192`
 6. `llm_call` records `llm.prompt_tokens` and `llm.completion_tokens` when usage is present. `VERIFIED` — `pkg/agent/llm_client.go:235`
@@ -128,7 +128,7 @@ Show token usage and cost in one provisioned dashboard.
 ## Evidence Index
 
 - `pkg/plugin/plugin.go:882` — the `agent_run` span start
-- `pkg/plugin/plugin.go:1120` — `agent_run` attributes
+- `pkg/plugin/plugin.go:1201` — `agent_run` attributes
 - `pkg/agent/loop.go:960` — `mcp_tool_call` span start
 - `pkg/mcp/trace_propagation.go:77` — W3C header injection
 - `pkg/plugin/metrics.go:22` — counter label set
