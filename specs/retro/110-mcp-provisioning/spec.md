@@ -21,7 +21,7 @@ at start, adds runtime servers, and sends W3C trace context with each tool call.
 
 | Capability | Admin | Editor | Viewer | Evidence |
 |---|---|---|---|---|
-| Declare servers in provisioning YAML | yes | no | no | `provisioning/apps/asko11y.yaml:8` |
+| Declare servers in provisioning YAML | yes | no | no | `provisioning/plugins/app.yaml:32` |
 | Add, list, or delete a runtime server | yes | no | no | `pkg/plugin/mcp_provisioner.go:108` |
 
 ## Contract
@@ -60,7 +60,7 @@ at start, adds runtime servers, and sends W3C trace context with each tool call.
 
 ## Behaviour Rules
 
-1. `mcpServers` is a JSON array at the root of `jsonData`. `VERIFIED` — `provisioning/apps/asko11y.yaml:8`
+1. `mcpServers` is a JSON array at the root of `jsonData`. `VERIFIED` — `provisioning/plugins/app.yaml:32`
 2. Settings are decoded once with `json.Unmarshal` into `PluginSettings`. `VERIFIED` — `pkg/plugin/plugin.go:269`
 3. Four `type` values are documented: `openapi`, `standard`, `sse`, `streamable-http`. `VERIFIED` — `pkg/mcp/types.go:95`
 4. `http+streamable` is an alias of `streamable-http`; both use the SDK streamable transport with 3 retries, and `sse` uses the SDK SSE transport. `VERIFIED` — `pkg/mcp/client.go:247`, `pkg/mcp/client.go:245`
@@ -125,7 +125,7 @@ at start, adds runtime servers, and sends W3C trace context with each tool call.
 
 ## Evidence Index
 
-- `provisioning/apps/asko11y.yaml:8` — single-org provisioning shape
+- `provisioning/plugins/app.yaml:32` — single-org provisioning shape
 - `provisioning/plugins/full.yaml_:16` — multi-org shape without built-in MCP
 - `pkg/plugin/mcp_provisioner.go:21` — runtime server routes
 - `pkg/mcp/trace_propagation.go:53` — outbound injection
