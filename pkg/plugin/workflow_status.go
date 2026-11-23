@@ -146,6 +146,47 @@ type workflowAPIEntry struct {
 	Status  workflowRuntimeStatus `json:"status"`
 }
 
+// workflowSessionStatus joins the in-memory last-tick state with durable
+// session outcome counts derived from the run store, so the row counters and
+// the sessions list always agree: both read the same run records. Timed-out
+// runs are stored as failed with a timeout message; they count as timeout.
+func (p *Plugin) workflowSessionStatus(name string) workflowRuntimeStatus {
+	status := p.workflowStatus.Get(name)
+	orgID := int64(0)
+	if instanceOrg, _, _, seeded := p.orgIdentity.Get(); seeded {
+		orgID = instanceOrg
+	}
+	if orgID == 0 {
+		return status
+	}
+	runs, err := p.runStore.ListRuns(syntheticWorkflowUserID(name), orgID, 500)
+	if err != nil {
+		// The durable counts are unavailable; the in-memory view still reports.
+		return status
+	}
+	status.Started = 0
+	status.Completed = 0
+	status.Failed = 0
+	status.Cancelled = 0
+	status.Timeout = 0
+	for _, run := range runs {
+		status.Started++
+		switch run.Status {
+		case RunStatusCompleted:
+			status.Completed++
+		case RunStatusCancelled:
+			status.Cancelled++
+		case RunStatusFailed:
+			if strings.Contains(run.Error, "timeout") {
+				status.Timeout++
+			} else {
+				status.Failed++
+			}
+		}
+	}
+	return status
+}
+
 // handleWorkflowsList serves GET /api/workflows: every configured workflow
 // entry with this instance's runtime status. Admin only, like the rest of
 // the AppConfig data routes.
@@ -193,7 +234,7 @@ func (p *Plugin) handleWorkflowsList(w http.ResponseWriter, r *http.Request) {
 			SpawnableSkills:       entry.SpawnableSkills,
 			FallbackSkill:         entry.FallbackSkill,
 			Running:               running[entry.Name],
-			Status:                p.workflowStatus.Get(entry.Name),
+			Status:                p.workflowSessionStatus(entry.Name),
 		})
 	}
 

@@ -100,8 +100,17 @@ func TestHandleWorkflowsListAdminSeesEntriesAndStatus(t *testing.T) {
 	p.workflows = &WorkflowManager{schedulers: []*WorkflowScheduler{running, stopped}}
 	p.workflowStatus = NewWorkflowStatusStore()
 	p.workflowStatus.RecordTick("running-wf", "executed")
-	p.workflowStatus.RecordSession("running-wf", "started")
-	p.workflowStatus.RecordSession("running-wf", "completed")
+	// Identity seeds the instance org so the durable counters can derive.
+	p.orgIdentity = NewOrgIdentityStore()
+	p.orgIdentity.Seed(1, "http://grafana", "token")
+	// Durable counts come from the run store: two completed, one timeout.
+	synthetic := syntheticWorkflowUserID("running-wf")
+	p.runStore.CreateRun("r-1", synthetic, 1, "s-1")
+	p.runStore.FinishRun("r-1", RunStatusCompleted, "")
+	p.runStore.CreateRun("r-2", synthetic, 1, "s-2")
+	p.runStore.FinishRun("r-2", RunStatusCompleted, "")
+	p.runStore.CreateRun("r-3", synthetic, 1, "s-3")
+	p.runStore.FinishRun("r-3", RunStatusFailed, "workflow session exceeded its 420 second timeout")
 
 	resp, body := workflowsListRequest(t, p, "Admin")
 	if resp.StatusCode != http.StatusOK {
@@ -116,8 +125,12 @@ func TestHandleWorkflowsListAdminSeesEntriesAndStatus(t *testing.T) {
 		t.Fatalf("running workflow not flagged: %v", first)
 	}
 	status := first["status"].(map[string]interface{})
-	if status["lastTickOutcome"] != "executed" || status["completed"].(float64) != 1 {
-		t.Fatalf("status not joined: %v", status)
+	if status["lastTickOutcome"] != "executed" {
+		t.Fatalf("tick status not joined: %v", status)
+	}
+	// Row counters must match the durable run records, not the in-memory view.
+	if status["started"].(float64) != 3 || status["completed"].(float64) != 2 || status["timeout"].(float64) != 1 {
+		t.Fatalf("durable counters wrong: %v", status)
 	}
 	second := rows[1].(map[string]interface{})
 	if second["enabled"] != false || second["running"] != false {

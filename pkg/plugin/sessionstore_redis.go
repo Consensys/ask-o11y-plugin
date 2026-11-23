@@ -28,17 +28,19 @@ func sessionStatsKey(id string) string { return fmt.Sprintf("session:%s:stats", 
 // Usage-stats fields live in a separate hash (sessionStatsKey) so they never
 // round-trip through session blob updates — see IncrementStats.
 type redisSession struct {
-	ID           string           `json:"id"`
-	Title        string           `json:"title"`
-	Messages     []SessionMessage `json:"messages"`
-	Summary      string           `json:"summary,omitempty"`
-	CreatedAt    time.Time        `json:"createdAt"`
-	UpdatedAt    time.Time        `json:"updatedAt"`
-	MessageCount int              `json:"messageCount"`
-	ActiveRunID  string           `json:"activeRunId,omitempty"`
-	Model        string           `json:"model,omitempty"`
-	UserID       int64            `json:"userId"`
-	OrgID        int64            `json:"orgId"`
+	ID               string           `json:"id"`
+	Title            string           `json:"title"`
+	Messages         []SessionMessage `json:"messages"`
+	Summary          string           `json:"summary,omitempty"`
+	CreatedAt        time.Time        `json:"createdAt"`
+	UpdatedAt        time.Time        `json:"updatedAt"`
+	MessageCount     int              `json:"messageCount"`
+	ActiveRunID      string           `json:"activeRunId,omitempty"`
+	Model            string           `json:"model,omitempty"`
+	UserID           int64            `json:"userId"`
+	OrgID            int64            `json:"orgId"`
+	ConversationType string           `json:"conversationType,omitempty"`
+	Workflow         string           `json:"workflow,omitempty"`
 }
 
 func toRedis(s *ChatSession) *redisSession {
@@ -47,6 +49,7 @@ func toRedis(s *ChatSession) *redisSession {
 		Summary: s.Summary, CreatedAt: s.CreatedAt, UpdatedAt: s.UpdatedAt,
 		MessageCount: s.MessageCount, ActiveRunID: s.ActiveRunID, Model: s.Model,
 		UserID: s.UserID, OrgID: s.OrgID,
+		ConversationType: s.ConversationType, Workflow: s.Workflow,
 	}
 }
 
@@ -56,6 +59,7 @@ func fromRedis(rs *redisSession) *ChatSession {
 		Summary: rs.Summary, CreatedAt: rs.CreatedAt, UpdatedAt: rs.UpdatedAt,
 		MessageCount: rs.MessageCount, ActiveRunID: rs.ActiveRunID, Model: rs.Model,
 		UserID: rs.UserID, OrgID: rs.OrgID,
+		ConversationType: rs.ConversationType, Workflow: rs.Workflow,
 	}
 }
 

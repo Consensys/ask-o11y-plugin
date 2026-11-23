@@ -148,6 +148,13 @@
 
 ---
 
+## Phase 13: Durability fixes from live UI testing (2026-11-23)
+
+- [x] T037 `redisSession`/`toRedis`/`fromRedis` carry `conversationType` and `workflow` — the tags were silently dropped on Redis writes, so the admin session read 404ed and Open started a new session.
+- [x] T038 Row counters derive from the durable run store (same records as the sessions list), not the in-memory store that resets on restart; lastTick stays per-instance. Timed-out runs (failed with a timeout message) count as timeout.
+
+---
+
 ## Dependencies & Execution Order
 
 - **Phase 1** blocks every story. T001 to T004 are parallel; T005 depends on nothing but is consumed by T008.

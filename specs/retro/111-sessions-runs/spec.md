@@ -76,7 +76,7 @@ Coverage: `VERIFIED` = code pointer or test; `ASSUMED` = code suggests, no test;
 10. Deleting the current session clears the current pointer. `VERIFIED` — test `TestSessionStore_DeleteClearsCurrentSession`
 11. The in-memory store deletes sessions older than the TTL on `CleanupOld`; a TTL of zero disables the sweep. `VERIFIED` — `pkg/plugin/sessionstore.go:409`
 12. The Redis session blob TTL is refreshed on every mutation. `VERIFIED` — `pkg/plugin/sessionstore_redis.go:222`
-13. Redis mutations use a `WATCH` read-modify-write loop and retry on conflict. `VERIFIED` — `pkg/plugin/sessionstore_redis.go:190`
+13. Redis mutations use a `WATCH` read-modify-write loop and retry on conflict. `VERIFIED` — `pkg/plugin/sessionstore_redis.go:194`
 14. Concurrent appends lose no messages. `VERIFIED` — test `TestRedisSessionStore_AppendMessages_ConcurrentNoLostUpdates`
 15. Usage stats live in a separate hash and use `HINCRBY`, so concurrent runs add independently. `VERIFIED` — `pkg/plugin/sessionstore_redis.go:481`
 16. Concurrent increments lose no counts. `VERIFIED` — test `TestRedisSessionStore_IncrementStats_ConcurrentNoLostUpdates`
@@ -98,6 +98,7 @@ Coverage: `VERIFIED` = code pointer or test; `ASSUMED` = code suggests, no test;
 32. Workflow sessions reuse the run store, stats, assistant-message persistence, and share mechanism unchanged. `VERIFIED` — `pkg/plugin/workflow_session.go:189`, `pkg/plugin/workflow_session.go:270`
 33. `GetSessionUnscoped` reads one session without the owner check; only the admin workflow-session path calls it (`workflowConversationType` sessions, same org). Implemented by both stores. `VERIFIED` — `pkg/plugin/sessionstore.go:80`, test `TestAdminMayReadWorkflowSessionsOnly`
 34. Admins may `GET` a workflow session they do not own; every other cross-owner read, including Admins reading interactive sessions, stays 404. `VERIFIED` — test `TestAdminMayReadWorkflowSessionsOnly`
+35. The Redis session blob carries `conversationType` and `workflow` through `redisSession`/`toRedis`/`fromRedis`; before 2026-11-23 the fields existed only on `ChatSession`, so workflow tagging was lost on every Redis write and the admin session read 404ed. `VERIFIED` — `pkg/plugin/sessionstore_redis.go:42`, test `TestAdminMayReadWorkflowSessionsOnly`
 
 ## Invariants
 
