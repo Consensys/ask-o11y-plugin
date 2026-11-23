@@ -2,6 +2,7 @@ package plugin
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -445,9 +446,10 @@ func (l *errorCapturingLogger) errorLines() []string {
 
 // TestReconcileAbortsWhenNewerReconcileStarted covers the stale-reconcile race:
 // a loop pass reads the old list, a save hot-applies a changed entry, then the
-// stale pass resumes. Its apply must be dropped, so the scheduler the hot apply
-// created still carries the changed entry instead of being restarted with the
-// old one.
+// stale pass resumes. Its first apply must be dropped; the retried read then
+// sees the saved list, which is already live. The scheduler the hot apply
+// created therefore still carries the changed entry instead of being restarted
+// with the old one.
 func TestReconcileAbortsWhenNewerReconcileStarted(t *testing.T) {
 	p, client := newStoreReconcileHarness(t, stubLLMFinalAnswer("tick ok"))
 	ctx := context.Background()
@@ -500,6 +502,115 @@ func TestReconcileAbortsWhenNewerReconcileStarted(t *testing.T) {
 	p.workflows.mu.Unlock()
 	if !ok || tracked.IntervalSec != 600 {
 		t.Fatalf("a stale reconcile must not restore the old entry, got %+v (tracked=%v)", tracked, ok)
+	}
+}
+
+// storeReadFailKey marks a context whose store SCAN must fail, simulating a
+// cancelled request context or a transient Redis error.
+type storeReadFailKey struct{}
+
+// failSecondScanBarrier blocks the first GET of one workflow store key, after
+// that GET already executed, and fails every SCAN carrying storeReadFailKey.
+// Together they reproduce the reported race: an older pass holds a stale
+// snapshot while the newer pass claims a later generation and then fails its
+// store read before applying anything.
+type failSecondScanBarrier struct {
+	key     string
+	reached chan struct{}
+	release chan struct{}
+	once    sync.Once
+}
+
+func (h *failSecondScanBarrier) DialHook(next redis.DialHook) redis.DialHook { return next }
+
+func (h *failSecondScanBarrier) ProcessHook(next redis.ProcessHook) redis.ProcessHook {
+	return func(ctx context.Context, cmd redis.Cmder) error {
+		if cmd.Name() == "scan" && ctx.Value(storeReadFailKey{}) != nil {
+			return errors.New("injected store read failure")
+		}
+		err := next(ctx, cmd)
+		args := cmd.Args()
+		if cmd.Name() == "get" && len(args) > 1 && args[1] == h.key {
+			first := false
+			h.once.Do(func() { first = true })
+			if first {
+				close(h.reached)
+				<-h.release
+			}
+		}
+		return err
+	}
+}
+
+func (h *failSecondScanBarrier) ProcessPipelineHook(next redis.ProcessPipelineHook) redis.ProcessPipelineHook {
+	return next
+}
+
+// TestReconcileRetriesAfterNewerPassFailsItsRead covers the other side of the
+// generation guard: the newer pass claims a later generation, then fails its
+// store read and returns without applying. The older pass must not treat that
+// as "the newer pass owns the state". It re-reads the store and converges the
+// snapshot the newer pass's save persisted, without waiting for the 30 second
+// loop.
+func TestReconcileRetriesAfterNewerPassFailsItsRead(t *testing.T) {
+	p, client := newStoreReconcileHarness(t, stubLLMFinalAnswer("tick ok"))
+	ctx := context.Background()
+	const name = "recon-newer-read-fails-wf"
+
+	stale := storedReconcileEntry(name)
+	stale.IntervalSec = 120
+	saveReconcileEntries(t, client, stale)
+
+	barrier := &failSecondScanBarrier{
+		key:     workflowStoreKey(1),
+		reached: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+	client.AddHook(barrier)
+
+	// The loop-shaped pass claims a generation, reads the old list, and waits
+	// inside the hook with that snapshot in hand.
+	loopDone := make(chan struct{})
+	var loopOK bool
+	go func() {
+		defer close(loopDone)
+		_, _, loopOK = p.reconcileWorkflows(ctx)
+	}()
+	<-barrier.reached
+
+	// The save persists the new entry, as a PUT does before it reconciles.
+	updated := storedReconcileEntry(name)
+	updated.IntervalSec = 600
+	updated.SessionTimeoutSeconds = 120
+	saveReconcileEntries(t, client, updated)
+
+	// The PUT-shaped pass claims a later generation, then its store read fails.
+	failingCtx := context.WithValue(ctx, storeReadFailKey{}, true)
+	if _, _, ok := p.reconcileWorkflows(failingCtx); ok {
+		t.Fatal("the injected store read failure must report the pass as failed")
+	}
+	if got := p.workflows.schedulerFor(1, name); got != nil {
+		t.Fatal("a pass that failed its store read must not converge")
+	}
+
+	close(barrier.release)
+	<-loopDone
+	if !loopOK {
+		t.Fatal("the superseded pass's retried read must succeed")
+	}
+
+	applied := p.workflows.schedulerFor(1, name)
+	if applied == nil || applied.Stopped() {
+		t.Fatal("the superseded pass must retry and start the saved entry's scheduler")
+	}
+	if got := applied.entry.IntervalSec; got != 600 {
+		t.Fatalf("the retried read must apply the newer entry, got interval %d", got)
+	}
+	p.workflows.mu.Lock()
+	tracked, trackedOK := p.workflows.entries[workflowKey{orgID: 1, name: name}]
+	p.workflows.mu.Unlock()
+	if !trackedOK || tracked.IntervalSec != 600 {
+		t.Fatalf("the applied set must hold the newer entry, got %+v (tracked=%v)", tracked, trackedOK)
 	}
 }
 

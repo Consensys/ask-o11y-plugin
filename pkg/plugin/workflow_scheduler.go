@@ -576,23 +576,47 @@ func (m *WorkflowManager) beginReconcile() int64 {
 	return m.generation.Add(1)
 }
 
+// applyResult reports what one apply call did, so the caller knows whether it
+// must re-read the store.
+type applyResult int
+
+const (
+	// applyConverged: the pass owned the newest generation and converged.
+	applyConverged applyResult = iota
+	// applySuperseded: a newer pass claimed the generation first, so this
+	// pass's snapshot may be stale. The caller re-reads and retries.
+	applySuperseded
+	// applyStopped: the manager stopped; nothing may converge any more, so a
+	// retry would only re-read a store nobody applies.
+	applyStopped
+)
+
 // apply converges the live scheduler set onto desired. readOrgs names the orgs
 // whose stored list was read successfully; a scheduler of an org that could
 // not be read is left running, so a Redis hiccup never disables a workflow.
 //
 // gen is the generation the caller claimed with beginReconcile. When a newer
 // pass has started, this pass read a list the newer pass has superseded, so
-// apply returns without touching a scheduler: the newer pass owns the state.
-// The check runs under the lock, so no newer pass can slip between it and the
-// convergence below.
-func (m *WorkflowManager) apply(gen int64, desired map[workflowKey]WorkflowEntry, readOrgs map[int64]bool, problems map[workflowKey]string, logger log.Logger) {
+// apply touches no scheduler and reports applySuperseded. The caller must then
+// re-read the store and retry: the newer pass can fail before it applies (a
+// cancelled request context, a SCAN blip), and in that case nobody else would
+// converge the state the newer pass's save persisted. A retried read is always
+// fresh, so no pass ever applies a snapshot older than what another pass
+// already applied. The check runs under the lock, so no newer pass can slip
+// between it and the convergence below.
+func (m *WorkflowManager) apply(gen int64, desired map[workflowKey]WorkflowEntry, readOrgs map[int64]bool, problems map[workflowKey]string, logger log.Logger) applyResult {
 	m.mu.Lock()
-	if m.stopped || m.generation.Load() != gen {
+	if m.stopped {
+		m.mu.Unlock()
+		logger.Debug("Workflow reconcile skipped: manager stopped", "generation", gen)
+		return applyStopped
+	}
+	if m.generation.Load() != gen {
 		latest := m.generation.Load()
 		m.mu.Unlock()
-		logger.Debug("Workflow reconcile superseded by a newer pass; apply skipped",
+		logger.Debug("Workflow reconcile superseded by a newer pass; re-reading the store",
 			"generation", gen, "latest", latest)
-		return
+		return applySuperseded
 	}
 
 	// Stop waits for an in-flight tick, so no Stop call may run under m.mu: a
@@ -657,6 +681,7 @@ func (m *WorkflowManager) apply(gen int64, desired map[workflowKey]WorkflowEntry
 	for _, scheduler := range stopping {
 		scheduler.Stop()
 	}
+	return applyConverged
 }
 
 // sameWorkflowEntry reports whether two prepared entries are identical. Any
@@ -670,6 +695,12 @@ func sameWorkflowEntry(a, b WorkflowEntry) bool {
 // the convergence bound after an out-of-band edit to Redis; a route save
 // reconciles immediately.
 const workflowReconcileInterval = 30 * time.Second
+
+// reconcileAttempts bounds how many times one reconcile pass re-reads the store
+// after a newer pass superseded it before applying. The bound only stops a
+// pathological ping-pong between two live passes; the 30 second loop is the
+// backstop when it is exhausted.
+const reconcileAttempts = 3
 
 // workflowReconcileLoop re-runs the reconcile on a fixed interval so replicas
 // converge without pub/sub.
@@ -695,11 +726,17 @@ func (p *Plugin) workflowReconcileLoop(ctx context.Context) {
 // schedulers are left running and its shares are never diffed for removal: a
 // failed read is not an empty list.
 //
+// reconcileWorkflows supersedes any in-flight pass and re-reads the store at
+// most reconcileAttempts times. A retry is needed because the newer pass that
+// superseded this one may have failed before it applied (a cancelled request
+// context, a transient SCAN error); without the retry nobody would converge
+// the state the newer pass's save persisted. Each attempt claims a new
+// generation and reads afresh, so an applied snapshot is never older than what
+// another pass already applied. Only a pass that fails its store read at the
+// SCAN returns the error immediately; the 30 second loop is the backstop then.
+//
 // The org set comes from SCAN over the store prefix. The applied-set keys share
 // that prefix but their suffix is not numeric, so they are skipped.
-//
-// A pass that a newer pass supersedes before it applies converges nothing: the
-// newer pass, which started after this one, applies the fresher list.
 func (p *Plugin) reconcileWorkflows(ctx context.Context) ([]WorkflowEntry, map[int64]bool, bool) {
 	mgr := p.workflows
 	unreadable := map[int64]bool{}
@@ -711,48 +748,59 @@ func (p *Plugin) reconcileWorkflows(ctx context.Context) ([]WorkflowEntry, map[i
 		return nil, unreadable, true
 	}
 
-	// Claim this pass before the first store read. A pass that a hot apply
-	// supersedes mid-read must not apply its stale snapshot: the newer pass
-	// applies the list the save persisted.
-	generation := mgr.beginReconcile()
-
-	orgIDs, err := p.workflowStoreOrgs(ctx)
-	if err != nil {
-		p.logger.Warn("Workflow reconcile skipped: cannot list orgs", "error", err)
-		return nil, unreadable, false
-	}
-
-	allowlistTools := make(map[string]bool)
-	if tools, err := p.mcpProxy.ListTools(); err == nil {
-		for _, t := range tools {
-			allowlistTools[t.Name] = true
-		}
-	}
-
-	desired := make(map[workflowKey]WorkflowEntry)
-	readOrgs := make(map[int64]bool, len(orgIDs))
-	problems := make(map[workflowKey]string)
 	var all []WorkflowEntry
-	for _, orgID := range orgIDs {
-		entries, listErr := p.workflowEntryStore().ListWorkflows(ctx, orgID)
-		if listErr != nil {
-			p.logger.Warn("Workflow reconcile skipped one org: entry list unreadable",
-				"orgId", orgID, "error", listErr)
-			unreadable[orgID] = true
-			continue
+	for attempt := 1; attempt <= reconcileAttempts; attempt++ {
+		unreadable = map[int64]bool{}
+
+		// Claim this pass before the first store read. A pass that a hot apply
+		// supersedes mid-read must not apply its stale snapshot: it re-reads
+		// instead, because the newer pass may itself fail before applying.
+		generation := mgr.beginReconcile()
+
+		orgIDs, err := p.workflowStoreOrgs(ctx)
+		if err != nil {
+			p.logger.Warn("Workflow reconcile skipped: cannot list orgs", "error", err)
+			return nil, unreadable, false
 		}
-		readOrgs[orgID] = true
-		all = append(all, entries...)
-		valid, refused := prepareWorkflowEntries(entries, orgID, p.skillRegistry, allowlistTools)
-		for _, entry := range valid {
-			desired[workflowKey{orgID: orgID, name: entry.Name}] = entry
+
+		allowlistTools := make(map[string]bool)
+		if tools, err := p.mcpProxy.ListTools(); err == nil {
+			for _, t := range tools {
+				allowlistTools[t.Name] = true
+			}
 		}
-		for _, problem := range refused {
-			problems[workflowKey{orgID: orgID, name: problem.Name}] = problem.Error
+
+		all = nil
+		desired := make(map[workflowKey]WorkflowEntry)
+		readOrgs := make(map[int64]bool, len(orgIDs))
+		problems := make(map[workflowKey]string)
+		for _, orgID := range orgIDs {
+			entries, listErr := p.workflowEntryStore().ListWorkflows(ctx, orgID)
+			if listErr != nil {
+				p.logger.Warn("Workflow reconcile skipped one org: entry list unreadable",
+					"orgId", orgID, "error", listErr)
+				unreadable[orgID] = true
+				continue
+			}
+			readOrgs[orgID] = true
+			all = append(all, entries...)
+			valid, refused := prepareWorkflowEntries(entries, orgID, p.skillRegistry, allowlistTools)
+			for _, entry := range valid {
+				desired[workflowKey{orgID: orgID, name: entry.Name}] = entry
+			}
+			for _, problem := range refused {
+				problems[workflowKey{orgID: orgID, name: problem.Name}] = problem.Error
+			}
+		}
+
+		switch mgr.apply(generation, desired, readOrgs, problems, p.logger) {
+		case applyConverged, applyStopped:
+			return all, unreadable, true
 		}
 	}
 
-	mgr.apply(generation, desired, readOrgs, problems, p.logger)
+	p.logger.Warn("Workflow reconcile gave up: a newer pass kept superseding it",
+		"attempts", reconcileAttempts)
 	return all, unreadable, true
 }
 
