@@ -27,52 +27,56 @@ type workflowRuntimeStatus struct {
 // WorkflowStatusStore tracks per-workflow runtime state in memory. The
 // Prometheus metrics remain the aggregated source of truth; this store gives
 // the config UI a cheap per-entry snapshot without scraping.
+//
+// Entries are keyed by (org, name): the same workflow name may run in two
+// orgs on one instance, and each org must read only its own tick state.
 type WorkflowStatusStore struct {
 	mu      sync.RWMutex
-	entries map[string]*workflowRuntimeStatus
+	entries map[workflowKey]*workflowRuntimeStatus
 }
 
 func NewWorkflowStatusStore() *WorkflowStatusStore {
-	return &WorkflowStatusStore{entries: map[string]*workflowRuntimeStatus{}}
+	return &WorkflowStatusStore{entries: map[workflowKey]*workflowRuntimeStatus{}}
 }
 
-func (s *WorkflowStatusStore) entry(name string) *workflowRuntimeStatus {
+func (s *WorkflowStatusStore) entry(orgID int64, name string) *workflowRuntimeStatus {
 	if s == nil {
 		return &workflowRuntimeStatus{}
 	}
-	e, ok := s.entries[name]
+	key := workflowKey{orgID: orgID, name: name}
+	e, ok := s.entries[key]
 	if !ok {
 		e = &workflowRuntimeStatus{}
-		s.entries[name] = e
+		s.entries[key] = e
 	}
 	return e
 }
 
-// RecordTick notes one scheduler tick outcome for a workflow. A tick that
-// proceeds clears the previous tick error, so a recovered workflow no longer
-// looks like it is failing.
-func (s *WorkflowStatusStore) RecordTick(name, outcome string) {
+// RecordTick notes one scheduler tick outcome for a workflow in one org. A
+// tick that proceeds clears the previous tick error, so a recovered workflow
+// no longer looks like it is failing.
+func (s *WorkflowStatusStore) RecordTick(orgID int64, name, outcome string) {
 	now := time.Now().UTC()
 	if s == nil {
 		return
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	e := s.entry(name)
+	e := s.entry(orgID, name)
 	e.LastTickAt = &now
 	e.LastTickOutcome = outcome
 	e.LastError = ""
 }
 
 // RecordTickError notes a tick that could not proceed and why.
-func (s *WorkflowStatusStore) RecordTickError(name string, errMsg string) {
+func (s *WorkflowStatusStore) RecordTickError(orgID int64, name string, errMsg string) {
 	now := time.Now().UTC()
 	if s == nil {
 		return
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	e := s.entry(name)
+	e := s.entry(orgID, name)
 	e.LastTickAt = &now
 	e.LastTickOutcome = "skip_error"
 	e.LastError = errMsg
@@ -81,23 +85,23 @@ func (s *WorkflowStatusStore) RecordTickError(name string, errMsg string) {
 // RecordSessionError records a session-level failure message without
 // changing the tick outcome: a tick that ran but could not start its session
 // still executed.
-func (s *WorkflowStatusStore) RecordSessionError(name string, errMsg string) {
+func (s *WorkflowStatusStore) RecordSessionError(orgID int64, name string, errMsg string) {
 	if s == nil {
 		return
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.entry(name).LastError = errMsg
+	s.entry(orgID, name).LastError = errMsg
 }
 
 // RecordSession counts one session outcome.
-func (s *WorkflowStatusStore) RecordSession(name, outcome string) {
+func (s *WorkflowStatusStore) RecordSession(orgID int64, name, outcome string) {
 	if s == nil {
 		return
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	e := s.entry(name)
+	e := s.entry(orgID, name)
 	switch outcome {
 	case "started":
 		e.Started++
@@ -112,15 +116,15 @@ func (s *WorkflowStatusStore) RecordSession(name, outcome string) {
 	}
 }
 
-// Get returns a copy of one workflow's status; the zero value when the
+// Get returns a copy of one org's workflow status; the zero value when the
 // workflow never ticked on this instance.
-func (s *WorkflowStatusStore) Get(name string) workflowRuntimeStatus {
+func (s *WorkflowStatusStore) Get(orgID int64, name string) workflowRuntimeStatus {
 	if s == nil {
 		return workflowRuntimeStatus{}
 	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	if e, ok := s.entries[name]; ok {
+	if e, ok := s.entries[workflowKey{orgID: orgID, name: name}]; ok {
 		return *e
 	}
 	return workflowRuntimeStatus{}
@@ -156,7 +160,9 @@ type workflowAPIEntry struct {
 // count as timeout.
 func (p *Plugin) workflowSessionStatus(rawName string, orgID int64) workflowRuntimeStatus {
 	name := strings.TrimSpace(rawName)
-	status := p.workflowStatus.Get(name)
+	// In-memory tick state is per org: two orgs running the same workflow
+	// name must never read each other's last tick or error.
+	status := p.workflowStatus.Get(orgID, name)
 	if orgID <= 0 {
 		return status
 	}
@@ -343,7 +349,9 @@ func (p *Plugin) handleWorkflowSave(w http.ResponseWriter, r *http.Request) {
 	store := p.workflowEntryStore()
 	if err := store.SaveWorkflows(r.Context(), orgID, entries); err != nil {
 		p.logger.Error("Failed to save workflow entries", "orgId", orgID, "error", err)
-		writeWorkflowJSONError(w, http.StatusInternalServerError, "Failed to save workflow entries")
+		// The only realistic cause is store unavailability, so answer 503 like
+		// GET: an unreadable or unwritable store is not a client error.
+		writeWorkflowJSONError(w, http.StatusServiceUnavailable, "Workflow entries are unavailable")
 		return
 	}
 	// A save is the hot-apply seam: shares of a removed entry are revoked for

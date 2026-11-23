@@ -2639,16 +2639,13 @@
             }
           },
           "403": {
-            "description": "Admin access required"
+            "description": "Caller is not a Grafana Admin (plugin-context role check)"
           },
           "413": {
             "description": "Request body exceeds 262144 bytes"
           },
-          "500": {
-            "description": "Failed to save workflow entries"
-          },
           "503": {
-            "description": "Workflow entry store unavailable (Redis unavailable)"
+            "description": "Workflow entry store unavailable"
           }
         }
       }

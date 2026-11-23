@@ -96,7 +96,7 @@ func TestReconcileAddsAndRemovesSchedulers(t *testing.T) {
 	// Prove the added scheduler is wired to the tick path.
 	scheduler.allowlistChecked = true
 	scheduler.tick()
-	if got := p.workflowStatus.entry(name).LastTickOutcome; got != "executed" {
+	if got := p.workflowStatus.entry(1, name).LastTickOutcome; got != "executed" {
 		t.Fatalf("the added scheduler's tick must execute, got %q", got)
 	}
 	waitForCondition(t, 5*time.Second, "run record from the added scheduler", func() bool {
@@ -260,7 +260,7 @@ func TestWorkflowTickSkipsRemovedEntryBeforeReconcile(t *testing.T) {
 	saveReconcileEntries(t, client)
 	scheduler.tick()
 
-	if got := p.workflowStatus.entry(name).LastTickOutcome; got != "skip_stale" {
+	if got := p.workflowStatus.entry(1, name).LastTickOutcome; got != "skip_stale" {
 		t.Fatalf("a removed entry's tick must skip as skip_stale, got %q", got)
 	}
 	if scheduler.Stopped() {

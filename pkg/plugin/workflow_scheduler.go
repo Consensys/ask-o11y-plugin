@@ -321,7 +321,7 @@ func (s *WorkflowScheduler) tick() {
 	// counted outcome, not a warning: reconcile stops it shortly.
 	if !s.entryStillStored(orgID) {
 		workflowTicks.WithLabelValues(label, "skip_stale").Inc()
-		s.p.workflowStatus.RecordTick(name, "skip_stale")
+		s.p.workflowStatus.RecordTick(orgID, name, "skip_stale")
 		return
 	}
 
@@ -347,7 +347,7 @@ func (s *WorkflowScheduler) tick() {
 				"workflow", name, "orgId", orgID)
 		}
 		workflowTicks.WithLabelValues(label, "skip_identity").Inc()
-		s.p.workflowStatus.RecordTick(name, "skip_identity")
+		s.p.workflowStatus.RecordTick(orgID, name, "skip_identity")
 		return
 	}
 
@@ -356,13 +356,13 @@ func (s *WorkflowScheduler) tick() {
 	if err != nil {
 		s.p.logger.Error("Workflow tick skipped: tick lock unavailable", "workflow", name, "orgId", orgID, "error", err)
 		workflowTicks.WithLabelValues(label, "skip_error").Inc()
-		s.p.workflowStatus.RecordTickError(name, "tick lock unavailable")
+		s.p.workflowStatus.RecordTickError(orgID, name, "tick lock unavailable")
 		return
 	}
 	if !held {
 		// Another replica owns this tick. Skipping is the healthy path.
 		workflowTicks.WithLabelValues(label, "skip_lock").Inc()
-		s.p.workflowStatus.RecordTick(name, "skip_lock")
+		s.p.workflowStatus.RecordTick(orgID, name, "skip_lock")
 		return
 	}
 
@@ -374,14 +374,14 @@ func (s *WorkflowScheduler) tick() {
 	runID, idErr := generateShareID()
 	if idErr != nil {
 		s.p.logger.Error("Workflow tick failed to generate a run ID", "workflow", name, "orgId", orgID, "error", idErr)
-		s.p.workflowStatus.RecordSessionError(name, idErr.Error())
+		s.p.workflowStatus.RecordSessionError(orgID, name, idErr.Error())
 		return
 	}
 	admitted, gateErr := s.p.acquireWorkflowTopLevelRun(orgID, name, runID, s.entry.SessionTimeoutSeconds)
 	if gateErr != nil {
 		s.p.logger.Error("Workflow tick skipped: top-level active key unavailable", "workflow", name, "orgId", orgID, "error", gateErr)
 		workflowTicks.WithLabelValues(label, "skip_error").Inc()
-		s.p.workflowStatus.RecordTickError(name, "top-level active key unavailable")
+		s.p.workflowStatus.RecordTickError(orgID, name, "top-level active key unavailable")
 		return
 	}
 	if !admitted {
@@ -389,13 +389,13 @@ func (s *WorkflowScheduler) tick() {
 		// the healthy path when the interval is shorter than the run, so it is
 		// counted and recorded, not warned about.
 		workflowTicks.WithLabelValues(label, "skip_active").Inc()
-		s.p.workflowStatus.RecordTick(name, "skip_active")
+		s.p.workflowStatus.RecordTick(orgID, name, "skip_active")
 		return
 	}
 	s.p.workflowTopLevelAdd(orgID, name, 1)
 
 	workflowTicks.WithLabelValues(label, "executed").Inc()
-	s.p.workflowStatus.RecordTick(name, "executed")
+	s.p.workflowStatus.RecordTick(orgID, name, "executed")
 	if _, _, startErr := s.p.startWorkflowSessionWithID(workflowRunParams{
 		entry:         s.entry,
 		skill:         s.entry.Skill,
@@ -413,7 +413,7 @@ func (s *WorkflowScheduler) tick() {
 		// released here because no finish goroutine will run for it.
 		s.p.releaseWorkflowTopLevelRun(orgID, name, runID)
 		s.p.logger.Error("Workflow tick failed to start its session", "workflow", name, "orgId", orgID, "error", startErr)
-		s.p.workflowStatus.RecordSessionError(name, startErr.Error())
+		s.p.workflowStatus.RecordSessionError(orgID, name, startErr.Error())
 	}
 }
 
@@ -466,7 +466,7 @@ func (s *WorkflowScheduler) deferredAllowlistValidation() bool {
 		}
 		s.p.logger.Error("Workflow disabled: invalid configuration", "workflow", s.entry.Name, "error", err)
 		workflowTicks.WithLabelValues(workflowLabel(s.resolvedOrgID(), s.entry.Name), "skip_error").Inc()
-		s.p.workflowStatus.RecordTickError(s.entry.Name, err.Error())
+		s.p.workflowStatus.RecordTickError(s.resolvedOrgID(), s.entry.Name, err.Error())
 		s.cancel()
 		return false
 	}
@@ -570,11 +570,17 @@ func (m *WorkflowManager) isRunning(orgID int64, name string) bool {
 // not be read is left running, so a Redis hiccup never disables a workflow.
 func (m *WorkflowManager) apply(desired map[workflowKey]WorkflowEntry, readOrgs map[int64]bool, problems map[workflowKey]string, logger log.Logger) {
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	if m.stopped {
+		m.mu.Unlock()
 		return
 	}
 
+	// Stop waits for an in-flight tick, so no Stop call may run under m.mu: a
+	// concurrent GET or PUT would block for up to one tick. The manager's own
+	// Stop uses the same shape. Cancel under the lock (cheap and
+	// non-blocking, so the old scheduler cannot start another tick) and join
+	// the schedulers after the unlock.
+	stopping := make([]*WorkflowScheduler, 0, len(m.schedulers))
 	for key, scheduler := range m.schedulers {
 		if !readOrgs[key.orgID] {
 			continue
@@ -585,7 +591,8 @@ func (m *WorkflowManager) apply(desired map[workflowKey]WorkflowEntry, readOrgs 
 		}
 		// Stop waits only for an in-flight tick. A run the tick already
 		// started continues under its own session and lands its record.
-		scheduler.Stop()
+		scheduler.cancel()
+		stopping = append(stopping, scheduler)
 		delete(m.schedulers, key)
 		delete(m.entries, key)
 		if keep {
@@ -624,6 +631,11 @@ func (m *WorkflowManager) apply(desired map[workflowKey]WorkflowEntry, readOrgs 
 			continue
 		}
 		delete(m.problems, key)
+	}
+	m.mu.Unlock()
+
+	for _, scheduler := range stopping {
+		scheduler.Stop()
 	}
 }
 

@@ -277,7 +277,7 @@ func TestWorkflowTickSurvivesSettingsSave(t *testing.T) {
 	// tick carries that stamp explicitly.
 	tick(after, entry)
 
-	if got := after.workflowStatus.entry(entry.Name).LastTickOutcome; got != "executed" {
+	if got := after.workflowStatus.entry(1, entry.Name).LastTickOutcome; got != "executed" {
 		t.Fatalf("tick after a settings save must run, not skip: outcome %q", got)
 	}
 	runsAfter, err := after.runStore.ListRuns(syntheticID, 1, 50)
@@ -336,7 +336,7 @@ func TestTickSkippedWhileTopLevelActive(t *testing.T) {
 	scheduler.allowlistChecked = true
 	scheduler.tick()
 
-	if got := p.workflowStatus.entry(name).LastTickOutcome; got != "skip_active" {
+	if got := p.workflowStatus.entry(1, name).LastTickOutcome; got != "skip_active" {
 		t.Fatalf("tick must skip while a top-level run is active, outcome %q", got)
 	}
 	runs, err := p.runStore.ListRuns(syntheticWorkflowUserID(name, 1), 1, 50)
@@ -367,7 +367,7 @@ func TestTopLevelTTLExpiryAllowsNextTick(t *testing.T) {
 	scheduler.allowlistChecked = true
 	scheduler.tick()
 
-	if got := p.workflowStatus.entry(name).LastTickOutcome; got != "executed" {
+	if got := p.workflowStatus.entry(1, name).LastTickOutcome; got != "executed" {
 		t.Fatalf("tick after key expiry must run, outcome %q", got)
 	}
 	waitForCondition(t, 10*time.Second, "run record", func() bool {
@@ -469,7 +469,7 @@ func TestWorkflowTickColdStartIsPerOrg(t *testing.T) {
 
 	// Org 2 has no identity record: its tick skips, for org 2 only.
 	tickEntry(cold)
-	if got := p.workflowStatus.entry(cold.Name).LastTickOutcome; got != "skip_identity" {
+	if got := p.workflowStatus.entry(2, cold.Name).LastTickOutcome; got != "skip_identity" {
 		t.Fatalf("unseeded org's tick must skip with skip_identity, got %q", got)
 	}
 	if got := testutil.ToFloat64(workflowTicks.WithLabelValues(workflowLabel(2, cold.Name), "skip_identity")); got < 1 {
@@ -482,7 +482,7 @@ func TestWorkflowTickColdStartIsPerOrg(t *testing.T) {
 
 	// Org 1's tick on the same instance and Redis proceeds normally.
 	tickEntry(hot)
-	if got := p.workflowStatus.entry(hot.Name).LastTickOutcome; got != "executed" {
+	if got := p.workflowStatus.entry(1, hot.Name).LastTickOutcome; got != "executed" {
 		t.Fatalf("seeded org's tick must run, got %q", got)
 	}
 	runs, err := p.runStore.ListRuns(syntheticWorkflowUserID(hot.Name, 1), 1, 50)

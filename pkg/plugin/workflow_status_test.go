@@ -18,12 +18,12 @@ import (
 func TestWorkflowStatusStoreRecordsTicksAndSessions(t *testing.T) {
 	store := NewWorkflowStatusStore()
 
-	if got := store.Get("never-ticked"); got.LastTickOutcome != "" || got.Started != 0 {
+	if got := store.Get(1, "never-ticked"); got.LastTickOutcome != "" || got.Started != 0 {
 		t.Fatalf("unknown workflow must return the zero status, got %+v", got)
 	}
 
-	store.RecordTick("wf", "executed")
-	status := store.Get("wf")
+	store.RecordTick(1, "wf", "executed")
+	status := store.Get(1, "wf")
 	if status.LastTickOutcome != "executed" || status.LastTickAt == nil {
 		t.Fatalf("tick not recorded: %+v", status)
 	}
@@ -31,42 +31,122 @@ func TestWorkflowStatusStoreRecordsTicksAndSessions(t *testing.T) {
 		t.Fatalf("tick time not current: %v", status.LastTickAt)
 	}
 
-	store.RecordTickError("wf", "tick lock unavailable")
-	status = store.Get("wf")
+	store.RecordTickError(1, "wf", "tick lock unavailable")
+	status = store.Get(1, "wf")
 	if status.LastTickOutcome != "skip_error" || status.LastError != "tick lock unavailable" {
 		t.Fatalf("tick error not recorded: %+v", status)
 	}
 
 	for i := 0; i < 3; i++ {
-		store.RecordSession("wf", "started")
-		store.RecordSession("wf", "completed")
+		store.RecordSession(1, "wf", "started")
+		store.RecordSession(1, "wf", "completed")
 	}
-	store.RecordSession("wf", "timeout")
-	store.RecordSession("wf", "not-an-outcome") // unknown outcomes count nothing
-	status = store.Get("wf")
+	store.RecordSession(1, "wf", "timeout")
+	store.RecordSession(1, "wf", "not-an-outcome") // unknown outcomes count nothing
+	status = store.Get(1, "wf")
 	if status.Started != 3 || status.Completed != 3 || status.Timeout != 1 || status.Failed != 0 {
 		t.Fatalf("session outcomes miscounted: %+v", status)
 	}
 
 	// A recovered tick clears the stale error; a session-level failure
 	// keeps the executed tick outcome.
-	store.RecordTickError("wf", "boom")
-	store.RecordTick("wf", "executed")
-	if got := store.Get("wf"); got.LastTickOutcome != "executed" || got.LastError != "" {
+	store.RecordTickError(1, "wf", "boom")
+	store.RecordTick(1, "wf", "executed")
+	if got := store.Get(1, "wf"); got.LastTickOutcome != "executed" || got.LastError != "" {
 		t.Fatalf("recovered tick must clear the error: %+v", got)
 	}
-	store.RecordTick("wf", "executed")
-	store.RecordSessionError("wf", "session start failed")
-	if got := store.Get("wf"); got.LastTickOutcome != "executed" || got.LastError != "session start failed" {
+	store.RecordTick(1, "wf", "executed")
+	store.RecordSessionError(1, "wf", "session start failed")
+	if got := store.Get(1, "wf"); got.LastTickOutcome != "executed" || got.LastError != "session start failed" {
 		t.Fatalf("session error must not change the tick outcome: %+v", got)
 	}
 
 	// A nil store (white-box test plugins) answers zero, never panics.
 	var nilStore *WorkflowStatusStore
-	nilStore.RecordTick("wf", "executed")
-	nilStore.RecordSession("wf", "started")
-	if got := nilStore.Get("wf"); got.Started != 0 {
+	nilStore.RecordTick(1, "wf", "executed")
+	nilStore.RecordSession(1, "wf", "started")
+	if got := nilStore.Get(1, "wf"); got.Started != 0 {
 		t.Fatalf("nil store must answer zero, got %+v", got)
+	}
+}
+
+// Two orgs may run the same workflow name on one plugin instance. Each org's
+// status row must show its own tick state: when the store was keyed by name
+// alone, the second org's tick overwrote the first org's, and each GET read
+// whichever org ticked last.
+func TestWorkflowStatusIsOrgScoped(t *testing.T) {
+	const name = "shared-name-wf"
+	store := NewWorkflowStatusStore()
+
+	store.RecordTick(1, name, "executed")
+	orgOne := store.Get(1, name)
+	store.RecordTickError(2, name, "tick lock unavailable")
+	store.RecordSession(1, name, "started")
+	store.RecordSession(2, name, "failed")
+
+	gotOne := store.Get(1, name)
+	if gotOne.LastTickOutcome != "executed" || gotOne.LastError != "" {
+		t.Fatalf("org 1 must keep its own tick state, got %+v", gotOne)
+	}
+	if orgOne.LastTickAt == nil || gotOne.LastTickAt == nil || !gotOne.LastTickAt.Equal(*orgOne.LastTickAt) {
+		t.Fatalf("org 2's tick must not rewrite org 1's tick time: before %v after %v",
+			orgOne.LastTickAt, gotOne.LastTickAt)
+	}
+	gotTwo := store.Get(2, name)
+	if gotTwo.LastTickOutcome != "skip_error" || gotTwo.LastError != "tick lock unavailable" {
+		t.Fatalf("org 2 must keep its own tick state, got %+v", gotTwo)
+	}
+	if gotTwo.LastTickAt == nil || !gotTwo.LastTickAt.After(*orgOne.LastTickAt) {
+		t.Fatalf("each org must carry its own tick time: org1 %v org2 %v",
+			orgOne.LastTickAt, gotTwo.LastTickAt)
+	}
+	if gotOne = store.Get(1, name); gotOne.Started != 1 || gotOne.Failed != 0 {
+		t.Fatalf("org 1's counters must not count org 2's sessions, got %+v", gotOne)
+	}
+	if gotTwo = store.Get(2, name); gotTwo.Started != 0 || gotTwo.Failed != 1 {
+		t.Fatalf("org 2's counters must not count org 1's sessions, got %+v", gotTwo)
+	}
+
+	// The API read path joins the status by org too: same name, two lists,
+	// two independent tick outcomes.
+	p, _ := newRedisBackedWorkflowPlugin(t)
+	orgOneEntry := validStoredWorkflowEntry(name)
+	orgOneEntry.OrgID = 1
+	orgTwoEntry := validStoredWorkflowEntry(name)
+	orgTwoEntry.OrgID = 2
+	if err := p.workflowEntryStore().SaveWorkflows(context.Background(), 1, []WorkflowEntry{orgOneEntry}); err != nil {
+		t.Fatalf("org 1 store seed failed: %v", err)
+	}
+	if err := p.workflowEntryStore().SaveWorkflows(context.Background(), 2, []WorkflowEntry{orgTwoEntry}); err != nil {
+		t.Fatalf("org 2 store seed failed: %v", err)
+	}
+	p.workflowStatus = NewWorkflowStatusStore()
+	p.workflowStatus.RecordTick(1, name, "executed")
+	p.workflowStatus.RecordTick(2, name, "skip_lock")
+
+	statusOf := func(orgID int64) map[string]interface{} {
+		rec := getWorkflowsRequest(t, p, orgID, "Admin")
+		if rec.Code != http.StatusOK {
+			t.Fatalf("org %d GET must succeed, got %d: %s", orgID, rec.Code, rec.Body.String())
+		}
+		var body struct {
+			Workflows []struct {
+				Status map[string]interface{} `json:"status"`
+			} `json:"workflows"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+			t.Fatalf("org %d invalid JSON body: %v", orgID, err)
+		}
+		if len(body.Workflows) != 1 {
+			t.Fatalf("org %d must see exactly its own entry, got %d", orgID, len(body.Workflows))
+		}
+		return body.Workflows[0].Status
+	}
+	if got := statusOf(1)["lastTickOutcome"]; got != "executed" {
+		t.Fatalf("org 1's GET must report its own tick outcome, got %v", got)
+	}
+	if got := statusOf(2)["lastTickOutcome"]; got != "skip_lock" {
+		t.Fatalf("org 2's GET must report its own tick outcome, got %v", got)
 	}
 }
 
@@ -111,7 +191,7 @@ func TestHandleWorkflowsListAdminSeesEntriesAndStatus(t *testing.T) {
 	p.workflows.schedulers[workflowKey{orgID: 1, name: "off-wf"}] = stopped
 	p.workflows.entries[workflowKey{orgID: 1, name: "off-wf"}] = configured[1]
 	p.workflowStatus = NewWorkflowStatusStore()
-	p.workflowStatus.RecordTick("running-wf", "executed")
+	p.workflowStatus.RecordTick(1, "running-wf", "executed")
 	// Durable counts come from the run store of the requesting org: two
 	// completed, one timeout. No identity seeding is needed to count.
 	synthetic := syntheticWorkflowUserID("running-wf", 1)
@@ -252,7 +332,7 @@ func TestHandleWorkflowLookupsTrimRawSavedName(t *testing.T) {
 	p.workflows.schedulers[workflowKey{orgID: 1, name: trimmed}] = scheduler
 	p.workflows.entries[workflowKey{orgID: 1, name: trimmed}] = scheduler.entry
 	p.workflowStatus = NewWorkflowStatusStore()
-	p.workflowStatus.RecordTick(trimmed, "executed")
+	p.workflowStatus.RecordTick(1, trimmed, "executed")
 
 	synthetic := syntheticWorkflowUserID(trimmed, 1)
 	p.runStore.CreateRun("trim-run-1", synthetic, 1, "trim-sess-1")
@@ -763,7 +843,7 @@ func TestHandleWorkflowSaveRejectsOversizeBody(t *testing.T) {
 }
 
 // Without Redis both routes fail closed: GET is 503, not an empty list, and
-// PUT is 500, not a silent success.
+// PUT is 503, not a silent success.
 func TestWorkflowRoutesFailClosedWithoutRedis(t *testing.T) {
 	p := newAgentRunTestPlugin(t) // no redisClient, matching the no-Redis deployment
 
@@ -777,8 +857,8 @@ func TestWorkflowRoutesFailClosedWithoutRedis(t *testing.T) {
 
 	put := putWorkflowsRequest(t, p, 1, "Admin",
 		putWorkflowsBody(t, []WorkflowEntry{validStoredWorkflowEntry("no-redis-wf")}))
-	if put.Code != http.StatusInternalServerError {
-		t.Fatalf("PUT without Redis must be 500, got %d: %s", put.Code, put.Body.String())
+	if put.Code != http.StatusServiceUnavailable {
+		t.Fatalf("PUT without Redis must be 503, got %d: %s", put.Code, put.Body.String())
 	}
 	if !strings.Contains(put.Body.String(), "error") {
 		t.Fatalf("PUT failure must be a JSON error body, got %s", put.Body.String())
