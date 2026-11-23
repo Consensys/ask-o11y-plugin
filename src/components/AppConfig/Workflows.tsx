@@ -111,6 +111,7 @@ export function WorkflowsTab({ savedWorkflows, onSaveWorkflows, onEditPrompt }: 
   const [runs, setRuns] = useState<Record<string, WorkflowRun[]>>({});
   const [runsError, setRunsError] = useState<Record<string, string | null>>({});
   const [skills, setSkills] = useState<SkillInfo[] | null>(null);
+  const [skillsError, setSkillsError] = useState<string | null>(null);
   const [editing, setEditing] = useState<{ original: string | null; entry: WorkflowEntryUI } | null>(null);
 
   const load = useCallback(async () => {
@@ -145,8 +146,15 @@ export function WorkflowsTab({ savedWorkflows, onSaveWorkflows, onEditPrompt }: 
   useEffect(() => {
     void load();
     listSkills()
-      .then((list) => setSkills(list.filter((s) => s.enabled && !s.hidden && !s.invalid)))
-      .catch(() => setSkills([]));
+      .then((list) => {
+        setSkills(list.filter((s) => s.enabled && !s.hidden && !s.invalid));
+        setSkillsError(null);
+      })
+      .catch(() => {
+        // An unavailable skill list must read as an error, not as zero skills.
+        setSkills([]);
+        setSkillsError('Failed to load skills; pickers show no options.');
+      });
   }, [load]);
 
   const toggleWorkflow = async (row: WorkflowRow, enabled: boolean) => {
@@ -159,7 +167,10 @@ export function WorkflowsTab({ savedWorkflows, onSaveWorkflows, onEditPrompt }: 
     onSaveWorkflows(next);
   };
 
-  const persistEntry = (original: string | null, entry: WorkflowEntryUI) => {
+  const persistEntry = (original: string | null, rawEntry: WorkflowEntryUI) => {
+    // The backend keys schedulers and session owners by the trimmed name;
+    // persist trimmed so UI lookups and runs fetches match.
+    const entry = { ...rawEntry, name: rawEntry.name.trim() };
     const base = (rows ?? []).map((r) => {
       const { running: _running, status: _status, ...saved } = r;
       return saved;
@@ -219,6 +230,7 @@ export function WorkflowsTab({ savedWorkflows, onSaveWorkflows, onEditPrompt }: 
       {editing && (
         <div className="mb-4 p-3" style={{ border: `1px solid ${theme.colors.border.weak}` }} data-testid="ac-workflow-editor">
           <h3 className="text-base mb-2">{editing.original === null ? 'New workflow' : `Edit ${editing.original}`}</h3>
+          {skillsError && <p className="text-warning text-sm mb-2">{skillsError}</p>}
           <div className="grid grid-cols-2 gap-2 mb-2">
             <Field label="Name" description={editing.original === null ? 'Stable identifier; renaming later orphans its sessions' : undefined}>
               <Input

@@ -150,7 +150,8 @@ type workflowAPIEntry struct {
 // session outcome counts derived from the run store, so the row counters and
 // the sessions list always agree: both read the same run records. Timed-out
 // runs are stored as failed with a timeout message; they count as timeout.
-func (p *Plugin) workflowSessionStatus(name string) workflowRuntimeStatus {
+func (p *Plugin) workflowSessionStatus(rawName string) workflowRuntimeStatus {
+	name := strings.TrimSpace(rawName)
 	status := p.workflowStatus.Get(name)
 	orgID := int64(0)
 	if instanceOrg, _, _, seeded := p.orgIdentity.Get(); seeded {
@@ -263,7 +264,9 @@ func (p *Plugin) handleWorkflowRuns(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Invalid path format", http.StatusBadRequest)
 		return
 	}
-	name = runIDPart
+	// prepareWorkflows trims entry names before schedulers start, so session
+	// owners are keyed by the trimmed name; trim here to match.
+	name = strings.TrimSpace(runIDPart)
 
 	p.settingsMu.RLock()
 	configured := p.settings.Workflows
