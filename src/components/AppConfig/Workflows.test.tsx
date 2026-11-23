@@ -8,7 +8,6 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 
 import { getBackendSrv } from '@grafana/runtime';
 import { WorkflowsTab } from './Workflows';
-import type { WorkflowEntryUI } from '../../types/plugin';
 
 jest.mock('@grafana/runtime', () => ({
   getBackendSrv: jest.fn(),
@@ -61,6 +60,25 @@ jest.mock('../../services/skillsClient', () => ({
 
 const fetchMock = getBackendSrv as jest.Mock;
 
+type FetchCfg = {
+  url: string;
+  method?: string;
+  data?: { workflows?: Array<Record<string, unknown>> };
+};
+
+/** Routes every backend call through `handler` and records the configs. */
+const routeFetch = (handler: (cfg: FetchCfg) => unknown, requests: FetchCfg[] = []): FetchCfg[] => {
+  fetchMock.mockImplementation(() => ({
+    fetch: (cfg: FetchCfg) => {
+      requests.push(cfg);
+      return handler(cfg);
+    },
+  }));
+  return requests;
+};
+
+const isWorkflowsSave = (cfg: FetchCfg) => cfg.method === 'PUT' && cfg.url.endsWith('/api/workflows');
+
 const workflowsResponse = () => ({
   workflows: [
     {
@@ -95,16 +113,16 @@ const workflowsResponse = () => ({
   ],
 });
 
-const renderTab = (onSave: (next: WorkflowEntryUI[]) => void = jest.fn(), onEditPrompt: (skill: string) => void = jest.fn()) =>
-  render(<WorkflowsTab savedWorkflows={[]} onSaveWorkflows={onSave} onEditPrompt={onEditPrompt} />);
+const renderTab = (onEditPrompt: (skill: string) => void = jest.fn()) =>
+  render(<WorkflowsTab onEditPrompt={onEditPrompt} />);
 
 describe('WorkflowsTab', () => {
   beforeEach(() => {
     fetchMock.mockReset();
   });
 
-  it('renders the fetched workflows with status', async () => {
-    fetchMock.mockImplementation(() => ({ fetch: () => of({ data: workflowsResponse() }) }));
+  it('seeds its rows from the GET on mount', async () => {
+    const requests = routeFetch(() => of({ data: workflowsResponse() }));
     renderTab();
 
     // The name and skill cells share the value; both render on success.
@@ -112,17 +130,22 @@ describe('WorkflowsTab', () => {
     expect(screen.getAllByText('noc-janitor').length).toBeGreaterThan(0);
     expect(screen.getByText(/3 \/ 2 \/ 1 \/ 0/)).toBeInTheDocument();
     expect(screen.getByText(/executed/)).toBeInTheDocument();
+
+    // The tab self-sources: one GET, no settings read on its behalf.
+    const workflowGets = requests.filter((cfg) => cfg.url.endsWith('/api/workflows') && !cfg.method);
+    expect(workflowGets).toHaveLength(1);
+    expect(requests.some((cfg) => cfg.url.endsWith('/settings'))).toBe(false);
   });
 
   it('renders the empty state when no workflows are configured', async () => {
-    fetchMock.mockImplementation(() => ({ fetch: () => of({ data: { workflows: [] } }) }));
+    routeFetch(() => of({ data: { workflows: [] } }));
     renderTab();
 
     expect(await screen.findByText(/No workflows configured/i)).toBeInTheDocument();
   });
 
   it('shows a load error with retry', async () => {
-    fetchMock.mockImplementation(() => ({ fetch: () => throwError(() => new Error('boom')) }));
+    routeFetch(() => throwError(() => new Error('boom')));
     renderTab();
 
     expect(await screen.findByText(/Failed to load workflow status/i)).toBeInTheDocument();
@@ -130,30 +153,28 @@ describe('WorkflowsTab', () => {
   });
 
   it('expands a workflow, lists its runs, and opens a share link', async () => {
-    fetchMock.mockImplementation(() => ({
-      fetch: (cfg: { url: string; method?: string }) => {
-        if (cfg.method === 'POST' && cfg.url.includes('/share')) {
-          return of({ data: { shareUrl: '/a/consensys-asko11y-app/shared/abc?orgId=1' } });
-        }
-        return of(
-          cfg.url.includes('/runs')
-            ? {
-                data: {
-                  runs: [
-                    {
-                      runId: 'run-9',
-                      sessionId: 'sess-9',
-                      status: 'completed',
-                      createdAt: '2026-11-20T17:00:00Z',
-                      updatedAt: '2026-11-20T17:01:00Z',
-                    },
-                  ],
-                },
-              }
-            : { data: workflowsResponse() }
-        );
-      },
-    }));
+    routeFetch((cfg) => {
+      if (cfg.method === 'POST' && cfg.url.includes('/share')) {
+        return of({ data: { shareUrl: '/a/consensys-asko11y-app/shared/abc?orgId=1' } });
+      }
+      return of(
+        cfg.url.includes('/runs')
+          ? {
+              data: {
+                runs: [
+                  {
+                    runId: 'run-9',
+                    sessionId: 'sess-9',
+                    status: 'completed',
+                    createdAt: '2026-11-20T17:00:00Z',
+                    updatedAt: '2026-11-20T17:01:00Z',
+                  },
+                ],
+              },
+            }
+          : { data: workflowsResponse() }
+      );
+    });
     const { locationService } = jest.requireMock('@grafana/runtime');
     renderTab();
 
@@ -170,30 +191,28 @@ describe('WorkflowsTab', () => {
   });
 
   it('surfaces a failed share POST instead of failing silently', async () => {
-    fetchMock.mockImplementation(() => ({
-      fetch: (cfg: { url: string; method?: string }) => {
-        if (cfg.method === 'POST' && cfg.url.includes('/share')) {
-          return throwError(() => new Error('boom'));
-        }
-        return of(
-          cfg.url.includes('/runs')
-            ? {
-                data: {
-                  runs: [
-                    {
-                      runId: 'run-9',
-                      sessionId: 'sess-9',
-                      status: 'completed',
-                      createdAt: '2026-11-20T17:00:00Z',
-                      updatedAt: '2026-11-20T17:01:00Z',
-                    },
-                  ],
-                },
-              }
-            : { data: workflowsResponse() }
-        );
-      },
-    }));
+    routeFetch((cfg) => {
+      if (cfg.method === 'POST' && cfg.url.includes('/share')) {
+        return throwError(() => new Error('boom'));
+      }
+      return of(
+        cfg.url.includes('/runs')
+          ? {
+              data: {
+                runs: [
+                  {
+                    runId: 'run-9',
+                    sessionId: 'sess-9',
+                    status: 'completed',
+                    createdAt: '2026-11-20T17:00:00Z',
+                    updatedAt: '2026-11-20T17:01:00Z',
+                  },
+                ],
+              },
+            }
+          : { data: workflowsResponse() }
+      );
+    });
     const { locationService } = jest.requireMock('@grafana/runtime');
     locationService.push.mockClear();
     renderTab();
@@ -210,10 +229,9 @@ describe('WorkflowsTab', () => {
     expect(locationService.push).not.toHaveBeenCalled();
   });
 
-  it('opens the editor for a row and saves an edited entry', async () => {
-    fetchMock.mockImplementation(() => ({ fetch: () => of({ data: workflowsResponse() }) }));
-    const onSave = jest.fn();
-    renderTab(onSave);
+  it('PUTs the edited entry list and closes the editor on success', async () => {
+    const requests = routeFetch((cfg) => of({ data: isWorkflowsSave(cfg) ? workflowsResponse() : workflowsResponse() }));
+    renderTab();
 
     const editButtons = await screen.findAllByRole('button', { name: 'Edit' });
     fireEvent.click(editButtons[0]);
@@ -222,18 +240,25 @@ describe('WorkflowsTab', () => {
     const nameInput = screen.getByDisplayValue('noc-dispatch');
     expect((nameInput as HTMLInputElement).disabled).toBe(true);
 
-    const save = screen.getByRole('button', { name: 'Save and reload' });
-    fireEvent.click(save);
-    expect(onSave).toHaveBeenCalledTimes(1);
-    const saved = onSave.mock.calls[0][0] as Array<Record<string, unknown>>;
-    expect(saved[0]).toMatchObject({ name: 'noc-dispatch', skill: 'noc-dispatch' });
-    expect(saved[0]).not.toHaveProperty('running');
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => expect(requests.some(isWorkflowsSave)).toBe(true));
+    const put = requests.find(isWorkflowsSave)!;
+    const payload = put.data!.workflows!;
+    expect(payload).toHaveLength(2);
+    expect(payload[0]).toMatchObject({ name: 'noc-dispatch', skill: 'noc-dispatch', enabled: true });
+    // Runtime state and the org never travel back in a save.
+    expect(payload[0]).not.toHaveProperty('running');
+    expect(payload[0]).not.toHaveProperty('status');
+    expect(payload[0]).not.toHaveProperty('orgId');
+
+    await waitFor(() => expect(screen.queryByTestId('ac-workflow-editor')).not.toBeInTheDocument());
   });
 
   it('jumps to the skill prompt editor', async () => {
-    fetchMock.mockImplementation(() => ({ fetch: () => of({ data: workflowsResponse() }) }));
+    routeFetch(() => of({ data: workflowsResponse() }));
     const onEditPrompt = jest.fn();
-    renderTab(jest.fn(), onEditPrompt);
+    renderTab(onEditPrompt);
 
     const promptButtons = await screen.findAllByRole('button', { name: 'Prompt' });
     fireEvent.click(promptButtons[0]);
@@ -241,53 +266,51 @@ describe('WorkflowsTab', () => {
   });
 
   it('encodes workflow names with spaces and percent signs in the runs URL', async () => {
-    const urls: string[] = [];
+    const requests: FetchCfg[] = [];
     const base = workflowsResponse().workflows[0];
-    fetchMock.mockImplementation(() => ({
-      fetch: (cfg: { url: string }) => {
-        urls.push(cfg.url);
-        if (cfg.url.includes('/runs')) {
-          return of({ data: { runs: [] } });
-        }
-        return of({
-          data: {
-            workflows: [
-              { ...base, name: 'Nightly RCA', skill: 'dispatch' },
-              { ...base, name: '50% RCA', skill: 'dispatch' },
-            ],
-          },
-        });
-      },
-    }));
+    routeFetch((cfg) => {
+      if (cfg.url.includes('/runs')) {
+        return of({ data: { runs: [] } });
+      }
+      return of({
+        data: {
+          workflows: [
+            { ...base, name: 'Nightly RCA', skill: 'dispatch' },
+            { ...base, name: '50% RCA', skill: 'dispatch' },
+          ],
+        },
+      });
+    }, requests);
     renderTab();
 
     const sessionsButtons = await screen.findAllByRole('button', { name: 'Sessions' });
     fireEvent.click(sessionsButtons[0]);
     await waitFor(() =>
-      expect(urls.some((url) => url.endsWith('/Nightly%20RCA/runs?limit=100'))).toBe(true)
+      expect(requests.some((cfg) => cfg.url.endsWith('/Nightly%20RCA/runs?limit=100'))).toBe(true)
     );
 
     fireEvent.click(sessionsButtons[1]);
     await waitFor(() =>
-      expect(urls.some((url) => url.endsWith('/50%25%20RCA/runs?limit=100'))).toBe(true)
+      expect(requests.some((cfg) => cfg.url.endsWith('/50%25%20RCA/runs?limit=100'))).toBe(true)
     );
   });
 
-  it('rejects an invalid workflow name inline and saves the trimmed name', async () => {
-    fetchMock.mockImplementation(() => ({ fetch: () => of({ data: { workflows: [] } }) }));
-    const onSave = jest.fn();
-    renderTab(onSave);
+  it('rejects an invalid workflow name inline and PUTs the trimmed name', async () => {
+    const requests = routeFetch((cfg) =>
+      of({ data: isWorkflowsSave(cfg) ? cfg.data : { workflows: [] } })
+    );
+    renderTab();
 
     fireEvent.click(await screen.findByRole('button', { name: 'New workflow' }));
     const nameInput = screen.getByLabelText('Name');
-    const save = screen.getByRole('button', { name: 'Save and reload' });
+    const save = screen.getByRole('button', { name: 'Save' });
 
     // "/" is a route separator: the runs GET and the share POST would cut the
     // path at different places.
     fireEvent.change(nameInput, { target: { value: 'x/runs/y' } });
     expect(screen.getByTestId('ac-workflow-name-error')).toHaveTextContent('Name must not contain "/".');
     expect(save).toBeDisabled();
-    expect(onSave).not.toHaveBeenCalled();
+    expect(requests.some(isWorkflowsSave)).toBe(false);
 
     // A control character corrupts Redis keys and log lines.
     fireEvent.change(nameInput, { target: { value: 'a\u0000b' } });
@@ -305,32 +328,116 @@ describe('WorkflowsTab', () => {
 
     expect(save).not.toBeDisabled();
     fireEvent.click(save);
-    expect(onSave).toHaveBeenCalledTimes(1);
-    expect((onSave.mock.calls[0][0] as Array<Record<string, unknown>>)[0]).toMatchObject({
+
+    await waitFor(() => expect(requests.some(isWorkflowsSave)).toBe(true));
+    const payload = requests.find(isWorkflowsSave)!.data!.workflows!;
+    expect(payload).toHaveLength(1);
+    expect(payload[0]).toMatchObject({
       name: 'Nightly RCA',
       skill: 'investigating-alerts',
+      toolAllowlist: ['irm_list_alert_groups'],
     });
+    expect(payload[0]).not.toHaveProperty('orgId');
   });
 
-  it('toggles a workflow and saves the full entry list', async () => {
-    fetchMock.mockImplementation(() => ({ fetch: () => of({ data: workflowsResponse() }) }));
-    const onSave = jest.fn();
-    renderTab(onSave);
+  it('toggles a workflow through one PUT of the full entry list', async () => {
+    const requests = routeFetch((cfg) =>
+      of({ data: isWorkflowsSave(cfg) ? cfg.data : workflowsResponse() })
+    );
+    renderTab();
 
     const toggles = await screen.findAllByRole('checkbox');
     // First row is noc-dispatch (enabled); switching it off must persist the
     // whole list minus the runtime join.
     fireEvent.click(toggles[0]);
 
-    // The save path reloads the page; the component must not refetch status
-    // on its own, which would race the restart.
-    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1));
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    const saved = onSave.mock.calls[0][0] as Array<Record<string, unknown>>;
-    expect(saved).toHaveLength(2);
-    expect(saved[0]).toMatchObject({ name: 'noc-dispatch', enabled: false });
-    expect(saved[1]).toMatchObject({ name: 'noc-janitor', enabled: false });
-    expect(saved[0]).not.toHaveProperty('running');
-    expect(saved[0]).not.toHaveProperty('status');
+    await waitFor(() => expect(requests.some(isWorkflowsSave)).toBe(true));
+    const payload = requests.find(isWorkflowsSave)!.data!.workflows!;
+    expect(payload).toHaveLength(2);
+    expect(payload[0]).toMatchObject({ name: 'noc-dispatch', enabled: false });
+    expect(payload[1]).toMatchObject({ name: 'noc-janitor', enabled: false });
+    expect(payload[0]).not.toHaveProperty('running');
+    expect(payload[0]).not.toHaveProperty('status');
+    expect(payload[0]).not.toHaveProperty('orgId');
+  });
+
+  it('deletes a workflow through the same PUT path', async () => {
+    const requests = routeFetch((cfg) => {
+      if (isWorkflowsSave(cfg)) {
+        return of({ data: { workflows: [workflowsResponse().workflows[1]] } });
+      }
+      return of({ data: workflowsResponse() });
+    });
+    renderTab();
+
+    const editButtons = await screen.findAllByRole('button', { name: 'Edit' });
+    fireEvent.click(editButtons[0]);
+    fireEvent.click(screen.getByRole('button', { name: 'Delete workflow' }));
+
+    await waitFor(() => expect(requests.some(isWorkflowsSave)).toBe(true));
+    const payload = requests.find(isWorkflowsSave)!.data!.workflows!;
+    expect(payload.map((entry) => entry.name)).toEqual(['noc-janitor']);
+
+    // The read-back seeds the table: the removed row is gone, the editor closed.
+    await waitFor(() => expect(screen.queryByText('noc-dispatch')).not.toBeInTheDocument());
+    expect(screen.queryByTestId('ac-workflow-editor')).not.toBeInTheDocument();
+    // The name renders in the name cell and again in the skill cell, so assert
+    // on the remaining row instead of on the shared text.
+    const tableRows = screen.getAllByRole('row');
+    expect(tableRows).toHaveLength(2); // header + the one remaining workflow
+    expect(tableRows[1]).toHaveTextContent('noc-janitor');
+  });
+
+  it('keeps the rows and the editor open and shows a 400 error inline', async () => {
+    const requests = routeFetch((cfg) => {
+      if (isWorkflowsSave(cfg)) {
+        return throwError(() => ({
+          status: 400,
+          data: { errors: [{ name: 'Nightly RCA', error: 'name must not contain "/"' }] },
+        }));
+      }
+      return of({ data: workflowsResponse() });
+    });
+    renderTab();
+
+    const editButtons = await screen.findAllByRole('button', { name: 'Edit' });
+    fireEvent.click(editButtons[0]);
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    const error = await screen.findByTestId('ac-workflow-save-error');
+    expect(error).toHaveTextContent(/Nightly RCA: name must not contain/);
+    expect(error.className).toContain('text-warning');
+    // A rejected save is all-or-nothing: the editor stays, the rows do not move.
+    expect(screen.getByTestId('ac-workflow-editor')).toBeInTheDocument();
+    expect(screen.getAllByText('noc-dispatch').length).toBeGreaterThan(0);
+    expect(screen.getByText(/3 \/ 2 \/ 1 \/ 0/)).toBeInTheDocument();
+    expect(requests.filter(isWorkflowsSave)).toHaveLength(1);
+  });
+
+  it('replaces its rows with the PUT read-back on success', async () => {
+    const updated = workflowsResponse();
+    updated.workflows[0].status.started = 9;
+    routeFetch((cfg) => of({ data: isWorkflowsSave(cfg) ? updated : workflowsResponse() }));
+    renderTab();
+
+    const toggles = await screen.findAllByRole('checkbox');
+    fireEvent.click(toggles[0]);
+
+    await waitFor(() => expect(screen.getByText(/9 \/ 2 \/ 1 \/ 0/)).toBeInTheDocument());
+    expect(screen.queryByTestId('ac-workflow-save-error')).not.toBeInTheDocument();
+  });
+
+  it('never writes through the Grafana plugin settings URL', async () => {
+    const requests = routeFetch((cfg) =>
+      of({ data: isWorkflowsSave(cfg) ? cfg.data : workflowsResponse() })
+    );
+    renderTab();
+
+    const toggles = await screen.findAllByRole('checkbox');
+    fireEvent.click(toggles[0]);
+    await waitFor(() => expect(requests.some(isWorkflowsSave)).toBe(true));
+
+    const settingsCalls = requests.filter((cfg) => cfg.url.endsWith('/settings'));
+    expect(settingsCalls).toHaveLength(0);
   });
 });

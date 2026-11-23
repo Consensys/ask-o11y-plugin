@@ -5,6 +5,7 @@ import { PluginType } from '@grafana/data';
 import AppConfig, { AppConfigProps } from './AppConfig';
 import { testIds } from 'components/testIds';
 import { getPluginStorageKey } from '../../utils/storageKeys';
+import type { AppPluginSettings } from '../../types/plugin';
 
 const SETTINGS_TAB_STORAGE_KEY = getPluginStorageKey('settings.activeTab');
 
@@ -205,20 +206,19 @@ describe('Components/AppConfig', () => {
     expect(screen.getByText('Agent Runtime *')).toBeInTheDocument();
   });
 
-  test('saveWorkflows merges into the settings read at save time, not the mount snapshot', async () => {
-    // Another admin changed maxTotalTokens after this page mounted; the stored
-    // jsonData also carries workflows the status endpoint does not report.
-    mockStoredJsonData = {
-      maxTotalTokens: 64000,
+  test('renders the Workflows tab from its own admin route, not from plugin settings', async () => {
+    // Settings still carry a stale workflows key from the pre-per-org design;
+    // the tab must ignore it and source its rows from GET /api/workflows.
+    mockStoredJsonData = { workflows: [{ name: 'stored-flow', enabled: true }] };
+    props.plugin.meta.jsonData = {
       workflows: [{ name: 'stored-flow', enabled: true }],
-    };
-    props.plugin.meta.jsonData = { maxTotalTokens: 128000 };
+    } as unknown as AppPluginSettings;
 
     mockFetch.mockImplementation((options: FetchOptions) => {
       if (options.url?.endsWith('/settings')) {
-        return of({ data: options.method === 'POST' ? {} : { jsonData: mockStoredJsonData } });
+        return of({ data: { jsonData: mockStoredJsonData } });
       }
-      if (options.url?.includes('/api/workflows')) {
+      if (options.url?.endsWith('/resources/api/workflows')) {
         return of({
           data: {
             workflows: [
@@ -230,6 +230,8 @@ describe('Components/AppConfig', () => {
                 sessionTimeoutSeconds: 300,
                 maxConcurrentSessions: 5,
                 toolAllowlist: ['alerting_rules_read'],
+                running: true,
+                status: { started: 0, completed: 0, failed: 0, cancelled: 0, timeout: 0 },
               },
             ],
           },
@@ -241,27 +243,14 @@ describe('Components/AppConfig', () => {
     render(<AppConfig {...props} />);
     fireEvent.click(screen.getByText('Workflows'));
 
-    const toggle = await screen.findByTestId('ac-workflow-enabled-Nightly RCA');
-    fireEvent.click(toggle);
+    expect(await screen.findByTestId('ac-workflow-enabled-Nightly RCA')).toBeInTheDocument();
+    expect(screen.queryByText('stored-flow')).not.toBeInTheDocument();
 
-    await waitFor(() => {
-      expect(
-        mockFetch.mock.calls.some(([options]) => options.method === 'POST' && options.url?.endsWith('/settings'))
-      ).toBe(true);
-    });
-
-    const postCall = mockFetch.mock.calls.find(
-      ([options]) => options.method === 'POST' && options.url?.endsWith('/settings')
+    const workflowGets = mockFetch.mock.calls.filter(([options]) =>
+      options.url?.endsWith('/resources/api/workflows')
     );
-    expect(postCall).toBeDefined();
-    const { data } = postCall![0] as {
-      data: { jsonData: { maxTotalTokens?: number; workflows?: Array<Record<string, unknown>> } };
-    };
-
-    // The non-workflows key comes from the fresh read, not the mount snapshot.
-    expect(data.jsonData.maxTotalTokens).toBe(64000);
-    // Only the workflows key is replaced, with the edited entry list.
-    expect(data.jsonData.workflows).toHaveLength(1);
-    expect(data.jsonData.workflows?.[0]).toMatchObject({ name: 'Nightly RCA', enabled: false });
+    expect(workflowGets).toHaveLength(1);
+    // Nothing is read from or written to the plugin settings for this tab.
+    expect(mockFetch.mock.calls.some(([options]) => options.url?.endsWith('/settings'))).toBe(false);
   });
 });

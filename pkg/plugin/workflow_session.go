@@ -169,7 +169,7 @@ func (p *Plugin) startWorkflowSessionWithID(params workflowRunParams, runID stri
 
 	activation, err := skills.Resolve(p.skillRegistry, params.message, []string{params.skill}, "")
 	if err != nil {
-		workflowSessions.WithLabelValues(workflowLabel(name), "failed").Inc()
+		workflowSessions.WithLabelValues(workflowLabel(orgID, name), "failed").Inc()
 		p.workflowStatus.RecordSession(name, "failed")
 		return "", "", fmt.Errorf("workflow %s: skill activation failed: %w", name, err)
 	}
@@ -183,7 +183,7 @@ func (p *Plugin) startWorkflowSessionWithID(params workflowRunParams, runID stri
 
 	systemPrompt, err := p.promptRegistry.BuildSystemPrompt(toolCtx)
 	if err != nil {
-		workflowSessions.WithLabelValues(workflowLabel(name), "failed").Inc()
+		workflowSessions.WithLabelValues(workflowLabel(orgID, name), "failed").Inc()
 		p.workflowStatus.RecordSession(name, "failed")
 		return "", "", fmt.Errorf("workflow %s: system prompt build failed: %w", name, err)
 	}
@@ -192,7 +192,7 @@ func (p *Plugin) startWorkflowSessionWithID(params workflowRunParams, runID stri
 	}
 	userPrompt, err := p.promptRegistry.BuildUserPrompt(workflowConversationType, params.message, toolCtx)
 	if err != nil {
-		workflowSessions.WithLabelValues(workflowLabel(name), "failed").Inc()
+		workflowSessions.WithLabelValues(workflowLabel(orgID, name), "failed").Inc()
 		p.workflowStatus.RecordSession(name, "failed")
 		return "", "", fmt.Errorf("workflow %s: user prompt build failed: %w", name, err)
 	}
@@ -206,7 +206,7 @@ func (p *Plugin) startWorkflowSessionWithID(params workflowRunParams, runID stri
 		Content: userPrompt,
 	}})
 	if err != nil {
-		workflowSessions.WithLabelValues(workflowLabel(name), "failed").Inc()
+		workflowSessions.WithLabelValues(workflowLabel(orgID, name), "failed").Inc()
 		p.workflowStatus.RecordSession(name, "failed")
 		return "", "", fmt.Errorf("workflow %s: session creation failed: %w", name, err)
 	}
@@ -285,7 +285,7 @@ func (p *Plugin) startWorkflowSessionWithID(params workflowRunParams, runID stri
 		"spawned", params.spawned,
 		"model", runModel,
 	)
-	workflowSessions.WithLabelValues(workflowLabel(name), "started").Inc()
+	workflowSessions.WithLabelValues(workflowLabel(orgID, name), "started").Inc()
 	p.workflowStatus.RecordSession(name, "started")
 
 	eventCh := make(chan agent.SSEEvent, 16)
@@ -302,7 +302,7 @@ func (p *Plugin) startWorkflowSessionWithID(params workflowRunParams, runID stri
 	go func() {
 		defer p.endWorkflowRun()
 		started := time.Now()
-		login := "workflow-" + workflowLabel(name)
+		login := "workflow-" + workflowLabel(params.orgID, name)
 		p.consumeAgentEvents(runID, sessionID, params.syntheticID, login, orgID, orgName, runModel, eventCh)
 
 		// Read the deadline verdict before cancelling: runCancel would turn a
@@ -327,16 +327,16 @@ func (p *Plugin) startWorkflowSessionWithID(params workflowRunParams, runID stri
 				outcome = "cancelled"
 			}
 		}
-		workflowSessions.WithLabelValues(workflowLabel(name), outcome).Inc()
+		workflowSessions.WithLabelValues(workflowLabel(orgID, name), outcome).Inc()
 		p.workflowStatus.RecordSession(name, outcome)
-		observeWorkflowRunDuration(name, time.Since(started))
+		observeWorkflowRunDuration(params.orgID, name, time.Since(started))
 
 		if params.topLevelGated {
-			p.releaseWorkflowTopLevelRun(name, runID)
+			p.releaseWorkflowTopLevelRun(params.orgID, name, runID)
 		}
 
 		if params.spawned {
-			p.workflowActiveSpawnRemove(name, runID)
+			p.workflowActiveSpawnRemove(params.orgID, name, runID)
 		}
 
 		if outcome == "timeout" || outcome == "failed" {
@@ -380,7 +380,7 @@ func (p *Plugin) maybeRunWorkflowFallback(params workflowRunParams, outcome stri
 			"workflow", entry.Name, "skill", entry.FallbackSkill, "error", err)
 		return
 	}
-	admitted, gateErr := p.acquireWorkflowTopLevelRun(entry.Name, runID, entry.SessionTimeoutSeconds)
+	admitted, gateErr := p.acquireWorkflowTopLevelRun(params.orgID, entry.Name, runID, entry.SessionTimeoutSeconds)
 	if gateErr != nil {
 		p.logger.Error("Workflow fallback skipped: top-level active key unavailable",
 			"workflow", entry.Name, "error", gateErr)
@@ -391,10 +391,10 @@ func (p *Plugin) maybeRunWorkflowFallback(params workflowRunParams, outcome stri
 			"workflow", entry.Name, "after", outcome)
 		return
 	}
-	p.workflowTopLevelAdd(entry.Name, 1)
+	p.workflowTopLevelAdd(params.orgID, entry.Name, 1)
 	fallbackParams.topLevelGated = true
 	if _, _, err := p.startWorkflowSessionWithID(fallbackParams, runID); err != nil {
-		p.releaseWorkflowTopLevelRun(entry.Name, runID)
+		p.releaseWorkflowTopLevelRun(params.orgID, entry.Name, runID)
 		p.logger.Error("Workflow fallback session failed to start",
 			"workflow", entry.Name, "skill", entry.FallbackSkill, "error", err)
 	}
@@ -472,7 +472,7 @@ func (p *Plugin) handleWorkflowSpawn(params workflowRunParams, arguments string,
 		return fmt.Sprintf("spawn_session failed: %v", err), true
 	}
 	deadline := time.Now().Add(time.Duration(params.entry.SessionTimeoutSeconds) * time.Second)
-	admitted, err := p.workflowActiveSpawnTryAdd(params.entry.Name, runID, deadline, params.entry.MaxConcurrentSessions)
+	admitted, err := p.workflowActiveSpawnTryAdd(params.orgID, params.entry.Name, runID, deadline, params.entry.MaxConcurrentSessions)
 	if err != nil {
 		return fmt.Sprintf("spawn_session refused: the concurrency check is unavailable (%v); retry on a later run", err), true
 	}
@@ -495,10 +495,10 @@ func (p *Plugin) handleWorkflowSpawn(params workflowRunParams, arguments string,
 	if err != nil {
 		// Release the admission slot the failed start never occupied with a
 		// running session.
-		p.workflowActiveSpawnRemove(params.entry.Name, runID)
+		p.workflowActiveSpawnRemove(params.orgID, params.entry.Name, runID)
 		return fmt.Sprintf("spawn_session failed: %v", err), true
 	}
-	p.workflowActiveSpawnRefreshGauge(params.entry.Name)
+	p.workflowActiveSpawnRefreshGauge(params.orgID, params.entry.Name)
 
 	result, _ := json.Marshal(map[string]string{"sessionId": sessionID, "runId": runID})
 	return string(result), false

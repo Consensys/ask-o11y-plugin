@@ -2,25 +2,24 @@ package plugin
 
 import (
 	"context"
-	"errors"
 	"testing"
 
 	"github.com/grafana/grafana-plugin-sdk-go/backend/log"
 )
 
-func TestOrgIdentityStoreSeedsInstanceBinding(t *testing.T) {
+func TestOrgIdentityStoreSeedsPerOrg(t *testing.T) {
 	store := NewOrgIdentityStore()
 
-	if _, _, _, ok := store.Get(); ok {
-		t.Fatal("unseeded instance must not resolve")
+	if _, _, ok := store.GetForOrg(42); ok {
+		t.Fatal("unseeded org must not resolve")
 	}
 
 	if err := store.Seed(42, "https://grafana.example", "token-1"); err != nil {
 		t.Fatalf("first seed failed: %v", err)
 	}
-	orgID, url, token, ok := store.Get()
-	if !ok || orgID != 42 || url != "https://grafana.example" || token != "token-1" {
-		t.Fatalf("seeded instance must resolve: %d %q %q %v", orgID, url, token, ok)
+	url, token, ok := store.GetForOrg(42)
+	if !ok || url != "https://grafana.example" || token != "token-1" {
+		t.Fatalf("seeded org must resolve: %q %q %v", url, token, ok)
 	}
 
 	// The same org refreshes the URL and the token, so a corrected URL or a
@@ -28,16 +27,16 @@ func TestOrgIdentityStoreSeedsInstanceBinding(t *testing.T) {
 	if err := store.Seed(42, "https://fixed.example", "token-2"); err != nil {
 		t.Fatalf("same-org re-seed failed: %v", err)
 	}
-	orgID, url, token, ok = store.Get()
-	if !ok || orgID != 42 || url != "https://fixed.example" || token != "token-2" {
-		t.Fatalf("same org must refresh URL and token: %d %q %q %v", orgID, url, token, ok)
+	url, token, ok = store.GetForOrg(42)
+	if !ok || url != "https://fixed.example" || token != "token-2" {
+		t.Fatalf("same org must refresh URL and token: %q %q %v", url, token, ok)
 	}
 
 	// An empty token never overwrites a known one.
 	if err := store.Seed(42, "", ""); err != nil {
 		t.Fatalf("same-org empty re-seed failed: %v", err)
 	}
-	if _, _, token, ok = store.Get(); !ok || token != "token-2" {
+	if _, token, ok = store.GetForOrg(42); !ok || token != "token-2" {
 		t.Fatalf("empty seed must not clear the token: %q %v", token, ok)
 	}
 
@@ -46,28 +45,33 @@ func TestOrgIdentityStoreSeedsInstanceBinding(t *testing.T) {
 	if err := fresh.Seed(7, "https://grafana.example", ""); err != nil {
 		t.Fatalf("seed without token failed: %v", err)
 	}
-	if _, _, _, ok := fresh.Get(); ok {
+	if _, _, ok := fresh.GetForOrg(7); ok {
 		t.Fatal("identity without a token must not resolve")
 	}
 }
 
-// TestOrgIdentityStoreRejectsMismatchedSeed is C10: an instance bound to org A
-// must reject a seed for org B outright instead of merging org A's org with
-// org B's token.
-func TestOrgIdentityStoreRejectsMismatchedSeed(t *testing.T) {
+// TestOrgIdentityStoreSeedsTwoOrgsIndependently replaces the old single-org
+// mismatch rule: org B may seed while org A is bound, and each resolves only
+// its own binding.
+func TestOrgIdentityStoreSeedsTwoOrgsIndependently(t *testing.T) {
 	store := NewOrgIdentityStore()
 	if err := store.Seed(42, "https://grafana.example", "token-1"); err != nil {
-		t.Fatalf("first seed failed: %v", err)
+		t.Fatalf("org 42 seed failed: %v", err)
+	}
+	if err := store.Seed(43, "https://other.example", "token-2"); err != nil {
+		t.Fatalf("org 43 seed must be accepted, got %v", err)
 	}
 
-	err := store.Seed(43, "https://other.example", "token-2")
-	if !errors.Is(err, errOrgIdentityMismatch) {
-		t.Fatalf("mismatched re-seed must return errOrgIdentityMismatch, got %v", err)
+	url, token, ok := store.GetForOrg(42)
+	if !ok || url != "https://grafana.example" || token != "token-1" {
+		t.Fatalf("org 42 binding changed: %q %q %v", url, token, ok)
 	}
-
-	orgID, url, token, ok := store.Get()
-	if !ok || orgID != 42 || url != "https://grafana.example" || token != "token-1" {
-		t.Fatalf("mismatched re-seed must change nothing: %d %q %q %v", orgID, url, token, ok)
+	url, token, ok = store.GetForOrg(43)
+	if !ok || url != "https://other.example" || token != "token-2" {
+		t.Fatalf("org 43 must resolve its own binding: %q %q %v", url, token, ok)
+	}
+	if _, _, ok := store.GetForOrg(44); ok {
+		t.Fatal("an org that never seeded must not resolve")
 	}
 }
 
@@ -76,22 +80,22 @@ func TestOrgIdentitySeedRejectsNonPositiveOrg(t *testing.T) {
 	if err := store.Seed(0, "https://grafana.example", "token-1"); err == nil {
 		t.Fatal("org ID 0 must be rejected")
 	}
-	if _, _, _, ok := store.Get(); ok {
-		t.Fatal("rejected seed must not resolve")
+	if err := store.Seed(-3, "https://grafana.example", "token-1"); err == nil {
+		t.Fatal("negative org ID must be rejected")
+	}
+	if _, _, ok := store.GetForOrg(0); ok {
+		t.Fatal("org ID 0 must never resolve")
 	}
 }
 
-// TestPersistedOrgIdentitySurvivesRestart is the state-level refutation: the
-// binding a request persists is what a fresh plugin instance (a settings save)
-// loads before its workflows start.
-func TestPersistedOrgIdentitySurvivesRestart(t *testing.T) {
+// TestPersistedOrgIdentityPerOrgRoundTrip is the state-level refutation: the
+// binding a request persists under one org's key is what a fresh plugin
+// instance resolves for that org, and only for that org.
+func TestPersistedOrgIdentityPerOrgRoundTrip(t *testing.T) {
 	client := workflowRedisTestClient(t)
 	defer client.Close()
 	ctx := context.Background()
-	if err := client.Del(ctx, orgIdentityRedisKey).Err(); err != nil {
-		t.Fatalf("cleanup failed: %v", err)
-	}
-	t.Cleanup(func() { client.Del(context.Background(), orgIdentityRedisKey) })
+	t.Cleanup(func() { client.FlushDB(context.Background()) })
 
 	before := &Plugin{
 		logger:      log.DefaultLogger,
@@ -100,6 +104,7 @@ func TestPersistedOrgIdentitySurvivesRestart(t *testing.T) {
 		orgIdentity: NewOrgIdentityStore(),
 		ctx:         ctx,
 	}
+	before.orgIdentity.attachRedis(client, ctx, log.DefaultLogger)
 	before.seedOrgIdentity(42, "https://grafana.example", "token-1")
 
 	after := &Plugin{
@@ -109,20 +114,52 @@ func TestPersistedOrgIdentitySurvivesRestart(t *testing.T) {
 		orgIdentity: NewOrgIdentityStore(),
 		ctx:         ctx,
 	}
-	if _, _, _, ok := after.orgIdentity.Get(); ok {
-		t.Fatal("the fresh instance must start empty")
+	after.orgIdentity.attachRedis(client, ctx, log.DefaultLogger)
+	if _, _, ok := after.orgIdentity.GetForOrg(42); !ok {
+		t.Fatal("the fresh instance must resolve org 42 from its persisted record")
 	}
-	after.loadPersistedOrgIdentity()
+	url, token, ok := after.orgIdentity.GetForOrg(42)
+	if !ok || url != "https://grafana.example" || token != "token-1" {
+		t.Fatalf("persisted binding must restore: %q %q %v", url, token, ok)
+	}
+	if _, _, ok := after.orgIdentity.GetForOrg(43); ok {
+		t.Fatal("org 43 must not see org 42's record")
+	}
+}
 
-	orgID, url, token, ok := after.orgIdentity.Get()
-	if !ok || orgID != 42 || url != "https://grafana.example" || token != "token-1" {
-		t.Fatalf("persisted binding must restore: %d %q %q %v", orgID, url, token, ok)
+// TestGetForOrgCachesRedisHit proves the read-through caches the record in
+// memory: after the key is gone the org still resolves without another GET.
+func TestGetForOrgCachesRedisHit(t *testing.T) {
+	client := workflowRedisTestClient(t)
+	defer client.Close()
+	ctx := context.Background()
+	t.Cleanup(func() { client.FlushDB(context.Background()) })
+
+	seeded := &Plugin{
+		logger:      log.DefaultLogger,
+		redisClient: client,
+		usingRedis:  true,
+		orgIdentity: NewOrgIdentityStore(),
+		ctx:         ctx,
+	}
+	seeded.orgIdentity.attachRedis(client, ctx, log.DefaultLogger)
+	seeded.seedOrgIdentity(5, "https://grafana.example", "token-5")
+
+	fresh := NewOrgIdentityStore()
+	fresh.attachRedis(client, ctx, log.DefaultLogger)
+	if _, _, ok := fresh.GetForOrg(5); !ok {
+		t.Fatal("fallback GET must resolve the persisted org")
+	}
+	if err := client.Del(ctx, orgIdentityRedisKey(5)).Err(); err != nil {
+		t.Fatalf("key removal failed: %v", err)
+	}
+	if _, token, ok := fresh.GetForOrg(5); !ok || token != "token-5" {
+		t.Fatal("a resolved org must be cached in memory")
 	}
 }
 
 // TestPersistedOrgIdentityWithoutRedisDegrades covers the in-memory path: a
-// seed still works for this instance, persistence is a no-op, and loading
-// never blocks or panics.
+// seed still works for this instance, and there is nothing to read back.
 func TestPersistedOrgIdentityWithoutRedisDegrades(t *testing.T) {
 	p := &Plugin{
 		logger:      log.DefaultLogger,
@@ -130,8 +167,8 @@ func TestPersistedOrgIdentityWithoutRedisDegrades(t *testing.T) {
 		ctx:         context.Background(),
 	}
 	p.seedOrgIdentity(42, "https://grafana.example", "token-1")
-	if orgID, _, token, ok := p.orgIdentity.Get(); !ok || orgID != 42 || token != "token-1" {
-		t.Fatalf("in-memory seed must still bind this instance: %d %q %v", orgID, token, ok)
+	if url, token, ok := p.orgIdentity.GetForOrg(42); !ok || token != "token-1" || url == "" {
+		t.Fatalf("in-memory seed must still bind this org: %q %q %v", url, token, ok)
 	}
 
 	restarted := &Plugin{
@@ -139,8 +176,7 @@ func TestPersistedOrgIdentityWithoutRedisDegrades(t *testing.T) {
 		orgIdentity: NewOrgIdentityStore(),
 		ctx:         context.Background(),
 	}
-	restarted.loadPersistedOrgIdentity()
-	if _, _, _, ok := restarted.orgIdentity.Get(); ok {
+	if _, _, ok := restarted.orgIdentity.GetForOrg(42); ok {
 		t.Fatal("no Redis means no persisted identity, matching the lazy-seed behavior")
 	}
 }
@@ -149,20 +185,33 @@ func TestPersistedOrgIdentityIgnoresCorruptRecord(t *testing.T) {
 	client := workflowRedisTestClient(t)
 	defer client.Close()
 	ctx := context.Background()
-	if err := client.Set(ctx, orgIdentityRedisKey, "not-json", 0).Err(); err != nil {
+	if err := client.Set(ctx, orgIdentityRedisKey(42), "not-json", 0).Err(); err != nil {
 		t.Fatalf("fixture write failed: %v", err)
 	}
-	t.Cleanup(func() { client.Del(context.Background(), orgIdentityRedisKey) })
+	t.Cleanup(func() { client.FlushDB(context.Background()) })
 
-	p := &Plugin{
-		logger:      log.DefaultLogger,
-		redisClient: client,
-		usingRedis:  true,
-		orgIdentity: NewOrgIdentityStore(),
-		ctx:         ctx,
+	p := NewOrgIdentityStore()
+	p.attachRedis(client, ctx, log.DefaultLogger)
+	if _, _, ok := p.GetForOrg(42); ok {
+		t.Fatal("a corrupt record must leave the org unseeded, not resolve")
 	}
-	p.loadPersistedOrgIdentity()
-	if _, _, _, ok := p.orgIdentity.Get(); ok {
-		t.Fatal("a corrupt record must leave the store empty, not resolve")
+}
+
+// TestGetForOrgRejectsForeignRecord guards the read path: a record stored under
+// the wrong org key must not bind its org.
+func TestGetForOrgRejectsForeignRecord(t *testing.T) {
+	client := workflowRedisTestClient(t)
+	defer client.Close()
+	ctx := context.Background()
+	if err := client.Set(ctx, orgIdentityRedisKey(43),
+		`{"orgId":42,"grafanaUrl":"https://grafana.example","saToken":"token-1"}`, 0).Err(); err != nil {
+		t.Fatalf("fixture write failed: %v", err)
+	}
+	t.Cleanup(func() { client.FlushDB(context.Background()) })
+
+	p := NewOrgIdentityStore()
+	p.attachRedis(client, ctx, log.DefaultLogger)
+	if _, _, ok := p.GetForOrg(43); ok {
+		t.Fatal("a record naming another org must not resolve")
 	}
 }

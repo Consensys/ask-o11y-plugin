@@ -45,10 +45,46 @@ type WorkflowRun = {
 };
 
 type WorkflowsTabProps = {
-  savedWorkflows: WorkflowEntryUI[];
-  onSaveWorkflows: (next: WorkflowEntryUI[]) => void;
   /** Opens the Skills tab with this skill's editor loaded. */
   onEditPrompt: (skill: string) => void;
+};
+
+/**
+ * Drops the runtime fields the GET joins onto an entry. The PUT replaces the
+ * stored entries, so counters and scheduler state must never travel back.
+ * orgId is never read or sent: the server stamps the org from the request.
+ */
+const toEntry = (row: WorkflowRow): WorkflowEntryUI => {
+  const { running: _running, status: _status, ...entry } = row;
+  delete (entry as Record<string, unknown>).orgId;
+  return entry;
+};
+
+const saveErrorMessage = (err: unknown): string => {
+  const failure = err as
+    | { status?: number; data?: { errors?: Array<{ name?: string; error?: string }>; error?: string } }
+    | undefined;
+  const problems = failure?.data?.errors;
+  if (Array.isArray(problems) && problems.length > 0) {
+    const parts = problems.map((problem) => {
+      const name = (problem.name ?? '').trim();
+      const text = (problem.error ?? '').trim() || 'invalid entry';
+      return name ? `${name}: ${text}` : text;
+    });
+    return `Save rejected. ${parts.join('; ')}`;
+  }
+  switch (failure?.status) {
+    case 403:
+      return 'Save rejected. Admin access is required.';
+    case 413:
+      return 'Save rejected. The workflow list is too large.';
+    case 503:
+      return 'Save failed. Workflow storage is unavailable. Is Redis configured?';
+    default:
+      break;
+  }
+  const detail = failure?.data?.error;
+  return detail ? `Save failed. ${detail}` : 'Save failed. The workflow list was not saved.';
 };
 
 const tickOutcomeColor = (outcome?: string) => {
@@ -156,11 +192,13 @@ const MODEL_OPTIONS: Array<ComboboxOption<string>> = [
   { label: 'Large', value: 'large' },
 ];
 
-export function WorkflowsTab({ savedWorkflows, onSaveWorkflows, onEditPrompt }: WorkflowsTabProps): React.ReactElement {
+export function WorkflowsTab({ onEditPrompt }: WorkflowsTabProps): React.ReactElement {
   const theme = useTheme2();
   const [rows, setRows] = useState<WorkflowRow[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [runs, setRuns] = useState<Record<string, WorkflowRun[]>>({});
   const [runsError, setRunsError] = useState<Record<string, string | null>>({});
@@ -214,39 +252,61 @@ export function WorkflowsTab({ savedWorkflows, onSaveWorkflows, onEditPrompt }: 
       });
   }, [load]);
 
-  const toggleWorkflow = async (row: WorkflowRow, enabled: boolean) => {
-    // No refetch: the save reloads the page (saveAndReload), which remounts
-    // this tab and loads fresh status.
-    const next = (rows ?? []).map((r) => {
-      const { running: _running, status: _status, ...entry } = r;
-      return entry.name === row.name ? { ...entry, enabled } : entry;
-    });
-    onSaveWorkflows(next);
+  // One save path for every action: the PUT replaces this org's whole list and
+  // answers with the fresh GET shape, so rows come from the server response.
+  // A non-admin or a store failure leaves the rows and the open editor intact.
+  const save = async (next: WorkflowEntryUI[]): Promise<boolean> => {
+    setSaving(true);
+    setSaveError(null);
+    try {
+      const res = await lastValueFrom(
+        getBackendSrv().fetch<{ workflows: WorkflowRow[] }>({
+          url: WORKFLOWS_URL,
+          method: 'PUT',
+          data: { workflows: next },
+        })
+      );
+      setRows(res.data.workflows ?? []);
+      return true;
+    } catch (err) {
+      setSaveError(saveErrorMessage(err));
+      return false;
+    } finally {
+      setSaving(false);
+    }
   };
 
-  const persistEntry = (original: string | null, rawEntry: WorkflowEntryUI) => {
+  const toggleWorkflow = async (row: WorkflowRow, enabled: boolean) => {
+    const next = (rows ?? []).map((r) => {
+      const entry = toEntry(r);
+      return entry.name === row.name ? { ...entry, enabled } : entry;
+    });
+    await save(next);
+  };
+
+  const persistEntry = async (original: string | null, rawEntry: WorkflowEntryUI) => {
     // The backend keys schedulers and session owners by the trimmed name;
     // persist trimmed so UI lookups and runs fetches match.
     const entry = { ...rawEntry, name: rawEntry.name.trim() };
-    const base = (rows ?? []).map((r) => {
-      const { running: _running, status: _status, ...saved } = r;
-      return saved;
-    });
+    const base = (rows ?? []).map(toEntry);
     let next: WorkflowEntryUI[];
     if (original === null) {
       next = [...base, entry];
     } else {
       next = base.map((saved) => (saved.name === original ? entry : saved));
     }
-    onSaveWorkflows(next);
+    if (await save(next)) {
+      // Without the old reload, the editor closes here on success so the
+      // admin sees the saved row with its fresh status.
+      setEditing(null);
+    }
   };
 
-  const deleteEntry = (name: string) => {
-    const base = (rows ?? []).map((r) => {
-      const { running: _running, status: _status, ...saved } = r;
-      return saved;
-    });
-    onSaveWorkflows(base.filter((saved) => saved.name !== name));
+  const deleteEntry = async (name: string) => {
+    const base = (rows ?? []).map(toEntry);
+    if (await save(base.filter((saved) => saved.name !== name))) {
+      setEditing(null);
+    }
   };
 
   // Opening a workflow session publishes a read-only share link owned by the
@@ -307,8 +367,14 @@ export function WorkflowsTab({ savedWorkflows, onSaveWorkflows, onEditPrompt }: 
     <div>
       <p className="text-sm text-secondary mb-2">
         Tick and session counters are reported by this Grafana instance only; each replica runs its own schedulers
-        behind a shared Redis tick lock. Every save reloads the plugin instance, which restarts the schedulers.
+        behind a shared Redis tick lock. Saves apply to this org immediately; no plugin reload is needed.
       </p>
+
+      {saveError && (
+        <p className="text-warning text-sm mb-2" data-testid="ac-workflow-save-error">
+          {saveError}
+        </p>
+      )}
 
       {editing && (
         <div className="mb-4 p-3" style={{ border: `1px solid ${theme.colors.border.weak}` }} data-testid="ac-workflow-editor">
@@ -425,11 +491,11 @@ export function WorkflowsTab({ savedWorkflows, onSaveWorkflows, onEditPrompt }: 
             <Button
               variant="primary"
               disabled={
-                nameError !== null || !editing.entry.skill || editing.entry.toolAllowlist.length === 0
+                saving || nameError !== null || !editing.entry.skill || editing.entry.toolAllowlist.length === 0
               }
-              onClick={() => persistEntry(editing.original, editing.entry)}
+              onClick={() => void persistEntry(editing.original, editing.entry)}
             >
-              Save and reload
+              {saving ? 'Saving...' : 'Save'}
             </Button>
             {editing.entry.skill && (
               <Button variant="secondary" onClick={() => onEditPrompt(editing.entry.skill ?? '')}>
@@ -439,9 +505,10 @@ export function WorkflowsTab({ savedWorkflows, onSaveWorkflows, onEditPrompt }: 
             {editing.original !== null && (
               <Button
                 variant="destructive"
+                disabled={saving}
                 onClick={() => {
                   if (editing.original) {
-                    deleteEntry(editing.original);
+                    void deleteEntry(editing.original);
                   }
                 }}
               >
@@ -483,8 +550,7 @@ export function WorkflowsTab({ savedWorkflows, onSaveWorkflows, onEditPrompt }: 
 
       {(rows ?? []).length === 0 ? (
         <p className="text-sm text-secondary">
-          No workflows configured. Create one above, or provision entries in the plugin settings
-          (jsonData.workflows) — see the Workflows section in the plugin README.
+          No workflows configured. Create one above; it is stored for this org only.
         </p>
       ) : (
         <table className="w-full text-sm" style={{ borderCollapse: 'collapse' }}>
@@ -552,8 +618,7 @@ export function WorkflowsTab({ savedWorkflows, onSaveWorkflows, onEditPrompt }: 
                       size="sm"
                       variant="secondary"
                       onClick={() => {
-                        const { running: _r, status: _s, ...entry } = row;
-                        setEditing({ original: row.name, entry });
+                        setEditing({ original: row.name, entry: toEntry(row) });
                       }}
                     >
                       Edit
@@ -602,11 +667,6 @@ export function WorkflowsTab({ savedWorkflows, onSaveWorkflows, onEditPrompt }: 
             ))}
           </tbody>
         </table>
-      )}
-      {savedWorkflows.length === 0 && (rows ?? []).length > 0 && (
-        <span className="text-secondary text-sm mt-2 block">
-          Note: the saved settings carry no workflow entries; the rows above come from the running instance only.
-        </span>
       )}
     </div>
   );

@@ -5,43 +5,55 @@ import (
 	"errors"
 	"fmt"
 	"hash/fnv"
+	"reflect"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
 	"consensys-asko11y-app/pkg/mcp"
 
+	"github.com/grafana/grafana-plugin-sdk-go/backend/log"
 	"github.com/redis/go-redis/v9"
 )
 
 // syntheticUserIDDomain prefixes every hashed synthetic (non-Grafana) user
 // ID. The leading NUL byte cannot appear in a Grafana login, so a real login
 // can never hash into the synthetic namespace, even a login literally named
-// "workflow:<name>".
+// "workflow:<org>:<name>".
 const syntheticUserIDDomain = "\x00workflow:"
 
-// fnvSyntheticUserID derives the stable synthetic user ID for a workflow
-// name. It uses the same FNV64a scheme as getUserID, over an input domain
-// that no real Grafana login can occupy.
-func fnvSyntheticUserID(workflow string) int64 {
+// fnvSyntheticUserID derives the stable synthetic user ID for a workflow name
+// in one org. It uses the same FNV64a scheme as getUserID, over an input
+// domain that no real Grafana login can occupy, and includes the org so the
+// same workflow name in two orgs owns two different sets of sessions.
+func fnvSyntheticUserID(workflow string, orgID int64) int64 {
 	h := fnv.New64a()
-	h.Write([]byte(syntheticUserIDDomain + workflow))
+	h.Write([]byte(syntheticUserIDDomain + strconv.FormatInt(orgID, 10) + ":" + workflow))
 	return int64(h.Sum64() & 0x7FFFFFFFFFFFFFFF)
 }
 
-// workflowTickLockKey is the Redis key electing one replica per tick.
-func workflowTickLockKey(name string) string { return "workflow:" + name + ":tick" }
+// workflowTickLockKey is the Redis key electing one replica per tick of one
+// org's workflow.
+func workflowTickLockKey(orgID int64, name string) string {
+	return "workflow:" + strconv.FormatInt(orgID, 10) + ":" + name + ":tick"
+}
 
 // workflowActiveSpawnKey is the Redis ZSET counting active spawned sessions
 // across replicas. Members are run IDs; scores are watchdog deadlines, so a
 // member whose deadline passed is pruned on read and never blocks a spawn.
-func workflowActiveSpawnKey(name string) string { return "workflow:" + name + ":active" }
+func workflowActiveSpawnKey(orgID int64, name string) string {
+	return "workflow:" + strconv.FormatInt(orgID, 10) + ":" + name + ":active"
+}
 
 // workflowTopLevelActiveKey is the Redis key electing one in-flight top-level
 // run per workflow. The value is the owning run ID. It is separate from the
 // tick lock (:tick) and the spawned-session set (:active): ticks may fire
 // while a top-level run from an earlier tick is still working, and only this
 // key bounds those runs.
-func workflowTopLevelActiveKey(name string) string { return "workflow:" + name + ":toplevel" }
+func workflowTopLevelActiveKey(orgID int64, name string) string {
+	return "workflow:" + strconv.FormatInt(orgID, 10) + ":" + name + ":toplevel"
+}
 
 // workflowTopLevelActiveMargin extends the top-level key TTL past the run's
 // own deadline, so a process that dies mid-run cannot deadlock the workflow:
@@ -51,7 +63,7 @@ const workflowTopLevelActiveMargin = 60 * time.Second
 // acquireWorkflowTopLevelRun claims the one top-level slot of a workflow for
 // runID. A held key means another top-level run is still in flight; the caller
 // skips the tick instead of piling up a concurrent run.
-func (p *Plugin) acquireWorkflowTopLevelRun(name, runID string, timeoutSeconds int) (bool, error) {
+func (p *Plugin) acquireWorkflowTopLevelRun(orgID int64, name, runID string, timeoutSeconds int) (bool, error) {
 	if p.redisClient == nil {
 		// No Redis: workflows only run single-instance, and the in-process
 		// tracker already bounds this instance's runs. Nothing to gate.
@@ -60,7 +72,7 @@ func (p *Plugin) acquireWorkflowTopLevelRun(name, runID string, timeoutSeconds i
 	ttl := time.Duration(timeoutSeconds)*time.Second + workflowTopLevelActiveMargin
 	ctx, cancel := redisContext(p.ctx, RedisOpTimeout)
 	defer cancel()
-	return p.redisClient.SetNX(ctx, workflowTopLevelActiveKey(name), runID, ttl).Result()
+	return p.redisClient.SetNX(ctx, workflowTopLevelActiveKey(orgID, name), runID, ttl).Result()
 }
 
 // workflowTopLevelReleaseScript deletes the key only when this run still owns
@@ -74,35 +86,35 @@ return 0
 
 // releaseWorkflowTopLevelRun frees the top-level slot and drops the run from
 // the active-sessions gauge. The TTL is the safety net, not the normal path.
-func (p *Plugin) releaseWorkflowTopLevelRun(name, runID string) {
+func (p *Plugin) releaseWorkflowTopLevelRun(orgID int64, name, runID string) {
 	if p.redisClient != nil {
 		ctx, cancel := redisContext(p.ctx, RedisOpTimeout)
 		if err := workflowTopLevelReleaseScript.Run(ctx, p.redisClient,
-			[]string{workflowTopLevelActiveKey(name)}, runID).Err(); err != nil {
-			p.logger.Warn("Workflow top-level key release failed", "workflow", name, "error", err)
+			[]string{workflowTopLevelActiveKey(orgID, name)}, runID).Err(); err != nil {
+			p.logger.Warn("Workflow top-level key release failed", "workflow", name, "orgId", orgID, "error", err)
 		}
 		cancel()
 	}
-	p.workflowTopLevelAdd(name, -1)
+	p.workflowTopLevelAdd(orgID, name, -1)
 }
 
 // acquireWorkflowTickLock elects this instance for one tick. The TTL is half
 // the interval at most, so a crashed holder cannot starve the survivors.
-func acquireWorkflowTickLock(ctx context.Context, client *redis.Client, name string, ttl time.Duration) (bool, error) {
+func acquireWorkflowTickLock(ctx context.Context, client *redis.Client, orgID int64, name string, ttl time.Duration) (bool, error) {
 	lockCtx, cancel := redisContext(ctx, RedisOpTimeout)
 	defer cancel()
-	return client.SetNX(lockCtx, workflowTickLockKey(name), "1", ttl).Result()
+	return client.SetNX(lockCtx, workflowTickLockKey(orgID, name), "1", ttl).Result()
 }
 
 // workflowActiveSpawnAdd records a spawned session in the active set with its
 // watchdog deadline as the score.
-func (p *Plugin) workflowActiveSpawnAdd(name, runID string, deadline time.Time) error {
+func (p *Plugin) workflowActiveSpawnAdd(orgID int64, name, runID string, deadline time.Time) error {
 	if p.redisClient == nil {
 		return fmt.Errorf("redis is not configured")
 	}
 	ctx, cancel := redisContext(p.ctx, RedisOpTimeout)
 	defer cancel()
-	return p.redisClient.ZAdd(ctx, workflowActiveSpawnKey(name), redis.Z{
+	return p.redisClient.ZAdd(ctx, workflowActiveSpawnKey(orgID, name), redis.Z{
 		Score:  float64(deadline.Unix()),
 		Member: runID,
 	}).Err()
@@ -111,16 +123,16 @@ func (p *Plugin) workflowActiveSpawnAdd(name, runID string, deadline time.Time) 
 // workflowActiveSpawnRemove drops a finished spawned session from the active
 // set. The gauge follows the surviving count so operators see the true
 // in-flight number even after a prune.
-func (p *Plugin) workflowActiveSpawnRemove(name, runID string) {
+func (p *Plugin) workflowActiveSpawnRemove(orgID int64, name, runID string) {
 	if p.redisClient == nil {
 		return
 	}
 	ctx, cancel := redisContext(p.ctx, RedisOpTimeout)
 	defer cancel()
-	if err := p.redisClient.ZRem(ctx, workflowActiveSpawnKey(name), runID).Err(); err != nil {
-		p.logger.Warn("Workflow active-set remove failed", "workflow", name, "error", err)
+	if err := p.redisClient.ZRem(ctx, workflowActiveSpawnKey(orgID, name), runID).Err(); err != nil {
+		p.logger.Warn("Workflow active-set remove failed", "workflow", name, "orgId", orgID, "error", err)
 	}
-	p.workflowActiveSpawnRefreshGauge(name)
+	p.workflowActiveSpawnRefreshGauge(orgID, name)
 }
 
 // workflowSpawnTryAddScript admits one spawned session atomically: prune
@@ -139,14 +151,14 @@ return 1
 
 // workflowActiveSpawnTryAdd admits a spawned session under the workflow's
 // cap in one atomic step. Returns false when the cap is reached.
-func (p *Plugin) workflowActiveSpawnTryAdd(name, runID string, deadline time.Time, cap int) (bool, error) {
+func (p *Plugin) workflowActiveSpawnTryAdd(orgID int64, name, runID string, deadline time.Time, cap int) (bool, error) {
 	if p.redisClient == nil {
 		return false, fmt.Errorf("redis is not configured")
 	}
 	ctx, cancel := redisContext(p.ctx, RedisOpTimeout)
 	defer cancel()
 	res, err := workflowSpawnTryAddScript.Run(ctx, p.redisClient,
-		[]string{workflowActiveSpawnKey(name)},
+		[]string{workflowActiveSpawnKey(orgID, name)},
 		fmt.Sprintf("%d", time.Now().Unix()),
 		fmt.Sprintf("%d", deadline.Unix()),
 		runID,
@@ -160,13 +172,13 @@ func (p *Plugin) workflowActiveSpawnTryAdd(name, runID string, deadline time.Tim
 
 // workflowActiveSpawnCount prunes expired members and returns the number of
 // active spawned sessions for a workflow.
-func (p *Plugin) workflowActiveSpawnCount(name string) (int, error) {
+func (p *Plugin) workflowActiveSpawnCount(orgID int64, name string) (int, error) {
 	if p.redisClient == nil {
 		return 0, fmt.Errorf("redis is not configured")
 	}
 	ctx, cancel := redisContext(p.ctx, RedisOpTimeout)
 	defer cancel()
-	key := workflowActiveSpawnKey(name)
+	key := workflowActiveSpawnKey(orgID, name)
 	if err := p.redisClient.ZRemRangeByScore(ctx, key, "-inf", fmt.Sprintf("%d", time.Now().Unix())).Err(); err != nil {
 		return 0, err
 	}
@@ -180,34 +192,41 @@ func (p *Plugin) workflowActiveSpawnCount(name string) (int, error) {
 // workflowActiveSpawnRefreshGauge syncs the metric with the stored count plus
 // this instance's in-flight top-level runs. Best effort: a Redis hiccup
 // leaves the previous value in place.
-func (p *Plugin) workflowActiveSpawnRefreshGauge(name string) {
-	count, err := p.workflowActiveSpawnCount(name)
+func (p *Plugin) workflowActiveSpawnRefreshGauge(orgID int64, name string) {
+	count, err := p.workflowActiveSpawnCount(orgID, name)
 	if err != nil {
 		return
 	}
-	workflowActiveSpawned.WithLabelValues(workflowLabel(name)).Set(float64(count + p.workflowTopLevelCount(name)))
+	workflowActiveSpawned.WithLabelValues(workflowLabel(orgID, name)).Set(float64(count + p.workflowTopLevelCount(orgID, name)))
+}
+
+// workflowTopLevelKey scopes this instance's in-flight top-level counter by
+// org, so the same workflow name in two orgs never shares a count.
+func workflowTopLevelKey(orgID int64, name string) string {
+	return strconv.FormatInt(orgID, 10) + ":" + name
 }
 
 // workflowTopLevelAdd adjusts this instance's in-flight top-level run count
 // and re-syncs the active-sessions gauge. Top-level runs are per replica, so
 // they are tracked here rather than in the cross-replica spawn set.
-func (p *Plugin) workflowTopLevelAdd(name string, delta int) {
+func (p *Plugin) workflowTopLevelAdd(orgID int64, name string, delta int) {
+	key := workflowTopLevelKey(orgID, name)
 	p.workflowTopLevelMu.Lock()
 	if p.workflowTopLevel != nil {
-		p.workflowTopLevel[name] += delta
-		if p.workflowTopLevel[name] <= 0 {
-			delete(p.workflowTopLevel, name)
+		p.workflowTopLevel[key] += delta
+		if p.workflowTopLevel[key] <= 0 {
+			delete(p.workflowTopLevel, key)
 		}
 	}
 	p.workflowTopLevelMu.Unlock()
-	p.workflowActiveSpawnRefreshGauge(name)
+	p.workflowActiveSpawnRefreshGauge(orgID, name)
 }
 
 // workflowTopLevelCount reports this instance's in-flight top-level runs.
-func (p *Plugin) workflowTopLevelCount(name string) int {
+func (p *Plugin) workflowTopLevelCount(orgID int64, name string) int {
 	p.workflowTopLevelMu.Lock()
 	defer p.workflowTopLevelMu.Unlock()
-	return p.workflowTopLevel[name]
+	return p.workflowTopLevel[workflowTopLevelKey(orgID, name)]
 }
 
 // identityWarnInterval bounds how often the unseeded-identity warning fires,
@@ -267,9 +286,35 @@ func (s *WorkflowScheduler) Stop() {
 	s.wg.Wait()
 }
 
+// resolvedOrgID is the org this scheduler's entry runs for. An entry stamped
+// with an org uses it; an unstamped entry (0) falls back to the instance's
+// sole bound org, which is the transitional single-org behaviour. With two
+// orgs bound and no stamp the answer is 0 (ambiguous), so the tick skips
+// rather than run as the wrong org; round B stamps every entry instead.
+func (s *WorkflowScheduler) resolvedOrgID() int64 {
+	orgID := s.entry.OrgID
+	if orgID <= 0 && s.p.orgIdentity != nil {
+		if sole, ok := s.p.orgIdentity.SoleOrgID(); ok {
+			orgID = sole
+		}
+	}
+	return orgID
+}
+
 func (s *WorkflowScheduler) tick() {
 	name := s.entry.Name
-	label := workflowLabel(name)
+	orgID := s.resolvedOrgID()
+	label := workflowLabel(orgID, name)
+
+	// Removal must never spend another token, even before the reconcile loop
+	// notices it: verify the entry still exists in its org's store and still
+	// matches the one this scheduler was started with. A stale entry is a
+	// counted outcome, not a warning: reconcile stops it shortly.
+	if !s.entryStillStored(orgID) {
+		workflowTicks.WithLabelValues(label, "skip_stale").Inc()
+		s.p.workflowStatus.RecordTick(name, "skip_stale")
+		return
+	}
 
 	if !s.allowlistChecked && !s.deferredAllowlistValidation() {
 		// Either the tool listing is still empty (retry next tick) or the
@@ -277,16 +322,20 @@ func (s *WorkflowScheduler) tick() {
 		return
 	}
 
-	// Identity before the lock: the org identity is per replica (seeded by
-	// the requests that replica served). An unseeded holder must not take
-	// the tick lock, or the seeded replica would skip the tick as locked and
-	// the workflow would never run under sticky-session routing.
-	orgID, grafanaURL, saToken, seeded := s.p.orgIdentity.Get()
+	// Identity before the lock: the org identity is per org and per replica
+	// (seeded by the requests that replica served). An unseeded org must not
+	// take the tick lock, or a seeded replica would skip the tick as locked
+	// and the workflow would never run under sticky-session routing. Only this
+	// org is skipped; every other org's tick proceeds.
+	grafanaURL, saToken, seeded := "", "", false
+	if orgID > 0 && s.p.orgIdentity != nil {
+		grafanaURL, saToken, seeded = s.p.orgIdentity.GetForOrg(orgID)
+	}
 	if !seeded {
 		if time.Since(s.lastIdentityWarn) >= identityWarnInterval {
 			s.lastIdentityWarn = time.Now()
-			s.p.logger.Warn("Workflow tick skipped: org identity not yet seeded; it seeds from the first user request in this instance",
-				"workflow", name)
+			s.p.logger.Warn("Workflow tick skipped: org identity not yet seeded for this org; it seeds from the first user request in that org",
+				"workflow", name, "orgId", orgID)
 		}
 		workflowTicks.WithLabelValues(label, "skip_identity").Inc()
 		s.p.workflowStatus.RecordTick(name, "skip_identity")
@@ -294,9 +343,9 @@ func (s *WorkflowScheduler) tick() {
 	}
 
 	ttl := time.Duration(s.entry.IntervalSec/2) * time.Second
-	held, err := acquireWorkflowTickLock(s.ctx, s.p.redisClient, name, ttl)
+	held, err := acquireWorkflowTickLock(s.ctx, s.p.redisClient, orgID, name, ttl)
 	if err != nil {
-		s.p.logger.Error("Workflow tick skipped: tick lock unavailable", "workflow", name, "error", err)
+		s.p.logger.Error("Workflow tick skipped: tick lock unavailable", "workflow", name, "orgId", orgID, "error", err)
 		workflowTicks.WithLabelValues(label, "skip_error").Inc()
 		s.p.workflowStatus.RecordTickError(name, "tick lock unavailable")
 		return
@@ -315,13 +364,13 @@ func (s *WorkflowScheduler) tick() {
 	// deadlock the workflow.
 	runID, idErr := generateShareID()
 	if idErr != nil {
-		s.p.logger.Error("Workflow tick failed to generate a run ID", "workflow", name, "error", idErr)
+		s.p.logger.Error("Workflow tick failed to generate a run ID", "workflow", name, "orgId", orgID, "error", idErr)
 		s.p.workflowStatus.RecordSessionError(name, idErr.Error())
 		return
 	}
-	admitted, gateErr := s.p.acquireWorkflowTopLevelRun(name, runID, s.entry.SessionTimeoutSeconds)
+	admitted, gateErr := s.p.acquireWorkflowTopLevelRun(orgID, name, runID, s.entry.SessionTimeoutSeconds)
 	if gateErr != nil {
-		s.p.logger.Error("Workflow tick skipped: top-level active key unavailable", "workflow", name, "error", gateErr)
+		s.p.logger.Error("Workflow tick skipped: top-level active key unavailable", "workflow", name, "orgId", orgID, "error", gateErr)
 		workflowTicks.WithLabelValues(label, "skip_error").Inc()
 		s.p.workflowStatus.RecordTickError(name, "top-level active key unavailable")
 		return
@@ -334,7 +383,7 @@ func (s *WorkflowScheduler) tick() {
 		s.p.workflowStatus.RecordTick(name, "skip_active")
 		return
 	}
-	s.p.workflowTopLevelAdd(name, 1)
+	s.p.workflowTopLevelAdd(orgID, name, 1)
 
 	workflowTicks.WithLabelValues(label, "executed").Inc()
 	s.p.workflowStatus.RecordTick(name, "executed")
@@ -345,7 +394,7 @@ func (s *WorkflowScheduler) tick() {
 		orgID:         orgID,
 		grafanaURL:    grafanaURL,
 		saToken:       saToken,
-		syntheticID:   syntheticWorkflowUserID(name),
+		syntheticID:   syntheticWorkflowUserID(name, orgID),
 		spawned:       false,
 		isFallback:    false,
 		topLevelGated: true,
@@ -353,10 +402,35 @@ func (s *WorkflowScheduler) tick() {
 		// The failed-session metric is incremented inside; log so the tick is
 		// never silently unhealthy. The slot the failed start never used is
 		// released here because no finish goroutine will run for it.
-		s.p.releaseWorkflowTopLevelRun(name, runID)
-		s.p.logger.Error("Workflow tick failed to start its session", "workflow", name, "error", startErr)
+		s.p.releaseWorkflowTopLevelRun(orgID, name, runID)
+		s.p.logger.Error("Workflow tick failed to start its session", "workflow", name, "orgId", orgID, "error", startErr)
 		s.p.workflowStatus.RecordSessionError(name, startErr.Error())
 	}
+}
+
+// entryStillStored verifies this scheduler's entry against its org's store
+// before a tick. It is true when no org-scoped store applies (a white-box test
+// plugin) and false when the entry is gone or changed, or when the store
+// cannot be read: an unverifiable entry must not spend a token.
+func (s *WorkflowScheduler) entryStillStored(orgID int64) bool {
+	if s.p.redisClient == nil || orgID <= 0 {
+		return true
+	}
+	entries, err := s.p.workflowEntryStore().ListWorkflows(s.ctx, orgID)
+	if err != nil {
+		return false
+	}
+	for _, stored := range entries {
+		if strings.TrimSpace(stored.Name) != s.entry.Name {
+			continue
+		}
+		next := stored
+		next.OrgID = orgID
+		next.Name = strings.TrimSpace(next.Name)
+		next.applyDefaults()
+		return sameWorkflowEntry(next, s.entry)
+	}
+	return false
 }
 
 // deferredAllowlistValidation re-validates the entry once tools are listable.
@@ -382,7 +456,7 @@ func (s *WorkflowScheduler) deferredAllowlistValidation() bool {
 			return false
 		}
 		s.p.logger.Error("Workflow disabled: invalid configuration", "workflow", s.entry.Name, "error", err)
-		workflowTicks.WithLabelValues(workflowLabel(s.entry.Name), "skip_error").Inc()
+		workflowTicks.WithLabelValues(workflowLabel(s.resolvedOrgID(), s.entry.Name), "skip_error").Inc()
 		s.p.workflowStatus.RecordTickError(s.entry.Name, err.Error())
 		s.cancel()
 		return false
@@ -411,44 +485,246 @@ func (s *WorkflowScheduler) mcpCatalogStable() bool {
 	return true
 }
 
-// WorkflowManager owns all schedulers for one plugin instance.
-type WorkflowManager struct {
-	schedulers []*WorkflowScheduler
+// workflowKey identifies one workflow scheduler. The org is part of the key,
+// so the same workflow name in two orgs owns two independent schedulers, ticks,
+// and run histories.
+type workflowKey struct {
+	orgID int64
+	name  string
 }
 
-// Stop ends every scheduler and waits for in-flight ticks.
+// WorkflowManager owns this instance's schedulers, one per stored workflow
+// entry. It converges on every reconcile: an added entry starts a scheduler, a
+// removed or changed entry stops (or restarts) one. Stop ends every scheduler
+// and waits for in-flight ticks; an in-flight RUN is owned by the session and
+// survives, exactly as it does across a settings-save instance rebuild.
+type WorkflowManager struct {
+	mu         sync.Mutex
+	p          *Plugin
+	ctx        context.Context
+	schedulers map[workflowKey]*WorkflowScheduler
+	entries    map[workflowKey]WorkflowEntry
+	// problems is the last refused-entry diagnostic per key, so the 30 second
+	// reconcile loop reports a bad stored entry once instead of every pass.
+	problems map[workflowKey]string
+	stopped  bool
+}
+
+// newWorkflowManager builds an empty manager whose schedulers inherit parent.
+func newWorkflowManager(p *Plugin, parent context.Context) *WorkflowManager {
+	return &WorkflowManager{
+		p:          p,
+		ctx:        parent,
+		schedulers: map[workflowKey]*WorkflowScheduler{},
+		entries:    map[workflowKey]WorkflowEntry{},
+		problems:   map[workflowKey]string{},
+	}
+}
+
+// Stop ends every scheduler and waits for in-flight ticks. No reconcile can
+// start a new scheduler afterwards.
 func (m *WorkflowManager) Stop() {
+	m.mu.Lock()
+	m.stopped = true
+	schedulers := make([]*WorkflowScheduler, 0, len(m.schedulers))
 	for _, s := range m.schedulers {
+		schedulers = append(schedulers, s)
+	}
+	m.schedulers = map[workflowKey]*WorkflowScheduler{}
+	m.entries = map[workflowKey]WorkflowEntry{}
+	m.mu.Unlock()
+	for _, s := range schedulers {
 		s.Stop()
 	}
 }
 
-// startWorkflows validates the configured entries and starts a scheduler per
-// valid, enabled one. Requires Redis: the tick lock and the cross-replica
-// spawn caps both live there.
-func (p *Plugin) startWorkflows(entries []WorkflowEntry) {
-	if !p.usingRedis || p.redisClient == nil {
-		p.logger.Error("Workflows require Redis; every workflow entry is disabled",
-			"entries", len(entries))
+// schedulerFor returns the live scheduler of one key, or nil.
+func (m *WorkflowManager) schedulerFor(orgID int64, name string) *WorkflowScheduler {
+	if m == nil {
+		return nil
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.schedulers[workflowKey{orgID: orgID, name: name}]
+}
+
+// isRunning reports whether this instance runs a live scheduler for one
+// workflow. A scheduler that stopped itself (deferred validation failure) is
+// held no longer, so it reports false.
+func (m *WorkflowManager) isRunning(orgID int64, name string) bool {
+	s := m.schedulerFor(orgID, name)
+	return s != nil && !s.Stopped()
+}
+
+// apply converges the live scheduler set onto desired. readOrgs names the orgs
+// whose stored list was read successfully; a scheduler of an org that could
+// not be read is left running, so a Redis hiccup never disables a workflow.
+func (m *WorkflowManager) apply(desired map[workflowKey]WorkflowEntry, readOrgs map[int64]bool, problems map[workflowKey]string, logger log.Logger) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.stopped {
 		return
 	}
-	// Best-effort tool listing at startup: servers may still be connecting,
-	// in which case the per-scheduler deferred check covers the allowlist.
-	allowlistTools := map[string]bool{}
+
+	for key, scheduler := range m.schedulers {
+		if !readOrgs[key.orgID] {
+			continue
+		}
+		next, keep := desired[key]
+		if keep && sameWorkflowEntry(m.entries[key], next) && !scheduler.Stopped() {
+			continue
+		}
+		// Stop waits only for an in-flight tick. A run the tick already
+		// started continues under its own session and lands its record.
+		scheduler.Stop()
+		delete(m.schedulers, key)
+		delete(m.entries, key)
+		if keep {
+			logger.Info("Workflow scheduler restarting: entry changed",
+				"workflow", key.name, "orgId", key.orgID)
+		} else {
+			logger.Info("Workflow scheduler stopped: entry removed",
+				"workflow", key.name, "orgId", key.orgID)
+		}
+	}
+
+	for key, entry := range desired {
+		if _, running := m.schedulers[key]; running {
+			continue
+		}
+		scheduler := NewWorkflowScheduler(m.ctx, m.p, entry)
+		m.schedulers[key] = scheduler
+		m.entries[key] = entry
+		logger.Info("Workflow scheduler started",
+			"workflow", entry.Name, "orgId", key.orgID,
+			"intervalSeconds", entry.IntervalSec, "skill", entry.Skill)
+		go scheduler.Start()
+	}
+
+	// Report each refused entry once, and report recovery when it returns.
+	for key, problem := range problems {
+		if m.problems[key] == problem {
+			continue
+		}
+		m.problems[key] = problem
+		logger.Error("Workflow entry disabled: invalid configuration",
+			"workflow", key.name, "orgId", key.orgID, "error", problem)
+	}
+	for key := range m.problems {
+		if _, stillRefused := problems[key]; stillRefused {
+			continue
+		}
+		delete(m.problems, key)
+	}
+}
+
+// sameWorkflowEntry reports whether two prepared entries are identical. Any
+// field difference restarts the scheduler, because every field changes how the
+// next tick behaves.
+func sameWorkflowEntry(a, b WorkflowEntry) bool {
+	return reflect.DeepEqual(a, b)
+}
+
+// workflowReconcileInterval is how often a replica re-reads the store. It is
+// the convergence bound after an out-of-band edit to Redis; a route save
+// reconciles immediately.
+const workflowReconcileInterval = 30 * time.Second
+
+// workflowReconcileLoop re-runs the reconcile on a fixed interval so replicas
+// converge without pub/sub.
+func (p *Plugin) workflowReconcileLoop(ctx context.Context) {
+	ticker := time.NewTicker(workflowReconcileInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			p.reconcileWorkflows(ctx)
+		case <-ctx.Done():
+			return
+		}
+	}
+}
+
+// reconcileWorkflows converges this instance's schedulers onto the per-org
+// store. It returns every stored entry, and ok=false when the store could not
+// be read at all: the caller must not treat an unreadable store as "no
+// workflows".
+//
+// The org set comes from SCAN over the store prefix. The applied-set keys share
+// that prefix but their suffix is not numeric, so they are skipped.
+func (p *Plugin) reconcileWorkflows(ctx context.Context) ([]WorkflowEntry, bool) {
+	mgr := p.workflows
+	if mgr == nil {
+		return nil, false
+	}
+	if !p.usingRedis || p.redisClient == nil {
+		// Entries live in Redis; without it there is nothing to reconcile.
+		return nil, true
+	}
+
+	orgIDs, err := p.workflowStoreOrgs(ctx)
+	if err != nil {
+		p.logger.Warn("Workflow reconcile skipped: cannot list orgs", "error", err)
+		return nil, false
+	}
+
+	allowlistTools := make(map[string]bool)
 	if tools, err := p.mcpProxy.ListTools(); err == nil {
 		for _, t := range tools {
 			allowlistTools[t.Name] = true
 		}
 	}
-	valid := prepareWorkflows(entries, p.skillRegistry, allowlistTools, p.logger)
-	if len(valid) == 0 {
-		return
+
+	desired := make(map[workflowKey]WorkflowEntry)
+	readOrgs := make(map[int64]bool, len(orgIDs))
+	problems := make(map[workflowKey]string)
+	var all []WorkflowEntry
+	for _, orgID := range orgIDs {
+		entries, listErr := p.workflowEntryStore().ListWorkflows(ctx, orgID)
+		if listErr != nil {
+			p.logger.Warn("Workflow reconcile skipped one org: entry list unreadable",
+				"orgId", orgID, "error", listErr)
+			continue
+		}
+		readOrgs[orgID] = true
+		all = append(all, entries...)
+		valid, refused := prepareWorkflowEntries(entries, orgID, p.skillRegistry, allowlistTools)
+		for _, entry := range valid {
+			desired[workflowKey{orgID: orgID, name: entry.Name}] = entry
+		}
+		for _, problem := range refused {
+			problems[workflowKey{orgID: orgID, name: problem.Name}] = problem.Error
+		}
 	}
-	mgr := &WorkflowManager{}
-	for _, entry := range valid {
-		scheduler := NewWorkflowScheduler(p.ctx, p, entry)
-		mgr.schedulers = append(mgr.schedulers, scheduler)
-		go scheduler.Start()
+
+	mgr.apply(desired, readOrgs, problems, p.logger)
+	return all, true
+}
+
+// workflowStoreOrgs lists every org with a stored workflow list.
+func (p *Plugin) workflowStoreOrgs(ctx context.Context) ([]int64, error) {
+	if p.redisClient == nil {
+		return nil, fmt.Errorf("workflow store requires Redis")
 	}
-	p.workflows = mgr
+	scanCtx, cancel := redisContext(ctx, RedisBulkOpTimeout)
+	defer cancel()
+	var orgIDs []int64
+	seen := map[int64]bool{}
+	iter := p.redisClient.Scan(scanCtx, 0, workflowStoreKeyPrefix+"*", 100).Iterator()
+	for iter.Next(scanCtx) {
+		suffix, ok := strings.CutPrefix(iter.Val(), workflowStoreKeyPrefix)
+		if !ok {
+			continue
+		}
+		orgID, err := strconv.ParseInt(suffix, 10, 64)
+		if err != nil || orgID <= 0 || seen[orgID] {
+			continue
+		}
+		seen[orgID] = true
+		orgIDs = append(orgIDs, orgID)
+	}
+	if err := iter.Err(); err != nil {
+		return nil, err
+	}
+	return orgIDs, nil
 }

@@ -1,6 +1,7 @@
 package plugin
 
 import (
+	"strconv"
 	"strings"
 	"time"
 
@@ -56,18 +57,20 @@ var (
 )
 
 // workflowLabel sanitizes a workflow name into a bounded metric label.
-func workflowLabel(name string) string {
+func workflowLabel(orgID int64, name string) string {
 	name = strings.TrimSpace(name)
 	if name == "" {
-		return "unknown"
+		name = "unknown"
 	}
 	if len(name) > maxWorkflowLabelLength {
 		name = name[:maxWorkflowLabelLength]
 	}
-	return name
+	// The org prefixes the label so the same workflow name in two orgs lands
+	// in two series instead of one mixed counter.
+	return "org" + strconv.FormatInt(orgID, 10) + ":" + name
 }
 
 // observeWorkflowRunDuration records a finished session's wall-clock time.
-func observeWorkflowRunDuration(workflow string, d time.Duration) {
-	workflowRunDuration.WithLabelValues(workflowLabel(workflow)).Observe(d.Seconds())
+func observeWorkflowRunDuration(orgID int64, workflow string, d time.Duration) {
+	workflowRunDuration.WithLabelValues(workflowLabel(orgID, workflow)).Observe(d.Seconds())
 }

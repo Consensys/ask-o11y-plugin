@@ -2,6 +2,7 @@ package plugin
 
 import (
 	"hash/fnv"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -156,12 +157,15 @@ func TestPrepareWorkflowsDisablesOnlyInvalidEntries(t *testing.T) {
 	duplicate := validWorkflowEntry()
 	duplicate.Name = "keep-me"
 
-	got := prepareWorkflows([]WorkflowEntry{valid, invalid, disabled, duplicate}, registry, tools, log.DefaultLogger)
+	got := prepareWorkflows([]WorkflowEntry{valid, invalid, disabled, duplicate}, 7, registry, tools, log.DefaultLogger)
 	if len(got) != 1 {
 		t.Fatalf("expected exactly the one valid enabled entry, got %d", len(got))
 	}
 	if got[0].Name != "keep-me" {
 		t.Fatalf("wrong entry survived: %q", got[0].Name)
+	}
+	if got[0].OrgID != 7 {
+		t.Fatalf("the server must stamp the entry's org, got %d", got[0].OrgID)
 	}
 	if got[0].IntervalSec != 120 {
 		t.Fatalf("defaults must not overwrite explicit values: %d", got[0].IntervalSec)
@@ -175,7 +179,7 @@ func TestPrepareWorkflowsAppliesDefaults(t *testing.T) {
 	entry.SessionTimeoutSeconds = 0
 	entry.MaxConcurrentSessions = 0
 
-	got := prepareWorkflows([]WorkflowEntry{entry}, registry, nil, log.DefaultLogger)
+	got := prepareWorkflows([]WorkflowEntry{entry}, 0, registry, nil, log.DefaultLogger)
 	if len(got) != 1 {
 		t.Fatalf("entry must survive: %d", len(got))
 	}
@@ -202,9 +206,9 @@ func TestWorkflowMessageDefaultAndOverride(t *testing.T) {
 }
 
 func TestSyntheticWorkflowUserIDStableAndDistinct(t *testing.T) {
-	a := syntheticWorkflowUserID("alpha")
-	b := syntheticWorkflowUserID("alpha")
-	c := syntheticWorkflowUserID("beta")
+	a := syntheticWorkflowUserID("alpha", 1)
+	b := syntheticWorkflowUserID("alpha", 1)
+	c := syntheticWorkflowUserID("beta", 1)
 	if a != b {
 		t.Fatal("same workflow must map to the same synthetic user")
 	}
@@ -213,6 +217,10 @@ func TestSyntheticWorkflowUserIDStableAndDistinct(t *testing.T) {
 	}
 	if a <= 0 {
 		t.Fatal("synthetic user ID must be positive")
+	}
+	// The same name in two orgs is two owners, never one.
+	if other := syntheticWorkflowUserID("alpha", 2); other == a {
+		t.Fatalf("the same workflow name in two orgs must not share an owner: %d", other)
 	}
 }
 
@@ -226,20 +234,29 @@ func realLoginUserID(login string) int64 {
 
 func TestSyntheticUserIDHelpersAgree(t *testing.T) {
 	for _, name := range []string{"alpha", "beta", "nightly-sweep", "with space", "ünïcode"} {
-		if got, want := fnvSyntheticUserID(name), syntheticWorkflowUserID(name); got != want {
-			t.Fatalf("helpers disagree for %q: fnv=%d synthetic=%d", name, got, want)
+		for _, orgID := range []int64{0, 1, 2, 99} {
+			if got, want := fnvSyntheticUserID(name, orgID), syntheticWorkflowUserID(name, orgID); got != want {
+				t.Fatalf("helpers disagree for %q org %d: fnv=%d synthetic=%d", name, orgID, got, want)
+			}
 		}
 	}
 }
 
 func TestSyntheticWorkflowUserIDCannotCollideWithRealLogin(t *testing.T) {
 	for _, name := range []string{"alpha", "beta", "nightly-sweep", "wf"} {
-		synthetic := syntheticWorkflowUserID(name)
-		// A real Grafana login named exactly "workflow:<name>" is the attack:
-		// under the old scheme it hashed to the same ID and owned the
-		// workflow's sessions.
-		if forged := realLoginUserID("workflow:" + name); synthetic == forged {
-			t.Fatalf("synthetic user ID for %q collides with real login %q: %d", name, "workflow:"+name, synthetic)
+		for _, orgID := range []int64{1, 2} {
+			synthetic := syntheticWorkflowUserID(name, orgID)
+			// A real Grafana login naming the workflow, with or without the
+			// org, is the attack: the NUL-prefixed domain keeps them apart.
+			for _, forgedLogin := range []string{
+				"workflow:" + name,
+				"workflow:" + strconv.FormatInt(orgID, 10) + ":" + name,
+			} {
+				if forged := realLoginUserID(forgedLogin); synthetic == forged {
+					t.Fatalf("synthetic user ID for %q org %d collides with real login %q: %d",
+						name, orgID, forgedLogin, synthetic)
+				}
+			}
 		}
 	}
 }
