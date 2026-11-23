@@ -941,7 +941,11 @@ func (p *Plugin) handleAgentRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ctx, span := tracing.DefaultTracer().Start(r.Context(), "agent_run")
+	// API callers send no traceparent, so the run would start as a local-root
+	// trace that Grafana's head sampler drops (UI runs ride a sampled Faro
+	// parent instead). ensureSampledTraceContext mints a sampled remote root
+	// for those runs so every agent_run span exports.
+	ctx, span := tracing.DefaultTracer().Start(ensureSampledTraceContext(r.Context()), "agent_run")
 	defer span.End()
 	r = r.WithContext(ctx)
 
