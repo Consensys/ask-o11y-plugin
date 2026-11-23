@@ -8,16 +8,14 @@ import { getPluginStorageKey } from '../../utils/storageKeys';
 
 const SETTINGS_TAB_STORAGE_KEY = getPluginStorageKey('settings.activeTab');
 
+type FetchOptions = { url?: string; method?: string; data?: unknown };
+
+const mockFetch = jest.fn();
+let mockStoredJsonData: Record<string, unknown> = {};
+
 jest.mock('@grafana/runtime', () => ({
   getBackendSrv: () => ({
-    fetch: () =>
-      of({
-        data: {
-          defaultSystemPrompt: 'mock system prompt',
-          investigationPrompt: 'mock investigation prompt',
-          performancePrompt: 'mock performance prompt',
-        },
-      }),
+    fetch: (options: FetchOptions) => mockFetch(options),
   }),
   locationService: {
     getSearch: () => '',
@@ -58,6 +56,20 @@ describe('Components/AppConfig', () => {
     jest.resetAllMocks();
     window.sessionStorage.clear();
     window.location.hash = '';
+    mockStoredJsonData = {};
+    mockFetch.mockImplementation((options: FetchOptions) => {
+      if (options.url?.endsWith('/settings')) {
+        // POST is the settings update; GET is the pre-save fresh read.
+        return of({ data: options.method === 'POST' ? {} : { jsonData: mockStoredJsonData } });
+      }
+      return of({
+        data: {
+          defaultSystemPrompt: 'mock system prompt',
+          investigationPrompt: 'mock investigation prompt',
+          performancePrompt: 'mock performance prompt',
+        },
+      });
+    });
     Object.defineProperty(HTMLCanvasElement.prototype, 'getContext', {
       configurable: true,
       value: () => ({
@@ -191,5 +203,65 @@ describe('Components/AppConfig', () => {
 
     expect(screen.getByTestId(testIds.appConfig.unsavedChangesNotice)).toHaveTextContent('Unsaved changes');
     expect(screen.getByText('Agent Runtime *')).toBeInTheDocument();
+  });
+
+  test('saveWorkflows merges into the settings read at save time, not the mount snapshot', async () => {
+    // Another admin changed maxTotalTokens after this page mounted; the stored
+    // jsonData also carries workflows the status endpoint does not report.
+    mockStoredJsonData = {
+      maxTotalTokens: 64000,
+      workflows: [{ name: 'stored-flow', enabled: true }],
+    };
+    props.plugin.meta.jsonData = { maxTotalTokens: 128000 };
+
+    mockFetch.mockImplementation((options: FetchOptions) => {
+      if (options.url?.endsWith('/settings')) {
+        return of({ data: options.method === 'POST' ? {} : { jsonData: mockStoredJsonData } });
+      }
+      if (options.url?.includes('/api/workflows')) {
+        return of({
+          data: {
+            workflows: [
+              {
+                name: 'Nightly RCA',
+                enabled: true,
+                skill: 'investigating-alerts',
+                intervalSeconds: 300,
+                sessionTimeoutSeconds: 300,
+                maxConcurrentSessions: 5,
+                toolAllowlist: ['alerting_rules_read'],
+              },
+            ],
+          },
+        });
+      }
+      return of({ data: {} });
+    });
+
+    render(<AppConfig {...props} />);
+    fireEvent.click(screen.getByText('Workflows'));
+
+    const toggle = await screen.findByTestId('ac-workflow-enabled-Nightly RCA');
+    fireEvent.click(toggle);
+
+    await waitFor(() => {
+      expect(
+        mockFetch.mock.calls.some(([options]) => options.method === 'POST' && options.url?.endsWith('/settings'))
+      ).toBe(true);
+    });
+
+    const postCall = mockFetch.mock.calls.find(
+      ([options]) => options.method === 'POST' && options.url?.endsWith('/settings')
+    );
+    expect(postCall).toBeDefined();
+    const { data } = postCall![0] as {
+      data: { jsonData: { maxTotalTokens?: number; workflows?: Array<Record<string, unknown>> } };
+    };
+
+    // The non-workflows key comes from the fresh read, not the mount snapshot.
+    expect(data.jsonData.maxTotalTokens).toBe(64000);
+    // Only the workflows key is replaced, with the edited entry list.
+    expect(data.jsonData.workflows).toHaveLength(1);
+    expect(data.jsonData.workflows?.[0]).toMatchObject({ name: 'Nightly RCA', enabled: false });
   });
 });

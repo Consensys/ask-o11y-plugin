@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -82,6 +83,9 @@ func newWorkflowTestPlugin(t *testing.T, llmHandler http.HandlerFunc) (*Plugin, 
 		ctx:        ctx,
 		cancel:     cancel,
 		runCancels: make(map[string]context.CancelFunc),
+
+		workflowRuns:     &workflowRunTracker{},
+		workflowTopLevel: make(map[string]int),
 	}
 	return p, llmServer.URL
 }
@@ -119,6 +123,7 @@ func TestWorkflowSessionRunsPersistsAndCompletes(t *testing.T) {
 	syntheticID := syntheticWorkflowUserID("happy-wf")
 	sessionID, runID, err := p.startWorkflowSession(workflowRunParams{
 		entry:       entry,
+		orgID:       1,
 		skill:       "dispatch",
 		message:     "Sweep the queue.",
 		grafanaURL:  grafanaURL,
@@ -133,7 +138,7 @@ func TestWorkflowSessionRunsPersistsAndCompletes(t *testing.T) {
 		return runStatus(p, runID) == RunStatusCompleted
 	})
 
-	session, err := p.sessionStore.GetSession(sessionID, syntheticID, entry.OrgID)
+	session, err := p.sessionStore.GetSession(sessionID, syntheticID, int64(1))
 	if err != nil {
 		t.Fatalf("session record missing: %v", err)
 	}
@@ -169,6 +174,7 @@ func TestWorkflowSessionWatchdogCancelsHungSession(t *testing.T) {
 	syntheticID := syntheticWorkflowUserID("hung-wf")
 	_, runID, err := p.startWorkflowSession(workflowRunParams{
 		entry:       entry,
+		orgID:       1,
 		skill:       "dispatch",
 		message:     "Sweep the queue.",
 		grafanaURL:  grafanaURL,
@@ -208,6 +214,7 @@ func TestWorkflowFallbackRunsOnceAfterTimeout(t *testing.T) {
 	syntheticID := syntheticWorkflowUserID("fallback-wf")
 	_, _, err := p.startWorkflowSession(workflowRunParams{
 		entry:       entry,
+		orgID:       1,
 		skill:       "dispatch",
 		message:     "Sweep the queue.",
 		grafanaURL:  grafanaURL,
@@ -221,10 +228,10 @@ func TestWorkflowFallbackRunsOnceAfterTimeout(t *testing.T) {
 	// The fallback session itself times out too (same hanging LLM), but must
 	// not spawn another fallback: exactly two sessions for this workflow.
 	waitForCondition(t, 20*time.Second, "fallback session", func() bool {
-		sessions, err := p.sessionStore.ListSessions(syntheticID, entry.OrgID)
+		sessions, err := p.sessionStore.ListSessions(syntheticID, int64(1))
 		return err == nil && len(sessions) == 2
 	})
-	sessions, err := p.sessionStore.ListSessions(syntheticID, entry.OrgID)
+	sessions, err := p.sessionStore.ListSessions(syntheticID, int64(1))
 	if err != nil {
 		t.Fatalf("session list failed: %v", err)
 	}
@@ -282,6 +289,7 @@ func TestWorkflowSpawnRefusals(t *testing.T) {
 	entry.MaxConcurrentSessions = 1
 	params := workflowRunParams{
 		entry:       entry,
+		orgID:       1,
 		grafanaURL:  grafanaURL,
 		saToken:     "test-token",
 		syntheticID: syntheticWorkflowUserID("spawn-wf"),
@@ -328,6 +336,7 @@ func TestWorkflowSpawnRespectsCapAndStartsSession(t *testing.T) {
 	entry.SessionTimeoutSeconds = 60
 	params := workflowRunParams{
 		entry:       entry,
+		orgID:       1,
 		grafanaURL:  grafanaURL,
 		saToken:     "test-token",
 		syntheticID: syntheticWorkflowUserID("cap-wf"),
@@ -354,25 +363,30 @@ func TestWorkflowSpawnRespectsCapAndStartsSession(t *testing.T) {
 	})
 
 	// The finished session left the active set, so the cap is free again.
-	count, err := p.workflowActiveSpawnCount("cap-wf")
-	if err != nil || count != 0 {
-		t.Fatalf("active set must drain after completion: count=%d err=%v", count, err)
-	}
+	// The run status flips to completed inside consumeAgentEvents, and the
+	// spawn slot is released later in the same goroutine: poll instead of
+	// reading the count at the instant status becomes visible.
+	var count int
+	var err error
+	waitForCondition(t, 5*time.Second, "active spawn set to drain", func() bool {
+		count, err = p.workflowActiveSpawnCount("cap-wf")
+		return err == nil && count == 0
+	})
 }
 
 func TestWorkflowShareToolCreatesLink(t *testing.T) {
 	p, _ := newWorkflowTestPlugin(t, stubLLMFinalAnswer("ok"))
 
 	entry := validWorkflowEntry()
-	entry.OrgID = 1
 	params := workflowRunParams{
 		entry:       entry,
+		orgID:       1,
 		syntheticID: syntheticWorkflowUserID("share-wf"),
 	}
 
 	// A session with one message plus a run holding streamed content and a
 	// tool result: the share snapshot must carry the live investigation.
-	session, err := p.sessionStore.CreateSession(params.syntheticID, entry.OrgID, "workflow share test", []SessionMessage{{
+	session, err := p.sessionStore.CreateSession(params.syntheticID, int64(1), "workflow share test", []SessionMessage{{
 		Role:    "user",
 		Content: "findings",
 	}})
@@ -380,7 +394,7 @@ func TestWorkflowShareToolCreatesLink(t *testing.T) {
 		t.Fatalf("session creation failed: %v", err)
 	}
 	runID := "share-run-1"
-	p.runStore.CreateRun(runID, params.syntheticID, entry.OrgID, session.ID)
+	p.runStore.CreateRun(runID, params.syntheticID, int64(1), session.ID)
 	p.runStore.AppendEvent(runID, agent.SSEEvent{Type: "content", Data: agent.ContentEvent{Content: "Root cause: "}})
 	p.runStore.AppendEvent(runID, agent.SSEEvent{Type: "content", Data: agent.ContentEvent{Content: "disk saturation."}})
 	p.runStore.AppendEvent(runID, agent.SSEEvent{
@@ -441,14 +455,14 @@ func TestWorkflowShareTranscriptSurvivesRedisRunStore(t *testing.T) {
 	p.runStore = NewRedisRunStore(p.ctx, client, log.DefaultLogger)
 
 	entry := validWorkflowEntry()
-	entry.OrgID = 1
 	params := workflowRunParams{
 		entry:       entry,
+		orgID:       1,
 		grafanaURL:  grafanaURL,
 		saToken:     "test-token",
 		syntheticID: syntheticWorkflowUserID("share-redis-wf"),
 	}
-	session, err := p.sessionStore.CreateSession(params.syntheticID, entry.OrgID, "redis share test", []SessionMessage{{
+	session, err := p.sessionStore.CreateSession(params.syntheticID, int64(1), "redis share test", []SessionMessage{{
 		Role:    "user",
 		Content: "findings",
 	}})
@@ -456,7 +470,7 @@ func TestWorkflowShareTranscriptSurvivesRedisRunStore(t *testing.T) {
 		t.Fatalf("session creation failed: %v", err)
 	}
 	runID := "share-redis-run-1"
-	p.runStore.CreateRun(runID, params.syntheticID, entry.OrgID, session.ID)
+	p.runStore.CreateRun(runID, params.syntheticID, int64(1), session.ID)
 	p.runStore.AppendEvent(runID, agent.SSEEvent{Type: "content", Data: agent.ContentEvent{Content: "Root cause: disk saturation."}})
 	p.runStore.AppendEvent(runID, agent.SSEEvent{
 		Type: "tool_call_start",
@@ -488,22 +502,23 @@ func TestWorkflowShareTranscriptSurvivesRedisRunStore(t *testing.T) {
 	}
 }
 
-// TestWorkflowSessionWithNilRunCancelsDoesNotPanic covers shutdown racing a
-// session start: Dispose clears the run-cancel registry, and a session that
-// starts after that must be cancelled cleanly instead of assigning into the
-// nil map.
-func TestWorkflowSessionWithNilRunCancelsDoesNotPanic(t *testing.T) {
-	p, grafanaURL := newWorkflowTestPlugin(t, stubLLMHanging())
+// TestWorkflowRunNeverEntersInteractiveCancelRegistry pins the new invariant:
+// a workflow session run never registers in the plugin's runCancels map, so
+// Dispose (a settings save) cannot cancel it. It is bounded by its own
+// deadline instead. Before the fix the nil-map guard had to cancel a session
+// that started exactly in the Dispose window.
+func TestWorkflowRunNeverEntersInteractiveCancelRegistry(t *testing.T) {
+	p, grafanaURL := newWorkflowTestPlugin(t, stubLLMFinalAnswer("done"))
 
 	entry := validWorkflowEntry()
-	entry.Name = "nilcancels-wf"
+	entry.Name = "nocancelreg-wf"
 	entry.Skill = "dispatch"
 	entry.SessionTimeoutSeconds = 30
-	p.runCancels = nil // simulates the Dispose window
 
-	syntheticID := syntheticWorkflowUserID("nilcancels-wf")
+	syntheticID := syntheticWorkflowUserID("nocancelreg-wf")
 	_, runID, err := p.startWorkflowSession(workflowRunParams{
 		entry:       entry,
+		orgID:       1,
 		skill:       "dispatch",
 		message:     "Sweep.",
 		grafanaURL:  grafanaURL,
@@ -514,7 +529,288 @@ func TestWorkflowSessionWithNilRunCancelsDoesNotPanic(t *testing.T) {
 		t.Fatalf("session start failed: %v", err)
 	}
 
-	waitForCondition(t, 15*time.Second, "cancelled run", func() bool {
-		return runStatus(p, runID) != RunStatusRunning && runStatus(p, runID) != ""
+	waitForCondition(t, 15*time.Second, "run completion", func() bool {
+		return runStatus(p, runID) == RunStatusCompleted
 	})
+
+	p.runCancelsMu.Lock()
+	_, registered := p.runCancels[runID]
+	total := len(p.runCancels)
+	p.runCancelsMu.Unlock()
+	if registered {
+		t.Fatalf("workflow run %s must not be in the interactive cancel registry", runID)
+	}
+	if total != 0 {
+		t.Fatalf("workflow run must leave the interactive registry empty, got %d entries", total)
+	}
+}
+
+// TestWorkflowRunSurvivesInstanceTeardown is the refutation for S7: a settings
+// save disposes the old instance, and an in-flight workflow run must survive
+// it, finish its write, and only then let the deferred teardown close the
+// instance resources.
+func TestWorkflowRunSurvivesInstanceTeardown(t *testing.T) {
+	release := make(chan struct{})
+	handler := func(w http.ResponseWriter, r *http.Request) {
+		<-release
+		stubLLMFinalAnswer("finished after teardown")(w, r)
+	}
+	p, grafanaURL := newWorkflowTestPlugin(t, handler)
+	// The run's stores live in Redis in production; give this instance one so
+	// the deferred teardown has a real client to close.
+	client := workflowRedisTestClient(t)
+	defer client.Close()
+	p.redisClient = client
+	p.usingRedis = true
+
+	entry := validWorkflowEntry()
+	entry.Name = "teardown-survive-wf"
+	entry.Skill = "dispatch"
+	entry.SessionTimeoutSeconds = 30
+
+	interactiveCtx, interactiveCancel := context.WithCancel(context.Background())
+	defer interactiveCancel()
+	p.runCancelsMu.Lock()
+	p.runCancels["interactive-run"] = interactiveCancel
+	p.runCancelsMu.Unlock()
+
+	syntheticID := syntheticWorkflowUserID(entry.Name)
+	_, runID, err := p.startWorkflowSession(workflowRunParams{
+		entry:       entry,
+		orgID:       1,
+		skill:       "dispatch",
+		message:     "Sweep.",
+		grafanaURL:  grafanaURL,
+		saToken:     "test-token",
+		syntheticID: syntheticID,
+	})
+	if err != nil {
+		t.Fatalf("session start failed: %v", err)
+	}
+	waitForCondition(t, 5*time.Second, "run started", func() bool {
+		return runStatus(p, runID) == RunStatusRunning
+	})
+	if got := p.workflowRuns.inFlight(); got != 1 {
+		t.Fatalf("one tracked run expected before teardown, got %d", got)
+	}
+
+	// Simulated settings save: the old instance is disposed.
+	p.Dispose()
+
+	if interactiveCtx.Err() == nil {
+		t.Fatal("interactive runs must still be cancelled by Dispose")
+	}
+	if p.runCancels != nil {
+		t.Fatal("the interactive registry must be cleared by Dispose")
+	}
+	if p.ctx.Err() != nil {
+		t.Fatal("teardown must wait for the in-flight workflow run")
+	}
+	if got := runStatus(p, runID); got != RunStatusRunning {
+		t.Fatalf("the workflow run must survive Dispose, status %q", got)
+	}
+
+	close(release)
+	waitForCondition(t, 15*time.Second, "run completion after teardown", func() bool {
+		return runStatus(p, runID) == RunStatusCompleted
+	})
+	waitForCondition(t, 5*time.Second, "deferred teardown", func() bool {
+		return p.ctx.Err() != nil
+	})
+	if got := p.workflowRuns.inFlight(); got != 0 {
+		t.Fatalf("tracker must drain after the run finishes, got %d", got)
+	}
+}
+
+// TestWorkflowRunSelfTerminatesAtDeadline proves the run context deadline —
+// not a scheduler or watchdog goroutine — ends an over-budget session, and
+// that the DeadlineExceeded classification still lands in the run record.
+func TestWorkflowRunSelfTerminatesAtDeadline(t *testing.T) {
+	p, grafanaURL := newWorkflowTestPlugin(t, stubLLMHanging())
+
+	entry := validWorkflowEntry()
+	entry.Name = "deadline-wf"
+	entry.Skill = "dispatch"
+	entry.SessionTimeoutSeconds = 2
+
+	before := testutil.ToFloat64(workflowSessions.WithLabelValues("deadline-wf", "timeout"))
+	syntheticID := syntheticWorkflowUserID(entry.Name)
+	_, runID, err := p.startWorkflowSession(workflowRunParams{
+		entry:       entry,
+		orgID:       1,
+		skill:       "dispatch",
+		message:     "Sweep.",
+		grafanaURL:  grafanaURL,
+		saToken:     "test-token",
+		syntheticID: syntheticID,
+	})
+	if err != nil {
+		t.Fatalf("session start failed: %v", err)
+	}
+
+	waitForCondition(t, 15*time.Second, "deadline end", func() bool {
+		return runStatus(p, runID) == RunStatusFailed
+	})
+	run, err := p.runStore.GetRun(runID)
+	if err != nil {
+		t.Fatalf("run record missing: %v", err)
+	}
+	if !strings.Contains(run.Error, "timeout") {
+		t.Fatalf("failure must name the timeout, got %q", run.Error)
+	}
+	if got := testutil.ToFloat64(workflowSessions.WithLabelValues("deadline-wf", "timeout")); got <= before {
+		t.Fatalf("the deadline must classify as timeout, counter stayed at %v", got)
+	}
+	if got := p.workflowRuns.inFlight(); got != 0 {
+		t.Fatalf("tracker must drain after the deadline, got %d", got)
+	}
+}
+
+// TestWorkflowFallbackStartsWhileInstanceDraining is the refutation for the
+// dispose-window defect: a run that survives Dispose and then times out must
+// still start its configured fallback. The instance resources stay open until
+// both runs drain, then teardown executes; after that no run may begin.
+func TestWorkflowFallbackStartsWhileInstanceDraining(t *testing.T) {
+	var calls atomic.Int32
+	release := make(chan struct{})
+	handler := func(w http.ResponseWriter, r *http.Request) {
+		if calls.Add(1) == 1 {
+			select {
+			case <-r.Context().Done():
+			case <-time.After(5 * time.Second):
+			}
+			return
+		}
+		<-release
+		stubLLMFinalAnswer("fallback recovered")(w, r)
+	}
+	p, grafanaURL := newWorkflowTestPlugin(t, handler)
+
+	entry := validWorkflowEntry()
+	entry.Name = "draining-fallback-wf"
+	entry.Skill = "dispatch"
+	entry.FallbackSkill = "escalate"
+	entry.SessionTimeoutSeconds = 3
+
+	const orgID int64 = 1
+	syntheticID := syntheticWorkflowUserID(entry.Name)
+	_, parentRunID, err := p.startWorkflowSession(workflowRunParams{
+		entry:       entry,
+		orgID:       orgID,
+		skill:       "dispatch",
+		message:     "Sweep.",
+		grafanaURL:  grafanaURL,
+		saToken:     "test-token",
+		syntheticID: syntheticID,
+	})
+	if err != nil {
+		t.Fatalf("session start failed: %v", err)
+	}
+	waitForCondition(t, 5*time.Second, "run started", func() bool {
+		return runStatus(p, parentRunID) == RunStatusRunning
+	})
+
+	// Simulated settings save while the run is in flight.
+	p.Dispose()
+	if p.ctx.Err() != nil {
+		t.Fatal("teardown must wait for the in-flight workflow run")
+	}
+
+	waitForCondition(t, 15*time.Second, "parent run failure", func() bool {
+		return runStatus(p, parentRunID) == RunStatusFailed
+	})
+
+	// The fallback was admitted while draining and is now in flight, keeping
+	// the deferred teardown waiting.
+	waitForCondition(t, 10*time.Second, "fallback session in flight", func() bool {
+		return p.workflowRuns.inFlight() == 1
+	})
+	if p.ctx.Err() != nil {
+		t.Fatal("teardown must wait for the fallback run too")
+	}
+
+	close(release)
+	waitForCondition(t, 15*time.Second, "fallback session completion", func() bool {
+		runs, listErr := p.runStore.ListRuns(syntheticID, orgID, 20)
+		if listErr != nil {
+			return false
+		}
+		for _, run := range runs {
+			if run.RunID == parentRunID || run.Status != RunStatusCompleted {
+				continue
+			}
+			session, getErr := p.sessionStore.GetSession(run.SessionID, syntheticID, orgID)
+			if getErr == nil && strings.Contains(session.Title, entry.FallbackSkill) {
+				return true
+			}
+		}
+		return false
+	})
+
+	waitForCondition(t, 5*time.Second, "deferred teardown after both drain", func() bool {
+		return p.ctx.Err() != nil && p.workflowRuns.inFlight() == 0
+	})
+
+	// After teardown executed, no run may begin against the closed resources.
+	if p.beginWorkflowRun() {
+		t.Fatal("begin must refuse a run after teardown executed")
+	}
+}
+
+// TestWorkflowRunTrackerAdmitsDrainingAndRefusesAfterTeardown pins the tracker
+// state machine: admitted while draining (the failing run is still in flight),
+// refused once the deferred teardown has executed.
+func TestWorkflowRunTrackerAdmitsDrainingAndRefusesAfterTeardown(t *testing.T) {
+	tracker := &workflowRunTracker{}
+	if !tracker.begin() {
+		t.Fatal("the first run must be admitted")
+	}
+
+	teardownRan := false
+	if tracker.dispose(func() { teardownRan = true }) {
+		t.Fatal("dispose must defer teardown while a run is in flight")
+	}
+	if !tracker.begin() {
+		t.Fatal("draining must admit a fallback started by an in-flight run")
+	}
+
+	tracker.end()
+	if teardownRan {
+		t.Fatal("teardown must wait for the fallback run")
+	}
+	if got := tracker.inFlight(); got != 1 {
+		t.Fatalf("the fallback must stay tracked, got %d in flight", got)
+	}
+
+	tracker.end()
+	if !teardownRan {
+		t.Fatal("teardown must run when the last run drains")
+	}
+	if tracker.begin() {
+		t.Fatal("begin must refuse a run after teardown executed")
+	}
+	if got := tracker.inFlight(); got != 0 {
+		t.Fatalf("tracker must be empty, got %d", got)
+	}
+}
+
+// TestInteractiveRunStillCancelsOnDispose preserves the historical behavior
+// for the handleAgentRun path.
+func TestInteractiveRunStillCancelsOnDispose(t *testing.T) {
+	p, _ := newWorkflowTestPlugin(t, stubLLMFinalAnswer("done"))
+
+	interactiveCtx, interactiveCancel := context.WithCancel(context.Background())
+	defer interactiveCancel()
+	p.runCancelsMu.Lock()
+	p.runCancels["interactive-run"] = interactiveCancel
+	p.runCancelsMu.Unlock()
+
+	p.Dispose()
+
+	if interactiveCtx.Err() == nil {
+		t.Fatal("Dispose must cancel an interactive run")
+	}
+	if p.runCancels != nil {
+		t.Fatal("Dispose must clear the interactive cancel registry")
+	}
 }

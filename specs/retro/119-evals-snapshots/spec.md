@@ -73,9 +73,9 @@ Tags: `VERIFIED` (code pointer or test), `ASSUMED` (untested), `GAP` (missing).
 11. The GET limit defaults to 20 and clamps to 100. `VERIFIED` — `pkg/plugin/plugin.go:2342`
 12. POST returns 404 when capture is disabled. `VERIFIED` — `pkg/plugin/plugin.go:1822`
 13. POST rejects a Viewer with 403 and accepts Admin or Editor. `VERIFIED` — `pkg/plugin/plugin.go:1822`
-14. POST with `runId` scores one run after an ownership check. `VERIFIED` — `pkg/plugin/plugin.go:1839`
+14. POST with `runId` scores one run after an ownership check. `VERIFIED` — `pkg/plugin/plugin.go:1840`
 15. POST without `runId` scores up to `limit` of the caller's recent runs. `VERIFIED` — `pkg/plugin/plugin.go:1846`
-16. POST returns `{status: "completed", results: [...]}`. `VERIFIED` — `pkg/plugin/plugin.go:1859`
+16. POST returns `{status: "completed", results: [...]}`. `VERIFIED` — `pkg/plugin/plugin.go:1933`
 17. Scores are computed per request and never persisted; there is no eval store. `VERIFIED` — `pkg/plugin/agent_eval.go:36`
 18. Scout skips a scavenge until org ID, Grafana URL, and Graphiti tools are known. `VERIFIED` — `pkg/plugin/scout.go:152`
 19. Scan intervals are 5m, 15m, 30m, 1h, 3h, 12h, 24h; anything else disables discovery. `VERIFIED` — test `TestParseScanInterval`
@@ -90,7 +90,7 @@ Tags: `VERIFIED` (code pointer or test), `ASSUMED` (untested), `GAP` (missing).
 28. Metric namespaces cache for one hour, fetch up to 5,000 names per datasource, and render 40 prefixes. `VERIFIED` — `pkg/plugin/metric_namespace_snapshot.go:19`
 29. The alert-rule snapshot has a 5-second budget, 90-second hit TTL, and 30-second miss TTL. `VERIFIED` — `pkg/plugin/alert_rule_snapshot.go:37`
 30. The alert-rule snapshot renders at most 3 rules from at most 8 datasources. `VERIFIED` — `pkg/plugin/alert_rule_snapshot.go:49`
-31. The alert-rule prefetch runs only when the alert name is extractable from the message. `VERIFIED` — `pkg/plugin/plugin.go:973`
+31. The alert-rule prefetch runs only when the alert name is extractable from the message. `VERIFIED` — `pkg/plugin/plugin.go:1040`
 32. Every snapshot fails open: an empty result renders no prompt block and the run continues. `VERIFIED` — `pkg/plugin/alert_rule_snapshot.go:29`
 
 ## Invariants
@@ -106,7 +106,7 @@ Tags: `VERIFIED` (code pointer or test), `ASSUMED` (untested), `GAP` (missing).
 | Capture disabled | GET `enabled: false`; POST 404 | `pkg/plugin/plugin.go:1821` |
 | Viewer calls eval run | HTTP 403 `Access denied` | `pkg/plugin/plugin.go:1822` |
 | Run not owned | HTTP 403 `Access denied` | `pkg/plugin/plugin.go:1339` |
-| Run list fails | HTTP 500 `Failed to list agent evals` | `pkg/plugin/plugin.go:1801` |
+| Run list fails | HTTP 500 `Failed to list agent evals` | `pkg/plugin/plugin.go:1802` |
 | `list_datasources` times out | Fail-open warning block in prompt | `pkg/plugin/datasource_snapshot.go:95` |
 | Scavenge fails | Run skipped; warning logged | `pkg/plugin/scout.go:214` |
 

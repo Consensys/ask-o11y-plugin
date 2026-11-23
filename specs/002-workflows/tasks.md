@@ -128,6 +128,33 @@
 
 ---
 
+## Phase 11: Sessions and editor increment (2026-11-23)
+
+**Purpose**: Workflow sessions visible and openable; full config and prompt editing in the tab.
+
+- [x] T031 Backend: `GET /api/workflows/{name}/runs` (Admin only, newest first) and the Admin workflow-session read on `GET /api/sessions/{id}` via `GetSessionUnscoped` on both stores. OpenAPI entry and endpoint test updated. Tests in `workflow_status_test.go`.
+- [x] T032 Frontend: runs panel per workflow with status badges and Open deep links (`?sessionId=`), full entry editor (create, edit, delete, Combobox skill pickers), Edit prompt jump into the Skills tab (focusSkill prop).
+- [x] T033 Amend this spec (Stories 9 and 10, FR-022 to FR-026) and retro 111 (admin read rule) in the same PR.
+
+---
+
+## Phase 12: Per-org instance semantics (2026-11-23)
+
+**Purpose**: Drop the redundant `orgId` entry field and surface run-listing failures in the tab.
+
+- [x] T034 Backend: `OrgIdentityStore` becomes the single-org instance binding (seeded from the first request to this instance); `WorkflowEntry` drops `orgId`; schedulers, sessions, spawn, fallback, and the status API use the instance org; the runs API row drops `orgId`.
+- [x] T035 Frontend: the editor drops the Org field; the sessions panel shows load failures as errors instead of an empty list.
+- [x] T036 Amend FR-001 and the w3f tenant payload (drop `orgId` from the workflow entries) in the same change.
+
+---
+
+## Phase 13: Durability fixes from live UI testing (2026-11-23)
+
+- [x] T037 `redisSession`/`toRedis`/`fromRedis` carry `conversationType` and `workflow` — the tags were silently dropped on Redis writes, so the admin session read 404ed and Open started a new session.
+- [x] T038 Row counters derive from the durable run store (same records as the sessions list), not the in-memory store that resets on restart; lastTick stays per-instance. Timed-out runs (failed with a timeout message) count as timeout.
+
+---
+
 ## Dependencies & Execution Order
 
 - **Phase 1** blocks every story. T001 to T004 are parallel; T005 depends on nothing but is consumed by T008.

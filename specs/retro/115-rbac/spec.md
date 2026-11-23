@@ -20,10 +20,10 @@ Admin and Editor keep full access.
 
 | Capability | Admin | Editor | Viewer | Evidence |
 |---|---|---|---|---|
-| List MCP tools | yes | yes | yes, read-only only | `pkg/plugin/plugin.go:751` |
+| List MCP tools | yes | yes | yes, read-only only | `pkg/plugin/plugin.go:752` |
 | Call a read-only tool | yes | yes | yes | `pkg/rbac/rbac.go:16` |
 | Call a mutating or unannotated tool | yes | yes | no | `pkg/plugin/plugin.go:805` |
-| Approve a pending tool call | yes | yes | no | `pkg/plugin/plugin.go:1455` |
+| Approve a pending tool call | yes | yes | no | `pkg/plugin/plugin.go:1531` |
 | Read skill content with `?include=content` | yes | no | no | `pkg/plugin/plugin.go:1724` |
 
 ## Contract
@@ -32,7 +32,7 @@ Admin and Editor keep full access.
 
 | Method | Path | Handler | Evidence |
 |---|---|---|---|
-| any | `/api/mcp/tools` | `handleMCPTools` | `pkg/plugin/plugin.go:729` |
+| any | `/api/mcp/tools` | `handleMCPTools` | `pkg/plugin/plugin.go:730` |
 | POST | `/api/mcp/call-tool` | `handleMCPCallTool` | `pkg/plugin/plugin.go:762` |
 
 ### SSE events
@@ -45,7 +45,7 @@ Admin and Editor keep full access.
 
 | Key | Location | Default | Evidence |
 |---|---|---|---|
-| None. The role comes from Grafana, not from plugin settings. | — | — | `pkg/plugin/plugin.go:691` |
+| None. The role comes from Grafana, not from plugin settings. | — | — | `pkg/plugin/plugin.go:692` |
 
 ### MCP tool names
 
@@ -56,7 +56,7 @@ Admin and Editor keep full access.
 
 ## Behaviour Rules
 
-1. The role model is exactly `Admin`, `Editor`, and `Viewer`, taken from the SDK plugin context. `VERIFIED` — `pkg/plugin/plugin.go:691`
+1. The role model is exactly `Admin`, `Editor`, and `Viewer`, taken from the SDK plugin context. `VERIFIED` — `pkg/plugin/plugin.go:692`
 2. When the context has no user, the role is `Viewer`, the least privileged value. `VERIFIED` — `pkg/plugin/plugin.go:700`
 3. Client headers cannot set the role. `VERIFIED` — test `TestGetUserRoleIgnoresHeaders`
 4. `IsReadOnlyTool` is true only when annotations exist and `ReadOnlyHint` is true. `VERIFIED` — `pkg/rbac/rbac.go:6`
@@ -68,10 +68,10 @@ Admin and Editor keep full access.
 10. `FilterToolsByRole` returns the input list untouched for Admin and Editor. `VERIFIED` — `pkg/rbac/rbac.go:20`
 11. `FilterToolsByRole` keeps only read-only tools for every other role. `VERIFIED` — `pkg/rbac/rbac.go:25`
 12. The filter is tested for Admin, Editor, Viewer, and an empty list. `VERIFIED` — test `TestFilterToolsByRole`
-13. `GET /api/mcp/tools` filters the list after it is fetched. `VERIFIED` — `pkg/plugin/plugin.go:751`
-14. Tool selection filtering runs after the RBAC filter, so selection cannot widen access. `VERIFIED` — `pkg/plugin/plugin.go:751`
+13. `GET /api/mcp/tools` filters the list after it is fetched. `VERIFIED` — `pkg/plugin/plugin.go:752`
+14. Tool selection filtering runs after the RBAC filter, so selection cannot widen access. `VERIFIED` — `pkg/plugin/plugin.go:752`
 15. The agent loop applies the same filter when it builds its tool list. `VERIFIED` — `pkg/agent/loop.go:161`
-16. A direct tool call is checked again before dispatch. `VERIFIED` — `pkg/plugin/plugin.go:802`
+16. A direct tool call is checked again before dispatch. `VERIFIED` — `pkg/plugin/plugin.go:803`
 17. The agent loop checks again inside `executeTool`. `VERIFIED` — `pkg/agent/loop.go:974`
 18. A Viewer calling a mutating tool gets HTTP 403 with `Access denied: Viewer role cannot access tool <name>`. `VERIFIED` — `pkg/plugin/plugin.go:805`
 19. The denial uses `http.Error`, so the body is plain text and the status is 403. `VERIFIED` — `pkg/plugin/plugin.go:805`
@@ -118,15 +118,15 @@ Coverage: `VERIFIED` = code pointer or test; `ASSUMED` = code suggests, no test;
 | Span attribute | `mcp.tool_name`, `mcp.is_error` | `mcp_tool_call` span | `pkg/agent/loop.go:963` |
 | Metric | None. No denial counter exists. | — | `pkg/plugin/plugin.go:825` |
 | Log field | `tool`, `role` | Plugin logger on denial | `pkg/plugin/plugin.go:825` |
-| Log field | `role`, `totalTools`, `filteredTools` | Plugin logger on listing | `pkg/plugin/plugin.go:776` |
+| Log field | `role`, `totalTools`, `filteredTools` | Plugin logger on listing | `pkg/plugin/plugin.go:777` |
 
 ## Evidence Index
 
 - `pkg/rbac/rbac.go:5` — read-only predicate
 - `pkg/rbac/rbac.go:12` — access predicate
 - `pkg/rbac/rbac.go:19` — list filter
-- `pkg/plugin/plugin.go:751` — listing filter call site
-- `pkg/plugin/plugin.go:802` — execution check call site
+- `pkg/plugin/plugin.go:752` — listing filter call site
+- `pkg/plugin/plugin.go:803` — execution check call site
 - `pkg/agent/loop.go:161` — agent list filter
 - `pkg/agent/loop.go:974` — agent execution check
 - `pkg/rbac/rbac_test.go` — `TestCanAccessTool` — 11-case matrix

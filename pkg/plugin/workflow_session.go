@@ -3,10 +3,11 @@ package plugin
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
-	"sync/atomic"
+	"sync"
 	"time"
 
 	"consensys-asko11y-app/pkg/agent"
@@ -17,14 +18,116 @@ import (
 // The tick path fills it from the entry; the spawn tool fills it from a
 // dispatcher's spawn_session call.
 type workflowRunParams struct {
-	entry       WorkflowEntry
-	skill       string
-	message     string
+	entry   WorkflowEntry
+	skill   string
+	message string
+	// orgID is the owning org of this plugin instance; workflow sessions run
+	// there because Grafana provisions app settings per org.
+	orgID       int64
 	grafanaURL  string
 	saToken     string
 	syntheticID int64
 	spawned     bool
 	isFallback  bool
+	// topLevelGated marks a run that owns the workflow's single top-level
+	// slot (see acquireWorkflowTopLevelRun). Its finish releases the slot.
+	topLevelGated bool
+}
+
+// workflowRunTracker counts in-flight workflow session runs of one plugin
+// instance and defers the instance teardown until the last one finishes.
+//
+// A settings save builds a fresh plugin instance, and Dispose of the old one
+// must not kill a workflow investigation mid-write: the run's stores are
+// shared (Redis), so the run can finish on the old instance while the new one
+// serves requests. Every run is bounded by its own timeout, so the deferred
+// teardown is bounded too.
+type workflowRunTracker struct {
+	mu     sync.Mutex
+	active int
+	// draining is set by dispose: the instance is shutting down but its
+	// resources stay open until the last in-flight run ends. A fallback that a
+	// failing run starts is admitted while draining, because that run is still
+	// in flight and holds the resources open.
+	draining bool
+	// closed is set when the deferred teardown has executed, or when dispose
+	// found no run to wait for and the caller tears down immediately. No run
+	// may begin afterwards: the stores behind it are closed.
+	closed  bool
+	onDrain func()
+}
+
+// begin registers an in-flight run. It reports false once teardown has
+// executed (or is about to, with no run in flight), so a run that would use
+// closed resources is refused instead of leaking.
+func (t *workflowRunTracker) begin() bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.closed {
+		return false
+	}
+	t.active++
+	return true
+}
+
+// end deregisters a finished run and runs the deferred teardown when it was
+// the last one. It marks the tracker closed before the teardown body runs, so
+// no new run can begin against resources that are being closed.
+func (t *workflowRunTracker) end() {
+	t.mu.Lock()
+	if t.active > 0 {
+		t.active--
+	}
+	if t.active > 0 || !t.draining || t.onDrain == nil || t.closed {
+		t.mu.Unlock()
+		return
+	}
+	t.closed = true
+	onDrain := t.onDrain
+	t.onDrain = nil
+	t.mu.Unlock()
+	onDrain()
+}
+
+// dispose defers onDrain until the last active run ends. It returns true when
+// no run is active, so the caller tears down immediately. The tracker is
+// closed in both cases; while draining, though, a run already in flight may
+// still start the fallback that its failure calls for.
+func (t *workflowRunTracker) dispose(onDrain func()) bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.closed {
+		return false
+	}
+	t.draining = true
+	if t.active > 0 {
+		t.onDrain = onDrain
+		return false
+	}
+	t.closed = true
+	return true
+}
+
+// inFlight reports how many runs are registered and not yet finished.
+func (t *workflowRunTracker) inFlight() int {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.active
+}
+
+// beginWorkflowRun / endWorkflowRun are nil-safe: white-box test plugins and
+// the no-Redis path may not build the tracker.
+func (p *Plugin) beginWorkflowRun() bool {
+	if p.workflowRuns == nil {
+		return true
+	}
+	return p.workflowRuns.begin()
+}
+
+func (p *Plugin) endWorkflowRun() {
+	if p.workflowRuns != nil {
+		p.workflowRuns.end()
+	}
 }
 
 // startWorkflowSession does the synchronous setup for one headless session
@@ -46,10 +149,23 @@ func (p *Plugin) startWorkflowSession(params workflowRunParams) (string, string,
 func (p *Plugin) startWorkflowSessionWithID(params workflowRunParams, runID string) (string, string, error) {
 	entry := params.entry
 	name := entry.Name
-	orgID := entry.OrgID
+	orgID := params.orgID
 	orgIDStr := strconv.FormatInt(orgID, 10)
 	orgName := "Org" + orgIDStr
 	userRole := "Editor"
+
+	// Register the run before any record is written: a run that would outlive
+	// a disposed instance must be refused up front, and the teardown of that
+	// instance waits for every registered run.
+	if !p.beginWorkflowRun() {
+		return "", "", fmt.Errorf("workflow %s: the plugin instance is shutting down", name)
+	}
+	launched := false
+	defer func() {
+		if !launched {
+			p.endWorkflowRun()
+		}
+	}()
 
 	activation, err := skills.Resolve(p.skillRegistry, params.message, []string{params.skill}, "")
 	if err != nil {
@@ -173,46 +289,35 @@ func (p *Plugin) startWorkflowSessionWithID(params workflowRunParams, runID stri
 	p.workflowStatus.RecordSession(name, "started")
 
 	eventCh := make(chan agent.SSEEvent, 16)
-	runCtx, runCancel := context.WithCancel(p.ctx)
-
-	p.runCancelsMu.Lock()
-	if p.runCancels != nil {
-		p.runCancels[runID] = runCancel
-	} else {
-		// Dispose already cleared the registry: the plugin is shutting down.
-		// Cancel now so this session ends immediately instead of assigning
-		// into a nil map.
-		runCancel()
-	}
-	p.runCancelsMu.Unlock()
-
-	var timedOut atomic.Bool
+	// The run context is detached from the plugin context and carries a hard
+	// deadline: a settings save disposes this instance, and that must not
+	// cancel an in-flight workflow session. The deadline is the bound that
+	// makes survival safe — the run always ends by itself, with no scheduler
+	// or watchdog goroutine involved.
 	timeout := time.Duration(entry.SessionTimeoutSeconds) * time.Second
-	timer := time.AfterFunc(timeout, func() {
-		timedOut.Store(true)
-		runCancel()
-	})
+	runCtx, runCancel := context.WithTimeout(context.WithoutCancel(p.ctx), timeout)
 
+	launched = true
 	go p.agentLoop.Run(runCtx, loopReq, eventCh)
 	go func() {
-		defer timer.Stop()
+		defer p.endWorkflowRun()
 		started := time.Now()
 		login := "workflow-" + workflowLabel(name)
 		p.consumeAgentEvents(runID, sessionID, params.syntheticID, login, orgID, orgName, runModel, eventCh)
 
+		// Read the deadline verdict before cancelling: runCancel would turn a
+		// DeadlineExceeded into Canceled and lose the timeout outcome.
+		timedOut := errors.Is(runCtx.Err(), context.DeadlineExceeded)
 		runCancel()
-		p.runCancelsMu.Lock()
-		delete(p.runCancels, runID)
-		p.runCancelsMu.Unlock()
 
 		// The run status is read first: a run that completed right at the
-		// deadline stays completed even if the watchdog timer fired in the
-		// race window between the consumer returning and the timer stopping.
+		// deadline stays completed even if the deadline fired in the race
+		// window between the consumer returning and this check.
 		run, getErr := p.runStore.GetRun(runID)
 		outcome := "failed"
 		if getErr == nil && run.Status == RunStatusCompleted {
 			outcome = "completed"
-		} else if timedOut.Load() {
+		} else if timedOut {
 			p.runStore.FinishRun(runID, RunStatusFailed,
 				fmt.Sprintf("workflow session exceeded its %d second timeout", entry.SessionTimeoutSeconds))
 			outcome = "timeout"
@@ -225,6 +330,10 @@ func (p *Plugin) startWorkflowSessionWithID(params workflowRunParams, runID stri
 		workflowSessions.WithLabelValues(workflowLabel(name), outcome).Inc()
 		p.workflowStatus.RecordSession(name, outcome)
 		observeWorkflowRunDuration(name, time.Since(started))
+
+		if params.topLevelGated {
+			p.releaseWorkflowTopLevelRun(name, runID)
+		}
 
 		if params.spawned {
 			p.workflowActiveSpawnRemove(name, runID)
@@ -252,6 +361,7 @@ func (p *Plugin) maybeRunWorkflowFallback(params workflowRunParams, outcome stri
 		entry:       entry,
 		skill:       entry.FallbackSkill,
 		message:     fallbackMessage,
+		orgID:       params.orgID,
 		grafanaURL:  params.grafanaURL,
 		saToken:     params.saToken,
 		syntheticID: params.syntheticID,
@@ -260,7 +370,31 @@ func (p *Plugin) maybeRunWorkflowFallback(params workflowRunParams, outcome stri
 	}
 	p.logger.Info("Workflow fallback session starting",
 		"workflow", entry.Name, "skill", entry.FallbackSkill, "after", outcome)
-	if _, _, err := p.startWorkflowSession(fallbackParams); err != nil {
+
+	// A fallback is a top-level run too, so it takes the same slot. The failed
+	// run released it before reaching here, so a refusal means a new tick's
+	// run already holds it — skip the fallback rather than overlap.
+	runID, err := generateShareID()
+	if err != nil {
+		p.logger.Error("Workflow fallback session got no run ID",
+			"workflow", entry.Name, "skill", entry.FallbackSkill, "error", err)
+		return
+	}
+	admitted, gateErr := p.acquireWorkflowTopLevelRun(entry.Name, runID, entry.SessionTimeoutSeconds)
+	if gateErr != nil {
+		p.logger.Error("Workflow fallback skipped: top-level active key unavailable",
+			"workflow", entry.Name, "error", gateErr)
+		return
+	}
+	if !admitted {
+		p.logger.Info("Workflow fallback skipped: another top-level run is in flight",
+			"workflow", entry.Name, "after", outcome)
+		return
+	}
+	p.workflowTopLevelAdd(entry.Name, 1)
+	fallbackParams.topLevelGated = true
+	if _, _, err := p.startWorkflowSessionWithID(fallbackParams, runID); err != nil {
+		p.releaseWorkflowTopLevelRun(entry.Name, runID)
 		p.logger.Error("Workflow fallback session failed to start",
 			"workflow", entry.Name, "skill", entry.FallbackSkill, "error", err)
 	}
@@ -351,6 +485,7 @@ func (p *Plugin) handleWorkflowSpawn(params workflowRunParams, arguments string,
 		entry:       params.entry,
 		skill:       args.Skill,
 		message:     args.Message,
+		orgID:       params.orgID,
 		grafanaURL:  params.grafanaURL,
 		saToken:     params.saToken,
 		syntheticID: params.syntheticID,
@@ -411,7 +546,7 @@ func (p *Plugin) handleWorkflowShare(params workflowRunParams, sessionID, runID,
 		days = 30
 	}
 
-	session, err := p.sessionStore.GetSession(sessionID, params.syntheticID, params.entry.OrgID)
+	session, err := p.sessionStore.GetSession(sessionID, params.syntheticID, params.orgID)
 	if err != nil {
 		return fmt.Sprintf("share_session failed: session %s could not be read: %v", sessionID, err), true
 	}
@@ -435,12 +570,12 @@ func (p *Plugin) handleWorkflowShare(params workflowRunParams, sessionID, runID,
 	}
 
 	hours := days * 24
-	share, err := p.shareStore.CreateShare(sessionID, data, params.entry.OrgID, params.syntheticID, &hours)
+	share, err := p.shareStore.CreateShare(sessionID, data, params.orgID, params.syntheticID, &hours)
 	if err != nil {
 		return fmt.Sprintf("share_session failed: %v", err), true
 	}
 	return fmt.Sprintf("Share link (valid %d days): %s/a/%s/shared/%s?orgId=%d",
-		days, params.grafanaURL, PluginID, share.ShareID, params.entry.OrgID), false
+		days, params.grafanaURL, PluginID, share.ShareID, params.orgID), false
 }
 
 // workflowShareSnapshot is the session-shaped payload stored for a workflow

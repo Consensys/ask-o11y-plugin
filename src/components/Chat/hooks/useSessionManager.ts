@@ -120,7 +120,11 @@ export function useSessionManager(
             : [metadata, ...prev];
         });
         onSessionIdChange(session.id);
-        await setCurrentSessionId(session.id);
+        // Making the session the caller's "current" is best-effort: opening a
+        // session you do not own (an Admin opening a workflow session from
+        // the config tab) 404s on this pointer update, and that must not
+        // wipe the transcript that just loaded.
+        await setCurrentSessionId(session.id).catch(() => {});
       } catch (error: unknown) {
         const is404 = error instanceof Error && error.message.includes('404');
         if (is404) {

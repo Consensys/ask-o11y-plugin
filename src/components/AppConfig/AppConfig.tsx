@@ -287,6 +287,14 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
     (plugin.meta as unknown as { secureJsonFields?: Record<string, boolean> }).secureJsonFields || {};
   const [promptDefaults, setPromptDefaults] = useState<PromptDefaults | null>(null);
   const [activeTab, setActiveTab] = useState<SettingsTab>(getInitialSettingsTab);
+  // Skill to auto-open in the Skills editor after switching tabs from the
+  // Workflows tab's Edit prompt action.
+  const [skillFocus, setSkillFocus] = useState<string | null>(null);
+  const handleEditPrompt = useCallback((skill: string) => {
+    setSkillFocus(skill);
+    setActiveTab('skills');
+    rememberSettingsTab('skills');
+  }, []);
   const [savedJsonData, setSavedJsonData] = useState<AppPluginSettings>(jsonData ?? {});
   const [topology, setTopology] = useState<AgentTopologyResponse | null>(null);
   const [topologyLoading, setTopologyLoading] = useState(false);
@@ -942,14 +950,31 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
     });
   }
 
-  function saveWorkflows(next: WorkflowEntryUI[]) {
+  // Read the stored settings at save time: the mount-time snapshot is stale, so
+  // spreading it would revert any jsonData key another admin (or another tab)
+  // wrote since this page loaded. Only the workflows key is replaced.
+  async function saveWorkflows(next: WorkflowEntryUI[]) {
+    let currentJsonData: AppPluginSettings;
+    try {
+      const res = await lastValueFrom(
+        getBackendSrv().fetch<{ jsonData?: AppPluginSettings }>({
+          url: `/api/plugins/${plugin.meta.id}/settings`,
+        })
+      );
+      currentJsonData = res.data?.jsonData ?? savedJsonData;
+    } catch {
+      // A PUT built without a fresh read would revert the other admin's change,
+      // which is the defect this path exists to avoid. Skip the save instead.
+      return;
+    }
+
+    const merged: AppPluginSettings = { ...currentJsonData, workflows: next };
+    // The save reloads the page; keep local state consistent until it does.
+    setSavedJsonData(merged);
     saveAndReload({
       enabled,
       pinned,
-      jsonData: {
-        ...savedJsonData,
-        workflows: next,
-      },
+      jsonData: merged,
     });
   }
 
@@ -1767,6 +1792,8 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
             savedEntries={savedJsonData.skills?.entries ?? {}}
             onSaveEntries={saveSkillEntries}
             legacyPromptSkills={legacyPromptSkills}
+            focusSkill={skillFocus ?? undefined}
+            onFocusConsumed={() => setSkillFocus(null)}
           />
         )}
 
@@ -1774,6 +1801,7 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
           <WorkflowsTab
             savedWorkflows={savedJsonData.workflows ?? []}
             onSaveWorkflows={saveWorkflows}
+            onEditPrompt={handleEditPrompt}
           />
         )}
 

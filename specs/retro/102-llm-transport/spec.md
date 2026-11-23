@@ -38,7 +38,7 @@ The transport emits no event of its own. A transport failure reaches the client 
 | Key | Location | Default | Evidence |
 |---|---|---|---|
 | `model` | query parameter | empty (auto) | `pkg/plugin/agent_model.go:15` |
-| `model` | session record | empty | `pkg/plugin/plugin.go:1053` |
+| `model` | session record | empty | `pkg/plugin/plugin.go:1054` |
 | `model` | skill front matter | empty | `pkg/skills/selection.go:92` |
 | `maxTotalTokens` | plugin jsonData | 64000 | `pkg/agent/context_window.go:16` |
 | `maxIterations` | skill entry | 0 (unset) | `pkg/skills/registry.go:42` |
@@ -98,12 +98,12 @@ The transport emits no event of its own. A transport failure reaches the client 
 | 5xx | `error`, code `llm_http_5xx`, retryable | `pkg/agent/llm_client.go:82` |
 | Stream ends early twice | `error`, code `llm_incomplete_stream` | `pkg/agent/loop.go:863` |
 | Request timeout | transport error, then one retry, then `error` | `pkg/agent/llm_client.go:175` |
-| Invalid `model` value | HTTP 400 with the supported values | `pkg/plugin/plugin.go:912` |
+| Invalid `model` value | HTTP 400 with the supported values | `pkg/plugin/plugin.go:976` |
 | Conflicting session model | HTTP 400 "Session model cannot be changed" | `pkg/plugin/plugin.go:1030` |
 ## Data and Persistence
 | Store | Key or table | TTL | Fallback | Evidence |
 |---|---|---|---|---|
-| Session model | `session.Model` | session TTL | auto selection | `pkg/plugin/plugin.go:1034` |
+| Session model | `session.Model` | session TTL | auto selection | `pkg/plugin/plugin.go:1035` |
 | Token counter | `asko11y_agent_user_tokens_total` | process lifetime | none | `pkg/plugin/metrics.go:19` |
 | Conversation history | in-memory message slice | run lifetime | none | `pkg/agent/loop.go:183` |
 ## Observability
@@ -112,7 +112,7 @@ The transport emits no event of its own. A transport failure reaches the client 
 | Span | `llm_call` | OTel tracer | `pkg/agent/llm_client.go:134` |
 | Span attribute | `llm.model`, `llm.message_count`, `llm.tool_count`, `llm.http_status` | span | `pkg/agent/llm_client.go:150` |
 | Metric | `asko11y_agent_user_tokens_total` | Prometheus scrape | `pkg/plugin/metrics.go:19` |
-| Log field | `model`, `modelSource`, `requestId`, `attempt` | plugin logger | `pkg/plugin/plugin.go:1116` |
+| Log field | `model`, `modelSource`, `requestId`, `attempt` | plugin logger | `pkg/plugin/plugin.go:1185` |
 ## Evidence Index
 - `pkg/agent/llm_client.go:335` — `parseStream` accumulation
 - `pkg/agent/llm_client.go:244` — `buildHTTPError`

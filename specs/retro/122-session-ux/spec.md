@@ -104,7 +104,7 @@ Coverage tags:
 |---|---|---|
 | Session list fetch fails | Stale list stays, no error shown | `src/components/Chat/hooks/useSessionManager.ts:51` |
 | Session load returns 404 | History clears, URL clears | `src/components/Chat/hooks/useSessionManager.ts:126` |
-| Delete fails | Nothing changes, no error shown | `src/components/Chat/hooks/useSessionManager.ts:145` |
+| Delete fails | Nothing changes, no error shown | `src/components/Chat/hooks/useSessionManager.ts:149` |
 | Share create fails | Error text in the dialog | `src/components/Chat/components/ShareDialog/ShareDialog.tsx:123` |
 | Share id unknown or expired | "This share link is not found or has expired." | `src/pages/SharedSession.tsx:26` |
 | Share import fails | "Failed to import session. Please try again." | `src/pages/SharedSession.tsx:91` |

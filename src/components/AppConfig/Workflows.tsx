@@ -1,15 +1,21 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { lastValueFrom } from 'rxjs';
 
 import {
   Badge,
   Button,
+  Combobox,
+  type ComboboxOption,
+  Field,
+  Input,
   LoadingPlaceholder,
   Switch,
+  TextArea,
   useTheme2,
 } from '@grafana/ui';
-import { getBackendSrv } from '@grafana/runtime';
+import { getBackendSrv, locationService } from '@grafana/runtime';
 
+import { listSkills, type SkillInfo } from '../../services/skillsClient';
 import type { WorkflowEntryUI } from '../../types/plugin';
 
 const WORKFLOWS_URL = '/api/plugins/consensys-asko11y-app/resources/api/workflows';
@@ -28,24 +34,50 @@ type WorkflowRow = WorkflowEntryUI & {
   };
 };
 
+type WorkflowRun = {
+  runId: string;
+  sessionId?: string;
+  status: string;
+  skill?: string;
+  createdAt: string;
+  updatedAt: string;
+  error?: string;
+};
+
 type WorkflowsTabProps = {
   savedWorkflows: WorkflowEntryUI[];
   onSaveWorkflows: (next: WorkflowEntryUI[]) => void;
+  /** Opens the Skills tab with this skill's editor loaded. */
+  onEditPrompt: (skill: string) => void;
 };
 
-const tickOutcomeSeverity = (outcome?: string) => {
+const tickOutcomeColor = (outcome?: string) => {
   switch (outcome) {
     case 'executed':
-      return 'success' as const;
+      return 'green' as const;
     case 'skip_lock':
     case 'skip_identity':
-      return 'info' as const;
+      return 'blue' as const;
     default:
-      return 'warning' as const;
+      return 'orange' as const;
   }
 };
 
-function formatTickTime(iso?: string): string {
+const runStatusColor = (status: string) => {
+  switch (status) {
+    case 'completed':
+      return 'green' as const;
+    case 'running':
+      return 'blue' as const;
+    case 'failed':
+    case 'timeout':
+      return 'orange' as const;
+    default:
+      return 'orange' as const;
+  }
+};
+
+function formatTime(iso?: string): string {
   if (!iso) {
     return 'never';
   }
@@ -56,11 +88,85 @@ function formatTickTime(iso?: string): string {
   return parsed.toLocaleTimeString();
 }
 
-export function WorkflowsTab({ savedWorkflows, onSaveWorkflows }: WorkflowsTabProps): React.ReactElement {
+const linesToList = (text: string): string[] =>
+  text
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+const listToLines = (list?: string[]): string => (list ?? []).join('\n');
+
+// The backend bounds a workflow name to 64 bytes: a longer one collides two
+// entries on one truncated metric label.
+const MAX_WORKFLOW_NAME_BYTES = 64;
+
+const utf8ByteLength = (value: string): number => {
+  let bytes = 0;
+  for (const char of value) {
+    const code = char.codePointAt(0) ?? 0;
+    if (code <= 0x7f) {
+      bytes += 1;
+    } else if (code <= 0x7ff) {
+      bytes += 2;
+    } else if (code <= 0xffff) {
+      bytes += 3;
+    } else {
+      bytes += 4;
+    }
+  }
+  return bytes;
+};
+
+const hasControlChar = (value: string): boolean => {
+  for (const char of value) {
+    const code = char.codePointAt(0) ?? 0;
+    if (code <= 0x1f || (code >= 0x7f && code <= 0x9f)) {
+      return true;
+    }
+  }
+  return false;
+};
+
+/**
+ * Mirrors validateWorkflowEntry's name rule: trim, then reject an empty name,
+ * "/", a control character, or more than 64 bytes. Spaces inside the name stay
+ * legal ("Nightly RCA"). The backend keys schedulers, Redis keys, and metric
+ * labels by this name, so an invalid one would be silently dropped there.
+ */
+export const workflowNameError = (rawName: string): string | null => {
+  const name = rawName.trim();
+  if (!name) {
+    return 'Name is required.';
+  }
+  if (name.includes('/')) {
+    return 'Name must not contain "/".';
+  }
+  if (hasControlChar(name)) {
+    return 'Name must not contain control characters.';
+  }
+  if (utf8ByteLength(name) > MAX_WORKFLOW_NAME_BYTES) {
+    return `Name must be at most ${MAX_WORKFLOW_NAME_BYTES} bytes.`;
+  }
+  return null;
+};
+
+const MODEL_OPTIONS: Array<ComboboxOption<string>> = [
+  { label: 'Auto (skill decides)', value: '' },
+  { label: 'Base', value: 'base' },
+  { label: 'Large', value: 'large' },
+];
+
+export function WorkflowsTab({ savedWorkflows, onSaveWorkflows, onEditPrompt }: WorkflowsTabProps): React.ReactElement {
   const theme = useTheme2();
   const [rows, setRows] = useState<WorkflowRow[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [expanded, setExpanded] = useState<string | null>(null);
+  const [runs, setRuns] = useState<Record<string, WorkflowRun[]>>({});
+  const [runsError, setRunsError] = useState<Record<string, string | null>>({});
+  const [skills, setSkills] = useState<SkillInfo[] | null>(null);
+  const [skillsError, setSkillsError] = useState<string | null>(null);
+  const [editing, setEditing] = useState<{ original: string | null; entry: WorkflowEntryUI } | null>(null);
 
   const load = useCallback(async () => {
     setRefreshing(true);
@@ -77,23 +183,107 @@ export function WorkflowsTab({ savedWorkflows, onSaveWorkflows }: WorkflowsTabPr
     }
   }, []);
 
+  const loadRuns = useCallback(async (name: string) => {
+    try {
+      // The name may contain spaces; the share POST below encodes it too.
+      const res = await lastValueFrom(
+        getBackendSrv().fetch<{ runs: WorkflowRun[] }>({
+          url: `${WORKFLOWS_URL}/${encodeURIComponent(name)}/runs?limit=100`,
+        })
+      );
+      setRuns((prev) => ({ ...prev, [name]: res.data.runs ?? [] }));
+      setRunsError((prev) => ({ ...prev, [name]: null }));
+    } catch {
+      // A failed listing must read as an error, not as an empty history.
+      setRuns((prev) => ({ ...prev, [name]: [] }));
+      setRunsError((prev) => ({ ...prev, [name]: 'Failed to load sessions for this workflow.' }));
+    }
+  }, []);
+
   useEffect(() => {
     void load();
+    listSkills()
+      .then((list) => {
+        setSkills(list.filter((s) => s.enabled && !s.hidden && !s.invalid));
+        setSkillsError(null);
+      })
+      .catch(() => {
+        // An unavailable skill list must read as an error, not as zero skills.
+        setSkills([]);
+        setSkillsError('Failed to load skills; pickers show no options.');
+      });
   }, [load]);
 
   const toggleWorkflow = async (row: WorkflowRow, enabled: boolean) => {
-    // The API row carries every configured field, so the next array is
-    // lossless: strip the runtime join, apply the toggle, save, reload (the
-    // schedulers restart with the plugin instance).
+    // No refetch: the save reloads the page (saveAndReload), which remounts
+    // this tab and loads fresh status.
     const next = (rows ?? []).map((r) => {
       const { running: _running, status: _status, ...entry } = r;
       return entry.name === row.name ? { ...entry, enabled } : entry;
     });
-    // No refetch here: the save reloads the page (saveAndReload), which
-    // remounts this tab and loads fresh status. A refetch would race the
-    // restart and could snap the switch back to the stale value.
     onSaveWorkflows(next);
   };
+
+  const persistEntry = (original: string | null, rawEntry: WorkflowEntryUI) => {
+    // The backend keys schedulers and session owners by the trimmed name;
+    // persist trimmed so UI lookups and runs fetches match.
+    const entry = { ...rawEntry, name: rawEntry.name.trim() };
+    const base = (rows ?? []).map((r) => {
+      const { running: _running, status: _status, ...saved } = r;
+      return saved;
+    });
+    let next: WorkflowEntryUI[];
+    if (original === null) {
+      next = [...base, entry];
+    } else {
+      next = base.map((saved) => (saved.name === original ? entry : saved));
+    }
+    onSaveWorkflows(next);
+  };
+
+  const deleteEntry = (name: string) => {
+    const base = (rows ?? []).map((r) => {
+      const { running: _running, status: _status, ...saved } = r;
+      return saved;
+    });
+    onSaveWorkflows(base.filter((saved) => saved.name !== name));
+  };
+
+  // Opening a workflow session publishes a read-only share link owned by the
+  // workflow's synthetic user — the same mechanism the share_session tool
+  // uses for findings — and navigates to the shared-session view. No
+  // cross-owner session access is involved.
+  const [openingRun, setOpeningRun] = useState<string | null>(null);
+  const [shareError, setShareError] = useState<string | null>(null);
+  const openSession = async (workflowName: string, run: WorkflowRun) => {
+    if (openingRun) {
+      return;
+    }
+    setOpeningRun(run.runId);
+    setShareError(null);
+    try {
+      const res = await lastValueFrom(
+        getBackendSrv().fetch<{ shareUrl: string }>({
+          url: `${WORKFLOWS_URL}/${encodeURIComponent(workflowName)}/runs/${run.runId}/share`,
+          method: 'POST',
+        })
+      );
+      if (res.data.shareUrl) {
+        locationService.push(res.data.shareUrl);
+      }
+    } catch {
+      // The share endpoint is admin-only and get-or-create; a failure leaves
+      // the user on the tab, so tell them why nothing opened.
+      setShareError('Failed to open the session: the share link could not be created.');
+    } finally {
+      setOpeningRun(null);
+    }
+  };
+
+  const skillOptions: Array<ComboboxOption<string>> = useMemo(
+    () => (skills ?? []).map((s) => ({ label: s.name, value: s.name, description: s.description })),
+    [skills]
+  );
 
   if (rows === null && !loadError) {
     return <LoadingPlaceholder text="Loading workflows..." />;
@@ -110,84 +300,314 @@ export function WorkflowsTab({ savedWorkflows, onSaveWorkflows }: WorkflowsTabPr
     );
   }
 
-  if ((rows ?? []).length === 0) {
-    return (
-      <p className="text-sm text-secondary">
-        No workflows configured. Workflow entries are provisioned in the plugin settings
-        (jsonData.workflows) or the provisioning file — see the Workflows section in the plugin
-        README for the full field reference.
-      </p>
-    );
-  }
+  const border = { borderBottom: `1px solid ${theme.colors.border.weak}` };
+  const nameError = editing ? workflowNameError(editing.entry.name) : null;
 
   return (
     <div>
       <p className="text-sm text-secondary mb-2">
-        Tick and session counters are reported by this Grafana instance only; each replica runs its
-        own schedulers behind a shared Redis tick lock. Toggling a workflow saves immediately and
-        restarts the plugin instance.
+        Tick and session counters are reported by this Grafana instance only; each replica runs its own schedulers
+        behind a shared Redis tick lock. Every save reloads the plugin instance, which restarts the schedulers.
       </p>
-      <table className="w-full text-sm" style={{ borderCollapse: 'collapse' }}>
-        <thead>
-          <tr style={{ textAlign: 'left', borderBottom: `1px solid ${theme.colors.border.weak}` }}>
-            <th className="p-1">Workflow</th>
-            <th className="p-1">Skill</th>
-            <th className="p-1">Enabled</th>
-            <th className="p-1">Interval</th>
-            <th className="p-1">Last tick</th>
-            <th className="p-1">Sessions started / done / failed / timeout</th>
-          </tr>
-        </thead>
-        <tbody>
-          {(rows ?? []).map((row) => (
-            <tr key={row.name} style={{ borderBottom: `1px solid ${theme.colors.border.weak}` }}>
-              <td className="p-1">
-                <span className="mr-1">{row.name}</span>
-                {row.running ? (
-                  <Badge text="running" color="green" />
-                ) : (
-                  <Badge text="stopped" color="orange" />
-                )}
-              </td>
-              <td className="p-1">{row.skill}</td>
-              <td className="p-1">
-                <Switch
-                  value={row.enabled}
-                  onChange={(e) => void toggleWorkflow(row, e.currentTarget.checked)}
-                  data-testid={`ac-workflow-enabled-${row.name}`}
+
+      {editing && (
+        <div className="mb-4 p-3" style={{ border: `1px solid ${theme.colors.border.weak}` }} data-testid="ac-workflow-editor">
+          <h3 className="text-base mb-2">{editing.original === null ? 'New workflow' : `Edit ${editing.original}`}</h3>
+          {skillsError && <p className="text-warning text-sm mb-2">{skillsError}</p>}
+          <div className="grid grid-cols-2 gap-2 mb-2">
+            <div>
+              <Field label="Name" description={editing.original === null ? 'Stable identifier; renaming later orphans its sessions' : undefined}>
+                <Input
+                  value={editing.entry.name}
+                  disabled={editing.original !== null}
+                  onChange={(e) => setEditing({ ...editing, entry: { ...editing.entry, name: e.currentTarget.value } })}
                 />
-              </td>
-              <td className="p-1">{row.intervalSeconds || 300}s</td>
-              <td className="p-1" title={row.status?.lastError ?? undefined}>
-                {row.status?.lastTickOutcome ? (
-                  <Badge
-                    text={`${row.status.lastTickOutcome} ${formatTickTime(row.status.lastTickAt)}`}
-                    color={tickOutcomeSeverity(row.status.lastTickOutcome) === 'success' ? 'green' : tickOutcomeSeverity(row.status.lastTickOutcome) === 'info' ? 'blue' : 'orange'}
-                  />
-                ) : (
-                  <span className="text-secondary">never</span>
-                )}
-              </td>
-              <td className="p-1">
-                {row.status?.started ?? 0} / {row.status?.completed ?? 0} /{' '}
-                {row.status?.failed ?? 0} / {row.status?.timeout ?? 0}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-      <div className="mt-2">
+              </Field>
+              {nameError && (
+                <p className="text-warning text-sm mb-1" data-testid="ac-workflow-name-error">
+                  {nameError}
+                </p>
+              )}
+            </div>
+            <Field label="Skill" description="Enabled public skill the sessions run">
+              <Combobox<string>
+                options={skillOptions}
+                value={editing.entry.skill || undefined}
+                onChange={(o) => setEditing({ ...editing, entry: { ...editing.entry, skill: o.value ?? '' } })}
+                width={30}
+              />
+            </Field>
+            <Field label="Model">
+              <Combobox<string>
+                options={MODEL_OPTIONS}
+                value={editing.entry.model ?? ''}
+                onChange={(o) => setEditing({ ...editing, entry: { ...editing.entry, model: o.value ?? '' } })}
+                width={30}
+              />
+            </Field>
+            <Field label="Interval (seconds)" description="Minimum 60, default 300">
+              <Input
+                type="number"
+                value={editing.entry.intervalSeconds ?? 300}
+                onChange={(e) =>
+                  setEditing({ ...editing, entry: { ...editing.entry, intervalSeconds: Number(e.currentTarget.value) } })
+                }
+              />
+            </Field>
+            <Field label="Session timeout (seconds)" description="Watchdog budget, minimum 60, default 300">
+              <Input
+                type="number"
+                value={editing.entry.sessionTimeoutSeconds ?? 300}
+                onChange={(e) =>
+                  setEditing({
+                    ...editing,
+                    entry: { ...editing.entry, sessionTimeoutSeconds: Number(e.currentTarget.value) },
+                  })
+                }
+              />
+            </Field>
+            <Field label="Max concurrent sessions" description="Cross-replica cap for spawned sessions, default 5">
+              <Input
+                type="number"
+                value={editing.entry.maxConcurrentSessions ?? 5}
+                onChange={(e) =>
+                  setEditing({
+                    ...editing,
+                    entry: { ...editing.entry, maxConcurrentSessions: Number(e.currentTarget.value) },
+                  })
+                }
+              />
+            </Field>
+            <Field label="Max iterations" description="Optional; the skill budget applies when unset">
+              <Input
+                type="number"
+                value={editing.entry.maxIterations ?? 0}
+                onChange={(e) =>
+                  setEditing({ ...editing, entry: { ...editing.entry, maxIterations: Number(e.currentTarget.value) } })
+                }
+              />
+            </Field>
+            <Field label="Spawnable skills" description="One per line; skills the dispatcher may spawn">
+              <TextArea
+                rows={2}
+                value={listToLines(editing.entry.spawnableSkills)}
+                onChange={(e) =>
+                  setEditing({ ...editing, entry: { ...editing.entry, spawnableSkills: linesToList(e.currentTarget.value) } })
+                }
+              />
+            </Field>
+            <Field label="Fallback skill" description="Runs once after a failed or timed-out session">
+              <Combobox<string>
+                options={[{ label: 'None', value: '' }, ...skillOptions]}
+                value={editing.entry.fallbackSkill ?? ''}
+                onChange={(o) => setEditing({ ...editing, entry: { ...editing.entry, fallbackSkill: o.value ?? '' } })}
+                width={30}
+              />
+            </Field>
+          </div>
+          <Field label="Tick message" description="First message of every tick session; defaults to a run-the-skill line">
+            <TextArea
+              rows={2}
+              value={editing.entry.message ?? ''}
+              onChange={(e) => setEditing({ ...editing, entry: { ...editing.entry, message: e.currentTarget.value } })}
+            />
+          </Field>
+          <Field label="Tool allowlist" description="One MCP tool name per line; the sessions see nothing else">
+            <TextArea
+              rows={3}
+              value={listToLines(editing.entry.toolAllowlist)}
+              onChange={(e) =>
+                setEditing({ ...editing, entry: { ...editing.entry, toolAllowlist: linesToList(e.currentTarget.value) } })
+              }
+            />
+          </Field>
+          <div className="flex items-center gap-2 mt-2">
+            <Button
+              variant="primary"
+              disabled={
+                nameError !== null || !editing.entry.skill || editing.entry.toolAllowlist.length === 0
+              }
+              onClick={() => persistEntry(editing.original, editing.entry)}
+            >
+              Save and reload
+            </Button>
+            {editing.entry.skill && (
+              <Button variant="secondary" onClick={() => onEditPrompt(editing.entry.skill ?? '')}>
+                Edit prompt
+              </Button>
+            )}
+            {editing.original !== null && (
+              <Button
+                variant="destructive"
+                onClick={() => {
+                  if (editing.original) {
+                    deleteEntry(editing.original);
+                  }
+                }}
+              >
+                Delete workflow
+              </Button>
+            )}
+            <Button variant="secondary" onClick={() => setEditing(null)}>
+              Cancel
+            </Button>
+          </div>
+        </div>
+      )}
+
+      <div className="mb-2 flex gap-2">
+        <Button
+          variant="primary"
+          onClick={() =>
+            setEditing({
+              original: null,
+              entry: {
+                name: '',
+                enabled: true,
+                skill: '',
+                toolAllowlist: [],
+                intervalSeconds: 300,
+                sessionTimeoutSeconds: 300,
+                maxConcurrentSessions: 5,
+              },
+            })
+          }
+        >
+          New workflow
+        </Button>
         <Button variant="secondary" disabled={refreshing} onClick={() => void load()}>
           Refresh
         </Button>
-        {loadError && <span className="ml-2 text-warning">{loadError}</span>}
-        {savedWorkflows.length === 0 && (
-          <span className="ml-2 text-secondary">
-            Note: the saved settings carry no workflow entries; the rows above come from the running
-            instance only.
-          </span>
-        )}
+        {loadError && <span className="text-warning self-center">{loadError}</span>}
       </div>
+
+      {(rows ?? []).length === 0 ? (
+        <p className="text-sm text-secondary">
+          No workflows configured. Create one above, or provision entries in the plugin settings
+          (jsonData.workflows) — see the Workflows section in the plugin README.
+        </p>
+      ) : (
+        <table className="w-full text-sm" style={{ borderCollapse: 'collapse' }}>
+          <thead>
+            <tr style={{ textAlign: 'left', borderBottom: `1px solid ${theme.colors.border.weak}` }}>
+              <th className="p-1">Workflow</th>
+              <th className="p-1">Skill</th>
+              <th className="p-1">Enabled</th>
+              <th className="p-1">Interval</th>
+              <th className="p-1">Last tick</th>
+              <th className="p-1">Sessions started / done / failed / timeout</th>
+              <th className="p-1">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {(rows ?? []).map((row) => (
+              <React.Fragment key={row.name}>
+                <tr style={border}>
+                  <td className="p-1">
+                    <span className="mr-1">{row.name}</span>
+                    {row.running ? (
+                      <Badge text="running" color="green" />
+                    ) : (
+                      <Badge text="stopped" color="orange" />
+                    )}
+                  </td>
+                  <td className="p-1">{row.skill}</td>
+                  <td className="p-1">
+                    <Switch
+                      value={row.enabled}
+                      onChange={(e) => void toggleWorkflow(row, e.currentTarget.checked)}
+                      data-testid={`ac-workflow-enabled-${row.name}`}
+                    />
+                  </td>
+                  <td className="p-1">{row.intervalSeconds || 300}s</td>
+                  <td className="p-1" title={row.status?.lastError ?? undefined}>
+                    {row.status?.lastTickOutcome ? (
+                      <Badge
+                        text={`${row.status.lastTickOutcome} ${formatTime(row.status.lastTickAt)}`}
+                        color={tickOutcomeColor(row.status.lastTickOutcome)}
+                      />
+                    ) : (
+                      <span className="text-secondary">never</span>
+                    )}
+                  </td>
+                  <td className="p-1">
+                    {row.status?.started ?? 0} / {row.status?.completed ?? 0} / {row.status?.failed ?? 0} /{' '}
+                    {row.status?.timeout ?? 0}
+                  </td>
+                  <td className="p-1">
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      onClick={() => {
+                        const next = expanded === row.name ? null : row.name;
+                        setExpanded(next);
+                        if (next) {
+                          void loadRuns(next);
+                        }
+                      }}
+                    >
+                      {expanded === row.name ? 'Hide sessions' : 'Sessions'}
+                    </Button>{' '}
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      onClick={() => {
+                        const { running: _r, status: _s, ...entry } = row;
+                        setEditing({ original: row.name, entry });
+                      }}
+                    >
+                      Edit
+                    </Button>{' '}
+                    <Button size="sm" variant="secondary" onClick={() => onEditPrompt(row.skill)}>
+                      Prompt
+                    </Button>
+                  </td>
+                </tr>
+                {expanded === row.name && (
+                  <tr style={border}>
+                    <td colSpan={7} className="p-2" data-testid={`ac-workflow-runs-${row.name}`}>
+                      {shareError && (
+                        <div className="text-warning py-1" data-testid="ac-workflow-share-error">
+                          {shareError}
+                        </div>
+                      )}
+                      {runsError[row.name] ? (
+                        <span className="text-warning">{runsError[row.name]}</span>
+                      ) : (runs[row.name] ?? []).length === 0 ? (
+                        <span className="text-secondary">No sessions recorded yet on this instance.</span>
+                      ) : (
+                        (runs[row.name] ?? []).map((run) => (
+                          <div key={run.runId} className="flex items-center gap-2 py-1">
+                            <Badge text={run.status} color={runStatusColor(run.status)} />
+                            <span className="text-secondary">{run.runId.slice(0, 8)}</span>
+                            <span className="text-secondary">{formatTime(run.createdAt)}</span>
+                            {run.error && <span className="text-warning">{run.error}</span>}
+                            {run.sessionId && (
+                              <Button
+                                size="sm"
+                                variant="primary"
+                                disabled={openingRun === run.runId}
+                                onClick={() => void openSession(row.name, run)}
+                              >
+                                {openingRun === run.runId ? 'Opening...' : 'Open'}
+                              </Button>
+                            )}
+                          </div>
+                        ))
+                      )}
+                    </td>
+                  </tr>
+                )}
+              </React.Fragment>
+            ))}
+          </tbody>
+        </table>
+      )}
+      {savedWorkflows.length === 0 && (rows ?? []).length > 0 && (
+        <span className="text-secondary text-sm mt-2 block">
+          Note: the saved settings carry no workflow entries; the rows above come from the running instance only.
+        </span>
+      )}
     </div>
   );
 }

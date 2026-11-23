@@ -35,14 +35,14 @@ Role names are matched case-sensitively. Any unknown role is treated as Viewer.
 
 | Method | Path | Handler | Evidence |
 |---|---|---|---|
-| GET | `/api/mcp/tools` | `handleMCPTools` | `pkg/plugin/plugin.go:729` |
+| GET | `/api/mcp/tools` | `handleMCPTools` | `pkg/plugin/plugin.go:730` |
 | POST | `/api/mcp/call-tool` | `handleMCPCallTool` | `pkg/plugin/plugin.go:762` |
 
 ### SSE events
 
 | Event | Payload fields | Evidence |
 |---|---|---|
-| none | filtering is silent | `pkg/plugin/plugin.go:751` |
+| none | filtering is silent | `pkg/plugin/plugin.go:752` |
 
 ### Configuration keys
 
@@ -65,9 +65,9 @@ Both meta-tools bypass MCP filtering by design. `pkg/agent/tools.go:26`
 
 ## Behaviour Rules
 
-1. Listing applies the role filter first, then the per-server selection filter. `VERIFIED` — `pkg/plugin/plugin.go:751`
+1. Listing applies the role filter first, then the per-server selection filter. `VERIFIED` — `pkg/plugin/plugin.go:752`
 2. An agent run applies the same two filters in the same order. `VERIFIED` — `pkg/agent/loop.go:161`
-3. Execution re-checks the role and returns 403 on failure. `VERIFIED` — `pkg/plugin/plugin.go:802`
+3. Execution re-checks the role and returns 403 on failure. `VERIFIED` — `pkg/plugin/plugin.go:803`
 4. Execution re-checks selection and returns 403 `Tool is not enabled`. `VERIFIED` — `pkg/plugin/plugin.go:830`
 5. The agent execution path returns a tool error instead of an HTTP status. `VERIFIED` — `pkg/agent/loop.go:976`
 6. A Viewer gets only tools whose `readOnlyHint` is exactly `true`. `VERIFIED` — test `TestIsReadOnlyTool`
@@ -80,9 +80,9 @@ Both meta-tools bypass MCP filtering by design. `pkg/agent/tools.go:26`
 13. A missing `toolSelections` entry defaults to enabled. `VERIFIED` — `pkg/mcp/selection.go:23`
 14. An empty server list passes every tool through unchanged. `VERIFIED` — test `TestFilterToolsBySelection_NoServers`
 15. Filtering keeps the input order. `ASSUMED` — `pkg/mcp/selection.go:51` appends in order; no test asserts order
-16. The built-in MCP contributes a synthetic config with ID `mcp-grafana` only when `useBuiltInMCP` is true. `VERIFIED` — `pkg/plugin/plugin.go:640`
+16. The built-in MCP contributes a synthetic config with ID `mcp-grafana` only when `useBuiltInMCP` is true. `VERIFIED` — `pkg/plugin/plugin.go:641`
 17. That synthetic config carries `builtInMCPToolSelections` and the global `riskOverrides`. `VERIFIED` — `pkg/plugin/plugin.go:648`
-18. `settingsForFilter` returns a copy of `mcpServers` plus the built-in overlay. `VERIFIED` — `pkg/plugin/plugin.go:679`
+18. `settingsForFilter` returns a copy of `mcpServers` plus the built-in overlay. `VERIFIED` — `pkg/plugin/plugin.go:680`
 19. Graphiti tools get `group_id` forced to `org_<orgID>` when the schema has that property. `VERIFIED` — test `TestEnsureScopedGraphitiArgs`
 20. Graphiti tools get `group_ids` forced to `["org_<orgID>"]` when the schema has that property. `VERIFIED` — `pkg/mcp/selection.go:80`
 21. An LLM-supplied `group_id` value is always overwritten. `VERIFIED` — `pkg/mcp/selection.go:77`

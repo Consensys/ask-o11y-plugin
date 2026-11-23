@@ -139,6 +139,36 @@ A Grafana admin opens the plugin configuration and sees one Workflows tab: every
 2. **Given** a running workflow, **When** the admin switches it off, **Then** the full entry list persists losslessly and the plugin instance reloads without the scheduler.
 3. **Given** a Viewer role request, **When** it calls the workflows API, **Then** it is refused.
 
+### User Story 9 - The admin opens workflow sessions from the config UI (Priority: P2)
+
+Each workflow row expands into its recent runs: status, start time, terminal error, and an Open button that deep-links the chat page to the run's session (?sessionId=). The session GET allows Admins to read workflow sessions — the synthetic owner would otherwise make them invisible — while interactive sessions stay owner-scoped and the org boundary always applies.
+
+**Why this priority**: Unattended sessions nobody can open are unverifiable; this is the audit surface for the whole feature.
+
+**Independent Test**: Run a workflow, open the tab, expand the row, click Open — the chat renders the session; a Viewer fetching the same session gets 404.
+
+**Acceptance Scenarios**:
+
+1. **Given** a workflow with runs, **When** the admin expands its row, **Then** the recent runs list with status and Open links.
+2. **Given** an admin clicks Open, **Then** the request creates (or reuses) a share owned by the synthetic user and navigates to the shared-session view; a second click reuses the same share.
+3. **Given** any cross-owner `GET /api/sessions/{id}`, including Admins, **Then** 404 — session reads stay owner-scoped, workflow sessions included.
+
+---
+
+### User Story 10 - The admin edits workflow configs and prompts in the config UI (Priority: P2)
+
+The tab gains a full editor: every workflow entry field (skill from the enabled-skill list, message, model, interval, timeout, cap, iteration budget, allowlist, spawnable skills, fallback, org), create, and delete. The name is immutable after creation — renaming would orphan the synthetic user's sessions. Edit prompt jumps to the Skills tab with that skill's editor open, so the workflow behavior (the skill body) is editable in place.
+
+**Why this priority**: Provisioning-only editing keeps the loop in the platform team; the UI hands it to the NOC owners.
+
+**Independent Test**: Edit a field, save — the settings persist losslessly, the instance reloads, the change takes effect on the next tick.
+
+**Acceptance Scenarios**:
+
+1. **Given** an existing workflow, **When** the admin edits its interval and saves, **Then** the full list persists and the scheduler restarts with the new interval.
+2. **Given** the editor, **When** the admin clicks Edit prompt, **Then** the Skills tab opens with that skill's editor loaded.
+3. **Given** a new workflow form with a missing name, skill, or allowlist, **When** the admin saves, **Then** the save is refused client-side.
+
 ### Edge Cases
 
 - Redis is configured but unreachable. The tick is skipped with an error log. No tick runs without the lock while Redis is configured.
@@ -159,7 +189,7 @@ A Grafana admin opens the plugin configuration and sees one Workflows tab: every
 
 ### Functional Requirements
 
-- **FR-001**: The system MUST load workflow entries from app instance settings `jsonData.workflows` and from the equivalent provisioning file, with fields: `name`, `enabled`, `intervalSeconds` (default 300, floor 60), `skill`, `model`, `maxIterations`, `toolAllowlist`, `spawnableSkills`, `maxConcurrentSessions`, `sessionTimeoutSeconds`, `fallbackSkill` (optional), and `orgId`.
+- **FR-001**: The system MUST load workflow entries from app instance settings `jsonData.workflows` and from the equivalent provisioning file, with fields: `name`, `enabled`, `intervalSeconds` (default 300, floor 60), `skill`, `model`, `maxIterations`, `toolAllowlist`, `spawnableSkills`, `maxConcurrentSessions`, `sessionTimeoutSeconds`, and `fallbackSkill` (optional). Entries carry no org field: Grafana provisions app settings per org, so a workflow always runs in the org that owns its settings, and the instance identity (org, Grafana URL, service-account token) seeds from that org's requests. An earlier revision carried `orgId`; it was removed as redundant (2026-11-23).
 - **FR-002**: At startup the system MUST validate every entry. An invalid entry (unknown skill, empty allowlist, allowlist naming no known tool, interval below the floor, missing name, duplicate name) MUST disable that entry with one error log naming it. Valid entries MUST start. The plugin MUST NOT refuse to start because one entry is invalid.
 - **FR-003**: The system MUST run one scheduler per enabled entry, ticking at the entry's interval.
 - **FR-004**: When Redis is configured, a tick MUST acquire a per-workflow lock (`workflow:<name>:tick`, SETNX, TTL no longer than half the interval) before it executes. A tick that cannot take the lock MUST skip silently. A tick that cannot reach Redis MUST skip with an error log.
@@ -180,6 +210,11 @@ A Grafana admin opens the plugin configuration and sees one Workflows tab: every
 - **FR-019**: The system MUST expose `GET /api/workflows` (Admin only) returning every configured entry joined with this plugin instance's runtime status: last tick time, last tick outcome, session outcome counters, and the last tick error when a tick could not proceed.
 - **FR-020**: The status counters MUST be per-instance; the API MUST NOT present them as cluster-wide totals.
 - **FR-021**: The AppConfig UI MUST provide a Workflows tab listing every entry with its status and an enable toggle whose save persists the full workflow list losslessly and restarts the plugin instance.
+- **FR-022**: The system MUST expose `GET /api/workflows/{name}/runs` (Admin only) returning the recent runs of the named workflow, newest first, each with its session id, status, and terminal error.
+- **FR-023** (revised 2026-11-23): Opening a workflow session from the config UI MUST go through a read-only share link: `POST /api/workflows/{name}/runs/{runId}/share` (Admin only) gets or creates a share owned by the workflow's synthetic user and returns the shared-session URL. No cross-owner session read exists; `GET /api/sessions/{id}` stays fully owner-scoped. An earlier revision added an admin read override for workflow sessions; it was removed in favor of shares.
+- **FR-024**: The Workflows tab MUST offer a full entry editor (create, edit, delete) that persists the whole workflow list through the standard settings save; the entry name MUST be immutable after creation.
+- **FR-025**: The tab MUST link each workflow's skill to the Skills tab editor for that skill.
+- **FR-026** (revised): The Workflows tab Open action MUST navigate to the shared-session view returned by the share endpoint, never to the owner-scoped chat deep link.
 
 ### Key Entities
 

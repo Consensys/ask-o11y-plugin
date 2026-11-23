@@ -16,12 +16,12 @@ A risky tool call pauses until a human approves it. The user can approve once, a
 ## Actors and RBAC
 | Capability | Admin | Editor | Viewer | Evidence |
 |---|---|---|---|---|
-| Approve or deny a pending call | yes | yes | no | `pkg/plugin/plugin.go:1455` |
+| Approve or deny a pending call | yes | yes | no | `pkg/plugin/plugin.go:1531` |
 | Approve a tool for the whole session | yes | yes | no | `pkg/plugin/plugin.go:1476` |
-| Decide on another user's run | no | no | no | `pkg/plugin/plugin.go:1446` |
+| Decide on another user's run | no | no | no | `pkg/plugin/plugin.go:1526` |
 | Trigger a gated call through the agent | yes | yes | read-only only | `pkg/agent/loop.go:1017` |
 | Read the decision in run state | yes | yes | yes | `pkg/plugin/runstore.go:298` |
-A Viewer cannot reach a gated write tool because RBAC removes it first. A Viewer cannot approve because the handler requires Admin or Editor. `VERIFIED` — `pkg/plugin/plugin.go:1455`
+A Viewer cannot reach a gated write tool because RBAC removes it first. A Viewer cannot approve because the handler requires Admin or Editor. `VERIFIED` — `pkg/plugin/plugin.go:1531`
 ## Contract
 ### HTTP endpoints
 | Method | Path | Handler | Evidence |
@@ -68,7 +68,7 @@ The decision body is `{"decision":"approved\|rejected","comment":"...","approval
 16. The in-memory grant store never expires a grant. `VERIFIED` — `pkg/plugin/approval_grants.go:75`
 17. The Redis grant store writes a hash field with no TTL. `VERIFIED` — `pkg/plugin/approval_grants.go:146`
 18. Only an approved decision with scope `always` persists a grant. `VERIFIED` — `pkg/plugin/plugin.go:1476`
-19. A grant failure is logged; the decision still returns 200. `VERIFIED` — `pkg/plugin/plugin.go:1518`
+19. A grant failure is logged; the decision still returns 200. `VERIFIED` — `pkg/plugin/plugin.go:1594`
 20. The grant stores tool name, risk, reason, session id, and creation time from the run trace. `VERIFIED` — `pkg/plugin/plugin.go:1546`
 21. A missing or malformed approval id is rejected at registration. `VERIFIED` — `pkg/plugin/approval_broker.go:53`
 22. `registered` waits; `resolved` returns the earlier decision; `pending` returns an error. `VERIFIED` — `pkg/plugin/approval_broker.go:234`
@@ -79,7 +79,7 @@ The decision body is `{"decision":"approved\|rejected","comment":"...","approval
 27. After a denial the loop continues and the model can choose another action. `VERIFIED` — `pkg/agent/loop.go:1082`
 28. With no registrar, the call fails with "requires approval before execution". `VERIFIED` — `pkg/agent/loop.go:1048`
 29. A decision accepts `approved`, `approve`, `accepted`, or `accept` for approval, and the mirrored deny forms. `VERIFIED` — `pkg/plugin/plugin.go:2376`
-30. An unrecognised decision returns 400. `VERIFIED` — `pkg/plugin/plugin.go:1493`
+30. An unrecognised decision returns 400. `VERIFIED` — `pkg/plugin/plugin.go:1542`
 31. A repeated identical decision returns 200 and the stored decision. `VERIFIED` — test `TestHandleAgentApprovalIsIdempotentForDuplicateDecision`
 32. A conflicting second decision returns 409. `VERIFIED` — test `TestHandleAgentApprovalRejectsConflictingDuplicateDecision`
 33. An unknown or expired approval returns 409. `VERIFIED` — test `TestHandleAgentApprovalUnknownPendingStillConflicts`
@@ -91,19 +91,19 @@ The decision body is `{"decision":"approved\|rejected","comment":"...","approval
 39. The in-memory broker is unsafe with more than one Grafana replica; the code only logs a warning. `GAP` — `pkg/plugin/plugin.go:422`
 40. Deleting a session also deletes its saved approval grants, and deleting all sessions deletes every grant of that user. `VERIFIED` — `pkg/plugin/plugin.go:2613`, `pkg/plugin/plugin.go:2783`, `pkg/plugin/approval_grants.go:153`
 ## Invariants
-- Only an Admin or Editor can resolve an approval. `VERIFIED` — `pkg/plugin/plugin.go:1455`
-- Only the run owner in the run org can resolve an approval. `VERIFIED` — `pkg/plugin/plugin.go:1446`
+- Only an Admin or Editor can resolve an approval. `VERIFIED` — `pkg/plugin/plugin.go:1531`
+- Only the run owner in the run org can resolve an approval. `VERIFIED` — `pkg/plugin/plugin.go:1526`
 - A viewed approval carries the tool name, risk, reason, and raw arguments. `VERIFIED` — `pkg/agent/loop.go:1048`
 - A decision resolves at most once; a later different decision conflicts. `VERIFIED` — `pkg/plugin/approval_broker.go:108`
 - A grant never leaks to another session. `VERIFIED` — test `TestHandleAgentApprovalApproveAlwaysPersistsToolGrant`
 ## Failure Modes
 | Condition | User-visible result | Evidence |
 |---|---|---|
-| Viewer posts a decision | HTTP 403 "Access denied" | `pkg/plugin/plugin.go:1455` |
-| Decision body is invalid | HTTP 400 "Invalid request body" | `pkg/plugin/plugin.go:1461` |
+| Viewer posts a decision | HTTP 403 "Access denied" | `pkg/plugin/plugin.go:1531` |
+| Decision body is invalid | HTTP 400 "Invalid request body" | `pkg/plugin/plugin.go:1537` |
 | Decision value is unknown | HTTP 400 "Invalid approval decision" | `pkg/plugin/plugin.go:1466` |
 | Approval already resolved differently | HTTP 409 "Approval already resolved as X" | `pkg/plugin/plugin.go:1492` |
-| Approval is not pending or expired | HTTP 409 "Approval is not pending or has expired" | `pkg/plugin/plugin.go:1504` |
+| Approval is not pending or expired | HTTP 409 "Approval is not pending or has expired" | `pkg/plugin/plugin.go:1580` |
 | Broker delivery fails | HTTP 504 "Approval delivery failed" | `pkg/plugin/plugin.go:1508` |
 | Approval registration fails | tool result "Failed to prepare approval for tool X" | `pkg/agent/loop.go:1078` |
 | User denies | model sees "was not approved by the user"; no SSE error | `pkg/agent/loop.go:1078` |
@@ -121,7 +121,7 @@ The decision body is `{"decision":"approved\|rejected","comment":"...","approval
 | Signal | Name | Where | Evidence |
 |---|---|---|---|
 | Log field | `runId`, `approvalId` on resolve failure | plugin logger, warn | `pkg/plugin/plugin.go:1507` |
-| Log field | `error`, `runId`, `approvalId` on grant failure | plugin logger, warn | `pkg/plugin/plugin.go:1518` |
+| Log field | `error`, `runId`, `approvalId` on grant failure | plugin logger, warn | `pkg/plugin/plugin.go:1594` |
 | Log field | `error` on cleanup failure | plugin logger, warn | `pkg/plugin/approval_broker.go:341` |
 | Span | `mcp_tool_call` only after approval passes | OTel tracer | `pkg/agent/loop.go:960` |
 ## Evidence Index

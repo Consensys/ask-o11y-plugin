@@ -2519,6 +2519,147 @@
           }
         }
       }
+    },
+    "/api/workflows/{name}/runs": {
+      "get": {
+        "summary": "List recent runs of one workflow",
+        "description": "Returns the recent runs of the named workflow, newest first, owned by the workflow's synthetic user. Each run carries its session id for the chat deep link (?sessionId=), the run status, and the terminal error when a run failed. Requires Admin role.",
+        "operationId": "listWorkflowRuns",
+        "tags": [
+          "Workflows"
+        ],
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Workflow name as configured in jsonData.workflows."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 20,
+              "maximum": 100
+            },
+            "description": "Maximum runs to return."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Workflow runs",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "workflow": {
+                      "type": "string"
+                    },
+                    "runs": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "runId": {
+                            "type": "string"
+                          },
+                          "sessionId": {
+                            "type": "string"
+                          },
+                          "status": {
+                            "type": "string"
+                          },
+                          "skill": {
+                            "type": "string"
+                          },
+                          "createdAt": {
+                            "type": "string"
+                          },
+                          "updatedAt": {
+                            "type": "string"
+                          },
+                          "error": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Admin access required"
+          },
+          "404": {
+            "description": "Workflow not found"
+          }
+        }
+      }
+    },
+    "/api/workflows/{name}/runs/{runId}/share": {
+      "post": {
+        "summary": "Get or create a read-only share link for a workflow run's session",
+        "description": "Returns a share link for the named run's session. The stored payload is a snapshot of the session's viewable fields plus the run's transcript, rebuilt from the run events so assistant output and tool results are present even before they reach the session store. An existing share is reused only when the run has reached a terminal state and the newest unexpired share was created at or after that state; a running run, a share without an expiry, and a share older than the terminal state all cause a fresh share to be created. The share is owned by the workflow's synthetic user, so no cross-owner session access is involved; the shared-session view renders it read-only for anyone with the link. Requires Admin role.",
+        "operationId": "shareWorkflowRun",
+        "tags": [
+          "Workflows"
+        ],
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Workflow name."
+          },
+          {
+            "name": "runId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Run ID from the runs listing."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Share created or reused",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "shareId": {
+                      "type": "string"
+                    },
+                    "shareUrl": {
+                      "type": "string",
+                      "description": "Path to the shared-session view."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Admin access required"
+          },
+          "404": {
+            "description": "Workflow or run not found"
+          }
+        }
+      }
     }
   },
   "components": {

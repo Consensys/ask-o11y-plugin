@@ -22,7 +22,7 @@ Graphiti is optional: without it, every other capability still works.
 
 | Capability | Admin | Editor | Viewer | Evidence |
 |---|---|---|---|---|
-| `GET /api/graphiti/status` | yes | yes | yes | `pkg/plugin/plugin.go:2055` (no role check) |
+| `GET /api/graphiti/status` | yes | yes | yes | `pkg/plugin/plugin.go:2056` (no role check) |
 | `POST /api/graphiti/discover` | yes | yes | no (403) | `pkg/plugin/plugin.go:2090` |
 | `POST /api/graphiti/ingest-session` | yes | yes | no (403) | `pkg/plugin/plugin.go:2246` |
 | Automatic session ingest after a run | yes | yes | yes | `pkg/plugin/plugin.go:1278` (no role check) |
@@ -72,11 +72,11 @@ Tags: `VERIFIED` (code pointer or test), `ASSUMED` (untested), `GAP` (missing).
 4. `status` never fails when Graphiti is absent: it returns `enabled: false`. `VERIFIED` — `pkg/plugin/plugin.go:2066`
 5. `discover` rejects a Viewer with 403. `VERIFIED` — `pkg/plugin/plugin.go:2090`
 6. `discover` and `ingest-session` return 503 when Graphiti is unavailable. `VERIFIED` — `pkg/plugin/plugin.go:2099`
-7. Both write routes share the agent rate limiter and return 429 when exhausted. `VERIFIED` — `pkg/plugin/plugin.go:2094`
+7. Both write routes share the agent rate limiter and return 429 when exhausted. `VERIFIED` — `pkg/plugin/plugin.go:2095`
 8. `discover` starts a hidden agent run: type `discovery`, 50 iterations, `large` model, approvals off. `VERIFIED` — `pkg/plugin/plugin.go:2132`
 9. Discovery excludes every Graphiti write tool from the model. `VERIFIED` — `pkg/plugin/plugin.go:2151`
 10. `discover` returns `{runId, status: "running"}` immediately. `VERIFIED` — `pkg/plugin/plugin.go:2178`
-11. Discovery ingests its synthesis as episode `discovery_synthesis` only when the run ends with `done`. `VERIFIED` — `pkg/plugin/plugin.go:2198`
+11. Discovery ingests its synthesis as episode `discovery_synthesis` only when the run ends with `done`. `VERIFIED` — `pkg/plugin/plugin.go:2273`
 12. Discovery synthesis is the concatenated assistant content, truncated to 12,000 chars. `VERIFIED` — `pkg/plugin/graphiti_memory.go:88`
 13. A synthesis with no content falls back to a summary built from tool results. `VERIFIED` — test `TestCollectDiscoverySynthesis_FallsBackToToolResults`
 14. `ingest-session` caps the body at 1 MiB. `VERIFIED` — `pkg/plugin/config.go:28`
@@ -124,7 +124,7 @@ Tags: `VERIFIED` (code pointer or test), `ASSUMED` (untested), `GAP` (missing).
 
 | Signal | Name | Where | Evidence |
 |---|---|---|---|
-| Log | `Session ingested into knowledge graph` | plugin backend log | `pkg/plugin/plugin.go:2297` |
+| Log | `Session ingested into knowledge graph` | plugin backend log | `pkg/plugin/plugin.go:2372` |
 | Span / metric | none | — | `GAP` — no ingest latency or failure counter |
 
 ## Evidence Index

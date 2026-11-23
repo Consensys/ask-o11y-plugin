@@ -243,6 +243,61 @@ func (s *RedisShareStore) GetSharesBySession(sessionID string) []*ShareMetadata 
 	return shares
 }
 
+// DeleteSharesByUser removes every share owned by userID, in every org. Redis
+// has no per-user share index, so it scans the share keys and matches the
+// owner field; the caller runs this only when a workflow entry is removed.
+func (s *RedisShareStore) DeleteSharesByUser(userID int64) (int, error) {
+	removed := 0
+	var cursor uint64
+	for {
+		ctx, cancel := redisContext(s.ctx, RedisBulkOpTimeout)
+		keys, next, err := s.client.Scan(ctx, cursor, "share:*", 100).Result()
+		cancel()
+		if err != nil {
+			return removed, fmt.Errorf("failed to scan shares: %w", err)
+		}
+		cursor = next
+
+		for _, key := range keys {
+			ctxGet, cancelGet := redisContext(s.ctx, RedisOpTimeout)
+			shareJSON, err := s.client.Get(ctxGet, key).Result()
+			cancelGet()
+			if err != nil {
+				continue
+			}
+			var share ShareMetadata
+			if err := json.Unmarshal([]byte(shareJSON), &share); err != nil {
+				continue
+			}
+			if share.UserID != userID {
+				continue
+			}
+
+			ctxDel, cancelDel := redisContext(s.ctx, RedisOpTimeout)
+			delErr := s.client.Del(ctxDel, key).Err()
+			cancelDel()
+			if delErr != nil {
+				s.logger.Warn("Failed to delete share from Redis", "error", delErr, "shareId", share.ShareID)
+				continue
+			}
+
+			ctxIdx, cancelIdx := redisContext(s.ctx, RedisOpTimeout)
+			s.client.SRem(ctxIdx, fmt.Sprintf("session:%s:shares", share.SessionID), share.ShareID)
+			cancelIdx()
+			removed++
+		}
+
+		if cursor == 0 {
+			break
+		}
+	}
+
+	if removed > 0 {
+		s.logger.Info("Shares deleted for user", "count", removed, "userId", userID)
+	}
+	return removed, nil
+}
+
 // CleanupExpired removes all expired shares (no-op for Redis as TTL handles this)
 func (s *RedisShareStore) CleanupExpired() {
 	// Redis TTL automatically handles expiration, so this is a no-op

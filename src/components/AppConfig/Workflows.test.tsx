@@ -12,6 +12,7 @@ import type { WorkflowEntryUI } from '../../types/plugin';
 
 jest.mock('@grafana/runtime', () => ({
   getBackendSrv: jest.fn(),
+  locationService: { push: jest.fn(), replace: jest.fn(), getLocation: () => ({}), getSearch: () => '' },
 }));
 
 jest.mock('@grafana/ui', () => ({
@@ -21,7 +22,25 @@ jest.mock('@grafana/ui', () => ({
       {children}
     </button>
   ),
+  Field: ({ label, children }: { label: string; children: React.ReactNode }) => (
+    <label>
+      <span>{label}</span>
+      {children}
+    </label>
+  ),
+  Input: ({ value, onChange, disabled, type }: { value?: string | number; onChange?: (e: { currentTarget: { value: string } }) => void; disabled?: boolean; type?: string }) => (
+    <input type={type ?? 'text'} value={value} disabled={disabled} onChange={onChange} />
+  ),
   LoadingPlaceholder: ({ text }: { text: string }) => <span>{text}</span>,
+  Combobox: ({ options, value, onChange }: { options: Array<{ label: string; value: string }>; value?: string; onChange?: (o: { value?: string }) => void }) => (
+    <select value={value ?? ''} onChange={(e) => onChange?.({ value: e.currentTarget.value })}>
+      {options.map((o) => (
+        <option key={o.value} value={o.value}>
+          {o.label}
+        </option>
+      ))}
+    </select>
+  ),
   Switch: ({ value, onChange }: { value: boolean; onChange: (e: { currentTarget: { checked: boolean } }) => void }) => (
     <input
       type="checkbox"
@@ -30,7 +49,14 @@ jest.mock('@grafana/ui', () => ({
       aria-label="workflow enabled"
     />
   ),
+  TextArea: ({ value, onChange, rows }: { value?: string; onChange?: (e: { currentTarget: { value: string } }) => void; rows?: number }) => (
+    <textarea rows={rows} value={value} onChange={onChange} />
+  ),
   useTheme2: () => ({ colors: { border: { weak: '#ddd' } } }),
+}));
+
+jest.mock('../../services/skillsClient', () => ({
+  listSkills: jest.fn(() => Promise.resolve([{ name: 'investigating-alerts', description: 'x', source: 'bundled', customized: false, enabled: true, hidden: false, hasUserPrompt: false }])),
 }));
 
 const fetchMock = getBackendSrv as jest.Mock;
@@ -40,7 +66,6 @@ const workflowsResponse = () => ({
     {
       name: 'noc-dispatch',
       enabled: true,
-      orgId: 1,
       skill: 'noc-dispatch',
       intervalSeconds: 300,
       sessionTimeoutSeconds: 420,
@@ -60,7 +85,6 @@ const workflowsResponse = () => ({
     {
       name: 'noc-janitor',
       enabled: false,
-      orgId: 1,
       skill: 'noc-janitor',
       intervalSeconds: 300,
       sessionTimeoutSeconds: 240,
@@ -71,8 +95,8 @@ const workflowsResponse = () => ({
   ],
 });
 
-const renderTab = (onSave: (next: WorkflowEntryUI[]) => void = jest.fn()) =>
-  render(<WorkflowsTab savedWorkflows={[]} onSaveWorkflows={onSave} />);
+const renderTab = (onSave: (next: WorkflowEntryUI[]) => void = jest.fn(), onEditPrompt: (skill: string) => void = jest.fn()) =>
+  render(<WorkflowsTab savedWorkflows={[]} onSaveWorkflows={onSave} onEditPrompt={onEditPrompt} />);
 
 describe('WorkflowsTab', () => {
   beforeEach(() => {
@@ -103,6 +127,189 @@ describe('WorkflowsTab', () => {
 
     expect(await screen.findByText(/Failed to load workflow status/i)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument();
+  });
+
+  it('expands a workflow, lists its runs, and opens a share link', async () => {
+    fetchMock.mockImplementation(() => ({
+      fetch: (cfg: { url: string; method?: string }) => {
+        if (cfg.method === 'POST' && cfg.url.includes('/share')) {
+          return of({ data: { shareUrl: '/a/consensys-asko11y-app/shared/abc?orgId=1' } });
+        }
+        return of(
+          cfg.url.includes('/runs')
+            ? {
+                data: {
+                  runs: [
+                    {
+                      runId: 'run-9',
+                      sessionId: 'sess-9',
+                      status: 'completed',
+                      createdAt: '2026-11-20T17:00:00Z',
+                      updatedAt: '2026-11-20T17:01:00Z',
+                    },
+                  ],
+                },
+              }
+            : { data: workflowsResponse() }
+        );
+      },
+    }));
+    const { locationService } = jest.requireMock('@grafana/runtime');
+    renderTab();
+
+    const sessionsButtons = await screen.findAllByRole('button', { name: 'Sessions' });
+    fireEvent.click(sessionsButtons[0]); // first row: noc-dispatch
+
+    expect(await screen.findByText('run-9')).toBeInTheDocument();
+    const open = await screen.findByRole('button', { name: 'Open' });
+    fireEvent.click(open);
+
+    await waitFor(() =>
+      expect(locationService.push).toHaveBeenCalledWith('/a/consensys-asko11y-app/shared/abc?orgId=1')
+    );
+  });
+
+  it('surfaces a failed share POST instead of failing silently', async () => {
+    fetchMock.mockImplementation(() => ({
+      fetch: (cfg: { url: string; method?: string }) => {
+        if (cfg.method === 'POST' && cfg.url.includes('/share')) {
+          return throwError(() => new Error('boom'));
+        }
+        return of(
+          cfg.url.includes('/runs')
+            ? {
+                data: {
+                  runs: [
+                    {
+                      runId: 'run-9',
+                      sessionId: 'sess-9',
+                      status: 'completed',
+                      createdAt: '2026-11-20T17:00:00Z',
+                      updatedAt: '2026-11-20T17:01:00Z',
+                    },
+                  ],
+                },
+              }
+            : { data: workflowsResponse() }
+        );
+      },
+    }));
+    const { locationService } = jest.requireMock('@grafana/runtime');
+    locationService.push.mockClear();
+    renderTab();
+
+    const sessionsButtons = await screen.findAllByRole('button', { name: 'Sessions' });
+    fireEvent.click(sessionsButtons[0]);
+
+    const open = await screen.findByRole('button', { name: 'Open' });
+    fireEvent.click(open);
+
+    expect(await screen.findByTestId('ac-workflow-share-error')).toHaveTextContent(
+      /share link could not be created/i
+    );
+    expect(locationService.push).not.toHaveBeenCalled();
+  });
+
+  it('opens the editor for a row and saves an edited entry', async () => {
+    fetchMock.mockImplementation(() => ({ fetch: () => of({ data: workflowsResponse() }) }));
+    const onSave = jest.fn();
+    renderTab(onSave);
+
+    const editButtons = await screen.findAllByRole('button', { name: 'Edit' });
+    fireEvent.click(editButtons[0]);
+
+    expect(screen.getByText('Edit noc-dispatch')).toBeInTheDocument();
+    const nameInput = screen.getByDisplayValue('noc-dispatch');
+    expect((nameInput as HTMLInputElement).disabled).toBe(true);
+
+    const save = screen.getByRole('button', { name: 'Save and reload' });
+    fireEvent.click(save);
+    expect(onSave).toHaveBeenCalledTimes(1);
+    const saved = onSave.mock.calls[0][0] as Array<Record<string, unknown>>;
+    expect(saved[0]).toMatchObject({ name: 'noc-dispatch', skill: 'noc-dispatch' });
+    expect(saved[0]).not.toHaveProperty('running');
+  });
+
+  it('jumps to the skill prompt editor', async () => {
+    fetchMock.mockImplementation(() => ({ fetch: () => of({ data: workflowsResponse() }) }));
+    const onEditPrompt = jest.fn();
+    renderTab(jest.fn(), onEditPrompt);
+
+    const promptButtons = await screen.findAllByRole('button', { name: 'Prompt' });
+    fireEvent.click(promptButtons[0]);
+    expect(onEditPrompt).toHaveBeenCalledWith('noc-dispatch');
+  });
+
+  it('encodes workflow names with spaces and percent signs in the runs URL', async () => {
+    const urls: string[] = [];
+    const base = workflowsResponse().workflows[0];
+    fetchMock.mockImplementation(() => ({
+      fetch: (cfg: { url: string }) => {
+        urls.push(cfg.url);
+        if (cfg.url.includes('/runs')) {
+          return of({ data: { runs: [] } });
+        }
+        return of({
+          data: {
+            workflows: [
+              { ...base, name: 'Nightly RCA', skill: 'dispatch' },
+              { ...base, name: '50% RCA', skill: 'dispatch' },
+            ],
+          },
+        });
+      },
+    }));
+    renderTab();
+
+    const sessionsButtons = await screen.findAllByRole('button', { name: 'Sessions' });
+    fireEvent.click(sessionsButtons[0]);
+    await waitFor(() =>
+      expect(urls.some((url) => url.endsWith('/Nightly%20RCA/runs?limit=100'))).toBe(true)
+    );
+
+    fireEvent.click(sessionsButtons[1]);
+    await waitFor(() =>
+      expect(urls.some((url) => url.endsWith('/50%25%20RCA/runs?limit=100'))).toBe(true)
+    );
+  });
+
+  it('rejects an invalid workflow name inline and saves the trimmed name', async () => {
+    fetchMock.mockImplementation(() => ({ fetch: () => of({ data: { workflows: [] } }) }));
+    const onSave = jest.fn();
+    renderTab(onSave);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'New workflow' }));
+    const nameInput = screen.getByLabelText('Name');
+    const save = screen.getByRole('button', { name: 'Save and reload' });
+
+    // "/" is a route separator: the runs GET and the share POST would cut the
+    // path at different places.
+    fireEvent.change(nameInput, { target: { value: 'x/runs/y' } });
+    expect(screen.getByTestId('ac-workflow-name-error')).toHaveTextContent('Name must not contain "/".');
+    expect(save).toBeDisabled();
+    expect(onSave).not.toHaveBeenCalled();
+
+    // A control character corrupts Redis keys and log lines.
+    fireEvent.change(nameInput, { target: { value: 'a\u0000b' } });
+    expect(screen.getByTestId('ac-workflow-name-error')).toHaveTextContent('control characters');
+
+    // Spaces inside the name are legal.
+    fireEvent.change(nameInput, { target: { value: '  Nightly RCA  ' } });
+    expect(screen.queryByTestId('ac-workflow-name-error')).not.toBeInTheDocument();
+
+    await waitFor(() =>
+      expect(screen.getByLabelText('Skill').querySelectorAll('option').length).toBeGreaterThan(0)
+    );
+    fireEvent.change(screen.getByLabelText('Skill'), { target: { value: 'investigating-alerts' } });
+    fireEvent.change(screen.getByLabelText('Tool allowlist'), { target: { value: 'irm_list_alert_groups' } });
+
+    expect(save).not.toBeDisabled();
+    fireEvent.click(save);
+    expect(onSave).toHaveBeenCalledTimes(1);
+    expect((onSave.mock.calls[0][0] as Array<Record<string, unknown>>)[0]).toMatchObject({
+      name: 'Nightly RCA',
+      skill: 'investigating-alerts',
+    });
   });
 
   it('toggles a workflow and saves the full entry list', async () => {

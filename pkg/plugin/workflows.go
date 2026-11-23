@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"unicode"
 
 	"consensys-asko11y-app/pkg/skills"
 
@@ -19,6 +20,11 @@ const (
 	workflowMinTimeoutSeconds      = 60
 	workflowDefaultMaxConcurrent   = 5
 )
+
+// workflowMaxNameLength bounds a workflow name in bytes, matching the
+// maxWorkflowLabelLength truncation the metrics apply: a longer name would
+// make two entries share one metric label while staying distinct schedulers.
+const workflowMaxNameLength = 64
 
 // workflowConversationType marks sessions created by the workflow runner.
 const workflowConversationType = "workflow"
@@ -36,7 +42,6 @@ var errWorkflowUnknownTool = errors.New("allowlist names unknown tool")
 type WorkflowEntry struct {
 	Name        string `json:"name"`
 	Enabled     bool   `json:"enabled"`
-	OrgID       int64  `json:"orgId"`
 	Skill       string `json:"skill"`
 	Message     string `json:"message,omitempty"`
 	Model       string `json:"model,omitempty"`
@@ -80,8 +85,23 @@ func validateWorkflowEntry(entry WorkflowEntry, registry *skills.Registry, allow
 	if name == "" {
 		return fmt.Errorf("workflow entry has no name")
 	}
-	if entry.OrgID <= 0 {
-		return fmt.Errorf("workflow %s: orgId must be a positive org number", name)
+	// The name is a route segment, a Redis key fragment, and a metric label
+	// value. A "/" makes the runs GET and the share POST cut the path at
+	// different places, so the runs list succeeds while Open 404s; control
+	// characters corrupt logs and key shapes; more than workflowMaxNameLength
+	// bytes collides two entries on one truncated metric label. Spaces inside
+	// the name stay legal ("Nightly RCA"). %q escapes hostile characters in
+	// the log line.
+	if strings.ContainsRune(name, '/') {
+		return fmt.Errorf("workflow %q: name must not contain \"/\"", name)
+	}
+	for _, r := range name {
+		if unicode.IsControl(r) {
+			return fmt.Errorf("workflow %q: name must not contain control characters", name)
+		}
+	}
+	if len(name) > workflowMaxNameLength {
+		return fmt.Errorf("workflow %q: name must be at most %d bytes", name, workflowMaxNameLength)
 	}
 	if entry.IntervalSec < workflowMinIntervalSeconds {
 		return fmt.Errorf("workflow %s: intervalSeconds must be at least %d", name, workflowMinIntervalSeconds)
@@ -162,8 +182,97 @@ func workflowMessage(entry WorkflowEntry) string {
 }
 
 // syntheticWorkflowUserID derives the stable synthetic user ID for a
-// workflow, using the same FNV-of-login scheme as interactive user IDs. The
-// ID owns the workflow's sessions; it never maps to a real Grafana user.
+// workflow, using the same FNV-of-login scheme as interactive user IDs but
+// over the NUL-prefixed synthetic domain. The ID owns the workflow's sessions;
+// it never maps to a real Grafana user.
 func syntheticWorkflowUserID(workflow string) int64 {
-	return fnvSyntheticUserID("workflow:" + workflow)
+	return fnvSyntheticUserID(workflow)
+}
+
+// appliedWorkflowNamesKey is the Redis set of workflow names recorded by the
+// last settings load. Settings changes take effect by restarting the plugin
+// process, so the previous set must outlive the process for a removed entry
+// to be detected.
+const appliedWorkflowNamesKey = "workflows:applied"
+
+// revokeRemovedWorkflowShares deletes the shares of every workflow whose entry
+// the applied settings no longer list, so no unauthenticated share URL for a
+// removed workflow keeps working. It is called at the settings-apply seam
+// (NewPlugin, before startWorkflows) and records the current entry names.
+func (p *Plugin) revokeRemovedWorkflowShares(entries []WorkflowEntry) {
+	current := make(map[string]bool, len(entries))
+	for _, entry := range entries {
+		if name := strings.TrimSpace(entry.Name); name != "" {
+			current[name] = true
+		}
+	}
+
+	previous := p.recordAppliedWorkflowNames(current)
+	for name := range previous {
+		if current[name] {
+			continue
+		}
+		removed, err := p.shareStore.DeleteSharesByUser(syntheticWorkflowUserID(name))
+		if err != nil {
+			p.logger.Warn("Failed to revoke shares for removed workflow", "workflow", name, "error", err)
+			continue
+		}
+		if removed > 0 {
+			p.logger.Info("Revoked shares for removed workflow", "workflow", name, "shareCount", removed)
+		}
+	}
+}
+
+// recordAppliedWorkflowNames returns the workflow names applied by the previous
+// settings load and records current as the new set. Redis holds the set across
+// restarts; the in-memory copy covers a reapply inside one process and the
+// configuration where no workflow ever ran because Redis is absent.
+func (p *Plugin) recordAppliedWorkflowNames(current map[string]bool) map[string]bool {
+	p.settingsMu.Lock()
+	previous := p.appliedWorkflows
+	p.appliedWorkflows = current
+	p.settingsMu.Unlock()
+
+	if !p.usingRedis || p.redisClient == nil {
+		return previous
+	}
+	for name := range p.readAppliedWorkflowNames() {
+		if previous == nil {
+			previous = map[string]bool{}
+		}
+		previous[name] = true
+	}
+	p.writeAppliedWorkflowNames(current)
+	return previous
+}
+
+// readAppliedWorkflowNames returns the persisted name set, or nil when Redis
+// cannot answer.
+func (p *Plugin) readAppliedWorkflowNames() map[string]bool {
+	ctx, cancel := redisContext(p.ctx, RedisBulkOpTimeout)
+	defer cancel()
+	names, err := p.redisClient.SMembers(ctx, appliedWorkflowNamesKey).Result()
+	if err != nil {
+		p.logger.Warn("Failed to read applied workflow names", "error", err)
+		return nil
+	}
+	set := make(map[string]bool, len(names))
+	for _, name := range names {
+		set[name] = true
+	}
+	return set
+}
+
+// writeAppliedWorkflowNames replaces the persisted name set.
+func (p *Plugin) writeAppliedWorkflowNames(names map[string]bool) {
+	ctx, cancel := redisContext(p.ctx, RedisOpTimeout)
+	defer cancel()
+	pipe := p.redisClient.TxPipeline()
+	pipe.Del(ctx, appliedWorkflowNamesKey)
+	for name := range names {
+		pipe.SAdd(ctx, appliedWorkflowNamesKey, name)
+	}
+	if _, err := pipe.Exec(ctx); err != nil {
+		p.logger.Warn("Failed to persist applied workflow names", "error", err)
+	}
 }

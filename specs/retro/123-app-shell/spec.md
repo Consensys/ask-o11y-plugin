@@ -73,15 +73,15 @@ Configuration is gated twice: the nav entry requires role `Admin`, and the actio
 24. Discovery threshold input shows only in `auto` mode and must be 1..100000. `VERIFIED` — `src/components/AppConfig/AppConfig.tsx:1264`
 25. `alwaysInclude` splits on commas, trims each name, and drops empty entries. `VERIFIED` — `src/components/AppConfig/AppConfig.tsx:1010`
 26. MCP writes `mcpServers`, `useBuiltInMCP`, `builtInMCPToolSelections`, `useLocalGrafanaURL`, `localGrafanaPort`, and `trustedMCPServers`. `VERIFIED` — `src/components/AppConfig/AppConfig.tsx:1125`
-27. A new server gets id `mcp-<epoch>`, name "New MCP Server", type `openapi`, and enabled state. `VERIFIED` — `src/components/AppConfig/AppConfig.tsx:579`
+27. A new server gets id `mcp-<epoch>`, name "New MCP Server", type `openapi`, and enabled state. `VERIFIED` — `src/components/AppConfig/AppConfig.tsx:587`
 28. A blank server name blocks save with "Server name is required". `VERIFIED` — `src/components/AppConfig/AppConfig.tsx:1026`
 29. A non-empty URL must be http or https, or save is blocked. `VERIFIED` — `src/services/validation.ts:82`
 30. A server without a name renders "Unnamed Server". `VERIFIED` — test `should show "Unnamed Server" when name is cleared`
 31. Server types are `openapi`, `standard`, `sse`, and `streamable-http`. `VERIFIED` — test `should add, configure, and remove MCP servers`
 32. A server holds at most 10 custom headers. `VERIFIED` — `src/components/AppConfig/AppConfig.tsx:679`
 33. A blank header key disables the Add Header button. `VERIFIED` — test `should disable add-header when incomplete header exists`
-34. Header values save to `secureJsonData` as `mcpServerHeader.<serverId>.<key>`. `VERIFIED` — `src/components/AppConfig/AppConfig.tsx:1094`
-35. A duplicate normalised header key blocks save and shows an error Alert. `VERIFIED` — `src/components/AppConfig/AppConfig.tsx:1056`
+34. Header values save to `secureJsonData` as `mcpServerHeader.<serverId>.<key>`. `VERIFIED` — `src/components/AppConfig/AppConfig.tsx:1102`
+35. A duplicate normalised header key blocks save and shows an error Alert. `VERIFIED` — `src/components/AppConfig/AppConfig.tsx:1064`
 36. The built-in MCP toggle is disabled when `grafana-llm-app` MCP is unavailable. `VERIFIED` — `src/components/AppConfig/AppConfig.tsx:1482`
 37. Server status badges poll every 15 s and read "Status unknown" without data. `VERIFIED` — `src/components/AppConfig/AppConfig.tsx:346`
 38. Removing a server stages its stored header secrets for deletion. `ASSUMED` — `src/components/AppConfig/AppConfig.tsx:638`
@@ -116,13 +116,13 @@ Coverage tags:
 | MCP name empty | Field error "Server name is required" | `src/components/AppConfig/AppConfig.tsx:1027` |
 | MCP URL invalid | Field error from `validateMCPServerURL` | `src/components/AppConfig/AppConfig.tsx:1035` |
 | Duplicate header key | Save does nothing, no message | `src/components/AppConfig/AppConfig.tsx:1053` |
-| Built-in MCP missing | Warning Alert "Built-in MCP unavailable" | `src/components/AppConfig/AppConfig.tsx:1444` |
+| Built-in MCP missing | Warning Alert "Built-in MCP unavailable" | `src/components/AppConfig/AppConfig.tsx:1452` |
 | Lazy chunk fails | Error boundary "Application Error" | `src/module.tsx:14` |
 ## Data and Persistence
 | Store | Key or table | TTL | Fallback | Evidence |
 |---|---|---|---|---|
 | Plugin jsonData | all keys above | plugin lifetime | constants above | `src/components/AppConfig/AppConfig.tsx:285` |
-| Plugin secureJsonData | `mcpServerHeader.<serverId>.<key>` | plugin lifetime | empty | `src/components/AppConfig/AppConfig.tsx:1094` |
+| Plugin secureJsonData | `mcpServerHeader.<serverId>.<key>` | plugin lifetime | empty | `src/components/AppConfig/AppConfig.tsx:1102` |
 | sessionStorage | `settings.activeTab` | tab lifetime | `general` | `src/components/AppConfig/AppConfig.tsx:161` |
 ## Observability
 | Signal | Name | Where | Evidence |

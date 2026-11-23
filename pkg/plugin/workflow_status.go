@@ -2,7 +2,10 @@ package plugin
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
@@ -128,7 +131,6 @@ func (s *WorkflowStatusStore) Get(name string) workflowRuntimeStatus {
 type workflowAPIEntry struct {
 	Name                  string   `json:"name"`
 	Enabled               bool     `json:"enabled"`
-	OrgID                 int64    `json:"orgId"`
 	Skill                 string   `json:"skill"`
 	Message               string   `json:"message,omitempty"`
 	Model                 string   `json:"model,omitempty"`
@@ -143,6 +145,47 @@ type workflowAPIEntry struct {
 	// plugin instance. Disabled and invalid entries never run.
 	Running bool                  `json:"running"`
 	Status  workflowRuntimeStatus `json:"status"`
+}
+
+// workflowSessionStatus joins the in-memory last-tick state with durable
+// session outcome counts derived from the run store, so the row counters and
+// the sessions list always agree: both read the same run records of the
+// requesting org. Both run stores clamp list limits above 100 down to 50, so
+// 100 is the widest window either side can see; the panel fetches the same
+// 100. Timed-out runs are stored as failed with a timeout message; they
+// count as timeout.
+func (p *Plugin) workflowSessionStatus(rawName string, orgID int64) workflowRuntimeStatus {
+	name := strings.TrimSpace(rawName)
+	status := p.workflowStatus.Get(name)
+	if orgID <= 0 {
+		return status
+	}
+	runs, err := p.runStore.ListRuns(syntheticWorkflowUserID(name), orgID, 100)
+	if err != nil {
+		// The durable counts are unavailable; the in-memory view still reports.
+		return status
+	}
+	status.Started = 0
+	status.Completed = 0
+	status.Failed = 0
+	status.Cancelled = 0
+	status.Timeout = 0
+	for _, run := range runs {
+		status.Started++
+		switch run.Status {
+		case RunStatusCompleted:
+			status.Completed++
+		case RunStatusCancelled:
+			status.Cancelled++
+		case RunStatusFailed:
+			if strings.Contains(run.Error, "timeout") {
+				status.Timeout++
+			} else {
+				status.Failed++
+			}
+		}
+	}
+	return status
 }
 
 // handleWorkflowsList serves GET /api/workflows: every configured workflow
@@ -181,7 +224,6 @@ func (p *Plugin) handleWorkflowsList(w http.ResponseWriter, r *http.Request) {
 		entries = append(entries, workflowAPIEntry{
 			Name:                  entry.Name,
 			Enabled:               entry.Enabled,
-			OrgID:                 entry.OrgID,
 			Skill:                 entry.Skill,
 			Message:               entry.Message,
 			Model:                 entry.Model,
@@ -192,13 +234,284 @@ func (p *Plugin) handleWorkflowsList(w http.ResponseWriter, r *http.Request) {
 			ToolAllowlist:         entry.ToolAllowlist,
 			SpawnableSkills:       entry.SpawnableSkills,
 			FallbackSkill:         entry.FallbackSkill,
-			Running:               running[entry.Name],
-			Status:                p.workflowStatus.Get(entry.Name),
+			// Schedulers are keyed by the trimmed name prepareWorkflows
+			// produced; settings may still hold the raw entry.
+			Running: running[strings.TrimSpace(entry.Name)],
+			Status:  p.workflowSessionStatus(entry.Name, getOrgID(r)),
 		})
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(map[string]interface{}{"workflows": entries}); err != nil {
 		p.logger.Error("Failed to encode workflows list", "error", err)
+	}
+}
+
+// handleWorkflowRunShare serves POST /api/workflows/{name}/runs/{runId}/share:
+// it gets or creates a read-only share link for one run's session and returns
+// the share path. The share is owned by the workflow's synthetic user (the
+// session owner), so creating it needs no cross-owner read. Admin only — the
+// share grants unauthenticated read access to the session transcript.
+//
+// The stored payload is the same snapshot the share_session tool writes (see
+// handleWorkflowShare): the session fields the viewer renders plus this run's
+// events merged in. Assistant output and tool results reach the session store
+// only after the agent loop ends, so a share minted mid-run holds a partial
+// transcript; reusableWorkflowRunShare therefore reuses a share only when the
+// run is terminal and the share postdates that terminal state.
+func (p *Plugin) handleWorkflowRunShare(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !isAdmin(r) {
+		http.Error(w, "Admin access required", http.StatusForbidden)
+		return
+	}
+	name, ok := strings.CutPrefix(r.URL.Path, "/api/workflows/")
+	withoutShare, hasShare := strings.CutSuffix(name, "/share")
+	// Path shape: {workflow}/runs/{runId}. The workflow name cannot contain
+	// "/runs/", so the first split is unambiguous.
+	wfName, runAndID, hasRun := strings.Cut(withoutShare, "/runs/")
+	runID := strings.TrimPrefix(runAndID, "/")
+	if !hasRun {
+		http.Error(w, "Invalid path format", http.StatusBadRequest)
+		return
+	}
+	if !ok || !hasShare || wfName == "" || runID == "" {
+		http.Error(w, "Invalid path format", http.StatusBadRequest)
+		return
+	}
+	name = strings.TrimSpace(wfName)
+
+	p.settingsMu.RLock()
+	configured := p.settings.Workflows
+	p.settingsMu.RUnlock()
+	var found bool
+	for _, entry := range configured {
+		if strings.TrimSpace(entry.Name) == name {
+			found = true
+			break
+		}
+	}
+	if !found {
+		http.Error(w, "Workflow not found", http.StatusNotFound)
+		return
+	}
+
+	orgID := getOrgID(r)
+	synthetic := syntheticWorkflowUserID(name)
+	run, err := p.runStore.GetRun(runID)
+	if err != nil || run == nil || run.SessionID == "" || run.UserID != synthetic || run.OrgID != orgID {
+		http.Error(w, "Run not found", http.StatusNotFound)
+		return
+	}
+
+	// The synthetic user owns the session, so the owner-scoped read works.
+	// It is read before the reuse check because its UpdatedAt marks the
+	// session write that completes the run's transcript.
+	session, err := p.sessionStore.GetSession(run.SessionID, synthetic, orgID)
+	if err != nil {
+		http.Error(w, "Session not found", http.StatusNotFound)
+		return
+	}
+
+	if share := reusableWorkflowRunShare(run, session, p.shareStore.GetSharesBySession(run.SessionID)); share != nil {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{
+			"shareId":  share.ShareID,
+			"shareUrl": fmt.Sprintf("/a/%s/shared/%s?orgId=%d", PluginID, share.ShareID, orgID),
+		})
+		return
+	}
+
+	snapshot := workflowShareSnapshot{
+		ID:               session.ID,
+		Title:            session.Title,
+		ConversationType: session.ConversationType,
+		Workflow:         session.Workflow,
+		CreatedAt:        session.CreatedAt,
+		Messages:         append([]SessionMessage(nil), session.Messages...),
+	}
+	snapshot.Messages = appendRunTranscript(
+		append([]SessionMessage(nil), session.Messages...),
+		workflowRunTranscript(p, runID),
+	)
+
+	data, err := json.Marshal(snapshot)
+	if err != nil {
+		p.logger.Error("Failed to encode workflow session for share", "error", err)
+		http.Error(w, "Failed to create share", http.StatusInternalServerError)
+		return
+	}
+	if err := ValidateSessionData(data); err != nil {
+		http.Error(w, "Failed to create share", http.StatusInternalServerError)
+		return
+	}
+	hours := 30 * 24
+	share, err := p.shareStore.CreateShare(run.SessionID, data, orgID, synthetic, &hours)
+	if err != nil {
+		p.logger.Error("Failed to create workflow session share", "error", err)
+		http.Error(w, "Failed to create share", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{
+		"shareId":  share.ShareID,
+		"shareUrl": fmt.Sprintf("/a/%s/shared/%s?orgId=%d", PluginID, share.ShareID, orgID),
+	})
+}
+
+// appendRunTranscript appends the reconstructed run transcript unless the
+// session already ends with that same assistant message. consumeAgentEvents
+// stores the final assistant message when the loop ends, so a finished run's
+// session already holds it and appending again would render the investigation
+// twice. A mid-run session holds only the user message, so the transcript is
+// still appended there.
+func appendRunTranscript(messages []SessionMessage, transcript []SessionMessage) []SessionMessage {
+	if len(transcript) == 0 {
+		return messages
+	}
+	for i := len(messages) - 1; i >= 0; i-- {
+		if messages[i].Role != "assistant" {
+			continue
+		}
+		if messages[i].Role == transcript[0].Role && messages[i].Content == transcript[0].Content {
+			return messages
+		}
+		break
+	}
+	return append(messages, transcript...)
+}
+
+// reusableWorkflowRunShare returns the share an admin POST may reuse, or nil
+// when a fresh share must be created. The rule, in order:
+//
+//  1. A running run is never reused: its transcript is still growing, so a
+//     share minted earlier froze a partial transcript.
+//  2. A share with ExpiresAt == nil is never reused (it would live forever);
+//     today every share gets an expiry, but the reuse path does not rely on
+//     that.
+//  3. Only the newest unexpired share is a candidate, and only when it was
+//     created at or after the run reached its terminal state. The terminal
+//     timestamp is the later of the run record's UpdatedAt (stamped by
+//     FinishRun) and the session's UpdatedAt: consumeAgentEvents appends the
+//     assistant message after FinishRun, so only the session write proves
+//     the transcript is complete. A zero terminal timestamp means no reuse.
+//
+// Every other case creates a fresh share instead of handing out a stale one.
+func reusableWorkflowRunShare(run *AgentRun, session *ChatSession, shares []*ShareMetadata) *ShareMetadata {
+	if run == nil || run.Status == RunStatusRunning {
+		return nil
+	}
+	terminal := run.UpdatedAt
+	if session != nil && session.UpdatedAt.After(terminal) {
+		terminal = session.UpdatedAt
+	}
+	if terminal.IsZero() {
+		return nil
+	}
+
+	now := time.Now().UTC()
+	var newest *ShareMetadata
+	for _, share := range shares {
+		if share == nil || share.ExpiresAt == nil || !share.ExpiresAt.After(now) {
+			continue
+		}
+		if newest == nil || share.CreatedAt.After(newest.CreatedAt) {
+			newest = share
+		}
+	}
+	if newest == nil || newest.CreatedAt.Before(terminal) {
+		return nil
+	}
+	return newest
+}
+
+// handleWorkflowRuns serves GET /api/workflows/{name}/runs: the recent runs
+// of one workflow, newest first, owned by the workflow's synthetic user. The
+// chat deep link (?sessionId=) opens each run's session; the session GET
+// allows Admins to read workflow sessions. Admin only.
+func (p *Plugin) handleWorkflowRuns(w http.ResponseWriter, r *http.Request) {
+	// /api/workflows/{name}/runs/{runId}/share → get-or-create a share link.
+	if strings.HasSuffix(r.URL.Path, "/share") {
+		p.handleWorkflowRunShare(w, r)
+		return
+	}
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !isAdmin(r) {
+		http.Error(w, "Admin access required", http.StatusForbidden)
+		return
+	}
+	name, ok := strings.CutPrefix(r.URL.Path, "/api/workflows/")
+	runIDPart, hasRuns := strings.CutSuffix(name, "/runs")
+	if !ok || !hasRuns || runIDPart == "" {
+		http.Error(w, "Invalid path format", http.StatusBadRequest)
+		return
+	}
+	// prepareWorkflows trims entry names before schedulers start, so session
+	// owners are keyed by the trimmed name; trim here to match.
+	name = strings.TrimSpace(runIDPart)
+
+	p.settingsMu.RLock()
+	configured := p.settings.Workflows
+	p.settingsMu.RUnlock()
+	var entry *WorkflowEntry
+	for i := range configured {
+		// prepareWorkflows trims entry names before schedulers start, so the
+		// stored side is raw only in settings that never went through it.
+		if strings.TrimSpace(configured[i].Name) == name {
+			entry = &configured[i]
+			break
+		}
+	}
+	if entry == nil {
+		http.Error(w, "Workflow not found", http.StatusNotFound)
+		return
+	}
+
+	limit := 20
+	if raw := r.URL.Query().Get("limit"); raw != "" {
+		if parsed, err := strconv.Atoi(raw); err == nil && parsed > 0 && parsed <= 100 {
+			limit = parsed
+		}
+	}
+
+	orgID := getOrgID(r)
+	runs, err := p.runStore.ListRuns(syntheticWorkflowUserID(name), orgID, limit)
+	if err != nil {
+		p.logger.Error("Failed to list workflow runs", "workflow", name, "error", err)
+		http.Error(w, "Failed to list runs", http.StatusInternalServerError)
+		return
+	}
+
+	type workflowRun struct {
+		RunID     string    `json:"runId"`
+		SessionID string    `json:"sessionId,omitempty"`
+		Status    RunStatus `json:"status"`
+		Skill     string    `json:"skill,omitempty"`
+		CreatedAt time.Time `json:"createdAt"`
+		UpdatedAt time.Time `json:"updatedAt"`
+		Error     string    `json:"error,omitempty"`
+	}
+	out := make([]workflowRun, 0, len(runs))
+	for _, run := range runs {
+		out = append(out, workflowRun{
+			RunID:     run.RunID,
+			SessionID: run.SessionID,
+			Status:    run.Status,
+			Skill:     entry.Skill,
+			CreatedAt: run.CreatedAt,
+			UpdatedAt: run.UpdatedAt,
+			Error:     run.Error,
+		})
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(map[string]interface{}{"workflow": name, "runs": out}); err != nil {
+		p.logger.Error("Failed to encode workflow runs", "workflow", name, "error", err)
 	}
 }

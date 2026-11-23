@@ -14,11 +14,11 @@ const maxWorkflowLabelLength = 64
 
 var (
 	// workflowTicks counts scheduler ticks per workflow and outcome.
-	// outcome: executed | skip_lock | skip_identity | skip_error.
+	// outcome: executed | skip_lock | skip_identity | skip_error | skip_active.
 	workflowTicks = promauto.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "asko11y_workflow_ticks_total",
-			Help: "Workflow scheduler ticks per workflow and outcome (executed, skip_lock, skip_identity, skip_error).",
+			Help: "Workflow scheduler ticks per workflow and outcome (executed, skip_lock, skip_identity, skip_error, skip_active).",
 		},
 		[]string{"workflow", "outcome"},
 	)
@@ -33,8 +33,9 @@ var (
 		[]string{"workflow", "outcome"},
 	)
 
-	// workflowActiveSpawned gauges active spawned sessions per workflow,
-	// sourced from the Redis active set.
+	// workflowActiveSpawned gauges active workflow sessions per workflow: the
+	// spawned sessions counted across replicas through Redis, plus this
+	// instance's in-flight top-level runs.
 	workflowActiveSpawned = promauto.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Name: "asko11y_workflow_active_spawned",

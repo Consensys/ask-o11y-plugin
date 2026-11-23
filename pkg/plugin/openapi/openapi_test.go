@@ -119,6 +119,8 @@ func TestSpecHasAllEndpoints(t *testing.T) {
 		"/api/oauth/{serverId}/status",
 		"/api/oauth/{serverId}/disconnect",
 		"/api/workflows",
+		"/api/workflows/{name}/runs",
+		"/api/workflows/{name}/runs/{runId}/share",
 		"/api/mcp/provisioner",
 		"/api/mcp/provisioner/presets",
 		"/api/mcp/provisioner/preset",
