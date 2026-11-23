@@ -128,6 +128,16 @@
 
 ---
 
+## Phase 11: Sessions and editor increment (2026-11-23)
+
+**Purpose**: Workflow sessions visible and openable; full config and prompt editing in the tab.
+
+- [x] T031 Backend: `GET /api/workflows/{name}/runs` (Admin only, newest first) and the Admin workflow-session read on `GET /api/sessions/{id}` via `GetSessionUnscoped` on both stores. OpenAPI entry and endpoint test updated. Tests in `workflow_status_test.go`.
+- [x] T032 Frontend: runs panel per workflow with status badges and Open deep links (`?sessionId=`), full entry editor (create, edit, delete, Combobox skill pickers), Edit prompt jump into the Skills tab (focusSkill prop).
+- [x] T033 Amend this spec (Stories 9 and 10, FR-022 to FR-026) and retro 111 (admin read rule) in the same PR.
+
+---
+
 ## Dependencies & Execution Order
 
 - **Phase 1** blocks every story. T001 to T004 are parallel; T005 depends on nothing but is consumed by T008.

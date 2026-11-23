@@ -3,6 +3,8 @@ package plugin
 import (
 	"encoding/json"
 	"net/http"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
@@ -200,5 +202,84 @@ func (p *Plugin) handleWorkflowsList(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(map[string]interface{}{"workflows": entries}); err != nil {
 		p.logger.Error("Failed to encode workflows list", "error", err)
+	}
+}
+
+// handleWorkflowRuns serves GET /api/workflows/{name}/runs: the recent runs
+// of one workflow, newest first, owned by the workflow's synthetic user. The
+// chat deep link (?sessionId=) opens each run's session; the session GET
+// allows Admins to read workflow sessions. Admin only.
+func (p *Plugin) handleWorkflowRuns(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !isAdmin(r) {
+		http.Error(w, "Admin access required", http.StatusForbidden)
+		return
+	}
+	name, ok := strings.CutPrefix(r.URL.Path, "/api/workflows/")
+	runIDPart, hasRuns := strings.CutSuffix(name, "/runs")
+	if !ok || !hasRuns || runIDPart == "" {
+		http.Error(w, "Invalid path format", http.StatusBadRequest)
+		return
+	}
+	name = runIDPart
+
+	p.settingsMu.RLock()
+	configured := p.settings.Workflows
+	p.settingsMu.RUnlock()
+	var entry *WorkflowEntry
+	for i := range configured {
+		if configured[i].Name == name {
+			entry = &configured[i]
+			break
+		}
+	}
+	if entry == nil {
+		http.Error(w, "Workflow not found", http.StatusNotFound)
+		return
+	}
+
+	limit := 20
+	if raw := r.URL.Query().Get("limit"); raw != "" {
+		if parsed, err := strconv.Atoi(raw); err == nil && parsed > 0 && parsed <= 100 {
+			limit = parsed
+		}
+	}
+
+	orgID := getOrgID(r)
+	runs, err := p.runStore.ListRuns(syntheticWorkflowUserID(name), orgID, limit)
+	if err != nil {
+		p.logger.Error("Failed to list workflow runs", "workflow", name, "error", err)
+		http.Error(w, "Failed to list runs", http.StatusInternalServerError)
+		return
+	}
+
+	type workflowRun struct {
+		RunID     string    `json:"runId"`
+		SessionID string    `json:"sessionId,omitempty"`
+		Status    RunStatus `json:"status"`
+		Skill     string    `json:"skill,omitempty"`
+		CreatedAt time.Time `json:"createdAt"`
+		UpdatedAt time.Time `json:"updatedAt"`
+		Error     string    `json:"error,omitempty"`
+	}
+	out := make([]workflowRun, 0, len(runs))
+	for _, run := range runs {
+		out = append(out, workflowRun{
+			RunID:     run.RunID,
+			SessionID: run.SessionID,
+			Status:    run.Status,
+			Skill:     entry.Skill,
+			CreatedAt: run.CreatedAt,
+			UpdatedAt: run.UpdatedAt,
+			Error:     run.Error,
+		})
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(map[string]interface{}{"workflow": name, "runs": out}); err != nil {
+		p.logger.Error("Failed to encode workflow runs", "workflow", name, "error", err)
 	}
 }

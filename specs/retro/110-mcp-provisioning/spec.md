@@ -21,7 +21,7 @@ at start, adds runtime servers, and sends W3C trace context with each tool call.
 
 | Capability | Admin | Editor | Viewer | Evidence |
 |---|---|---|---|---|
-| Declare servers in provisioning YAML | yes | no | no | `provisioning/plugins/app.yaml:32` |
+| Declare servers in provisioning YAML | yes | no | no | `provisioning/apps/asko11y.yaml:8` |
 | Add, list, or delete a runtime server | yes | no | no | `pkg/plugin/mcp_provisioner.go:108` |
 
 ## Contract
@@ -60,7 +60,7 @@ at start, adds runtime servers, and sends W3C trace context with each tool call.
 
 ## Behaviour Rules
 
-1. `mcpServers` is a JSON array at the root of `jsonData`. `VERIFIED` — `provisioning/plugins/app.yaml:32`
+1. `mcpServers` is a JSON array at the root of `jsonData`. `VERIFIED` — `provisioning/apps/asko11y.yaml:8`
 2. Settings are decoded once with `json.Unmarshal` into `PluginSettings`. `VERIFIED` — `pkg/plugin/plugin.go:269`
 3. Four `type` values are documented: `openapi`, `standard`, `sse`, `streamable-http`. `VERIFIED` — `pkg/mcp/types.go:95`
 4. `http+streamable` is an alias of `streamable-http`; both use the SDK streamable transport with 3 retries, and `sse` uses the SDK SSE transport. `VERIFIED` — `pkg/mcp/client.go:247`, `pkg/mcp/client.go:245`
@@ -81,7 +81,7 @@ at start, adds runtime servers, and sends W3C trace context with each tool call.
 19. A runtime server transport must be `streamable-http` or `sse`. `VERIFIED` — `pkg/plugin/mcp_provisioner.go:240`
 20. Presets are `github-read`, `github-write`, and `atlassian`. `VERIFIED` — `pkg/plugin/oauth/presets.go:38`
 21. The built-in MCP registers as server ID `mcp-grafana`. `VERIFIED` — `pkg/plugin/plugin.go:86`
-22. The built-in URL is `{grafanaURL}/api/plugins/grafana-llm-app/resources/mcp/grafana` and it authenticates with the service-account bearer. `VERIFIED` — `pkg/plugin/plugin.go:629`, `pkg/plugin/plugin.go:633`
+22. The built-in URL is `{grafanaURL}/api/plugins/grafana-llm-app/resources/mcp/grafana` and it authenticates with the service-account bearer. `VERIFIED` — `pkg/plugin/plugin.go:629`, `pkg/plugin/plugin.go:634`
 23. With no service-account token the plugin removes the built-in client instead of failing. `VERIFIED` — `pkg/plugin/plugin.go:621`
 24. The service-account token is Org 1 only, so `useBuiltInMCP` must not appear in `full.yaml_`. `ASSUMED` — documentation only: `CLAUDE.md:69`
 25. No code checks the org before registering the built-in MCP. `GAP` — `pkg/plugin/plugin.go:617` takes no org argument
@@ -98,7 +98,7 @@ at start, adds runtime servers, and sends W3C trace context with each tool call.
 ## Invariants
 
 - `useBuiltInMCP: true` never appears in `full.yaml_`. `VERIFIED` — `provisioning/plugins/full.yaml_:16`
-- The service-account bearer is sent only to the built-in MCP URL. `VERIFIED` — `pkg/plugin/plugin.go:633`
+- The service-account bearer is sent only to the built-in MCP URL. `VERIFIED` — `pkg/plugin/plugin.go:634`
 - Outbound trace injection never mutates the caller request. `VERIFIED` — `pkg/mcp/trace_propagation.go:74`
 
 ## Failure Modes
@@ -125,7 +125,7 @@ at start, adds runtime servers, and sends W3C trace context with each tool call.
 
 ## Evidence Index
 
-- `provisioning/plugins/app.yaml:32` — single-org provisioning shape
+- `provisioning/apps/asko11y.yaml:8` — single-org provisioning shape
 - `provisioning/plugins/full.yaml_:16` — multi-org shape without built-in MCP
 - `pkg/plugin/mcp_provisioner.go:21` — runtime server routes
 - `pkg/mcp/trace_propagation.go:53` — outbound injection

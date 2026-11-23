@@ -12,6 +12,7 @@ import type { WorkflowEntryUI } from '../../types/plugin';
 
 jest.mock('@grafana/runtime', () => ({
   getBackendSrv: jest.fn(),
+  locationService: { push: jest.fn(), replace: jest.fn(), getLocation: () => ({}), getSearch: () => '' },
 }));
 
 jest.mock('@grafana/ui', () => ({
@@ -21,7 +22,25 @@ jest.mock('@grafana/ui', () => ({
       {children}
     </button>
   ),
+  Field: ({ label, children }: { label: string; children: React.ReactNode }) => (
+    <label>
+      <span>{label}</span>
+      {children}
+    </label>
+  ),
+  Input: ({ value, onChange, disabled, type }: { value?: string | number; onChange?: (e: { currentTarget: { value: string } }) => void; disabled?: boolean; type?: string }) => (
+    <input type={type ?? 'text'} value={value} disabled={disabled} onChange={onChange} />
+  ),
   LoadingPlaceholder: ({ text }: { text: string }) => <span>{text}</span>,
+  Combobox: ({ options, value, onChange }: { options: Array<{ label: string; value: string }>; value?: string; onChange?: (o: { value?: string }) => void }) => (
+    <select value={value ?? ''} onChange={(e) => onChange?.({ value: e.currentTarget.value })}>
+      {options.map((o) => (
+        <option key={o.value} value={o.value}>
+          {o.label}
+        </option>
+      ))}
+    </select>
+  ),
   Switch: ({ value, onChange }: { value: boolean; onChange: (e: { currentTarget: { checked: boolean } }) => void }) => (
     <input
       type="checkbox"
@@ -30,7 +49,14 @@ jest.mock('@grafana/ui', () => ({
       aria-label="workflow enabled"
     />
   ),
+  TextArea: ({ value, onChange, rows }: { value?: string; onChange?: (e: { currentTarget: { value: string } }) => void; rows?: number }) => (
+    <textarea rows={rows} value={value} onChange={onChange} />
+  ),
   useTheme2: () => ({ colors: { border: { weak: '#ddd' } } }),
+}));
+
+jest.mock('../../services/skillsClient', () => ({
+  listSkills: jest.fn(() => Promise.resolve([{ name: 'investigating-alerts', description: 'x', source: 'bundled', customized: false, enabled: true, hidden: false, hasUserPrompt: false }])),
 }));
 
 const fetchMock = getBackendSrv as jest.Mock;
@@ -71,8 +97,8 @@ const workflowsResponse = () => ({
   ],
 });
 
-const renderTab = (onSave: (next: WorkflowEntryUI[]) => void = jest.fn()) =>
-  render(<WorkflowsTab savedWorkflows={[]} onSaveWorkflows={onSave} />);
+const renderTab = (onSave: (next: WorkflowEntryUI[]) => void = jest.fn(), onEditPrompt: (skill: string) => void = jest.fn()) =>
+  render(<WorkflowsTab savedWorkflows={[]} onSaveWorkflows={onSave} onEditPrompt={onEditPrompt} />);
 
 describe('WorkflowsTab', () => {
   beforeEach(() => {
@@ -103,6 +129,69 @@ describe('WorkflowsTab', () => {
 
     expect(await screen.findByText(/Failed to load workflow status/i)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument();
+  });
+
+  it('expands a workflow, lists its runs, and opens a session', async () => {
+    fetchMock.mockImplementation(() => ({
+      fetch: (cfg: { url: string }) =>
+        of(
+          cfg.url.includes('/runs')
+            ? {
+                data: {
+                  runs: [
+                    {
+                      runId: 'run-9',
+                      sessionId: 'sess-9',
+                      status: 'completed',
+                      createdAt: '2026-11-20T17:00:00Z',
+                      updatedAt: '2026-11-20T17:01:00Z',
+                    },
+                  ],
+                },
+              }
+            : { data: workflowsResponse() }
+        ),
+    }));
+    const { locationService } = jest.requireMock('@grafana/runtime');
+    renderTab();
+
+    const sessionsButtons = await screen.findAllByRole('button', { name: 'Sessions' });
+    fireEvent.click(sessionsButtons[0]); // first row: noc-dispatch
+
+    expect(await screen.findByText('run-9')).toBeInTheDocument();
+    const open = screen.getByRole('button', { name: 'Open' });
+    fireEvent.click(open);
+    expect(locationService.push).toHaveBeenCalledWith('/a/consensys-asko11y-app?sessionId=sess-9');
+  });
+
+  it('opens the editor for a row and saves an edited entry', async () => {
+    fetchMock.mockImplementation(() => ({ fetch: () => of({ data: workflowsResponse() }) }));
+    const onSave = jest.fn();
+    renderTab(onSave);
+
+    const editButtons = await screen.findAllByRole('button', { name: 'Edit' });
+    fireEvent.click(editButtons[0]);
+
+    expect(screen.getByText('Edit noc-dispatch')).toBeInTheDocument();
+    const nameInput = screen.getByDisplayValue('noc-dispatch');
+    expect((nameInput as HTMLInputElement).disabled).toBe(true);
+
+    const save = screen.getByRole('button', { name: 'Save and reload' });
+    fireEvent.click(save);
+    expect(onSave).toHaveBeenCalledTimes(1);
+    const saved = onSave.mock.calls[0][0] as Array<Record<string, unknown>>;
+    expect(saved[0]).toMatchObject({ name: 'noc-dispatch', skill: 'noc-dispatch' });
+    expect(saved[0]).not.toHaveProperty('running');
+  });
+
+  it('jumps to the skill prompt editor', async () => {
+    fetchMock.mockImplementation(() => ({ fetch: () => of({ data: workflowsResponse() }) }));
+    const onEditPrompt = jest.fn();
+    renderTab(jest.fn(), onEditPrompt);
+
+    const promptButtons = await screen.findAllByRole('button', { name: 'Prompt' });
+    fireEvent.click(promptButtons[0]);
+    expect(onEditPrompt).toHaveBeenCalledWith('noc-dispatch');
   });
 
   it('toggles a workflow and saves the full entry list', async () => {

@@ -21,7 +21,7 @@ Both survive a pod restart when Redis is configured.
 | Capability | Admin | Editor | Viewer | Evidence |
 |---|---|---|---|---|
 | Manage own sessions and the current session | yes | yes | yes | `pkg/plugin/plugin.go:2560` |
-| Start, read, cancel, or stream a run | yes | yes | yes | `pkg/plugin/plugin.go:876` |
+| Start, read, cancel, or stream a run | yes | yes | yes | `pkg/plugin/plugin.go:877` |
 | Approve a pending tool call | yes | yes | no | `pkg/plugin/plugin.go:1455` |
 
 ## Contract
@@ -30,7 +30,7 @@ Both survive a pod restart when Redis is configured.
 
 | Method | Path | Handler | Evidence |
 |---|---|---|---|
-| POST | `/api/agent/run` | `handleAgentRun` | `pkg/plugin/plugin.go:876` |
+| POST | `/api/agent/run` | `handleAgentRun` | `pkg/plugin/plugin.go:877` |
 | GET | `/api/agent/runs/{id}` | `handleAgentRuns` | `pkg/plugin/plugin.go:1369` |
 | GET | `/api/agent/runs/{id}/events` | `handleAgentRunEvents` | `pkg/plugin/plugin.go:1607` |
 | POST | `/api/agent/runs/{id}/cancel` | `handleCancelRun` | `pkg/plugin/plugin.go:1584` |
@@ -68,19 +68,19 @@ Coverage: `VERIFIED` = code pointer or test; `ASSUMED` = code suggests, no test;
 2. `POST /api/sessions` creates the session, then sets it as current. `VERIFIED` — `pkg/plugin/plugin.go:2620`
 3. The store interface holds 14 methods, from `CreateSession` to `CleanupOld`. `VERIFIED` — `pkg/plugin/sessionstore.go:74`
 4. The owner key is `"<userID>:<orgID>"`; every read and write is scoped by it. `VERIFIED` — `pkg/plugin/sessionstore.go:94`
-5. A session owned by another user or org returns `session not found`. `VERIFIED` — `pkg/plugin/sessionstore.go:175`
+5. A session owned by another user or org returns `session not found`. `VERIFIED` — `pkg/plugin/sessionstore.go:179`
 6. Org isolation is tested. `VERIFIED` — test `TestSessionStore_OrgIsolation`
 7. An empty title comes from the first user message, cut at 60 characters plus `...`. `VERIFIED` — `pkg/plugin/sessionstore.go:98`
 8. A session ID is 32 random bytes, base64url encoded without padding. `VERIFIED` — `pkg/plugin/shareutil.go:20`
-9. `SetCurrentSessionID` rejects a session the caller does not own. `VERIFIED` — `pkg/plugin/sessionstore.go:335`
+9. `SetCurrentSessionID` rejects a session the caller does not own. `VERIFIED` — `pkg/plugin/sessionstore.go:349`
 10. Deleting the current session clears the current pointer. `VERIFIED` — test `TestSessionStore_DeleteClearsCurrentSession`
-11. The in-memory store deletes sessions older than the TTL on `CleanupOld`; a TTL of zero disables the sweep. `VERIFIED` — `pkg/plugin/sessionstore.go:395`
+11. The in-memory store deletes sessions older than the TTL on `CleanupOld`; a TTL of zero disables the sweep. `VERIFIED` — `pkg/plugin/sessionstore.go:409`
 12. The Redis session blob TTL is refreshed on every mutation. `VERIFIED` — `pkg/plugin/sessionstore_redis.go:222`
 13. Redis mutations use a `WATCH` read-modify-write loop and retry on conflict. `VERIFIED` — `pkg/plugin/sessionstore_redis.go:190`
 14. Concurrent appends lose no messages. `VERIFIED` — test `TestRedisSessionStore_AppendMessages_ConcurrentNoLostUpdates`
 15. Usage stats live in a separate hash and use `HINCRBY`, so concurrent runs add independently. `VERIFIED` — `pkg/plugin/sessionstore_redis.go:481`
 16. Concurrent increments lose no counts. `VERIFIED` — test `TestRedisSessionStore_IncrementStats_ConcurrentNoLostUpdates`
-17. Stats increment on `done` before the event is stored and streamed. `VERIFIED` — `pkg/plugin/plugin.go:1235`
+17. Stats increment on `done` before the event is stored and streamed. `VERIFIED` — `pkg/plugin/plugin.go:1236`
 18. Stats increment is tested. `VERIFIED` — test `TestConsumeAgentEvents_IncrementsSessionStats`
 19. A run holds status, events, trace, error, and owners; a session holds messages, title, model, and stats. `VERIFIED` — `pkg/plugin/runstore.go:23`
 20. `AppendEvent` assigns an increasing `Sequence` and keeps the newest 500 events. `VERIFIED` — `pkg/plugin/runstore.go:183`
@@ -96,10 +96,12 @@ Coverage: `VERIFIED` = code pointer or test; `ASSUMED` = code suggests, no test;
 30. Workflow sessions are created by the workflow runner under a synthetic user ID (FNV of `"workflow:<name>"`), owned like any other session by `"<userID>:<orgID>"`. `VERIFIED` — `pkg/plugin/workflows.go:161`, `pkg/plugin/workflow_session.go:33`
 31. A session record carries optional `conversationType` (workflow sessions set `workflow`) and `workflow` (the workflow name); interactive sessions never set them. `VERIFIED` — `pkg/plugin/sessionstore.go:33`, `pkg/plugin/workflow_session.go:78`
 32. Workflow sessions reuse the run store, stats, assistant-message persistence, and share mechanism unchanged. `VERIFIED` — `pkg/plugin/workflow_session.go:189`, `pkg/plugin/workflow_session.go:270`
+33. `GetSessionUnscoped` reads one session without the owner check; only the admin workflow-session path calls it (`workflowConversationType` sessions, same org). Implemented by both stores. `VERIFIED` — `pkg/plugin/sessionstore.go:80`, test `TestAdminMayReadWorkflowSessionsOnly`
+34. Admins may `GET` a workflow session they do not own; every other cross-owner read, including Admins reading interactive sessions, stays 404. `VERIFIED` — test `TestAdminMayReadWorkflowSessionsOnly`
 
 ## Invariants
 
-- Session and run records never cross a user or org boundary. `VERIFIED` — `pkg/plugin/sessionstore.go:175`
+- Session and run records never cross a user or org boundary. `VERIFIED` — `pkg/plugin/sessionstore.go:179`
 - A session ID is accepted only when it decodes to exactly 32 bytes. `VERIFIED` — `pkg/plugin/shareutil.go:11`
 - A running run is never deleted by cleanup. `VERIFIED` — `pkg/plugin/runstore.go:415`
 
@@ -141,4 +143,4 @@ Coverage: `VERIFIED` = code pointer or test; `ASSUMED` = code suggests, no test;
 
 - Concurrent runs on one session are allowed and uncoordinated. A forward spec should define single-flight or per-session serialisation.
 - The Redis session index has no TTL; it is pruned only on create, so an idle user keeps stale members.
-- `GET /api/sessions/{id}/shares` filters by `UserID` only, not by org (`pkg/plugin/plugin.go:2761`). Cross-org leakage needs a review.
+- `GET /api/sessions/{id}/shares` filters by `UserID` only, not by org (`pkg/plugin/plugin.go:2762`). Cross-org leakage needs a review.

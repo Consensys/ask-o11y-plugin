@@ -12,6 +12,10 @@ interface SkillsTabProps {
   onSaveEntries: (entries: Record<string, SkillEntry>) => void;
   /** Bundled skills still driven by legacy pre-skills prompt fields. */
   legacyPromptSkills?: string[];
+  /** Skill whose editor opens as soon as the list loads (Workflows tab link). */
+  focusSkill?: string;
+  /** Called once the focus skill's editor opened, so the focus is one-shot. */
+  onFocusConsumed?: () => void;
 }
 
 const NEW_SKILL_TEMPLATE = `---
@@ -29,7 +33,7 @@ metadata:
 2. Second step
 `;
 
-export function SkillsTab({ savedEntries, onSaveEntries, legacyPromptSkills = [] }: SkillsTabProps): React.ReactElement {
+export function SkillsTab({ savedEntries, onSaveEntries, legacyPromptSkills = [], focusSkill, onFocusConsumed }: SkillsTabProps): React.ReactElement {
   const theme = useTheme2();
   const [skills, setSkills] = useState<SkillInfo[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -100,6 +104,17 @@ export function SkillsTab({ savedEntries, onSaveEntries, legacyPromptSkills = []
   const openEditor = (info: SkillInfo) => {
     setEditing({ name: info.name, content: info.raw ?? '' });
   };
+
+  useEffect(() => {
+    if (!focusSkill || !skills || editing) {
+      return;
+    }
+    const target = skills.find((s) => s.name === focusSkill);
+    if (target) {
+      setEditing({ name: target.name, content: target.raw ?? '' });
+      onFocusConsumed?.();
+    }
+  }, [focusSkill, skills, editing, onFocusConsumed]);
 
   if (loadError) {
     return (

@@ -81,7 +81,7 @@ Every record and tool call is scoped to the org that made the request.
 18. `getUserID` hashes the login; no client header can set it. `VERIFIED` — `pkg/plugin/plugin.go:2025`
 19. `useBuiltInMCP` with no SA token removes the built-in server and logs a warning. `VERIFIED` — `pkg/plugin/plugin.go:621`
 20. `full.yaml_` never enables `useBuiltInMCP`. `VERIFIED` — `provisioning/plugins/full.yaml_:18`
-21. `app.yaml` enables `useBuiltInMCP` for org 1. `VERIFIED` — `provisioning/plugins/app.yaml:31`
+21. `app.yaml` enables `useBuiltInMCP` for org 1. `VERIFIED` — `provisioning/apps/asko11y.yaml:7`
 22. An empty `redisURL` still attempts `redis://localhost:6379/0`. `VERIFIED` — `pkg/plugin/plugin.go:75`
 23. Redis is used only when the client builds and answers `PING`; otherwise memory wins. `VERIFIED` — `pkg/plugin/plugin.go:333`
 24. Redis success and fallback are both tested. `VERIFIED` — test `TestNewPlugin_RedisSuccess`

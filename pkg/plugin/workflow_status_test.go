@@ -149,3 +149,103 @@ func TestHandleWorkflowsListRejectsNonAdminAndWrongMethod(t *testing.T) {
 		t.Fatalf("POST must be refused, got %d", rec.Code)
 	}
 }
+
+func TestHandleWorkflowRunsListsSyntheticUserRuns(t *testing.T) {
+	p := newAgentRunTestPlugin(t)
+	p.settings.Workflows = []WorkflowEntry{
+		{Name: "runs-wf", Enabled: true, OrgID: 1, Skill: "dispatch", ToolAllowlist: []string{"t"}},
+	}
+	synthetic := syntheticWorkflowUserID("runs-wf")
+	p.runStore.CreateRun("run-1", synthetic, 1, "sess-1")
+	p.runStore.FinishRun("run-1", RunStatusCompleted, "")
+	p.runStore.CreateRun("run-2", synthetic, 1, "sess-2")
+	p.runStore.FinishRun("run-2", RunStatusFailed, "boom")
+
+	req := httptest.NewRequest(http.MethodGet, "/api/workflows/runs-wf/runs?limit=10", nil)
+	req = withTestIdentity(req, 1, "admin-1", "Admin")
+	rec := httptest.NewRecorder()
+	p.handleWorkflowRuns(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("admin runs request must succeed, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var body struct {
+		Workflow string `json:"workflow"`
+		Runs     []struct {
+			RunID  string    `json:"runId"`
+			Status RunStatus `json:"status"`
+			Error  string    `json:"error"`
+		} `json:"runs"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+	if body.Workflow != "runs-wf" || len(body.Runs) != 2 {
+		t.Fatalf("expected 2 runs for runs-wf, got %+v", body)
+	}
+	if body.Runs[0].RunID != "run-2" || body.Runs[0].Status != RunStatusFailed || body.Runs[0].Error != "boom" {
+		t.Fatalf("newest run first with its error, got %+v", body.Runs[0])
+	}
+
+	// Unknown workflow, wrong method, and non-admin all refuse.
+	req = httptest.NewRequest(http.MethodGet, "/api/workflows/missing/runs", nil)
+	req = withTestIdentity(req, 1, "admin-1", "Admin")
+	rec = httptest.NewRecorder()
+	p.handleWorkflowRuns(rec, req)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("unknown workflow must 404, got %d", rec.Code)
+	}
+	req = httptest.NewRequest(http.MethodGet, "/api/workflows/runs-wf/runs", nil)
+	req = withTestIdentity(req, 1, "user-7", "Viewer")
+	rec = httptest.NewRecorder()
+	p.handleWorkflowRuns(rec, req)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("viewer must be refused, got %d", rec.Code)
+	}
+}
+
+func TestAdminMayReadWorkflowSessionsOnly(t *testing.T) {
+	p := newAgentRunTestPlugin(t)
+	orgID := int64(1)
+	synthetic := syntheticWorkflowUserID("read-wf")
+
+	// A workflow session owned by the synthetic user.
+	wfSession, err := p.sessionStore.CreateSession(synthetic, orgID, "Workflow read-wf: dispatch", []SessionMessage{{Role: "user", Content: "go"}})
+	if err != nil {
+		t.Fatalf("workflow session creation failed: %v", err)
+	}
+	convType := workflowConversationType
+	workflowName := "read-wf"
+	if err := p.sessionStore.UpdateSession(wfSession.ID, synthetic, orgID, SessionUpdate{ConversationType: &convType, Workflow: &workflowName}); err != nil {
+		t.Fatalf("workflow tagging failed: %v", err)
+	}
+	// An interactive session owned by someone else.
+	otherSession, err := p.sessionStore.CreateSession(testUserID("user-7"), orgID, "someone else chat", []SessionMessage{{Role: "user", Content: "hi"}})
+	if err != nil {
+		t.Fatalf("interactive session creation failed: %v", err)
+	}
+
+	getSession := func(role, login, sessionID string) int {
+		req := httptest.NewRequest(http.MethodGet, "/api/sessions/"+sessionID, nil)
+		req = withTestIdentity(req, orgID, login, role)
+		rec := httptest.NewRecorder()
+		p.handleSessionRouter(rec, req)
+		return rec.Code
+	}
+
+	// The admin reads the workflow session but not someone else's interactive one.
+	if code := getSession("Admin", "admin-1", wfSession.ID); code != http.StatusOK {
+		t.Fatalf("admin must read workflow sessions, got %d", code)
+	}
+	if code := getSession("Admin", "admin-1", otherSession.ID); code != http.StatusNotFound {
+		t.Fatalf("admin must not read interactive sessions of others, got %d", code)
+	}
+	// Non-admins never cross the ownership line.
+	if code := getSession("Viewer", "user-8", wfSession.ID); code != http.StatusNotFound {
+		t.Fatalf("viewer must not read the workflow session, got %d", code)
+	}
+	// The org boundary holds for the admin path too: another org is invisible.
+	if code := getSession("Admin", "admin-1", "0000000000000000000000000000000000000000000"); code != http.StatusNotFound {
+		t.Fatalf("unknown session must 404, got %d", code)
+	}
+}

@@ -82,6 +82,10 @@ type SessionUpdate struct {
 type SessionStoreInterface interface {
 	CreateSession(userID, orgID int64, title string, messages []SessionMessage) (*ChatSession, error)
 	GetSession(sessionID string, userID, orgID int64) (*ChatSession, error)
+	// GetSessionUnscoped reads one session regardless of owner. Only the
+	// admin workflow-session read path may call it; every interactive path
+	// stays owner-scoped through GetSession.
+	GetSessionUnscoped(sessionID string) (*ChatSession, error)
 	ListSessions(userID, orgID int64) ([]SessionMetadata, error)
 	UpdateSession(sessionID string, userID, orgID int64, update SessionUpdate) error
 	AppendMessages(sessionID string, userID, orgID int64, messages []SessionMessage) error
@@ -219,6 +223,16 @@ func (s *SessionStore) ListSessions(userID, orgID int64) ([]SessionMetadata, err
 	})
 
 	return result, nil
+}
+
+func (s *SessionStore) GetSessionUnscoped(sessionID string) (*ChatSession, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	session, exists := s.sessions[sessionID]
+	if !exists {
+		return nil, fmt.Errorf("session not found")
+	}
+	return session, nil
 }
 
 func (s *SessionStore) UpdateSession(sessionID string, userID, orgID int64, update SessionUpdate) error {

@@ -287,6 +287,14 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
     (plugin.meta as unknown as { secureJsonFields?: Record<string, boolean> }).secureJsonFields || {};
   const [promptDefaults, setPromptDefaults] = useState<PromptDefaults | null>(null);
   const [activeTab, setActiveTab] = useState<SettingsTab>(getInitialSettingsTab);
+  // Skill to auto-open in the Skills editor after switching tabs from the
+  // Workflows tab's Edit prompt action.
+  const [skillFocus, setSkillFocus] = useState<string | null>(null);
+  const handleEditPrompt = useCallback((skill: string) => {
+    setSkillFocus(skill);
+    setActiveTab('skills');
+    rememberSettingsTab('skills');
+  }, []);
   const [savedJsonData, setSavedJsonData] = useState<AppPluginSettings>(jsonData ?? {});
   const [topology, setTopology] = useState<AgentTopologyResponse | null>(null);
   const [topologyLoading, setTopologyLoading] = useState(false);
@@ -1767,6 +1775,8 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
             savedEntries={savedJsonData.skills?.entries ?? {}}
             onSaveEntries={saveSkillEntries}
             legacyPromptSkills={legacyPromptSkills}
+            focusSkill={skillFocus ?? undefined}
+            onFocusConsumed={() => setSkillFocus(null)}
           />
         )}
 
@@ -1774,6 +1784,7 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
           <WorkflowsTab
             savedWorkflows={savedJsonData.workflows ?? []}
             onSaveWorkflows={saveWorkflows}
+            onEditPrompt={handleEditPrompt}
           />
         )}
 
