@@ -5,6 +5,13 @@ All notable changes to the Ask O11y Grafana plugin will be documented in this fi
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.1](https://github.com/Consensys/ask-o11y-plugin/compare/v0.6.0...v0.6.1) (2026-11-24)
+
+
+### Bug Fixes
+
+* **backend:** seed workflow org identity on admin routes ([#270](https://github.com/Consensys/ask-o11y-plugin/issues/270)) ([6df4f81](https://github.com/Consensys/ask-o11y-plugin/commit/6df4f81b363d10ed535a2c05f8937bc8e384fd8a))
+
 ## [0.6.0](https://github.com/Consensys/ask-o11y-plugin/compare/v0.5.1...v0.6.0) (2026-11-23)
 
 
