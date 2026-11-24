@@ -8,6 +8,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/grafana/grafana-plugin-sdk-go/backend"
 )
 
 // workflowRuntimeStatus is one workflow's view on this plugin instance:
@@ -208,6 +210,24 @@ func (p *Plugin) handleWorkflows(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// seedWorkflowOrgIdentity records the route caller's org binding so entries
+// created or inspected through the admin routes run their first tick without
+// waiting for a chat in the same org. Best effort: a missing Grafana config or
+// an unpersistable seed never fails the request, the same contract
+// handleAgentRun follows.
+func (p *Plugin) seedWorkflowOrgIdentity(r *http.Request) {
+	cfg := backend.GrafanaConfigFromContext(r.Context())
+	if cfg == nil {
+		return
+	}
+	saToken, err := cfg.PluginAppClientSecret()
+	if err != nil {
+		saToken = ""
+	}
+	grafanaURL, _ := resolveGrafanaURL(p.settings, cfg)
+	p.seedOrgIdentity(getOrgID(r), grafanaURL, saToken)
+}
+
 // handleWorkflowsList serves GET /api/workflows: this org's stored workflow
 // entries with this instance's runtime status. The org comes from the server
 // plugin context, never from the request body, query, or headers. A store
@@ -222,6 +242,7 @@ func (p *Plugin) handleWorkflowsList(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Admin access required", http.StatusForbidden)
 		return
 	}
+	p.seedWorkflowOrgIdentity(r)
 
 	orgID := getOrgID(r)
 	configured, err := p.workflowEntryStore().ListWorkflows(r.Context(), orgID)
@@ -298,6 +319,9 @@ func (p *Plugin) handleWorkflowSave(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Admin access required", http.StatusForbidden)
 		return
 	}
+	// Seed before validation: the caller's org binding is what lets the entry
+	// it saves tick, even when this very body is later rejected.
+	p.seedWorkflowOrgIdentity(r)
 	orgID := getOrgID(r)
 
 	var body struct {

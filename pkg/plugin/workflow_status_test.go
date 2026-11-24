@@ -12,7 +12,9 @@ import (
 
 	"consensys-asko11y-app/pkg/agent"
 
+	"github.com/grafana/grafana-plugin-sdk-go/backend"
 	"github.com/grafana/grafana-plugin-sdk-go/backend/log"
+	"github.com/redis/go-redis/v9"
 )
 
 func TestWorkflowStatusStoreRecordsTicksAndSessions(t *testing.T) {
@@ -1001,5 +1003,213 @@ func TestWorkflowRoutesResolveEntriesFromRequestingOrgStore(t *testing.T) {
 	}
 	if rec := shareReq(orgID); rec.Code != http.StatusOK {
 		t.Fatalf("org 2 share must succeed from its store, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+// orgSeedGrafanaConfig is the request-scoped Grafana config the admin routes
+// read to seed an org: the app URL plus the plugin's service-account token,
+// the same shape newAgentRunRequest builds.
+func orgSeedGrafanaConfig() *backend.GrafanaCfg {
+	return backend.NewGrafanaCfg(map[string]string{
+		"GF_APP_URL":                  "http://grafana.test",
+		"GF_PLUGIN_APP_CLIENT_SECRET": "test-token",
+	})
+}
+
+// withOrgSeedConfig attaches cfg the way Grafana populates it for real plugin
+// resource calls.
+func withOrgSeedConfig(req *http.Request, cfg *backend.GrafanaCfg) *http.Request {
+	return req.WithContext(backend.WithGrafanaConfig(req.Context(), cfg))
+}
+
+// clearOrgIdentities removes the identity records of the given orgs, so a
+// stale seed from another test cannot decide the result.
+func clearOrgIdentities(t *testing.T, client *redis.Client, orgIDs ...int64) {
+	t.Helper()
+	keys := make([]string, 0, len(orgIDs))
+	for _, orgID := range orgIDs {
+		keys = append(keys, orgIdentityRedisKey(orgID))
+	}
+	if err := client.Del(context.Background(), keys...).Err(); err != nil {
+		t.Fatalf("clear org identities failed: %v", err)
+	}
+}
+
+// newOrgIdentitySeedingWorkflowPlugin builds an admin-route plugin whose org
+// identity store is wired to dev Redis, starting from no identity record for
+// the given orgs.
+func newOrgIdentitySeedingWorkflowPlugin(t *testing.T, orgIDs ...int64) (*Plugin, *redis.Client) {
+	t.Helper()
+	p, client := newRedisBackedWorkflowPlugin(t)
+	p.orgIdentity = NewOrgIdentityStore()
+	p.orgIdentity.attachRedis(client, context.Background(), p.logger)
+	clearOrgIdentities(t, client, orgIDs...)
+	t.Cleanup(func() { clearOrgIdentities(t, client, orgIDs...) })
+	return p, client
+}
+
+// A workflow saved through the admin route seeds the requesting org's identity,
+// so its first tick runs without a chat in that org. The seed is persisted, so
+// a fresh plugin instance against the same Redis resolves it.
+func TestHandleWorkflowSaveSeedsOrgIdentity(t *testing.T) {
+	p, _ := newOrgIdentitySeedingWorkflowPlugin(t, 2)
+	if _, _, ok := p.orgIdentity.GetForOrg(2); ok {
+		t.Fatal("org 2 must start unseeded")
+	}
+
+	body := putWorkflowsBody(t, []WorkflowEntry{validStoredWorkflowEntry("route-seed-wf")})
+	req := httptest.NewRequest(http.MethodPut, "/api/workflows", strings.NewReader(body))
+	req = withTestIdentity(req, 2, "admin-2", "Admin")
+	req = withOrgSeedConfig(req, orgSeedGrafanaConfig())
+	rec := httptest.NewRecorder()
+	p.handleWorkflows(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("admin save must succeed, got %d: %s", rec.Code, rec.Body.String())
+	}
+	entries, err := p.workflowEntryStore().ListWorkflows(context.Background(), 2)
+	if err != nil || len(entries) != 1 || entries[0].Name != "route-seed-wf" {
+		t.Fatalf("org 2 store must hold the saved entry: %v %+v", err, entries)
+	}
+	url, token, ok := p.orgIdentity.GetForOrg(2)
+	if !ok || token != "test-token" {
+		t.Fatalf("the save must seed org 2's identity: url=%q token=%q ok=%v", url, token, ok)
+	}
+
+	// Persistence: a settings save builds a fresh instance with an empty
+	// in-memory identity store over the same Redis.
+	instance, err := NewPlugin(context.Background(), backend.AppInstanceSettings{
+		JSONData: []byte(`{
+			"mcpServers": [],
+			"skills": {"entries": {"dispatch": {"content": "---\nname: dispatch\ndescription: test.\n---\nBody"}}}
+		}`),
+		DecryptedSecureJSONData: map[string]string{"redisURL": "redis://localhost:6379/15"},
+	})
+	if err != nil {
+		t.Fatalf("second plugin instance failed: %v", err)
+	}
+	fresh := instance.(*Plugin)
+	defer fresh.Dispose()
+	if !fresh.usingRedis {
+		t.Skip("Redis became unavailable between probe and plugin start")
+	}
+	if _, token, ok := fresh.orgIdentity.GetForOrg(2); !ok || token != "test-token" {
+		t.Fatalf("a fresh instance must resolve the persisted seed: token=%q ok=%v", token, ok)
+	}
+}
+
+// An entry already stored in an org with no identity record runs on its first
+// tick once an admin inspects the routes: the GET seeds that org, so the tick
+// is not skipped as skip_identity. This is the upgrade case — entries created
+// before route seeding existed run without anyone sending a chat in that org.
+func TestWorkflowAdminGetSeedsOrgSoFirstTickRuns(t *testing.T) {
+	client := workflowRedisTestClient(t)
+	t.Cleanup(func() { client.Close() })
+	ctx := context.Background()
+	const orgID = int64(2)
+	const name = "upgrade-seed-wf"
+
+	p, _ := newWorkflowTestPlugin(t, stubLLMFinalAnswer("tick ok"))
+	p.redisClient = client
+	p.usingRedis = true
+	p.workflowTopLevel = make(map[string]int)
+	p.orgIdentity.attachRedis(client, ctx, log.DefaultLogger)
+
+	cleanup := func() {
+		client.Del(context.Background(), orgIdentityRedisKey(orgID), workflowStoreKey(orgID),
+			workflowTickLockKey(orgID, name), workflowTopLevelActiveKey(orgID, name))
+	}
+	cleanup()
+	t.Cleanup(cleanup)
+
+	entry := validWorkflowEntry()
+	entry.Name = name
+	entry.Skill = "dispatch"
+	entry.OrgID = orgID
+	entry.IntervalSec = 120
+	entry.SessionTimeoutSeconds = 60
+	if err := p.workflowEntryStore().SaveWorkflows(ctx, orgID, []WorkflowEntry{entry}); err != nil {
+		t.Fatalf("org store seed failed: %v", err)
+	}
+
+	// Before the admin GET the org has no identity, so a tick would skip.
+	if _, _, ok := p.orgIdentity.GetForOrg(orgID); ok {
+		t.Fatal("org 2 must start unseeded")
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/workflows", nil)
+	req = withTestIdentity(req, orgID, "admin-2", "Admin")
+	req = withOrgSeedConfig(req, orgSeedGrafanaConfig())
+	rec := httptest.NewRecorder()
+	p.handleWorkflows(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("admin GET must succeed, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if _, token, ok := p.orgIdentity.GetForOrg(orgID); !ok || token != "test-token" {
+		t.Fatalf("the admin GET must seed org 2: token=%q ok=%v", token, ok)
+	}
+
+	// The first tick after the inspection now proceeds and writes a run.
+	scheduler := NewWorkflowScheduler(p.ctx, p, entry)
+	scheduler.allowlistChecked = true
+	scheduler.tick()
+	if got := p.workflowStatus.entry(orgID, name).LastTickOutcome; got != "executed" {
+		t.Fatalf("the seeded tick must run, got %q", got)
+	}
+	waitForCondition(t, 10*time.Second, "run record", func() bool {
+		runs, err := p.runStore.ListRuns(syntheticWorkflowUserID(name, orgID), orgID, 50)
+		return err == nil && len(runs) == 1
+	})
+}
+
+// The admin routes refuse a non-admin before seeding: a Viewer GET and PUT
+// answer 403 and leave the org unseeded.
+func TestWorkflowAdminRoutesDoNotSeedForNonAdmin(t *testing.T) {
+	p, _ := newOrgIdentitySeedingWorkflowPlugin(t, 1)
+
+	get := httptest.NewRequest(http.MethodGet, "/api/workflows", nil)
+	get = withTestIdentity(get, 1, "viewer-1", "Viewer")
+	get = withOrgSeedConfig(get, orgSeedGrafanaConfig())
+	getRec := httptest.NewRecorder()
+	p.handleWorkflows(getRec, get)
+	if getRec.Code != http.StatusForbidden {
+		t.Fatalf("viewer GET must be refused, got %d: %s", getRec.Code, getRec.Body.String())
+	}
+
+	put := httptest.NewRequest(http.MethodPut, "/api/workflows",
+		strings.NewReader(putWorkflowsBody(t, []WorkflowEntry{validStoredWorkflowEntry("viewer-wf")})))
+	put = withTestIdentity(put, 1, "viewer-1", "Viewer")
+	put = withOrgSeedConfig(put, orgSeedGrafanaConfig())
+	putRec := httptest.NewRecorder()
+	p.handleWorkflows(putRec, put)
+	if putRec.Code != http.StatusForbidden {
+		t.Fatalf("viewer PUT must be refused, got %d: %s", putRec.Code, putRec.Body.String())
+	}
+
+	if _, _, ok := p.orgIdentity.GetForOrg(1); ok {
+		t.Fatal("a refused non-admin request must not seed the org identity")
+	}
+}
+
+// An admin request without a Grafana config still answers, and seeds nothing:
+// the identity seed must never fail or break the route.
+func TestWorkflowAdminRoutesWithoutGrafanaConfigDoNotSeed(t *testing.T) {
+	// The SDK falls back to this environment variable, so clear it to model a
+	// deployment that supplies no Grafana config at all.
+	t.Setenv("GF_PLUGIN_APP_CLIENT_SECRET", "")
+	p, _ := newOrgIdentitySeedingWorkflowPlugin(t, 1)
+
+	put := putWorkflowsRequest(t, p, 1, "Admin",
+		putWorkflowsBody(t, []WorkflowEntry{validStoredWorkflowEntry("no-config-wf")}))
+	if put.Code != http.StatusOK {
+		t.Fatalf("admin PUT without Grafana config must succeed, got %d: %s", put.Code, put.Body.String())
+	}
+	get := getWorkflowsRequest(t, p, 1, "Admin")
+	if get.Code != http.StatusOK {
+		t.Fatalf("admin GET without Grafana config must succeed, got %d: %s", get.Code, get.Body.String())
+	}
+
+	if _, _, ok := p.orgIdentity.GetForOrg(1); ok {
+		t.Fatal("a request without Grafana config must not seed the org identity")
 	}
 }
