@@ -73,6 +73,45 @@
    docker compose restart grafana
    ```
 
+### Plugin Install Fails In An Air-Gapped Environment
+
+Ask O11y declares `grafana-llm-app` as a plugin dependency in its `plugin.json`. When you install Ask O11y with the plugin catalog, `grafana-cli`, or the `preinstall` setting, Grafana resolves that dependency against the Grafana.com plugin API. Grafana does this even when `grafana-llm-app` is already installed. If Grafana cannot reach the plugin API, the Ask O11y install fails.
+
+Use directory-mounted plugins on a network that reaches only a static mirror:
+
+1. Get both plugin zips through your proxy:
+   - `grafana-llm-app` from your Grafana.com mirror.
+   - `consensys-asko11y-app` from the [GitHub releases page](https://github.com/Consensys/ask-o11y-plugin/releases).
+2. Extract each zip into the Grafana plugins directory. Use the plugin ID as the directory name:
+
+   ```text
+   /var/lib/grafana/plugins/consensys-asko11y-app/
+   /var/lib/grafana/plugins/grafana-llm-app/
+   ```
+
+   For Docker, mount the parent directory:
+
+   ```yaml
+   volumes:
+     - ./plugins:/var/lib/grafana/plugins
+   ```
+
+3. Restart Grafana. Grafana loads directory-mounted plugins at startup and does not run the installer, so no plugin API request occurs.
+
+Do not use the plugin catalog UI, `grafana-cli plugins install`, or the `preinstall` setting with a zip URL for this case. Each path runs the installer, and the installer resolves the `grafana-llm-app` dependency against the plugin API.
+
+If your proxy implements the Grafana.com plugin API, keep the installer and point Grafana at the proxy:
+
+```ini
+[grafana_com]
+url = https://grafana-proxy.example.com
+api_url = https://grafana-proxy.example.com/api
+```
+
+The dependency check requests `GET <api_url>/plugins/grafana-llm-app/versions`. A static file mirror does not answer that request.
+
+Ask O11y does not work without the Grafana LLM app. Install and configure the LLM app with an AI provider before you enable Ask O11y.
+
 ### LLM Not Responding
 
 1. Verify the Grafana LLM plugin is installed:

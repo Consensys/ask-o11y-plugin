@@ -18,7 +18,7 @@
 2. **Grafana Service Account** — used to authenticate LLM calls and MCP tool execution
 3. **Grafana MCP Server** — either the built-in toggle (Org 1 only) or an external mcp-grafana instance
 
-Without these, the plugin will not work. See [User Guide](src/README.md) for setup instructions.
+Without these, the plugin will not work. See [User Guide](src/README.md) for setup instructions. For an air-gapped Grafana deployment, see [Plugin Install Fails In An Air-Gapped Environment](TROUBLESHOOTING.md#plugin-install-fails-in-an-air-gapped-environment).
 
 ---
 
