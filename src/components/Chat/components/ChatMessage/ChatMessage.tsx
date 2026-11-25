@@ -1,6 +1,4 @@
 import React from 'react';
-import DOMPurify from 'dompurify';
-import { marked } from 'marked';
 import { css } from '@emotion/css';
 import { GrafanaTheme2 } from '@grafana/data';
 import { Alert, Button, Icon, useStyles2, useTheme2 } from '@grafana/ui';
@@ -12,6 +10,7 @@ import { LogsRenderer } from '../LogsRenderer/LogsRenderer';
 import { TracesRenderer } from '../TracesRenderer/TracesRenderer';
 import { AgentApprovalItem, ChatMessage as ChatMessageType, ContentSection } from '../../types';
 import { splitContentByPromQL } from '../../utils/promqlParser';
+import { ChatMarkdown } from './ChatMarkdown';
 
 interface ChatMessageProps {
   message: ChatMessageType;
@@ -30,31 +29,6 @@ function buildTimeRange(query: ContentSection['query']): { from: string; to: str
     return undefined;
   }
   return { from: query.from, to: query.to || 'now' };
-}
-
-interface MarkdownContentProps {
-  content: string;
-}
-
-function MarkdownContent({ content }: MarkdownContentProps): React.ReactElement {
-  const html = React.useMemo(() => {
-    const rendered = marked.parse(content, {
-      async: false,
-      breaks: true,
-      gfm: true,
-    }) as string;
-
-    // The content is LLM/agent output influenced by untrusted datasource data,
-    // so on top of DOMPurify's script/event filtering explicitly forbid
-    // embedded-content tags (default profile would keep <iframe> etc.) to
-    // block external-content phishing/UI-redress inside the chat panel.
-    return DOMPurify.sanitize(rendered, {
-      FORBID_TAGS: ['iframe', 'object', 'embed', 'form', 'base', 'link', 'meta'],
-      FORBID_ATTR: ['srcdoc'],
-    });
-  }, [content]);
-
-  return <div dangerouslySetInnerHTML={{ __html: html }} />;
 }
 
 interface QuerySectionProps {
@@ -213,7 +187,7 @@ function AgentTraceSummary({
   );
 }
 
-export const ChatMessage: React.FC<ChatMessageProps> = ({
+const ChatMessageComponent: React.FC<ChatMessageProps> = ({
   message,
   isGenerating = false,
   isLastMessage = false,
@@ -224,6 +198,10 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
   const skillChipStyles = useStyles2(getSkillChipStyles);
   const showThinking = message.role === 'assistant' && isGenerating && isLastMessage && !message.content;
   const isUser = message.role === 'user';
+  const contentSections = React.useMemo(
+    () => (!isUser && message.content ? splitContentByPromQL(message.content) : []),
+    [isUser, message.content]
+  );
 
   if (isUser) {
     return (
@@ -245,8 +223,6 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
       </div>
     );
   }
-
-  const contentSections = message.content ? splitContentByPromQL(message.content) : [];
 
   return (
     <div className="flex w-full mb-6 animate-fadeIn" role="article" aria-label="Assistant message">
@@ -314,11 +290,7 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
           <div className="text-sm leading-relaxed whitespace-normal break-words text-primary">
             {contentSections.map((section, index) => {
               if (section.type === 'text') {
-                return (
-                  <div key={index} className="prose prose-sm max-w-none">
-                    <MarkdownContent content={section.content} />
-                  </div>
-                );
+                return <ChatMarkdown key={index} content={section.content} />;
               }
 
               if (section.query) {
@@ -335,8 +307,8 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
         )}
 
         {!showThinking && contentSections.length === 0 && (
-          <div className="text-sm leading-relaxed whitespace-normal break-words prose prose-sm max-w-none text-primary">
-            <MarkdownContent content={message.content} />
+          <div className="text-sm leading-relaxed whitespace-normal break-words text-primary">
+            <ChatMarkdown content={message.content} />
           </div>
         )}
 
@@ -364,6 +336,9 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
     </div>
   );
 };
+
+export const ChatMessage = React.memo(ChatMessageComponent);
+ChatMessage.displayName = 'ChatMessage';
 
 const getSkillChipStyles = (theme: GrafanaTheme2) => css`
   display: inline-flex;

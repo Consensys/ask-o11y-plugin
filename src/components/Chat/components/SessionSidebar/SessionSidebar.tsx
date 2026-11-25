@@ -4,7 +4,8 @@ import { LoadingButton, InlineLoading } from '../../../LoadingOverlay';
 import { ShareDialog } from '../ShareDialog/ShareDialog';
 import { sessionShareService, CreateShareResponse } from '../../../../services/sessionShare';
 import { getSession, getSessionStats, SessionStats } from '../../../../services/backendSessionClient';
-import { ConfirmModal, Icon, useTheme2 } from '@grafana/ui';
+import { ConfirmModal, Icon, useTheme2, Alert } from '@grafana/ui';
+import { testIds } from '../../../testIds';
 
 interface SessionSidebarProps {
   sessionManager: UseSessionManagerReturn;
@@ -20,6 +21,7 @@ export function SessionSidebar({ sessionManager, currentSessionId, isOpen, onClo
   const [showDeleteConfirm, setShowDeleteConfirm] = useState<string | null>(null);
   const [showClearAllConfirm, setShowClearAllConfirm] = useState(false);
   const [loadingAction, setLoadingAction] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [creatingSession, setCreatingSession] = useState(false);
   const [shareDialogSessionId, setShareDialogSessionId] = useState<string | null>(null);
   const [sessionShares, setSessionShares] = useState<Map<string, CreateShareResponse[]>>(new Map());
@@ -98,6 +100,7 @@ export function SessionSidebar({ sessionManager, currentSessionId, isOpen, onClo
   };
 
   const handleLoadSession = async (sessionId: string) => {
+    setLoadError(null);
     setLoadingAction(`loading-${sessionId}`);
     try {
       await new Promise((resolve) => setTimeout(resolve, 300)); // Small delay for UX
@@ -105,6 +108,11 @@ export function SessionSidebar({ sessionManager, currentSessionId, isOpen, onClo
       if (!docked) {
         onClose();
       }
+    } catch {
+      // Refresh so a deleted session disappears from the list, then tell the
+      // user why nothing opened instead of failing silently.
+      await sessionManager.refreshSessions().catch(() => undefined);
+      setLoadError('This conversation could not be loaded. It may have been deleted.');
     } finally {
       setLoadingAction(null);
     }
@@ -194,6 +202,14 @@ export function SessionSidebar({ sessionManager, currentSessionId, isOpen, onClo
             <span>{sessionManager.sessions.length} sessions</span>
           </div>
         </div>
+
+        {loadError && (
+          <div data-testid={testIds.chat.sessionLoadError} className="p-1.5">
+            <Alert severity="warning" title="Conversation unavailable">
+              {loadError}
+            </Alert>
+          </div>
+        )}
 
         {/* Session list */}
         <div className="flex-1 overflow-y-auto p-1.5">
