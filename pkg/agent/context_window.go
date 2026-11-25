@@ -194,6 +194,7 @@ func TrimMessagesToTokenLimit(messages []Message, tools []OpenAITool, maxTokens 
 	if maxTokens <= 0 {
 		maxTokens = DefaultMaxTotalTokens
 	}
+	maxTokens = clampMaxTotalTokens(maxTokens)
 	limits = limits.withDefaults()
 
 	if estimateMessagesTokens(messages, tools) <= maxTokens {
@@ -411,4 +412,23 @@ func capToolResultAtIngestion(content string, maxTokens int) string {
 		return content
 	}
 	return content[:maxChars] + fmt.Sprintf(ingestionTruncationNotice, maxChars, len(content))
+}
+
+// MaxTotalTokensCeiling bounds the admin-configurable MaxTotalTokens at the
+// largest context window the supported models expose. Provisioning or the HTTP
+// API can set a larger value; the runtime clamps down to this ceiling so an
+// oversized window produces context-length errors at the provider.
+const MaxTotalTokensCeiling = 1_000_000
+
+// clampMaxTotalTokens resolves a raw MaxTotalTokens value to a usable budget:
+// non-positive falls back to DefaultMaxTotalTokens, and anything above
+// MaxTotalTokensCeiling is clamped to the ceiling.
+func clampMaxTotalTokens(n int) int {
+	if n <= 0 {
+		return DefaultMaxTotalTokens
+	}
+	if n > MaxTotalTokensCeiling {
+		return MaxTotalTokensCeiling
+	}
+	return n
 }

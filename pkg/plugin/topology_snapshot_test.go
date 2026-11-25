@@ -81,25 +81,31 @@ func TestScopeServiceGraph(t *testing.T) {
 	}
 }
 
+// countRenderedEdges counts the rendered edge lines in a topology snapshot.
+func countRenderedEdges(rendered string) int {
+	edges := 0
+	for _, l := range strings.Split(rendered, "\n") {
+		if strings.Contains(l, " -> ") {
+			edges++
+		}
+	}
+	return edges
+}
+
 func TestRenderServiceTopology(t *testing.T) {
-	edges := make([]serviceGraphEdge, 0, topoMaxEdges+5)
-	for i := 0; i < topoMaxEdges+5; i++ {
+	limits := topoLimits{maxNodes: hardTopologyMaxNodes, maxEdges: 40, maxFacts: graphitiFallbackMaxFacts}
+	edges := make([]serviceGraphEdge, 0, limits.maxEdges+5)
+	for i := 0; i < limits.maxEdges+5; i++ {
 		edges = append(edges, serviceGraphEdge{client: fmt.Sprintf("svc%03d", i), server: "db", rps: float64(i + 1)})
 	}
 	edges[0].rps = 0.005 // below the noise floor
 
-	got := renderServiceTopology(edges)
+	got := renderServiceTopology(edges, limits)
 	if got == "" {
 		t.Fatal("expected non-empty rendering")
 	}
-	edgeLines := 0
-	for _, l := range strings.Split(got, "\n") {
-		if strings.Contains(l, " -> ") {
-			edgeLines++
-		}
-	}
-	if edgeLines != topoMaxEdges {
-		t.Errorf("expected %d rendered edges, got %d", topoMaxEdges, edgeLines)
+	if edgeLines := countRenderedEdges(got); edgeLines != limits.maxEdges {
+		t.Errorf("expected %d rendered edges, got %d", limits.maxEdges, edgeLines)
 	}
 	if strings.Contains(got, "svc000") {
 		t.Errorf("sub-floor edge must be dropped, got:\n%s", got)
@@ -110,21 +116,112 @@ func TestRenderServiceTopology(t *testing.T) {
 		t.Errorf("edges must sort by descending rps:\n%s", got)
 	}
 
-	if got := renderServiceTopology(nil); got != "" {
+	if got := renderServiceTopology(nil, limits); got != "" {
 		t.Errorf("empty edge set must render nothing, got %q", got)
 	}
 }
 
+func TestRenderServiceTopologyConfiguredCaps(t *testing.T) {
+	edges := []serviceGraphEdge{
+		{client: "a", server: "b", rps: 30},
+		{client: "c", server: "d", rps: 20},
+		{client: "e", server: "f", rps: 10},
+	}
+
+	edgeLimited := topoLimits{maxNodes: defaultTopologyMaxNodes, maxEdges: 2, maxFacts: graphitiFallbackMaxFacts}
+	if got := countRenderedEdges(renderServiceTopology(edges, edgeLimited)); got != 2 {
+		t.Errorf("maxEdges=2 rendered %d edges, want 2", got)
+	}
+
+	nodeLimited := edgeLimited
+	nodeLimited.maxEdges = 10
+	nodeLimited.maxNodes = 2
+	got := renderServiceTopology(edges, nodeLimited)
+	if n := countRenderedEdges(got); n != 1 {
+		t.Errorf("maxNodes=2 rendered %d edges, want 1:\n%s", n, got)
+	}
+	if strings.Contains(got, "c -> d") || strings.Contains(got, "e -> f") {
+		t.Errorf("maxNodes=2 must keep only edges among 2 endpoints, got:\n%s", got)
+	}
+}
+
+func TestRenderServiceTopologyNodeCapSkipsRatherThanStops(t *testing.T) {
+	limits := topoLimits{maxNodes: 3, maxEdges: 10, maxFacts: graphitiFallbackMaxFacts}
+	edges := []serviceGraphEdge{
+		{client: "a", server: "b", rps: 30}, // keeps nodes a,b
+		{client: "c", server: "d", rps: 20}, // skipped: would be 4 nodes
+		{client: "a", server: "c", rps: 10}, // kept: only node c is new -> 3
+	}
+	got := renderServiceTopology(edges, limits)
+	if !strings.Contains(got, "a -> b") || !strings.Contains(got, "a -> c") {
+		t.Errorf("expected edges among 3 endpoints, skipping c->d, got:\n%s", got)
+	}
+	if strings.Contains(got, "c -> d") {
+		t.Errorf("c -> d exceeds maxNodes=3 and must be skipped:\n%s", got)
+	}
+}
+
 func TestRenderGraphitiTopology(t *testing.T) {
+	limits := topoLimits{maxNodes: defaultTopologyMaxNodes, maxEdges: defaultTopologyMaxEdges, maxFacts: graphitiFallbackMaxFacts}
 	got := renderGraphitiTopology([]TopologyEdge{
 		{ID: "checkout->cart", Source: "checkout", Target: "cart"},
 		{ID: "frontend->flagd", Source: "frontend", Target: "flagd"},
-	})
+	}, limits)
 	if !strings.Contains(got, "checkout -> cart") || !strings.Contains(got, "frontend -> flagd") {
 		t.Errorf("rendering missing edges:\n%s", got)
 	}
-	if got := renderGraphitiTopology(nil); got != "" {
+	if got := renderGraphitiTopology(nil, limits); got != "" {
 		t.Errorf("empty edges must render nothing, got %q", got)
+	}
+}
+
+func TestRenderGraphitiTopologyConfiguredCaps(t *testing.T) {
+	edges := []TopologyEdge{
+		{Source: "a", Target: "b"},
+		{Source: "c", Target: "d"},
+		{Source: "a", Target: "c"},
+	}
+
+	edgeLimited := topoLimits{maxNodes: defaultTopologyMaxNodes, maxEdges: 1, maxFacts: graphitiFallbackMaxFacts}
+	if got := countRenderedEdges(renderGraphitiTopology(edges, edgeLimited)); got != 1 {
+		t.Errorf("maxEdges=1 rendered %d edges, want 1", got)
+	}
+
+	nodeLimited := edgeLimited
+	nodeLimited.maxEdges = 10
+	nodeLimited.maxNodes = 3
+	got := renderGraphitiTopology(edges, nodeLimited)
+	if !strings.Contains(got, "a -> b") || !strings.Contains(got, "a -> c") {
+		t.Errorf("expected edges among 3 endpoints, got:\n%s", got)
+	}
+	if strings.Contains(got, "c -> d") {
+		t.Errorf("c -> d exceeds maxNodes=3 and must be skipped:\n%s", got)
+	}
+}
+
+func TestPluginTopologyLimits(t *testing.T) {
+	unset := (&Plugin{}).topologyLimits()
+	if unset.maxNodes != defaultTopologyMaxNodes || unset.maxEdges != defaultTopologyMaxEdges {
+		t.Errorf("unset limits = %+v, want %d/%d", unset, defaultTopologyMaxNodes, defaultTopologyMaxEdges)
+	}
+	if unset.maxFacts != defaultTopologyMaxEdges {
+		t.Errorf("unset maxFacts = %d, want at least maxEdges (%d)", unset.maxFacts, defaultTopologyMaxEdges)
+	}
+
+	configured := (&Plugin{settings: PluginSettings{ServiceGraphMaxNodes: 2, ServiceGraphMaxEdges: 300}}).topologyLimits()
+	if configured.maxNodes != 2 || configured.maxEdges != 300 {
+		t.Errorf("configured limits = %+v, want 2/300", configured)
+	}
+	if configured.maxFacts != 300 {
+		t.Errorf("maxFacts = %d, want at least maxEdges (300)", configured.maxFacts)
+	}
+
+	clamped := (&Plugin{settings: PluginSettings{
+		ServiceGraphMaxNodes: hardTopologyMaxNodes + 1,
+		ServiceGraphMaxEdges: hardTopologyMaxEdges + 1,
+	}}).topologyLimits()
+	if clamped.maxNodes != hardTopologyMaxNodes || clamped.maxEdges != hardTopologyMaxEdges {
+		t.Errorf("clamped limits = %+v, want %d/%d", clamped, hardTopologyMaxNodes, hardTopologyMaxEdges)
 	}
 }
 
@@ -253,6 +350,55 @@ func TestTopologySnapshot_ServiceGraphPrimaryAndCached(t *testing.T) {
 	}
 	if queryCalls.Load() != before {
 		t.Errorf("cache hit re-fetched queries: %d -> %d", before, queryCalls.Load())
+	}
+}
+
+// TestTopologySnapshot_HonorsConfiguredServiceGraphLimits proves the admin
+// Service Graph limits reach the RCA snapshot: maxEdges=2 keeps the two
+// busiest edges and maxNodes=2 keeps edges among only two endpoints.
+func TestTopologySnapshot_HonorsConfiguredServiceGraphLimits(t *testing.T) {
+	totalBody := `{"data":[
+		{"metric":{"client":"checkout","server":"payment"},"value":[1758800000,"30"]},
+		{"metric":{"client":"checkout","server":"db"},"value":[1758800000,"20"]},
+		{"metric":{"client":"cart","server":"cache"},"value":[1758800000,"10"]}
+	]}`
+
+	limits := PluginSettings{ServiceGraphMaxEdges: 2}
+	server := newTopologySnapshotServer(t, new(atomic.Int32), totalBody, `{"data":[]}`, nil)
+	defer server.Close()
+	proxy := mcp.NewProxy(context.Background(), log.DefaultLogger)
+	if err := proxy.EnsureServer(mcp.ServerConfig{
+		ID: "mcp-grafana", Name: "Grafana", URL: server.URL, Type: "standard", Enabled: true,
+	}); err != nil {
+		t.Fatalf("failed to configure proxy: %v", err)
+	}
+	defer proxy.Close()
+
+	p := &Plugin{logger: log.DefaultLogger, mcpProxy: proxy, settings: limits}
+	snapshot := p.topologySnapshot(context.Background(), "", "1", "Org1", "")
+	if got := countRenderedEdges(snapshot); got != 2 {
+		t.Errorf("maxEdges=2 rendered %d edges:\n%s", got, snapshot)
+	}
+	if strings.Contains(snapshot, "cart -> cache") {
+		t.Errorf("lowest-traffic edge must be cut by maxEdges=2:\n%s", snapshot)
+	}
+
+	// A fresh plugin and cache: maxNodes=2 allows only the first edge's two
+	// endpoints, so the other edges are skipped.
+	nodeLimitedProxy := mcp.NewProxy(context.Background(), log.DefaultLogger)
+	if err := nodeLimitedProxy.EnsureServer(mcp.ServerConfig{
+		ID: "mcp-grafana", Name: "Grafana", URL: server.URL, Type: "standard", Enabled: true,
+	}); err != nil {
+		t.Fatalf("failed to configure proxy: %v", err)
+	}
+	defer nodeLimitedProxy.Close()
+	p = &Plugin{logger: log.DefaultLogger, mcpProxy: nodeLimitedProxy, settings: PluginSettings{ServiceGraphMaxNodes: 2}}
+	snapshot = p.topologySnapshot(context.Background(), "", "1", "Org1", "")
+	if got := countRenderedEdges(snapshot); got != 1 {
+		t.Errorf("maxNodes=2 rendered %d edges, want 1:\n%s", got, snapshot)
+	}
+	if !strings.Contains(snapshot, "checkout -> payment") {
+		t.Errorf("expected the busiest edge among two endpoints:\n%s", snapshot)
 	}
 }
 

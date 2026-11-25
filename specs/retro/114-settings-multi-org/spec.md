@@ -18,45 +18,45 @@ Every record and tool call is scoped to the org that made the request.
 
 ## Actors and RBAC
 
-| Capability | Admin | Editor | Viewer | Evidence |
-|---|---|---|---|---|
-| Change plugin settings | yes | no | no | `ASSUMED` — Grafana app config is Admin-only; no plugin-side check |
-| Read the health message | yes | yes | yes | `VERIFIED` — `pkg/plugin/plugin.go:553` |
-| Use the configured org stores | yes | yes | yes | `VERIFIED` — `pkg/plugin/plugin.go:2327` |
+| Capability                    | Admin | Editor | Viewer | Evidence                                                           |
+| ----------------------------- | ----- | ------ | ------ | ------------------------------------------------------------------ |
+| Change plugin settings        | yes   | no     | no     | `ASSUMED` — Grafana app config is Admin-only; no plugin-side check |
+| Read the health message       | yes   | yes    | yes    | `VERIFIED` — `pkg/plugin/plugin.go:553`                            |
+| Use the configured org stores | yes   | yes    | yes    | `VERIFIED` — `pkg/plugin/plugin.go:2327`                           |
 
 ## Contract
 
 ### HTTP endpoints
 
-| Method | Path | Handler | Evidence |
-|---|---|---|---|
-| GET | `/health` | `handleHealth` | `pkg/plugin/plugin.go:602` |
-| GET | `/openapi.json` | `handleOpenAPISpec` | `pkg/plugin/plugin.go:582` |
+| Method | Path            | Handler             | Evidence                   |
+| ------ | --------------- | ------------------- | -------------------------- |
+| GET    | `/health`       | `handleHealth`      | `pkg/plugin/plugin.go:602` |
+| GET    | `/openapi.json` | `handleOpenAPISpec` | `pkg/plugin/plugin.go:582` |
 
 ### SSE events
 
-| Event | Payload fields | Evidence |
-|---|---|---|
-| None. This module emits no SSE event. | — | `pkg/plugin/plugin.go:521` |
+| Event                                 | Payload fields | Evidence                   |
+| ------------------------------------- | -------------- | -------------------------- |
+| None. This module emits no SSE event. | —              | `pkg/plugin/plugin.go:521` |
 
 ### Configuration keys
 
-| Key group | jsonData keys | Default | Evidence |
-|---|---|---|---|
-| MCP servers | `mcpServers`, `useBuiltInMCP`, `builtInMCPToolSelections`, `trustedMCPServers`, `riskOverrides` | empty, off | `pkg/plugin/plugin.go:90` |
-| Prompts | `defaultSystemPrompt`, `investigationPrompt`, `performancePrompt`, `skills` | shipped constants | `pkg/plugin/plugin.go:96` |
-| URL routing | `builtInMCPBaseURL`, `useLocalGrafanaURL`, `localGrafanaPort` | `http://localhost:3000`, off, `0` | `pkg/plugin/plugin.go:107` |
-| Retention | `sessionTTLDays`, `graphitiEpisodeTTLDays` | `90`, `30` | `pkg/plugin/config.go:71` |
-| Context | `keepRecentToolResults`, `maxToolResponseTokens`, `aggressiveToolResponseTokens`, `maxHighVolumeToolResponseTokens`, `aggressiveHighVolumeToolResponseTokens`, `toolCallSummarizationDisabled` | resolved in the loop | `pkg/plugin/plugin.go:140` |
-| Other | `maxTotalTokens`, `recentMessageCount`, `graphitiScanInterval`, `serviceGraphMaxNodes`, `serviceGraphMaxEdges`, `graphitiAutoSaveSessionsDisabled`, `approvalPolicy`, `maxParallelToolCalls`, `agentEvalCaptureEnabled` | resolved at init or in the loop | `pkg/plugin/plugin.go:104` |
-| Workflows | none: entries live per org in the Redis store `workflows:<orgID>` (fields name, enabled, skill, message, model, intervalSeconds, maxIterations, toolAllowlist, spawnableSkills, maxConcurrentSessions, sessionTimeoutSeconds, fallbackSkill, orgId); a legacy `jsonData.workflows` key is ignored with one warning | empty | `pkg/plugin/workflow_store.go:41`, `pkg/plugin/plugin.go:541` |
-| Tool search | `toolSearch` | auto | `pkg/plugin/plugin.go:146` |
-| Secure | `redisURL`, `mcpServerHeader.{serverID}.{headerName}` | none | `pkg/plugin/plugin.go:341` |
+| Key group   | jsonData keys                                                                                                                                                                                                                                                                                                      | Default                           | Evidence                                                      |
+| ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------- | ------------------------------------------------------------- |
+| MCP servers | `mcpServers`, `useBuiltInMCP`, `builtInMCPToolSelections`, `trustedMCPServers`, `riskOverrides`                                                                                                                                                                                                                    | empty, off                        | `pkg/plugin/plugin.go:90`                                     |
+| Prompts     | `defaultSystemPrompt`, `investigationPrompt`, `performancePrompt`, `skills`                                                                                                                                                                                                                                        | shipped constants                 | `pkg/plugin/plugin.go:96`                                     |
+| URL routing | `builtInMCPBaseURL`, `useLocalGrafanaURL`, `localGrafanaPort`                                                                                                                                                                                                                                                      | `http://localhost:3000`, off, `0` | `pkg/plugin/plugin.go:107`                                    |
+| Retention   | `sessionTTLDays`, `graphitiEpisodeTTLDays`                                                                                                                                                                                                                                                                         | `90`, `30`                        | `pkg/plugin/config.go:71`                                     |
+| Context     | `keepRecentToolResults`, `maxToolResponseTokens`, `aggressiveToolResponseTokens`, `maxHighVolumeToolResponseTokens`, `aggressiveHighVolumeToolResponseTokens`, `toolCallSummarizationDisabled`                                                                                                                     | resolved in the loop              | `pkg/plugin/plugin.go:140`                                    |
+| Other       | `maxTotalTokens`, `recentMessageCount`, `graphitiScanInterval`, `serviceGraphMaxNodes`, `serviceGraphMaxEdges`, `graphitiAutoSaveSessionsEnabled`, `approvalPolicy`, `maxParallelToolCalls`, `agentEvalCaptureEnabled`                                                                                             | resolved at init or in the loop   | `pkg/plugin/plugin.go:104`                                    |
+| Workflows   | none: entries live per org in the Redis store `workflows:<orgID>` (fields name, enabled, skill, message, model, intervalSeconds, maxIterations, toolAllowlist, spawnableSkills, maxConcurrentSessions, sessionTimeoutSeconds, fallbackSkill, orgId); a legacy `jsonData.workflows` key is ignored with one warning | empty                             | `pkg/plugin/workflow_store.go:41`, `pkg/plugin/plugin.go:541` |
+| Tool search | `toolSearch`                                                                                                                                                                                                                                                                                                       | auto                              | `pkg/plugin/plugin.go:146`                                    |
+| Secure      | `redisURL`, `mcpServerHeader.{serverID}.{headerName}`                                                                                                                                                                                                                                                              | none                              | `pkg/plugin/plugin.go:341`                                    |
 
 ### MCP tool names
 
-| Tool | Read-only | Evidence |
-|---|---|---|
+| Tool                                            | Read-only                 | Evidence                  |
+| ----------------------------------------------- | ------------------------- | ------------------------- |
 | Every tool of the built-in server `mcp-grafana` | inherited from the server | `pkg/plugin/plugin.go:86` |
 
 ## Behaviour Rules
@@ -102,29 +102,29 @@ Coverage: `VERIFIED` = code pointer or test; `ASSUMED` = code suggests, no test;
 
 ## Failure Modes
 
-| Condition | User-visible result | Evidence |
-|---|---|---|
-| `builtInMCPBaseURL` is invalid | Error logged; `http://localhost:3000` used | `pkg/plugin/plugin.go:287` |
-| Redis connection fails | Warning; in-memory stores | `pkg/plugin/plugin.go:345` |
-| SA token unavailable | Warning; built-in MCP and SA LLM calls fail | `pkg/plugin/plugin.go:948` |
-| `useBuiltInMCP` with no SA token | Built-in server removed; warning | `pkg/plugin/plugin.go:622` |
-| SDK HTTP client fails to build | `NewPlugin` returns an error | `pkg/plugin/plugin.go:431` |
+| Condition                        | User-visible result                         | Evidence                   |
+| -------------------------------- | ------------------------------------------- | -------------------------- |
+| `builtInMCPBaseURL` is invalid   | Error logged; `http://localhost:3000` used  | `pkg/plugin/plugin.go:287` |
+| Redis connection fails           | Warning; in-memory stores                   | `pkg/plugin/plugin.go:345` |
+| SA token unavailable             | Warning; built-in MCP and SA LLM calls fail | `pkg/plugin/plugin.go:948` |
+| `useBuiltInMCP` with no SA token | Built-in server removed; warning            | `pkg/plugin/plugin.go:622` |
+| SDK HTTP client fails to build   | `NewPlugin` returns an error                | `pkg/plugin/plugin.go:431` |
 
 ## Data and Persistence
 
-| Store | Key or table | TTL | Fallback | Evidence |
-|---|---|---|---|---|
-| Redis client | `redisURL` from secure data | connection timeout 5s | In-memory stores | `pkg/plugin/plugin.go:341` |
-| Redis sessions | `session:{id}` | `sessionTTLDays` | `SessionStore` | `pkg/plugin/sessionstore_redis.go:15` |
-| Redis runs | `run:{id}` | 1 hour | `RunStore` | `pkg/plugin/runstore_redis.go:45` |
+| Store          | Key or table                | TTL                   | Fallback         | Evidence                              |
+| -------------- | --------------------------- | --------------------- | ---------------- | ------------------------------------- |
+| Redis client   | `redisURL` from secure data | connection timeout 5s | In-memory stores | `pkg/plugin/plugin.go:341`            |
+| Redis sessions | `session:{id}`              | `sessionTTLDays`      | `SessionStore`   | `pkg/plugin/sessionstore_redis.go:15` |
+| Redis runs     | `run:{id}`                  | 1 hour                | `RunStore`       | `pkg/plugin/runstore_redis.go:45`     |
 
 ## Observability
 
-| Signal | Name | Where | Evidence |
-|---|---|---|---|
-| Span | None. Init and dispose emit no span. | — | `pkg/plugin/plugin.go:265` |
-| Metric | None. Init emits no metric. | — | `pkg/plugin/plugin.go:553` |
-| Log field | `orgID` | LLM client warning for a non-1 org | `pkg/agent/llm_client.go:326` |
+| Signal    | Name                                 | Where                              | Evidence                      |
+| --------- | ------------------------------------ | ---------------------------------- | ----------------------------- |
+| Span      | None. Init and dispose emit no span. | —                                  | `pkg/plugin/plugin.go:265`    |
+| Metric    | None. Init emits no metric.          | —                                  | `pkg/plugin/plugin.go:553`    |
+| Log field | `orgID`                              | LLM client warning for a non-1 org | `pkg/agent/llm_client.go:326` |
 
 ## Evidence Index
 

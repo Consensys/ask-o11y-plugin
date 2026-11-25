@@ -105,7 +105,7 @@ type State = {
   graphitiError: string | null;
   serviceGraphMaxNodes: number;
   serviceGraphMaxEdges: number;
-  graphitiAutoSaveSessionsDisabled: boolean;
+  graphitiAutoSaveSessionsEnabled: boolean;
   sessionTTLDays: number;
   graphitiEpisodeTTLDays: number;
   approvalPolicy: string;
@@ -126,15 +126,15 @@ type ValidationErrors = {
   maxTotalTokens?: string;
   prompt?: string;
   mcpServersForm?: string;
-  mcpServers: { [id: string]: { name?: string; url?: string } };
+  mcpServers: { [id: string]: { name?: string; url?: string; timeoutSeconds?: string } };
 };
 
 export interface AppConfigProps extends PluginConfigPageProps<AppPluginMeta<AppPluginSettings>> {}
 
 const PROMPT_DEFAULTS_URL = '/api/plugins/consensys-asko11y-app/resources/api/prompt-defaults';
-const DEFAULT_MAX_TOTAL_TOKENS = 128000;
+const DEFAULT_MAX_TOTAL_TOKENS = 64000;
 const MIN_TOTAL_TOKENS = 1000;
-const MAX_TOTAL_TOKENS = 200000;
+const MAX_TOTAL_TOKENS = 1000000;
 const BUILTIN_MCP_SERVER_ID = 'mcp-grafana';
 const DEFAULT_SERVICE_GRAPH_MAX_NODES = 100;
 const DEFAULT_SERVICE_GRAPH_MAX_EDGES = 200;
@@ -223,12 +223,154 @@ function normalizeMCPServersForDirty(settings: AppPluginSettings): unknown[] {
     name: server.name,
     url: server.url,
     enabled: server.enabled,
-    type: server.type || 'openapi',
+    type: server.type || 'streamable-http',
     trusted: server.trusted ?? trustedServers[server.id] ?? false,
     headers: cleanObject(server.headers),
+    timeoutSeconds: server.timeoutSeconds ?? 0,
     toolSelections: cleanObject(server.toolSelections),
     riskOverrides: cleanObject(server.riskOverrides),
   }));
+}
+
+const MCP_SERVER_TIMEOUT_SECONDS_LIMIT = 3600;
+const MCP_DUPLICATE_HEADERS_ERROR = 'Two headers in one server have the same name. Header names are case-insensitive.';
+const MCP_TOOL_SELECTIONS_UNSAVED_SERVER_ERROR = 'Save this MCP server before applying tool selections.';
+
+type MCPSettingsPayload = {
+  jsonData: AppPluginSettings;
+  secureJsonData?: Record<string, string>;
+};
+
+/**
+ * Builds the MCP settings write payload. Header values never reach jsonData:
+ * jsonData keeps the header names with empty values and the typed values go to
+ * secureJsonData, which Grafana stores encrypted.
+ */
+function buildMCPSettingsPayload(
+  baseSettings: AppPluginSettings,
+  servers: MCPServerConfig[],
+  options: {
+    useBuiltInMCP: boolean;
+    builtInMCPToolSelections: Record<string, boolean>;
+    useLocalGrafanaURL: boolean;
+    localGrafanaPort: number;
+    resetSecureKeys: Set<string>;
+    deletedSecureKeys: Set<string>;
+  }
+): MCPSettingsPayload {
+  const secureJsonData: Record<string, string> = {};
+
+  const cleanedServers = servers.map((server) => {
+    if (!server.headers) {
+      return server;
+    }
+
+    const headerKeys: Record<string, string> = {};
+    for (const [key, value] of Object.entries(server.headers)) {
+      let cleanKey = key.trim();
+      if (!cleanKey || cleanKey.startsWith('__new_header_')) {
+        continue;
+      }
+      if (cleanKey.includes('__collision_')) {
+        cleanKey = cleanKey.split('__collision_')[0].trim();
+      }
+      headerKeys[cleanKey] = '';
+      const secureKey = `mcpServerHeader.${server.id}.${cleanKey}`;
+      if (value) {
+        secureJsonData[secureKey] = value;
+      } else if (options.resetSecureKeys.has(secureKey)) {
+        secureJsonData[secureKey] = '';
+      }
+    }
+
+    return {
+      ...server,
+      headers: Object.keys(headerKeys).length > 0 ? headerKeys : undefined,
+    };
+  });
+
+  for (const key of options.deletedSecureKeys) {
+    if (!(key in secureJsonData)) {
+      secureJsonData[key] = '';
+    }
+  }
+
+  const trustedMCPServers = cleanedServers.reduce<Record<string, boolean>>((acc, server) => {
+    if (server.trusted) {
+      acc[server.id] = true;
+    }
+    return acc;
+  }, {});
+
+  const jsonData: AppPluginSettings = {
+    ...baseSettings,
+    mcpServers: cleanedServers,
+    useBuiltInMCP: options.useBuiltInMCP,
+    builtInMCPToolSelections: options.builtInMCPToolSelections,
+    useLocalGrafanaURL: options.useLocalGrafanaURL,
+    localGrafanaPort: options.localGrafanaPort,
+    trustedMCPServers,
+  };
+
+  const hasSecureChanges = Object.keys(secureJsonData).length > 0;
+
+  return hasSecureChanges ? { jsonData, secureJsonData } : { jsonData };
+}
+
+/**
+ * Validates every MCP server's name, URL, and timeout. The MCP form Save button
+ * uses it so that path cannot persist an invalid server.
+ */
+function validateMCPServers(servers: MCPServerConfig[]): {
+  errors: ValidationErrors['mcpServers'];
+  hasErrors: boolean;
+} {
+  const errors: ValidationErrors['mcpServers'] = {};
+  let hasErrors = false;
+
+  servers.forEach((server) => {
+    const serverErrors: { name?: string; url?: string; timeoutSeconds?: string } = {};
+
+    if (!server.name.trim()) {
+      serverErrors.name = 'Server name is required';
+      hasErrors = true;
+    }
+
+    if (!server.url.trim()) {
+      if (server.enabled) {
+        serverErrors.url = 'Server URL is required';
+        hasErrors = true;
+      }
+    } else {
+      try {
+        ValidationService.validateMCPServerURL(server.url);
+      } catch (error) {
+        serverErrors.url = error instanceof Error ? error.message : 'Invalid URL';
+        hasErrors = true;
+      }
+    }
+
+    if ((server.timeoutSeconds ?? 0) < 0 || (server.timeoutSeconds ?? 0) > MCP_SERVER_TIMEOUT_SECONDS_LIMIT) {
+      serverErrors.timeoutSeconds = `Enter a value from 0 to ${MCP_SERVER_TIMEOUT_SECONDS_LIMIT}`;
+      hasErrors = true;
+    }
+
+    if (Object.keys(serverErrors).length > 0) {
+      errors[server.id] = serverErrors;
+    }
+  });
+
+  return { errors, hasErrors };
+}
+
+/**
+ * A "__collision_" header key marks two header names that differ only by case.
+ * The MCP write path rejects the payload, so both save paths check it first.
+ */
+function hasDuplicateMCPHeaders(servers: MCPServerConfig[]): boolean {
+  return servers.some(
+    (server) => server.headers && Object.keys(server.headers).some((key) => key.includes('__collision_'))
+  );
 }
 
 function getPromptValue(
@@ -322,7 +464,7 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
     graphitiError: null,
     serviceGraphMaxNodes: jsonData?.serviceGraphMaxNodes || DEFAULT_SERVICE_GRAPH_MAX_NODES,
     serviceGraphMaxEdges: jsonData?.serviceGraphMaxEdges || DEFAULT_SERVICE_GRAPH_MAX_EDGES,
-    graphitiAutoSaveSessionsDisabled: jsonData?.graphitiAutoSaveSessionsDisabled ?? false,
+    graphitiAutoSaveSessionsEnabled: jsonData?.graphitiAutoSaveSessionsEnabled ?? false,
     sessionTTLDays: jsonData?.sessionTTLDays || DEFAULT_SESSION_TTL_DAYS,
     graphitiEpisodeTTLDays: jsonData?.graphitiEpisodeTTLDays || DEFAULT_GRAPHITI_EPISODE_TTL_DAYS,
     approvalPolicy: jsonData?.approvalPolicy || 'approval-gated-writes',
@@ -485,14 +627,15 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
             DEFAULT_AGGRESSIVE_HIGH_VOLUME_TOOL_RESPONSE_TOKENS) ||
         state.toolCallSummarizationDisabled !== (savedJsonData.toolCallSummarizationDisabled ?? false) ||
         state.toolSearchMode !== (savedJsonData.toolSearch?.mode || DEFAULT_TOOL_SEARCH_MODE) ||
-        state.toolSearchBudgetTokens !== (savedJsonData.toolSearch?.budgetTokens || DEFAULT_TOOL_SEARCH_BUDGET_TOKENS) ||
+        state.toolSearchBudgetTokens !==
+          (savedJsonData.toolSearch?.budgetTokens || DEFAULT_TOOL_SEARCH_BUDGET_TOKENS) ||
         state.toolSearchAlwaysInclude !== ((savedJsonData.toolSearch?.alwaysInclude ?? []).join(', ') || ''),
       mcp: mcpDirty,
       'service-graph':
         state.graphitiScanInterval !== (savedJsonData.graphitiScanInterval || 'off') ||
         state.serviceGraphMaxNodes !== (savedJsonData.serviceGraphMaxNodes || DEFAULT_SERVICE_GRAPH_MAX_NODES) ||
         state.serviceGraphMaxEdges !== (savedJsonData.serviceGraphMaxEdges || DEFAULT_SERVICE_GRAPH_MAX_EDGES) ||
-        state.graphitiAutoSaveSessionsDisabled !== (savedJsonData.graphitiAutoSaveSessionsDisabled ?? false) ||
+        state.graphitiAutoSaveSessionsEnabled !== (savedJsonData.graphitiAutoSaveSessionsEnabled ?? false) ||
         state.sessionTTLDays !== (savedJsonData.sessionTTLDays || DEFAULT_SESSION_TTL_DAYS) ||
         state.graphitiEpisodeTTLDays !== (savedJsonData.graphitiEpisodeTTLDays || DEFAULT_GRAPHITI_EPISODE_TTL_DAYS),
       prompts: state.defaultSystemPrompt !== getPromptValue(savedJsonData, promptDefaults, 'defaultSystemPrompt'),
@@ -591,60 +734,95 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
     }
   }
 
+  // Removes only the stale "save this server first" message. Other form-level
+  // messages, such as duplicate headers, stay until their own condition clears.
+  function clearUnsavedServerFormError() {
+    setValidationErrors((prev) =>
+      prev.mcpServersForm === MCP_TOOL_SELECTIONS_UNSAVED_SERVER_ERROR ? { ...prev, mcpServersForm: undefined } : prev
+    );
+  }
+
   function addMCPServer() {
     const newServer: MCPServerConfig = {
       id: `mcp-${Date.now()}`,
       name: 'New MCP Server',
       url: '',
       enabled: true,
-      type: 'openapi',
+      type: 'streamable-http',
     };
     setState({
       ...state,
       mcpServers: [...state.mcpServers, newServer],
     });
+    // A new server starts a fresh edit; only the stale tool-selection message
+    // is cleared. Any other form-level message still applies.
+    clearUnsavedServerFormError();
   }
 
   function updateMCPServer(id: string, updates: Partial<MCPServerConfig>) {
+    const existing = state.mcpServers.find((server) => server.id === id);
+
     setState({
       ...state,
       mcpServers: state.mcpServers.map((server) => (server.id === id ? { ...server, ...updates } : server)),
     });
 
     const newErrors = { ...validationErrors.mcpServers };
+    if (newErrors[id]) {
+      newErrors[id] = { ...newErrors[id] };
+    }
 
-    if (updates.url !== undefined) {
-      if (updates.url.trim()) {
-        try {
-          ValidationService.validateMCPServerURL(updates.url);
-          if (newErrors[id]) {
-            delete newErrors[id].url;
-            if (Object.keys(newErrors[id]).length === 0) {
-              delete newErrors[id];
-            }
-          }
-        } catch (error) {
-          if (!newErrors[id]) {
-            newErrors[id] = {};
-          }
-          newErrors[id].url = error instanceof Error ? error.message : 'Invalid URL';
+    const clearError = (field: 'name' | 'url' | 'timeoutSeconds') => {
+      if (!newErrors[id]) {
+        return;
+      }
+      delete newErrors[id][field];
+      if (Object.keys(newErrors[id]).length === 0) {
+        delete newErrors[id];
+      }
+    };
+
+    const setError = (field: 'name' | 'url' | 'timeoutSeconds', message: string) => {
+      if (!newErrors[id]) {
+        newErrors[id] = {};
+      }
+      newErrors[id][field] = message;
+    };
+
+    if (updates.url !== undefined || updates.enabled !== undefined) {
+      const nextUrl = (updates.url ?? existing?.url ?? '').trim();
+      const nextEnabled = updates.enabled ?? existing?.enabled ?? true;
+
+      if (!nextUrl) {
+        if (nextEnabled) {
+          setError('url', 'Server URL is required');
+        } else {
+          clearError('url');
         }
+      } else {
+        try {
+          ValidationService.validateMCPServerURL(nextUrl);
+          clearError('url');
+        } catch (error) {
+          setError('url', error instanceof Error ? error.message : 'Invalid URL');
+        }
+      }
+    }
+
+    if (updates.timeoutSeconds !== undefined) {
+      const timeoutSeconds = updates.timeoutSeconds;
+      if (timeoutSeconds < 0 || timeoutSeconds > MCP_SERVER_TIMEOUT_SECONDS_LIMIT) {
+        setError('timeoutSeconds', `Enter a value from 0 to ${MCP_SERVER_TIMEOUT_SECONDS_LIMIT}`);
+      } else {
+        clearError('timeoutSeconds');
       }
     }
 
     if (updates.name !== undefined) {
       if (!updates.name.trim()) {
-        if (!newErrors[id]) {
-          newErrors[id] = {};
-        }
-        newErrors[id].name = 'Server name is required';
+        setError('name', 'Server name is required');
       } else {
-        if (newErrors[id]) {
-          delete newErrors[id].name;
-          if (Object.keys(newErrors[id]).length === 0) {
-            delete newErrors[id];
-          }
-        }
+        clearError('name');
       }
     }
 
@@ -667,6 +845,8 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
       ...state,
       mcpServers: state.mcpServers.filter((s) => s.id !== id),
     });
+    // Removing the offending server makes the tool-selection message stale.
+    clearUnsavedServerFormError();
   }
 
   function toggleAdvancedOptions(id: string) {
@@ -804,38 +984,52 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
   }
 
   async function handleSaveToolSelections(serverId: string, selections: Record<string, boolean>) {
-    const nextBuiltInSelections = serverId === BUILTIN_MCP_SERVER_ID ? selections : state.builtInMCPToolSelections;
-    const nextServers =
-      serverId === BUILTIN_MCP_SERVER_ID
-        ? state.mcpServers
-        : state.mcpServers.map((s) => (s.id === serverId ? { ...s, toolSelections: selections } : s));
+    // Tools Apply persists ONLY the tool-selection change on top of the last
+    // saved settings. Unsaved header, server, and URL edits belong to the MCP
+    // form's Save button, so Apply must never carry them.
+    const savedServers = savedJsonData.mcpServers ?? [];
+    let nextSavedServers = savedServers;
+    let nextBuiltInSelections = savedJsonData.builtInMCPToolSelections ?? {};
 
-    setState((prev) => ({
-      ...prev,
-      builtInMCPToolSelections: nextBuiltInSelections,
-      mcpServers: nextServers,
-    }));
+    if (serverId === BUILTIN_MCP_SERVER_ID) {
+      nextBuiltInSelections = selections;
+      setState((prev) => ({ ...prev, builtInMCPToolSelections: selections }));
+    } else {
+      const savedServer = savedServers.find((s) => s.id === serverId);
+      if (!savedServer) {
+        // An unsaved new server has no saved entry to attach selections to.
+        setValidationErrors((prev) => ({
+          ...prev,
+          mcpServersForm: MCP_TOOL_SELECTIONS_UNSAVED_SERVER_ERROR,
+        }));
+        setModalOpen(false);
+        setModalServerId(null);
+        return;
+      }
+
+      nextSavedServers = savedServers.map((s) => (s.id === serverId ? { ...s, toolSelections: selections } : s));
+      setState((prev) => ({
+        ...prev,
+        mcpServers: prev.mcpServers.map((s) => (s.id === serverId ? { ...s, toolSelections: selections } : s)),
+      }));
+    }
+
     setModalOpen(false);
     setModalServerId(null);
 
-    // Persist all MCP-related fields from the latest local state so successive
-    // Apply calls don't overwrite each other's prior changes via stale jsonData.
-    const nextJsonData: AppPluginSettings = {
+    const nextSavedJsonData: AppPluginSettings = {
       ...savedJsonData,
-      useBuiltInMCP: state.useBuiltInMCP,
       builtInMCPToolSelections: nextBuiltInSelections,
-      mcpServers: nextServers,
-      trustedMCPServers: nextServers.reduce<Record<string, boolean>>((acc, server) => {
-        if (server.trusted) {
-          acc[server.id] = true;
-        }
-        return acc;
-      }, {}),
+      mcpServers: nextSavedServers,
     };
 
     try {
-      await updatePlugin(plugin.meta.id, { enabled, pinned, jsonData: nextJsonData });
-      setSavedJsonData(nextJsonData);
+      await updatePlugin(plugin.meta.id, { enabled, pinned, jsonData: nextSavedJsonData });
+      setSavedJsonData(nextSavedJsonData);
+      // The tool selections are persisted, so a previous Apply rejection no
+      // longer describes the form. Other form-level messages still do.
+      clearUnsavedServerFormError();
+      // Unsaved header edits stay unsaved and dirty; Apply never writes them.
     } catch {
       // Persist error: local state already updated; user can retry via the main Save button.
     }
@@ -899,7 +1093,7 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
         graphitiScanInterval: state.graphitiScanInterval,
         serviceGraphMaxNodes: state.serviceGraphMaxNodes,
         serviceGraphMaxEdges: state.serviceGraphMaxEdges,
-        graphitiAutoSaveSessionsDisabled: state.graphitiAutoSaveSessionsDisabled,
+        graphitiAutoSaveSessionsEnabled: state.graphitiAutoSaveSessionsEnabled,
         sessionTTLDays: state.sessionTTLDays,
         graphitiEpisodeTTLDays: state.graphitiEpisodeTTLDays,
       },
@@ -975,7 +1169,7 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
     return legacy;
   }, [savedJsonData.investigationPrompt, savedJsonData.performancePrompt]);
 
-  function onSubmitLLMSettings() {
+  function onSubmitGeneralSettings() {
     if (isLLMSettingsDisabled || validationErrors.maxTotalTokens) {
       return;
     }
@@ -996,6 +1190,8 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
       jsonData: {
         ...savedJsonData,
         maxTotalTokens: state.maxTotalTokens,
+        kioskModeEnabled: state.kioskModeEnabled,
+        chatPanelPosition: state.chatPanelPosition,
       },
     });
   }
@@ -1033,107 +1229,32 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
   }
 
   function onSubmitMCPServers() {
-    const errors: ValidationErrors['mcpServers'] = {};
-    let hasErrors = false;
-
-    state.mcpServers.forEach((server) => {
-      const serverErrors: { name?: string; url?: string } = {};
-
-      if (!server.name.trim()) {
-        serverErrors.name = 'Server name is required';
-        hasErrors = true;
-      }
-
-      if (server.url.trim()) {
-        try {
-          ValidationService.validateMCPServerURL(server.url);
-        } catch (error) {
-          serverErrors.url = error instanceof Error ? error.message : 'Invalid URL';
-          hasErrors = true;
-        }
-      }
-
-      if (Object.keys(serverErrors).length > 0) {
-        errors[server.id] = serverErrors;
-      }
-    });
+    const { errors, hasErrors } = validateMCPServers(state.mcpServers);
 
     if (hasErrors) {
       setValidationErrors((prev) => ({ ...prev, mcpServers: errors }));
       return;
     }
 
-    const hasDuplicateHeaders = state.mcpServers.some(
-      (server) => server.headers && Object.keys(server.headers).some((key) => key.includes('__collision_'))
-    );
-    if (hasDuplicateHeaders) {
+    if (hasDuplicateMCPHeaders(state.mcpServers)) {
       setValidationErrors((prev) => ({
         ...prev,
-        mcpServersForm: 'Two headers in one server have the same name. Header names are case-insensitive.',
+        mcpServersForm: MCP_DUPLICATE_HEADERS_ERROR,
       }));
       return;
     }
     setValidationErrors((prev) => ({ ...prev, mcpServersForm: undefined }));
 
-    const secureJsonData: Record<string, string> = {};
-
-    const cleanedServers = state.mcpServers.map((server) => {
-      if (!server.headers) {
-        return server;
-      }
-
-      const headerKeys: Record<string, string> = {};
-      for (const [key, value] of Object.entries(server.headers)) {
-        let cleanKey = key.trim();
-        if (!cleanKey || cleanKey.startsWith('__new_header_')) {
-          continue;
-        }
-        if (cleanKey.includes('__collision_')) {
-          cleanKey = cleanKey.split('__collision_')[0].trim();
-        }
-        headerKeys[cleanKey] = '';
-        const secureKey = `mcpServerHeader.${server.id}.${cleanKey}`;
-        if (value) {
-          secureJsonData[secureKey] = value;
-        } else if (resetSecureKeys.has(secureKey)) {
-          secureJsonData[secureKey] = '';
-        }
-      }
-
-      return {
-        ...server,
-        headers: Object.keys(headerKeys).length > 0 ? headerKeys : undefined,
-      };
+    const payload = buildMCPSettingsPayload(savedJsonData, state.mcpServers, {
+      useBuiltInMCP: state.useBuiltInMCP,
+      builtInMCPToolSelections: state.builtInMCPToolSelections,
+      useLocalGrafanaURL: state.useLocalGrafanaURL,
+      localGrafanaPort: state.localGrafanaPort,
+      resetSecureKeys,
+      deletedSecureKeys,
     });
 
-    for (const key of deletedSecureKeys) {
-      if (!(key in secureJsonData)) {
-        secureJsonData[key] = '';
-      }
-    }
-
-    const trustedMCPServers = cleanedServers.reduce<Record<string, boolean>>((acc, server) => {
-      if (server.trusted) {
-        acc[server.id] = true;
-      }
-      return acc;
-    }, {});
-
-    const hasSecureChanges = Object.keys(secureJsonData).length > 0;
-    saveAndReload({
-      enabled,
-      pinned,
-      jsonData: {
-        ...savedJsonData,
-        mcpServers: cleanedServers,
-        useBuiltInMCP: state.useBuiltInMCP,
-        builtInMCPToolSelections: state.builtInMCPToolSelections,
-        useLocalGrafanaURL: state.useLocalGrafanaURL,
-        localGrafanaPort: state.localGrafanaPort,
-        trustedMCPServers,
-      },
-      ...(hasSecureChanges ? { secureJsonData } : {}),
-    });
+    saveAndReload({ enabled, pinned, ...payload });
   }
 
   const topologyServiceCount = topology?.nodes.filter((node) => node.type === 'service').length ?? 0;
@@ -1174,7 +1295,7 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
           <FieldSet label="LLM Settings">
             <Field
               label="Max Total Tokens"
-              description={`Maximum prompt-plus-completion budget per LLM call (minimum: ${MIN_TOTAL_TOKENS}, maximum: ${MAX_TOTAL_TOKENS}, default: ${DEFAULT_MAX_TOTAL_TOKENS})`}
+              description={`Maximum prompt-plus-completion budget per LLM call (minimum: ${MIN_TOTAL_TOKENS}, maximum: ${MAX_TOTAL_TOKENS}, default: ${DEFAULT_MAX_TOTAL_TOKENS}). Set this to your model's context window; a larger value causes context-length errors.`}
               invalid={!!validationErrors.maxTotalTokens}
               error={validationErrors.maxTotalTokens}
             >
@@ -1192,16 +1313,6 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
                 invalid={!!validationErrors.maxTotalTokens}
               />
             </Field>
-
-            <div className="mt-3">
-              <Button
-                onClick={onSubmitLLMSettings}
-                data-testid={testIds.appConfig.submit}
-                disabled={isLLMSettingsDisabled || !!validationErrors.maxTotalTokens}
-              >
-                Save LLM settings
-              </Button>
-            </div>
           </FieldSet>
         )}
 
@@ -1209,21 +1320,21 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
           <FieldSet label="Agent Runtime">
             <Field
               label="Approval policy"
-              description="Controls whether risky tool calls pause until the user approves them."
+              description="Controls whether risky tool calls pause until the user approves them. When off, risky tool calls run without an approval prompt."
             >
               <RadioButtonGroup
                 value={state.approvalPolicy}
                 onChange={(value) => setState({ ...state, approvalPolicy: value })}
                 options={[
                   { label: 'Gate writes and external actions', value: 'approval-gated-writes' },
-                  { label: 'Disabled', value: 'off' },
+                  { label: 'Off', value: 'off' },
                 ]}
               />
             </Field>
 
             <Field
               label="Max parallel tool calls"
-              description="Upper bound reserved for the agent scheduler. The current runtime keeps tool execution sequential when a provider serializes tool calls."
+              description="Bounds the tool calls that run concurrently when the model emits several calls in one turn (default: 4)."
               className="mt-2"
               invalid={isAgentRuntimeDisabled}
               error={isAgentRuntimeDisabled ? 'Enter a value from 1 to 16' : undefined}
@@ -1282,7 +1393,9 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
                   label="Discovery threshold (tokens)"
                   description={`Discovery turns on only when the tool definitions exceed this many tokens (default: ${DEFAULT_TOOL_SEARCH_BUDGET_TOKENS})`}
                   className="mt-2"
-                  invalid={state.toolSearchBudgetTokens < 1 || state.toolSearchBudgetTokens > TOOL_SEARCH_BUDGET_TOKENS_LIMIT}
+                  invalid={
+                    state.toolSearchBudgetTokens < 1 || state.toolSearchBudgetTokens > TOOL_SEARCH_BUDGET_TOKENS_LIMIT
+                  }
                   error={`Enter a value from 1 to ${TOOL_SEARCH_BUDGET_TOKENS_LIMIT}`}
                 >
                   <Input
@@ -1598,7 +1711,7 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
 
                 <Field label="Type" className="mt-2">
                   <Combobox<MCPServerType>
-                    value={(server.type || 'openapi') as MCPServerType}
+                    value={(server.type || 'streamable-http') as MCPServerType}
                     onChange={(option) =>
                       updateMCPServer(server.id, {
                         type: option.value,
@@ -1640,6 +1753,29 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
 
                 {state.expandedAdvanced.has(server.id) && (
                   <div className="mt-2 p-3 rounded bg-canvas border border-weak">
+                    <Field
+                      label="Tool call timeout (seconds)"
+                      description="0 uses the default 30 s; raise it for servers whose queries run long."
+                      className="mb-3"
+                      invalid={!!validationErrors.mcpServers[server.id]?.timeoutSeconds}
+                      error={validationErrors.mcpServers[server.id]?.timeoutSeconds}
+                    >
+                      <Input
+                        width={20}
+                        type="number"
+                        min={0}
+                        max={MCP_SERVER_TIMEOUT_SECONDS_LIMIT}
+                        value={server.timeoutSeconds ?? 0}
+                        onChange={(e) =>
+                          updateMCPServer(server.id, {
+                            timeoutSeconds: parseInt(e.currentTarget.value, 10) || 0,
+                          })
+                        }
+                        invalid={!!validationErrors.mcpServers[server.id]?.timeoutSeconds}
+                        data-testid={testIds.appConfig.mcpServerTimeoutInput(server.id)}
+                      />
+                    </Field>
+
                     <div className="flex items-center justify-between mb-2">
                       <span className="text-sm font-medium">Custom Headers</span>
                       <span className="text-xs text-secondary">{Object.keys(server.headers || {}).length}/10</span>
@@ -1836,21 +1972,12 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
 
             <div className="mt-4">
               <Button
-                onClick={() => {
-                  saveAndReload({
-                    enabled,
-                    pinned,
-                    jsonData: {
-                      ...savedJsonData,
-                      kioskModeEnabled: state.kioskModeEnabled,
-                      chatPanelPosition: state.chatPanelPosition,
-                    },
-                  });
-                }}
+                onClick={onSubmitGeneralSettings}
                 variant="primary"
-                data-testid={testIds.appConfig.saveDisplaySettingsButton}
+                disabled={isLLMSettingsDisabled || !!validationErrors.maxTotalTokens}
+                data-testid={testIds.appConfig.submit}
               >
-                Save Display Settings
+                Save general settings
               </Button>
             </div>
           </FieldSet>
@@ -1934,12 +2061,12 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
 
             <Field
               label="Auto-save sessions to knowledge graph"
-              description="Feed every completed session's messages into Graphiti automatically, instead of requiring the manual 'Feed to Knowledge Graph' action."
+              description="Off by default. When enabled, every completed session's messages feed into Graphiti automatically instead of requiring the manual 'Feed to Knowledge Graph' action."
               className="mt-2"
             >
               <Switch
-                value={!state.graphitiAutoSaveSessionsDisabled}
-                onChange={(e) => setState({ ...state, graphitiAutoSaveSessionsDisabled: !e.currentTarget.checked })}
+                value={state.graphitiAutoSaveSessionsEnabled}
+                onChange={(e) => setState({ ...state, graphitiAutoSaveSessionsEnabled: e.currentTarget.checked })}
                 data-testid={testIds.appConfig.graphitiAutoSaveToggle}
               />
             </Field>

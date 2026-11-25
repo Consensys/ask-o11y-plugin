@@ -8,16 +8,16 @@ async function openSettingsTab(page: Page, tabId: string) {
 test.describe('LLM Settings', () => {
   test('should save valid config and reject invalid token limits', async ({ appConfigPage, page }) => {
     const maxTokensInput = page.getByLabel('Max Total Tokens');
-    const saveButton = page.getByRole('button', { name: /Save LLM settings/i });
+    const saveButton = page.getByRole('button', { name: /Save general settings/i });
 
     // Reject value below minimum (1000)
     await maxTokensInput.clear();
     await maxTokensInput.fill('500');
     await expect(saveButton).toBeDisabled();
 
-    // Reject value above maximum (200000)
+    // Reject value above maximum (1000000)
     await maxTokensInput.clear();
-    await maxTokensInput.fill('200001');
+    await maxTokensInput.fill('1000001');
     await expect(saveButton).toBeDisabled();
 
     // Accept valid value and save
@@ -81,7 +81,7 @@ test.describe('MCP Server Management', () => {
       .filter({ has: page.locator('[data-testid^="data-testid ac-mcp-server-name-"]') })
       .last();
     const typeCombobox = serverCard.getByRole('combobox');
-    await expect(typeCombobox).toHaveValue('OpenAPI');
+    await expect(typeCombobox).toHaveValue('Streamable HTTP');
     await typeCombobox.click();
     await page.getByRole('option', { name: 'SSE', exact: true }).click();
     await expect(typeCombobox).toHaveValue('SSE');

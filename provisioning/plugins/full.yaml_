@@ -16,7 +16,7 @@ apps:
   - type: consensys-asko11y-app
     org_id: 1
     jsonData:
-      maxTotalTokens: 128000
+      maxTotalTokens: 64000
       mcpServers:
         - id: graphiti
           name: Graphiti Knowledge Graph
@@ -53,7 +53,7 @@ apps:
   - type: consensys-asko11y-app
     org_id: 2
     jsonData:
-      maxTotalTokens: 128000
+      maxTotalTokens: 64000
       mcpServers:
         - id: graphiti
           name: Graphiti Knowledge Graph
