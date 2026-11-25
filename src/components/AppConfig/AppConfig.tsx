@@ -734,6 +734,14 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
     }
   }
 
+  // Removes only the stale "save this server first" message. Other form-level
+  // messages, such as duplicate headers, stay until their own condition clears.
+  function clearUnsavedServerFormError() {
+    setValidationErrors((prev) =>
+      prev.mcpServersForm === MCP_TOOL_SELECTIONS_UNSAVED_SERVER_ERROR ? { ...prev, mcpServersForm: undefined } : prev
+    );
+  }
+
   function addMCPServer() {
     const newServer: MCPServerConfig = {
       id: `mcp-${Date.now()}`,
@@ -746,6 +754,9 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
       ...state,
       mcpServers: [...state.mcpServers, newServer],
     });
+    // A new server starts a fresh edit; only the stale tool-selection message
+    // is cleared. Any other form-level message still applies.
+    clearUnsavedServerFormError();
   }
 
   function updateMCPServer(id: string, updates: Partial<MCPServerConfig>) {
@@ -834,6 +845,8 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
       ...state,
       mcpServers: state.mcpServers.filter((s) => s.id !== id),
     });
+    // Removing the offending server makes the tool-selection message stale.
+    clearUnsavedServerFormError();
   }
 
   function toggleAdvancedOptions(id: string) {
@@ -1013,6 +1026,9 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
     try {
       await updatePlugin(plugin.meta.id, { enabled, pinned, jsonData: nextSavedJsonData });
       setSavedJsonData(nextSavedJsonData);
+      // The tool selections are persisted, so a previous Apply rejection no
+      // longer describes the form. Other form-level messages still do.
+      clearUnsavedServerFormError();
       // Unsaved header edits stay unsaved and dirty; Apply never writes them.
     } catch {
       // Persist error: local state already updated; user can retry via the main Save button.

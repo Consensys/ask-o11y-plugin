@@ -471,6 +471,12 @@ describe('Components/AppConfig', () => {
         ([options]: [FetchOptions]) => options.url?.endsWith('/settings') && options.method === 'POST'
       )
     ).toBe(false);
+
+    // Removing the unsaved server makes the form-level message stale.
+    fireEvent.click(screen.getByTestId(testIds.appConfig.mcpServerRemoveButton(newServerId)));
+    await waitFor(() =>
+      expect(screen.queryByText('Save this MCP server before applying tool selections.')).not.toBeInTheDocument()
+    );
   });
 
   test('Tools Apply on a saved server writes only its tool selections', async () => {
