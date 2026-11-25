@@ -131,7 +131,13 @@ export function useSessionManager(
           setCurrentSessionId_(null);
           setChatHistory([]);
           onSessionIdChange(null);
+          // The session no longer exists: drop the stale sidebar entry so the
+          // list matches the backend instead of offering a dead link forever.
+          setSessions((prev) => prev.filter((s) => s.id !== sessionId));
         }
+        // Any other failure keeps the transcript the user is reading intact.
+        // Rethrow so the caller can tell the user instead of failing silently.
+        throw error;
       }
     },
     [setChatHistory, onSessionIdChange]
