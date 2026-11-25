@@ -1,47 +1,64 @@
 # Retro-Spec: Sidebar, Stats, and Session UX
+
 **Capability ID**: `122-session-ux`
 **Status**: Retrospective
 **Last verified**: `18e315b`
 **Owner**: Ask O11y maintainers
 **Module**: `src/components/Chat/components/SessionSidebar/`, `src/services/backendSessionClient.ts`
+
 ---
+
 ## Purpose
+
 A user finds earlier conversations, reads their cost, shares one by link, and opens a session from a URL.
+
 ## Actors and RBAC
-| Capability | Admin | Editor | Viewer | Evidence |
-|---|---|---|---|---|
-| List own sessions | yes | yes | yes | `src/services/backendSessionClient.ts:61` |
-| Create and delete a session | yes | yes | yes | `src/services/backendSessionClient.ts:46` |
-| Create a share link | yes | yes | yes | `src/services/sessionShare.ts:52` |
-| Read a shared session | yes | yes | yes | `src/pages/SharedSession.tsx:27` |
+
+| Capability                  | Admin | Editor | Viewer | Evidence                                  |
+| --------------------------- | ----- | ------ | ------ | ----------------------------------------- |
+| List own sessions           | yes   | yes    | yes    | `src/services/backendSessionClient.ts:61` |
+| Create and delete a session | yes   | yes    | yes    | `src/services/backendSessionClient.ts:46` |
+| Create a share link         | yes   | yes    | yes    | `src/services/sessionShare.ts:52`         |
+| Read a shared session       | yes   | yes    | yes    | `src/pages/SharedSession.tsx:27`          |
 
 Sessions are scoped by the `X-Grafana-Org-Id` header. No role check exists in this path.
+
 ## Contract
+
 ### HTTP endpoints
-| Method | Path | Handler | Evidence |
-|---|---|---|---|
-| GET, POST | `/api/plugins/consensys-asko11y-app/resources/api/sessions` | `listSessions`, `createSession` | `src/services/backendSessionClient.ts:61` |
-| GET, PUT, DELETE | `…/api/sessions/{sessionId}` | `getSession`, `updateSession`, `deleteSession` | `src/services/backendSessionClient.ts:71` |
-| GET | `…/api/sessions/{sessionId}/stats` | `getSessionStats` | `src/services/backendSessionClient.ts:81` |
-| DELETE | `…/api/sessions` | `deleteAllSessions` | `src/services/backendSessionClient.ts:112` |
-| GET, PUT | `…/api/sessions/current` | `getCurrentSessionId`, `setCurrentSessionId` | `src/services/backendSessionClient.ts:133` |
-| POST | `…/api/sessions/share` | `sessionShareService.createShare` | `src/services/sessionShare.ts:72` |
-| GET | `…/api/sessions/shared/{shareId}` | `getSharedSession` | `src/services/sessionShare.ts:92` |
-| GET | `…/api/sessions/{sessionId}/shares` | `getSessionShares` | `src/services/sessionShare.ts:145` |
-| DELETE | `…/api/sessions/share/{shareId}` | `revokeShare` | `src/services/sessionShare.ts:130` |
+
+| Method           | Path                                                        | Handler                                        | Evidence                                   |
+| ---------------- | ----------------------------------------------------------- | ---------------------------------------------- | ------------------------------------------ |
+| GET, POST        | `/api/plugins/consensys-asko11y-app/resources/api/sessions` | `listSessions`, `createSession`                | `src/services/backendSessionClient.ts:61`  |
+| GET, PUT, DELETE | `…/api/sessions/{sessionId}`                                | `getSession`, `updateSession`, `deleteSession` | `src/services/backendSessionClient.ts:71`  |
+| GET              | `…/api/sessions/{sessionId}/stats`                          | `getSessionStats`                              | `src/services/backendSessionClient.ts:81`  |
+| DELETE           | `…/api/sessions`                                            | `deleteAllSessions`                            | `src/services/backendSessionClient.ts:112` |
+| GET, PUT         | `…/api/sessions/current`                                    | `getCurrentSessionId`, `setCurrentSessionId`   | `src/services/backendSessionClient.ts:133` |
+| POST             | `…/api/sessions/share`                                      | `sessionShareService.createShare`              | `src/services/sessionShare.ts:72`          |
+| GET              | `…/api/sessions/shared/{shareId}`                           | `getSharedSession`                             | `src/services/sessionShare.ts:92`          |
+| GET              | `…/api/sessions/{sessionId}/shares`                         | `getSessionShares`                             | `src/services/sessionShare.ts:145`         |
+| DELETE           | `…/api/sessions/share/{shareId}`                            | `revokeShare`                                  | `src/services/sessionShare.ts:130`         |
+
 ### SSE events
-| Event | Payload fields | Evidence |
-|---|---|---|
-| — | no session UI consumes an SSE event | `src/services/backendSessionClient.ts:1` |
+
+| Event | Payload fields                      | Evidence                                 |
+| ----- | ----------------------------------- | ---------------------------------------- |
+| —     | no session UI consumes an SSE event | `src/services/backendSessionClient.ts:1` |
+
 ### Configuration keys
-| Key | Location | Default | Evidence |
-|---|---|---|---|
-| `sessionTTLDays` | `jsonData` | `90` | `src/components/AppConfig/AppConfig.tsx:142` |
+
+| Key              | Location   | Default | Evidence                                     |
+| ---------------- | ---------- | ------- | -------------------------------------------- |
+| `sessionTTLDays` | `jsonData` | `90`    | `src/components/AppConfig/AppConfig.tsx:143` |
+
 ### MCP tool names
-| Tool | Read-only | Evidence |
-|---|---|---|
-| — | session UX calls no MCP tool | `src/services/backendSessionClient.ts:1` |
+
+| Tool | Read-only                    | Evidence                                 |
+| ---- | ---------------------------- | ---------------------------------------- |
+| —    | session UX calls no MCP tool | `src/services/backendSessionClient.ts:1` |
+
 ## Behaviour Rules
+
 1. The session list loads when the org changes, and no last session is restored. `ASSUMED` — `src/components/Chat/hooks/useSessionManager.ts:62`
 2. A failed list refresh keeps the displayed list. `ASSUMED` — `src/components/Chat/hooks/useSessionManager.ts:51`
 3. New chat clears history, the current id, the URL, and the backend current session. `ASSUMED` — `src/components/Chat/hooks/useSessionManager.ts:91`
@@ -88,39 +105,49 @@ Sessions are scoped by the `X-Grafana-Org-Id` header. No role check exists in th
 44. A skill outside `/^[a-z0-9]+(-[a-z0-9]+)*$/`, or over 64 characters, is dropped. `VERIFIED` — test `ignores an invalid skill name`
 45. A valid skill combines with the investigation deep link. `VERIFIED` — test `combines the skill param with the legacy investigation deep link`
 46. The investigation error screen offers Start Normal Chat. `ASSUMED` — `src/pages/Home.tsx:53`
-Coverage tags:
+    Coverage tags:
 
-| Tag | Meaning | Review action |
-|---|---|---|
-| `VERIFIED` | A code pointer or a test proves the rule | Accept without reading |
-| `ASSUMED` | Code suggests it, no test proves it | Human must confirm or veto |
-| `GAP` | Behaviour is absent, unclear, or contradictory | Becomes a candidate forward spec |
+| Tag        | Meaning                                        | Review action                    |
+| ---------- | ---------------------------------------------- | -------------------------------- |
+| `VERIFIED` | A code pointer or a test proves the rule       | Accept without reading           |
+| `ASSUMED`  | Code suggests it, no test proves it            | Human must confirm or veto       |
+| `GAP`      | Behaviour is absent, unclear, or contradictory | Becomes a candidate forward spec |
+
 ## Invariants
+
 - Every session and share call carries the org header. `VERIFIED` — `src/services/backendSessionClient.ts:8`
 - A deleted session never stays in the list. `VERIFIED` — `src/components/Chat/hooks/useSessionManager.ts:140`
 - A share URL always resolves under the plugin route, never at the host root. `VERIFIED` — `src/services/sessionShare.ts:172`
+
 ## Failure Modes
-| Condition | User-visible result | Evidence |
-|---|---|---|
-| Session list fetch fails | Stale list stays, no error shown | `src/components/Chat/hooks/useSessionManager.ts:51` |
-| Session load returns 404 | History clears, URL clears | `src/components/Chat/hooks/useSessionManager.ts:126` |
-| Delete fails | Nothing changes, no error shown | `src/components/Chat/hooks/useSessionManager.ts:149` |
-| Share create fails | Error text in the dialog | `src/components/Chat/components/ShareDialog/ShareDialog.tsx:123` |
-| Share id unknown or expired | "This share link is not found or has expired." | `src/pages/SharedSession.tsx:26` |
-| Share import fails | "Failed to import session. Please try again." | `src/pages/SharedSession.tsx:91` |
-| Invalid alert name | Alert "Investigation Error" plus Start Normal Chat | `src/pages/Home.tsx:45` |
+
+| Condition                   | User-visible result                                | Evidence                                                         |
+| --------------------------- | -------------------------------------------------- | ---------------------------------------------------------------- |
+| Session list fetch fails    | Stale list stays, no error shown                   | `src/components/Chat/hooks/useSessionManager.ts:51`              |
+| Session load returns 404    | History clears, URL clears                         | `src/components/Chat/hooks/useSessionManager.ts:126`             |
+| Delete fails                | Nothing changes, no error shown                    | `src/components/Chat/hooks/useSessionManager.ts:149`             |
+| Share create fails          | Error text in the dialog                           | `src/components/Chat/components/ShareDialog/ShareDialog.tsx:123` |
+| Share id unknown or expired | "This share link is not found or has expired."     | `src/pages/SharedSession.tsx:26`                                 |
+| Share import fails          | "Failed to import session. Please try again."      | `src/pages/SharedSession.tsx:91`                                 |
+| Invalid alert name          | Alert "Investigation Error" plus Start Normal Chat | `src/pages/Home.tsx:45`                                          |
+
 ## Data and Persistence
-| Store | Key or table | TTL | Fallback | Evidence |
-|---|---|---|---|---|
-| Backend session store | session id, messages, title, model | `sessionTTLDays` | none | `src/services/backendSessionClient.ts:13` |
-| Backend share store | share id | request expiry | none | `src/services/sessionShare.ts:8` |
-| Browser URL | `sessionId` query parameter | tab lifetime | removed on failure | `src/hooks/useSessionUrl.ts:58` |
+
+| Store                 | Key or table                       | TTL              | Fallback           | Evidence                                  |
+| --------------------- | ---------------------------------- | ---------------- | ------------------ | ----------------------------------------- |
+| Backend session store | session id, messages, title, model | `sessionTTLDays` | none               | `src/services/backendSessionClient.ts:13` |
+| Backend share store   | share id                           | request expiry   | none               | `src/services/sessionShare.ts:8`          |
+| Browser URL           | `sessionId` query parameter        | tab lifetime     | removed on failure | `src/hooks/useSessionUrl.ts:58`           |
+
 ## Observability
-| Signal | Name | Where | Evidence |
-|---|---|---|---|
-| Span | none | — | `GAP` |
-| Log field | none; failures stay silent in the sidebar | — | `GAP` |
+
+| Signal    | Name                                      | Where | Evidence |
+| --------- | ----------------------------------------- | ----- | -------- |
+| Span      | none                                      | —     | `GAP`    |
+| Log field | none; failures stay silent in the sidebar | —     | `GAP`    |
+
 ## Evidence Index
+
 - `src/components/Chat/hooks/useSessionManager.ts:25` — session manager contract
 - `src/services/backendSessionClient.ts:8` — org header helper
 - `src/services/sessionShare.ts:46` — share service
@@ -128,7 +155,9 @@ Coverage tags:
 - `src/hooks/useAlertInvestigation.ts:27` — deep-link parsing
 - `tests/sessionManagement.spec.ts` — `should display token/turn/tool-call stats after a completed run` — stats contract
 - `tests/sessionSharing.spec.ts` — `should view a shared session in read-only mode` — read-only contract
+
 ## Known Gaps
+
 - No rename path exists, and `updateSession` is unused. Forward spec: session rename.
 - The sidebar component has no unit test. Forward spec: sidebar component tests.
 - List, delete, and delete-all failures are silent. Forward spec: session error surfacing.

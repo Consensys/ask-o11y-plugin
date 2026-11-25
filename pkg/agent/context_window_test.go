@@ -559,3 +559,25 @@ func TestEvictStaleToolResults_KeepsEvidenceIDHeader(t *testing.T) {
 		t.Fatal("unexpected suffix for content without header")
 	}
 }
+
+func TestClampMaxTotalTokens(t *testing.T) {
+	tests := []struct {
+		name string
+		in   int
+		want int
+	}{
+		{"zero falls back to default", 0, DefaultMaxTotalTokens},
+		{"negative falls back to default", -1, DefaultMaxTotalTokens},
+		{"value below ceiling is preserved", 64000, 64000},
+		{"value at ceiling is preserved", 1000000, 1000000},
+		{"value above ceiling is clamped", 1000001, MaxTotalTokensCeiling},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := clampMaxTotalTokens(tc.in); got != tc.want {
+				t.Errorf("clampMaxTotalTokens(%d) = %d, want %d", tc.in, got, tc.want)
+			}
+		})
+	}
+}

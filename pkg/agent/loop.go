@@ -156,7 +156,7 @@ func (a *AgentLoop) Run(ctx context.Context, req LoopRequest, eventCh chan<- SSE
 	if maxIter <= 0 {
 		maxIter = defaultMaxIterations
 	}
-	maxTokens := req.MaxTotalTokens
+	maxTokens := min(req.MaxTotalTokens, MaxTotalTokensCeiling)
 	if maxTokens <= 0 {
 		maxTokens = DefaultMaxTotalTokens
 	}

@@ -6,6 +6,8 @@ export interface MCPServerConfig {
   type?: 'openapi' | 'standard' | 'sse' | 'streamable-http';
   trusted?: boolean;
   headers?: Record<string, string>;
+  /** Per-server tool call timeout; 0 uses the backend default of 30 s. */
+  timeoutSeconds?: number;
   toolSelections?: Record<string, boolean>;
   riskOverrides?: Record<string, ToolRiskOverride>;
 }
@@ -80,7 +82,7 @@ export type AppPluginSettings = {
   graphitiScanInterval?: string;
   serviceGraphMaxNodes?: number;
   serviceGraphMaxEdges?: number;
-  graphitiAutoSaveSessionsDisabled?: boolean;
+  graphitiAutoSaveSessionsEnabled?: boolean;
   sessionTTLDays?: number;
   graphitiEpisodeTTLDays?: number;
 

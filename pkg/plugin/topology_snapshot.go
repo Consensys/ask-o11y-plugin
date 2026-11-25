@@ -36,9 +36,6 @@ const (
 	// deployment starts emitting them.
 	topoMissTTL = 1 * time.Minute
 
-	// topoMaxEdges caps the rendered edge list (~1.5k tokens).
-	topoMaxEdges = 40
-
 	// topoMinRPS drops near-zero-traffic edges — sampler noise, not real
 	// dependencies.
 	topoMinRPS = 0.01
@@ -167,21 +164,83 @@ func scopeServiceGraph(edges []serviceGraphEdge, service string) []serviceGraphE
 	return edges
 }
 
+// topoLimits holds the rendering caps resolved from the admin Service Graph
+// limits for one topology snapshot.
+type topoLimits struct {
+	maxNodes int
+	maxEdges int
+	maxFacts int
+}
+
+// topologyLimits resolves the admin Service Graph limits
+// (serviceGraphMaxNodes/serviceGraphMaxEdges) into rendering caps, applying
+// the same defaults and hard clamps as the topology API. Zero or unset
+// settings resolve to defaultTopologyMaxNodes/defaultTopologyMaxEdges. The
+// Graphiti facts search asks for at least graphitiFallbackMaxFacts and at
+// least maxEdges facts so the edge cap is not starved by the search cap.
+func (p *Plugin) topologyLimits() topoLimits {
+	p.settingsMu.RLock()
+	maxNodes := p.settings.ServiceGraphMaxNodes
+	maxEdges := p.settings.ServiceGraphMaxEdges
+	p.settingsMu.RUnlock()
+
+	limits := topoLimits{
+		maxNodes: sanitizeTopologyLimit(maxNodes, defaultTopologyMaxNodes, hardTopologyMaxNodes),
+		maxEdges: sanitizeTopologyLimit(maxEdges, defaultTopologyMaxEdges, hardTopologyMaxEdges),
+		maxFacts: graphitiFallbackMaxFacts,
+	}
+	if limits.maxFacts < limits.maxEdges {
+		limits.maxFacts = limits.maxEdges
+	}
+	return limits
+}
+
+// limitEdgesByEndpoints caps an edge list at maxEdges edges and maxNodes
+// distinct endpoints, preserving the input order. An edge that would push the
+// endpoint count past the cap is skipped, not treated as a stop, so a later
+// edge between already-seen endpoints can still be included.
+func limitEdgesByEndpoints[T any](edges []T, limits topoLimits, endpoints func(T) (string, string)) []T {
+	seen := make(map[string]struct{}, limits.maxNodes)
+	kept := make([]T, 0, min(len(edges), limits.maxEdges))
+	for _, e := range edges {
+		if len(kept) >= limits.maxEdges {
+			break
+		}
+		client, server := endpoints(e)
+		need := 0
+		if _, ok := seen[client]; !ok {
+			need++
+		}
+		if server != client {
+			if _, ok := seen[server]; !ok {
+				need++
+			}
+		}
+		if len(seen)+need > limits.maxNodes {
+			continue
+		}
+		seen[client] = struct{}{}
+		seen[server] = struct{}{}
+		kept = append(kept, e)
+	}
+	return kept
+}
+
 // renderServiceTopology renders the compact edge list injected into the
 // prompt. Edges sort by traffic; only meaningful edges survive the floor
-// and the cap.
-func renderServiceTopology(edges []serviceGraphEdge) string {
+// and the caps.
+func renderServiceTopology(edges []serviceGraphEdge, limits topoLimits) string {
 	sort.SliceStable(edges, func(i, j int) bool { return edges[i].rps > edges[j].rps })
-	var kept []serviceGraphEdge
+	aboveFloor := make([]serviceGraphEdge, 0, len(edges))
 	for _, e := range edges {
 		if e.rps < topoMinRPS {
 			break
 		}
-		kept = append(kept, e)
-		if len(kept) >= topoMaxEdges {
-			break
-		}
+		aboveFloor = append(aboveFloor, e)
 	}
+	kept := limitEdgesByEndpoints(aboveFloor, limits, func(e serviceGraphEdge) (string, string) {
+		return e.client, e.server
+	})
 	if len(kept) == 0 {
 		return ""
 	}
@@ -200,16 +259,16 @@ func renderServiceTopology(edges []serviceGraphEdge) string {
 }
 
 // renderGraphitiTopology renders the fallback edge list from Graphiti facts.
-func renderGraphitiTopology(edges []TopologyEdge) string {
-	if len(edges) == 0 {
+func renderGraphitiTopology(edges []TopologyEdge, limits topoLimits) string {
+	kept := limitEdgesByEndpoints(edges, limits, func(e TopologyEdge) (string, string) {
+		return e.Source, e.Target
+	})
+	if len(kept) == 0 {
 		return ""
-	}
-	if len(edges) > topoMaxEdges {
-		edges = edges[:topoMaxEdges]
 	}
 	var b strings.Builder
 	b.WriteString("Known dependencies (from the organization knowledge graph; no live traffic rates):\n")
-	for _, e := range edges {
+	for _, e := range kept {
 		fmt.Fprintf(&b, "%s -> %s\n", e.Source, e.Target)
 	}
 	b.WriteString("\nTreat these edges as candidate dependencies to verify with live data. Do not invent dependencies not listed here.")
@@ -261,16 +320,17 @@ func (p *Plugin) fetchTopologySnapshot(ctx context.Context, alertSnapshot, orgID
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), topoBudget)
 	defer cancel()
 
+	limits := p.topologyLimits()
 	if edges := p.fetchServiceGraphEdges(ctx, orgID, orgName, scopeOrgID); len(edges) > 0 {
 		edges = scopeServiceGraph(edges, extractServiceLabelFromSnapshot(alertSnapshot))
-		if rendered := renderServiceTopology(edges); rendered != "" {
+		if rendered := renderServiceTopology(edges, limits); rendered != "" {
 			return rendered
 		}
 	}
 	if ctx.Err() != nil {
 		return ""
 	}
-	return p.fetchGraphitiTopology(ctx, orgID, orgName, scopeOrgID)
+	return p.fetchGraphitiTopology(ctx, orgID, orgName, scopeOrgID, limits)
 }
 
 // fetchServiceGraphEdges probes the org's Prometheus datasources (bounded by
@@ -311,7 +371,7 @@ func (p *Plugin) fetchServiceGraphEdges(ctx context.Context, orgID, orgName, sco
 
 // fetchGraphitiTopology renders the Graphiti fallback when the service graph
 // metrics are absent (no metrics-generator, no Tempo integration yet).
-func (p *Plugin) fetchGraphitiTopology(ctx context.Context, orgID, orgName, scopeOrgID string) string {
+func (p *Plugin) fetchGraphitiTopology(ctx context.Context, orgID, orgName, scopeOrgID string, limits topoLimits) string {
 	tools, err := p.mcpProxy.ListToolsWithContext(ctx)
 	if err != nil {
 		return ""
@@ -327,7 +387,7 @@ func (p *Plugin) fetchGraphitiTopology(ctx context.Context, orgID, orgName, scop
 	result, err := p.mcpProxy.CallToolWithContext(
 		ctx,
 		toolName,
-		graphitiSearchFactsArgs(tools, toolName, orgIDInt, graphitiTopologyFactQuery(), graphitiFallbackMaxFacts),
+		graphitiSearchFactsArgs(tools, toolName, orgIDInt, graphitiTopologyFactQuery(), limits.maxFacts),
 		orgID, orgName, scopeOrgID,
 	)
 	if err != nil || result == nil || len(result.Content) == 0 {
@@ -338,7 +398,7 @@ func (p *Plugin) fetchGraphitiTopology(ctx context.Context, orgID, orgName, scop
 	if body == "" {
 		return ""
 	}
-	return renderGraphitiTopology(parseGraphitiTopology(body).Edges)
+	return renderGraphitiTopology(parseGraphitiTopology(body).Edges, limits)
 }
 
 func (p *Plugin) findQueryPrometheusTool(ctx context.Context) (string, bool) {

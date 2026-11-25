@@ -52,7 +52,7 @@ extraObjects:
             org_id: 1
             jsonData:
               useBuiltInMCP: true
-              maxTotalTokens: 128000
+              maxTotalTokens: 64000
               mcpServers: []
             secureJsonData:
               redisURL: $ASK_O11Y_REDIS_URL

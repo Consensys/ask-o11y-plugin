@@ -20,19 +20,19 @@ Both paths fail open: a missing graph never blocks an investigation.
 
 ## Actors and RBAC
 
-| Capability | Admin | Editor | Viewer | Evidence |
-|---|---|---|---|---|
-| Read `GET /api/agent/topology` | yes | yes | yes | `pkg/plugin/plugin.go:1865` (no role check) |
-| Receive the prefetched topology block on an RCA run | yes | yes | yes | `pkg/plugin/plugin.go:992` |
-| Open the AppConfig service-graph panel | yes | no | no | `GAP` — no route-level check; Grafana gates the config page |
+| Capability                                          | Admin | Editor | Viewer | Evidence                                                    |
+| --------------------------------------------------- | ----- | ------ | ------ | ----------------------------------------------------------- |
+| Read `GET /api/agent/topology`                      | yes   | yes    | yes    | `pkg/plugin/plugin.go:1865` (no role check)                 |
+| Receive the prefetched topology block on an RCA run | yes   | yes    | yes    | `pkg/plugin/plugin.go:992`                                  |
+| Open the AppConfig service-graph panel              | yes   | no     | no     | `GAP` — no route-level check; Grafana gates the config page |
 
 ## Contract
 
 ### HTTP endpoints
 
-| Method | Path | Handler | Evidence |
-|---|---|---|---|
-| GET | `/api/agent/topology` | `handleAgentTopology` | `pkg/plugin/plugin.go:592` |
+| Method | Path                  | Handler               | Evidence                   |
+| ------ | --------------------- | --------------------- | -------------------------- |
+| GET    | `/api/agent/topology` | `handleAgentTopology` | `pkg/plugin/plugin.go:592` |
 
 Query parameters: `query` (string), `maxNodes` (default 100, max 500), `maxEdges` (default 200, max 1000). `VERIFIED` — `pkg/plugin/plugin.go:1869`
 
@@ -42,21 +42,21 @@ None. The route returns one JSON body. `VERIFIED` — `pkg/plugin/plugin.go:2069
 
 ### Configuration keys
 
-| Key | Location | Default | Evidence |
-|---|---|---|---|
-| `serviceGraphMaxNodes` | plugin jsonData | 100 | `src/components/AppConfig/AppConfig.tsx:138` |
-| `serviceGraphMaxEdges` | plugin jsonData | 200 | `src/components/AppConfig/AppConfig.tsx:139` |
+| Key                    | Location        | Default | Evidence                              |
+| ---------------------- | --------------- | ------- | ------------------------------------- |
+| `serviceGraphMaxNodes` | plugin jsonData | 100     | `pkg/plugin/topology_snapshot.go:188` |
+| `serviceGraphMaxEdges` | plugin jsonData | 200     | `pkg/plugin/topology_snapshot.go:189` |
 
-The backend does not read either key; the UI forwards them as query parameters. `GAP` — `pkg/plugin/plugin.go:115`
+The RCA snapshot resolves both keys, applies defaults 100/200 and hard clamps 500/1000, and uses the resolved caps on both the metric and Graphiti render paths. `VERIFIED` — `pkg/plugin/topology_snapshot.go:181`
 
 ### MCP tool names
 
-| Tool | Read-only | Evidence |
-|---|---|---|
-| `*_search_memory_facts` (Graphiti) | yes | `pkg/plugin/topology.go:596` |
-| `*_search_nodes` / `*_search_memory_nodes` (Graphiti) | yes | `pkg/plugin/topology.go:616` |
-| `*_query_prometheus` (snapshot path) | yes | `pkg/plugin/topology_snapshot.go:344` |
-| `*_list_datasources` (snapshot path) | yes | `pkg/plugin/topology_snapshot.go:360` |
+| Tool                                                  | Read-only | Evidence                              |
+| ----------------------------------------------------- | --------- | ------------------------------------- |
+| `*_search_memory_facts` (Graphiti)                    | yes       | `pkg/plugin/topology.go:596`          |
+| `*_search_nodes` / `*_search_memory_nodes` (Graphiti) | yes       | `pkg/plugin/topology.go:616`          |
+| `*_query_prometheus` (snapshot path)                  | yes       | `pkg/plugin/topology_snapshot.go:404` |
+| `*_list_datasources` (snapshot path)                  | yes       | `pkg/plugin/topology_snapshot.go:420` |
 
 ## Behaviour Rules
 
@@ -80,22 +80,22 @@ Tags: `VERIFIED` (code pointer or test), `ASSUMED` (untested), `GAP` (missing).
 16. Per-center fact limit is between 25 and 100, scaled by the edge limit. `VERIFIED` — `pkg/plugin/topology.go:741`
 17. Invalid or absent limits fall back to the defaults. `VERIFIED` — `pkg/plugin/plugin.go:1997`
 18. A limit above the hard maximum is clamped, not rejected. `VERIFIED` — `pkg/plugin/topology.go:182`
-18. Node truncation and edge truncation each append a warning. `VERIFIED` — `pkg/plugin/topology.go:197`
-19. Edges whose endpoints were truncated away are dropped. `VERIFIED` — `pkg/plugin/topology.go:207`
-20. An empty graph appends a "no facts matched" warning. `VERIFIED` — `pkg/plugin/plugin.go:1985`
-21. Nil nodes or edges serialise as `[]`, never `null`. `VERIFIED` — `pkg/plugin/topology.go:224`
-22. The route has no cache; every request fans out to Graphiti. `GAP` — `pkg/plugin/plugin.go:1865` (no cache lookup)
-23. The prompt snapshot prefers Tempo service-graph metrics over Graphiti. `VERIFIED` — `pkg/plugin/topology_snapshot.go:264`
-24. The snapshot budget is 3 seconds for the whole prefetch. `VERIFIED` — `pkg/plugin/topology_snapshot.go:27`
-25. A successful snapshot caches for 5 minutes; a miss caches for 1 minute. `VERIFIED` — test `TestTopologySnapshot_ServiceGraphPrimaryAndCached`
-26. The snapshot cache key is org ID plus the alert's service label. `VERIFIED` — test `TestTopologySnapshot_CacheKeyIncludesService`
-27. The snapshot renders at most 40 edges above 0.01 rps. `VERIFIED` — `pkg/plugin/topology_snapshot.go:40`
-28. Up to 5 Prometheus datasources are probed; the first with edges wins. `VERIFIED` — test `TestTopologySnapshot_ProbesMultiplePrometheusDatasources`
-29. With no Prometheus datasource, the snapshot queries the MCP default datasource. `VERIFIED` — `pkg/plugin/topology_snapshot.go:288`
-30. The snapshot scopes to the alert's `service` label, and keeps all edges when nothing matches. `VERIFIED` — `pkg/plugin/topology_snapshot.go:154`
-31. Graphiti fallback is capped at 60 facts and labels edges as unverified. `VERIFIED` — `pkg/plugin/topology_snapshot.go:48`
-32. An empty snapshot renders no prompt block. `VERIFIED` — `pkg/plugin/prompt_defaults.go:85`
-33. Failed or partial node lookups return a warning and partial data, never a 500. `VERIFIED` — `pkg/plugin/plugin.go:1939`
+19. Node truncation and edge truncation each append a warning. `VERIFIED` — `pkg/plugin/topology.go:197`
+20. Edges whose endpoints were truncated away are dropped. `VERIFIED` — `pkg/plugin/topology.go:207`
+21. An empty graph appends a "no facts matched" warning. `VERIFIED` — `pkg/plugin/plugin.go:1985`
+22. Nil nodes or edges serialise as `[]`, never `null`. `VERIFIED` — `pkg/plugin/topology.go:224`
+23. The route has no cache; every request fans out to Graphiti. `GAP` — `pkg/plugin/plugin.go:1865` (no cache lookup)
+24. The prompt snapshot prefers Tempo service-graph metrics over Graphiti. `VERIFIED` — `pkg/plugin/topology_snapshot.go:324`
+25. The snapshot budget is 3 seconds for the whole prefetch. `VERIFIED` — `pkg/plugin/topology_snapshot.go:27`
+26. A successful snapshot caches for 5 minutes; a miss caches for 1 minute. `VERIFIED` — test `TestTopologySnapshot_ServiceGraphPrimaryAndCached`
+27. The snapshot cache key is org ID plus the alert's service label. `VERIFIED` — test `TestTopologySnapshot_CacheKeyIncludesService`
+28. The snapshot renders at most `maxEdges` edges (default 200) above 0.01 rps, and at most `maxNodes` endpoints (default 100). `VERIFIED` — `pkg/plugin/topology_snapshot.go:232`
+29. Up to 5 Prometheus datasources are probed; the first with edges wins. `VERIFIED` — test `TestTopologySnapshot_ProbesMultiplePrometheusDatasources`
+30. With no Prometheus datasource, the snapshot queries the MCP default datasource. `VERIFIED` — `pkg/plugin/topology_snapshot.go:348`
+31. The snapshot scopes to the alert's `service` label, and keeps all edges when nothing matches. `VERIFIED` — `pkg/plugin/topology_snapshot.go:151`
+32. Graphiti fallback asks for at least 60 facts (and at least `maxEdges`), and labels edges as unverified. `VERIFIED` — `pkg/plugin/topology_snapshot.go:190`
+33. An empty snapshot renders no prompt block. `VERIFIED` — `pkg/plugin/prompt_defaults.go:85`
+34. Failed or partial node lookups return a warning and partial data, never a 500. `VERIFIED` — `pkg/plugin/plugin.go:1939`
 
 ## Invariants
 
@@ -105,27 +105,27 @@ Tags: `VERIFIED` (code pointer or test), `ASSUMED` (untested), `GAP` (missing).
 
 ## Failure Modes
 
-| Condition | User-visible result | Evidence |
-|---|---|---|
-| Tool listing fails | 500 `Failed to load topology tools` | `pkg/plugin/plugin.go:1875` |
-| Facts call fails | 500 `Failed to load topology` | `pkg/plugin/plugin.go:1917` |
-| Graphiti not registered | 200 with `enabled: false` | `pkg/plugin/plugin.go:1879` |
-| Nodes tool missing | 200, text-only graph, warning | `pkg/plugin/plugin.go:1926` |
-| Prompt snapshot empty | No topology block in the prompt | `pkg/plugin/prompt_defaults.go:85` |
+| Condition               | User-visible result                 | Evidence                           |
+| ----------------------- | ----------------------------------- | ---------------------------------- |
+| Tool listing fails      | 500 `Failed to load topology tools` | `pkg/plugin/plugin.go:1875`        |
+| Facts call fails        | 500 `Failed to load topology`       | `pkg/plugin/plugin.go:1917`        |
+| Graphiti not registered | 200 with `enabled: false`           | `pkg/plugin/plugin.go:1879`        |
+| Nodes tool missing      | 200, text-only graph, warning       | `pkg/plugin/plugin.go:1926`        |
+| Prompt snapshot empty   | No topology block in the prompt     | `pkg/plugin/prompt_defaults.go:85` |
 
 ## Data and Persistence
 
-| Store | Key or table | TTL | Fallback | Evidence |
-|---|---|---|---|---|
+| Store         | Key or table                 | TTL                    | Fallback | Evidence                             |
+| ------------- | ---------------------------- | ---------------------- | -------- | ------------------------------------ |
 | In-memory map | `topoCache[orgID + service]` | 5 min hit / 1 min miss | Graphiti | `pkg/plugin/topology_snapshot.go:32` |
-| Graphiti | `group_id = org_<id>` | external | none | `pkg/plugin/topology.go:643` |
+| Graphiti      | `group_id = org_<id>`        | external               | none     | `pkg/plugin/topology.go:643`         |
 
 ## Observability
 
-| Signal | Name | Where | Evidence |
-|---|---|---|---|
-| Log | `topologySnapshot: service graph query failed` | plugin backend log | `pkg/plugin/topology_snapshot.go:296` |
-| Span / metric | none | — | `GAP` — no span around either topology path |
+| Signal        | Name                                           | Where              | Evidence                                    |
+| ------------- | ---------------------------------------------- | ------------------ | ------------------------------------------- |
+| Log           | `topologySnapshot: service graph query failed` | plugin backend log | `pkg/plugin/topology_snapshot.go:356`       |
+| Span / metric | none                                           | —                  | `GAP` — no span around either topology path |
 
 ## Evidence Index
 
@@ -135,6 +135,5 @@ Tags: `VERIFIED` (code pointer or test), `ASSUMED` (untested), `GAP` (missing).
 
 ## Known Gaps
 
-- The backend ignores `serviceGraphMaxNodes` and `serviceGraphMaxEdges`; only query parameters count.
 - `/api/agent/topology` is Graphiti-only, while the prompt snapshot is Tempo-first. The two views can disagree.
 - No cache and no timeout on the HTTP route; a slow Graphiti server holds the request open.

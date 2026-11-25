@@ -114,12 +114,12 @@ type PluginSettings struct {
 	ServiceGraphMaxNodes int    `json:"serviceGraphMaxNodes,omitempty"`
 	ServiceGraphMaxEdges int    `json:"serviceGraphMaxEdges,omitempty"`
 
-	// GraphitiAutoSaveSessionsDisabled turns off the default behavior of
-	// feeding every completed session into the knowledge graph. Named as a
-	// "disabled" flag (rather than an "enabled" one defaulting true) so the
-	// Go zero value keeps auto-save on for existing installs that predate
-	// this setting.
-	GraphitiAutoSaveSessionsDisabled bool `json:"graphitiAutoSaveSessionsDisabled,omitempty"`
+	// GraphitiAutoSaveSessionsEnabled opts in to feeding every completed
+	// session into the knowledge graph. Auto-save is opt-in and off by
+	// default: the Go zero value (setting absent) keeps it off for existing
+	// installs that predate this setting, and admins must turn it on
+	// explicitly with graphitiAutoSaveSessionsEnabled.
+	GraphitiAutoSaveSessionsEnabled bool `json:"graphitiAutoSaveSessionsEnabled,omitempty"`
 	// SessionTTLDays and GraphitiEpisodeTTLDays are retention windows in
 	// days; 0 (unset) falls back to DefaultSessionTTLDays /
 	// DefaultGraphitiEpisodeTTLDays.
@@ -1357,7 +1357,7 @@ func (p *Plugin) consumeAgentEvents(runID, sessionID string, userID int64, userL
 		}
 		p.sessionStore.ClearActiveRunID(sessionID, userID, orgID)
 
-		if lastEvent.Type == "done" && !p.settings.GraphitiAutoSaveSessionsDisabled && p.isGraphitiAvailable() {
+		if lastEvent.Type == "done" && p.settings.GraphitiAutoSaveSessionsEnabled && p.isGraphitiAvailable() {
 			p.autoSaveSessionToGraphiti(sessionID, userID, orgID)
 		}
 	}
@@ -1366,7 +1366,7 @@ func (p *Plugin) consumeAgentEvents(runID, sessionID string, userID int64, userL
 // autoSaveSessionToGraphiti feeds a session's messages into the knowledge
 // graph after every completed run, mirroring the manual "Feed to Knowledge
 // Graph" action (handleGraphitiIngestSession) so investigation findings are
-// captured by default. Disable via settings.graphitiAutoSaveSessionsDisabled.
+// captured when enabled. Enable via settings.graphitiAutoSaveSessionsEnabled.
 // Best-effort: failures are logged, never surfaced mid-conversation.
 func (p *Plugin) autoSaveSessionToGraphiti(sessionID string, userID, orgID int64) {
 	session, err := p.sessionStore.GetSession(sessionID, userID, orgID)
