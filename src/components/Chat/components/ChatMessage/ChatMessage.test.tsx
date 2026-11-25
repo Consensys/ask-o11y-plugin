@@ -11,13 +11,27 @@ import { ChatMessage as ChatMessageType } from '../../types';
 const mockTheme = {
   isDark: false,
   colors: {
-    text: { primary: '#000', secondary: '#666', disabled: '#999' },
-    background: { primary: '#fff', secondary: '#f5f5f5' },
-    border: { weak: '#ddd' },
-    primary: { main: '#7c3aed' },
+    text: {
+      primary: '#000',
+      secondary: '#666',
+      disabled: '#999',
+      link: '#1f62c4',
+      linkHover: '#123f80',
+      maxContrast: '#000',
+    },
+    background: { primary: '#fff', secondary: '#f5f5f5', canvas: '#fafafa' },
+    border: { weak: '#ddd', medium: '#bbb' },
+    primary: { main: '#7c3aed', contrastText: '#fff' },
+    action: { hover: 'rgba(0, 0, 0, 0.05)' },
   },
   spacing: (factor: number) => `${factor * 8}px`,
-  shape: { radius: { pill: '999px' } },
+  shape: { radius: { pill: '999px', default: '2px' } },
+  typography: {
+    body: { fontSize: '14px', fontWeight: 400, lineHeight: 1.6, fontFamily: 'sans' },
+    code: { fontSize: '14px', fontWeight: 400, lineHeight: 1.6, fontFamily: 'mono' },
+    fontFamilyMonospace: 'monospace',
+    fontWeightBold: 600,
+  },
 };
 
 jest.mock('@grafana/ui', () => ({
@@ -58,6 +72,7 @@ jest.mock('../TracesRenderer/TracesRenderer', () => ({
 jest.mock('marked', () => ({
   marked: {
     parse: (content: string) => `<p data-testid="markdown-content">${content}</p>`,
+    use: jest.fn(),
   },
 }));
 
@@ -65,6 +80,8 @@ jest.mock('dompurify', () => ({
   __esModule: true,
   default: {
     sanitize: (html: string) => html,
+    addHook: jest.fn(),
+    removeHook: jest.fn(),
   },
 }));
 
