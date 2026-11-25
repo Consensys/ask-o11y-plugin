@@ -31,8 +31,8 @@ Configuration is gated twice: the nav entry requires role `Admin`, and the actio
 | ------ | ------------------------------------------------------------------ | ----------------------- | --------------------------------------------- |
 | GET    | `/api/plugins/consensys-asko11y-app/resources/api/prompt-defaults` | `AppConfig` init        | `src/components/AppConfig/AppConfig.tsx:134`  |
 | GET    | `…/api/graphiti/status`                                            | `AppConfig` mount       | `src/components/AppConfig/AppConfig.tsx:1026`  |
-| POST   | `…/api/graphiti/discover`                                          | `onBuildKnowledgeGraph` | `src/components/AppConfig/AppConfig.tsx:1025` |
-| GET    | `…/api/agent/runs/{runId}`                                         | discovery poll          | `src/components/AppConfig/AppConfig.tsx:969`  |
+| POST   | `…/api/graphiti/discover`                                          | `onBuildKnowledgeGraph` | `src/components/AppConfig/AppConfig.tsx:1114` |
+| GET    | `…/api/agent/runs/{runId}`                                         | discovery poll          | `src/components/AppConfig/AppConfig.tsx:1058`  |
 | PUT    | `/api/plugins/{pluginId}/settings`                                 | `updatePluginAndReload` | `src/components/AppConfig/AppConfig.tsx:2189` |
 
 ### SSE events
@@ -101,7 +101,7 @@ Configuration is gated twice: the nav entry requires role `Admin`, and the actio
 35. A duplicate normalised header key blocks save and shows an error Alert. `VERIFIED` — `src/components/AppConfig/AppConfig.tsx:1183`
 36. The built-in MCP toggle is disabled when `grafana-llm-app` MCP is unavailable. `VERIFIED` — `src/components/AppConfig/AppConfig.tsx:1541`
 37. Server status badges poll every 15 s and read "Status unknown" without data. `VERIFIED` — `src/components/AppConfig/AppConfig.tsx:461`
-38. Removing a server stages its stored header secrets for deletion. `ASSUMED` — `src/components/AppConfig/AppConfig.tsx:769`
+38. Removing a server stages its stored header secrets for deletion. `ASSUMED` — `src/components/AppConfig/AppConfig.tsx:832`
 39. The Skills tab writes `jsonData.skills.entries` on each action. `VERIFIED` — `src/components/AppConfig/AppConfig.tsx:1065`
 40. Toggling a pristine bundled skill keeps any override content. `VERIFIED` — `src/components/AppConfig/SkillsTab.tsx:74`
 41. Prompt templates render only after the defaults load. `VERIFIED` — `src/components/AppConfig/AppConfig.tsx:1856`
@@ -136,7 +136,7 @@ Configuration is gated twice: the nav entry requires role `Admin`, and the actio
 | `maxTotalTokens` out of range | Field error, Save disabled               | `src/components/AppConfig/AppConfig.tsx:1290` |
 | MCP name empty                | Field error "Server name is required"    | `src/components/AppConfig/AppConfig.tsx:1629` |
 | MCP URL invalid               | Field error from `validateMCPServerURL`  | `src/components/AppConfig/AppConfig.tsx:1645` |
-| Duplicate header key          | Save does nothing, no message            | `src/components/AppConfig/AppConfig.tsx:1186` |
+| Duplicate header key          | Save does nothing, no message            | `src/components/AppConfig/AppConfig.tsx:1242` |
 | Built-in MCP missing          | Warning Alert "Built-in MCP unavailable" | `src/components/AppConfig/AppConfig.tsx:1518` |
 | Lazy chunk fails              | Error boundary "Application Error"       | `src/module.tsx:14`                           |
 
